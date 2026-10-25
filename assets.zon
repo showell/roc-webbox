@@ -1,0 +1,10 @@
+// **WHAT THE TODO LIST SERVES BESIDES ITS CODE** (webbox's Phase B contract,
+// as Dog Park's assets.zon): `.embedded`, files compiled in by name (the
+// page), and `.site`, directories its routes read at request time (none:
+// the list itself is data, made by the app).
+.{
+    .embedded = .{
+        .{ .name = "todo_page", .path = "web/index.html", .built_by = "git" },
+    },
+    .site = .{},
+}

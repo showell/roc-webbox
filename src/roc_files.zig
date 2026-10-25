@@ -6,7 +6,7 @@
 
 const std = @import("std");
 const webbox = @import("webbox");
-const Io = std.Io;
+const Io = @import("host_io").Io;
 const store = webbox.store;
 const roc = @import("roc_abi.zig");
 const RocStr = roc.RocStr;

@@ -16,6 +16,20 @@ zig build test  -Droc=<path to roc>
 `roc` on the PATH needs no `-Droc`. The Roc used is the nightly
 `2026-10-18-1df370f`.
 
+### On the unikernel
+
+```
+zig build metal                         # zig-out/bin/roc-todo.elf
+```
+
+builds the list as a [zig-metal-unikernel](../zig-metal-unikernel) kernel of its
+own (a sibling checkout, through its `addAppKernel`, as Dog Park does):
+`src/hosted.zig` gives the kernel the site and what only the app can say
+about itself, `assets.zon` what it serves besides its code, and the Roc is
+built for freestanding x86-64. The kernel needs a disk: a GPT disk whose
+partition 1 is FAT16, empty to start; the list is made on it at
+`data/todo/todos.json` and survives a reboot.
+
 ### Trying the client without a server
 
 `zig build demo` builds a **client test bench**, `demo/`, which is **not the
@@ -36,6 +50,8 @@ not test.
 | `src/roc_abi.zig` | The host's side of the seam: `RocStr`, the records, Roc's runtime (`roc_alloc` and the rest), and the hosted functions. |
 | `src/todo_app.zig` | The webbox site: the page, and `/api/*` sent to Roc. |
 | `src/main.zig` | Linux main: webbox's Linux host. |
+| `src/hosted.zig` | The site as a host takes it: zig-metal-unikernel's kernel (`zig build metal`). |
+| `assets.zon` | What the site serves besides its code: the page, compiled in. |
 | `web/index.html` | The client. Every API answer is the whole list, and the page draws it. |
 | `demo/` | **Not the server.** A test bench for the client: the Roc app as wasm in the tab (demo/README.md). |
 

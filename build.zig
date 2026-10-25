@@ -33,6 +33,26 @@ pub fn build(b: *std.Build) void {
 
     _ = demo(b, roc, optimize);
 
+    // **THE LIST ON METAL**: zig-metal-unikernel's kernel, a sibling
+    // checkout, hosting hosted.zig's `site` in place of main.zig's Linux
+    // host. The module names no target or optimize mode (the kernel's) and
+    // imports neither webbox nor host_io (the kernel supplies its own); its
+    // Roc is built for the kernel's target, freestanding x86-64.
+    const metal_step = b.step("metal", "Build the TODO list as a zig-metal-unikernel kernel, zig-out/bin/roc-todo.elf (ReleaseSafe; ../zig-metal-unikernel)");
+    if (b.lazyDependency("zig_metal_unikernel", .{})) |kernel| {
+        if (b.lazyImport(@This(), "zig_metal_unikernel")) |kernel_build| {
+            const metal_app = b.createModule(.{ .root_source_file = b.path("src/hosted.zig") });
+            withApp(b, metal_app, rocArchive(b, roc, "x64v1elf"));
+            const elf = kernel_build.addAppKernel(b, kernel, .{
+                .name = "roc-todo.elf",
+                .module = metal_app,
+                .assets = b.path("assets.zon"),
+                .optimize = .ReleaseSafe,
+            });
+            metal_step.dependOn(&b.addInstallArtifact(elf, .{}).step);
+        }
+    }
+
     // The host's tests, the Roc app linked: the strings across the seam, and
     // the site's routes against a store in a temporary folder.
     const tests = b.step("test", "The host's tests, through the Roc app");

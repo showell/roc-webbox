@@ -3,10 +3,14 @@
     .version = "0.0.0",
     .fingerprint = 0x3827264434d48999,
     .minimum_zig_version = "0.17.0",
-    .paths = .{ "build.zig", "build.zig.zon", "src", "app", "platform", "web" },
+    .paths = .{ "build.zig", "build.zig.zon", "assets.zon", "src", "app", "platform", "web" },
     .dependencies = .{
         // The web-server-in-a-box library: zig-webbox, a sibling checkout
         // (../zig-webbox), modules `webbox`, `webbox_linux` and `host_io`.
         .webbox = .{ .path = "../zig-webbox" },
+        // The kernel the list runs on as a machine of its own (`zig build
+        // metal`): zig-metal-unikernel, a sibling checkout, through its public
+        // `addAppKernel`, as Dog Park does.
+        .zig_metal_unikernel = .{ .path = "../zig-metal-unikernel", .lazy = true },
     },
 }
