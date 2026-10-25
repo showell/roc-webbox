@@ -14,17 +14,20 @@
 | `host.js` | The stand-in. It answers the page's `/api/` requests in the tab. |
 | `todo.wasm` | `app/todo.roc` built for wasm32, with `demo/wasm_host.zig`. |
 
-Any static file server will do; the page's `/api/` requests never leave the tab:
+It needs the Roc `roc-version` pins, as every build does (README.md,
+"Before you build"). Any static file server will do; the page's `api/`
+requests never leave the tab:
 
 ```
-zig build demo -Droc=<path to roc>
+zig build demo
 python3 -m http.server -d zig-out/demo     # then open http://localhost:8000/
 ```
 
 ## What it is
 
 - The page's own code, unchanged. `host.js` replaces `window.fetch` for
-  `/api/` paths and passes everything else through.
+  any path containing `/api/` (the page asks relative to itself, so the
+  bench works from any folder) and passes everything else through.
 - The same Roc app (`app/todo.roc`) and the same runtime glue
   (`src/roc_abi.zig`) as the real host. So the client gets the same answers,
   errors included, that it will get from webbox.
