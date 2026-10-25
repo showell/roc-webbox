@@ -85,9 +85,13 @@ On day one it:
   Zig handlers take the parsed route and never read the path again. The
   families delegated whole (docs, search, recent, images, code, links) are
   handed the rest of their path, which their Zig parses as it does today;
-- **runs the prelude** Zig's `handle` and `handleChannel` run today: the chat
-  gate (a 303 to `/login/full?next=`), presence (`Presence.mark!`, except on
-  streams), the method checks;
+- **runs the prelude** Zig's `handle` and `handleChannel` ran: a static
+  script served to anyone, the chat gate (a 303 to `/login/full?next=`),
+  presence (except on streams). Who is asking stays the host's: the Roc asks
+  (`Host.member!`) after the static scripts, so a script's request does no
+  identity reads. The method checks stay with the Zig that serves the
+  route, since Zig answered a missing topic's 404 before a wrong method's
+  405 (as built, A1-A2);
 - **answers with a delegation**, `Zig(route)`: the host runs the Zig handler
   for that route after the Roc call has returned, with the request's `now`
   and user. The lookups that need the disk stay in the handler on day one:
@@ -457,6 +461,18 @@ Conv : [Dm(Str), Channel(Str)]
 Tail : [Page, Stream, Send, Upload, Uploads(Str), Pin, Unpin, Raw, Download, Saved, Reactions, React]
 ```
 
+**As built for the router (A2), the answer is flat.** chat/platform/Chat.roc's
+`Answer` is a record, `{ kind, location, presence, route }`, `kind` 0 for
+Zig's and 1 for a 303, and `route` is `ZigRoute` flattened:
+`{ family, key, rest, sid, part, tail }`, small numbers that Chat.roc and
+src/chat_route.zig both name, unused fields empty, so two routes are equal
+exactly when they go the same place. The records are laid out by hand in
+src/chat_abi.zig with their sizes asserted, and A3's agreement test catches
+a number that drifts. The tag union above waits for P8's generated
+layouts; the request is `{ sub : List(U8), channel : Bool }`, and the host
+keeps the request's `now` for Zig rather than passing it, since no Roc
+reads it yet.
+
 **Tag unions cross the ABI fine** (probe 2). The layout is the payload
 first, then a `u8` tag. Discriminants are alphabetical, so adding a tag
 renumbers the others. That is why the layout is generated and asserted
@@ -667,6 +683,26 @@ delegation, the busy word (R1), the arena's peak (R5), and a crash as a 500
    build time and size with Roc.
 6. Steve using it.
 
+**Where it stands** (A1-A4, angry-gopher `bb9ad6c`, roc-webbox `a7aa6ab`):
+1. Met: A3's agreement test, 11,000+ decisions, every route-test path and
+   generated ones, under both areas, member or not. It found one
+   disagreement between the router and the pre-turn hooks, which was Zig's
+   before: a topic's `.../stream/` counted as chat and as presence (fixed:
+   presence is read from the route).
+2. Met: the route tests run through the router; a broken `/c/` in the Roc
+   fails seven of them.
+3. Open: the box's judges on KVM. Under QEMU (TCG) here, `/chat`,
+   `/channel/ops` and a script answer from the router on `gopher.elf` with
+   zig-metal-unikernel's diff (metal-vmm QUEUE, T1/A).
+4. Open: a crash is still a panic. P9 (longjmp to the call's entry) and P7
+   (the busy word) are not built; the router calls no Roc outside a call
+   (the decision is copied out and the call ended before Zig serves it),
+   but nothing yet checks it.
+5. Partly: build size and time measured (41,529,840 bytes; 84 s). The
+   router's Roc memory is the request's own allocator now, so R5's "the
+   arena keeps its peak" is gone for it; its cost per request on metal is
+   not measured.
+
 ### Milestone 2: one send, orchestrated in Roc
 
 `send` leaves `Zig`: Roc runs §6.2's steps, calling Zig's pieces as hosted
@@ -733,10 +769,10 @@ the transcript header stays `date:`; and `.count` still has two trust rules
 
 | # | item | repo | owner | size |
 |---|---|---|---|---|
-| A1 | Zig side: the chat handlers take a parsed route, the uid and `now`, and no longer read the path; the prelude leaves `handle`/`handleChannel`; the host's `Zig(route)` dispatch | ag | CC → box | M |
-| A2 | `Route.roc`: every chat path parsed by Zig's rules; the prelude; `Zig(route)` | rw | CC | M |
-| A3 | Agreement: Roc's parse against Zig's over a corpus (router.zig's path tables, every path in the route tests, and generated ones: case, `new`, trailing and doubled slashes, `.js`, over-long ids); the pre-turn hooks (`bodyLimit`, `family`) against the route each path parses to | ag, rw | CC | M |
-| A4 | The route tests (router_harness.zig and the router_*_test files) driven through the router | ag | CC → box | M |
+| A1 | **Done**, angry-gopher `bb9ad6c`: chat.zig `serve(route)`, the handlers take a parsed route, the uid and `now`, and no longer read the path; chat_router.zig, the prelude's host side and the dispatch; a failure reading who is asking kept and returned, a 500 | ag | CC → box | M |
+| A2 | **Done**, roc-webbox `a7aa6ab`: chat/Route.roc, chat/main.roc, the chat's own platform (chat/platform/), the path as `List(U8)` | rw | CC | M |
+| A3 | **Done**, angry-gopher `bb9ad6c`: chat_route_twin.zig, Zig's old dispatch as a pure function, held to the Roc over the corpus; router.zig's hooks test | ag, rw | CC | M |
+| A4 | **Done**: the route tests go through the router as they are (router.zig hands it /chat and /channel) | ag | CC → box | M |
 | M1 | **Milestone 1** (§7) | rw, ag | CC; box releases | L |
 
 ### Orchestration in Roc
