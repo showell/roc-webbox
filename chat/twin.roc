@@ -6,6 +6,8 @@
 app [call] { pf: platform "twin/platform/main.roc" }
 
 import Time
+import ZigText
+import Paths
 
 call : { which : U8, args : List(List(U8)) } -> List(List(U8))
 call = |req| {
@@ -18,9 +20,27 @@ call = |req| {
 				Ok(n) => [Str.to_utf8(I64.to_str(n))]
 				Err(None) => []
 			}
+		4 =>
+			match ZigText.parse_u64(arg(0)) {
+				Ok(n) => [Str.to_utf8(U64.to_str(n))]
+				Err(None) => []
+			}
+		5 => [ZigText.json_string(arg(0))]
+		6 => [ZigText.trim(arg(0))]
+		7 => [bool(Paths.participant(arg(0), arg(1)))]
+		8 => [Paths.pair_key(arg(0), arg(1))]
+		9 => [bool(Paths.valid_topic_id(arg(0)))]
+		10 => [bool(Paths.valid_channel_name(arg(0)))]
+		11 => [bool(Paths.valid_msg_ref_id(arg(0)))]
+		12 => [Paths.join(req.args)]
+		13 => [Paths.first_of(req.args)]
+		14 => [Paths.transcript_path(arg(0), arg(1))]
 		_ => crash "twin: no function ${U8.to_str(req.which)}"
 	}
 }
+
+bool : Bool -> List(U8)
+bool = |b| if b [49] else [48]
 
 ## A signed decimal the test wrote.
 int : List(U8) -> I64

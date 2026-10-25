@@ -5,6 +5,8 @@
 ## the route, so this says only what the path says.
 ##
 ## A path is bytes (Chat.roc): every comparison is on bytes.
+import Paths
+
 Route := [].{
 	## The route for `sub`, the path under /chat.
 	under_chat : List(U8) -> R
@@ -188,38 +190,8 @@ Route := [].{
 	drop : List(U8), U64 -> List(U8)
 	drop = |l, n| List.drop_first(l, n)
 
-	is_alpha : U8 -> Bool
-	is_alpha = |c| (c >= 65 and c <= 90) or (c >= 97 and c <= 122)
 
-	is_alnum : U8 -> Bool
-	is_alnum = |c| is_alpha(c) or (c >= 48 and c <= 57)
+	valid_channel_name = Paths.valid_channel_name
+	valid_topic_id = Paths.valid_topic_id
 
-	## chat_paths.zig `validChannelName`: a letter, then letters, digits
-	## and hyphens, 1 to 40 bytes.
-	valid_channel_name : List(U8) -> Bool
-	valid_channel_name = |name| match name {
-		[first, .. as more] =>
-			List.len(name) <= 40 and is_alpha(first) and List.all(more, |c| is_alnum(c) or c == 45)
-		[] => Bool.False
-	}
-
-	## chat_paths.zig `validTopicID`: letters and digits joined by single
-	## hyphens, none at either end, 1 to 80 bytes.
-	valid_topic_id : List(U8) -> Bool
-	valid_topic_id = |sid| {
-		n = List.len(sid)
-		if n == 0 or n > 80 or List.first(sid) == Ok(45) or List.last(sid) == Ok(45) {
-			Bool.False
-		} else {
-			(ok, _) = List.fold(sid, (Bool.True, Bool.False), |(good, prev_hyphen), c|
-				if !good {
-					(Bool.False, prev_hyphen)
-				} else if c == 45 {
-					(!prev_hyphen, Bool.True)
-				} else {
-					(is_alnum(c), Bool.False)
-				})
-			ok
-		}
-	}
 }
