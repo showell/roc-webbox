@@ -18,7 +18,9 @@ app does not hand the host a description of work to do afterwards.
 - **Roc, the nightly `roc-version` pins** (`nightly-2026-10-09-258ab27`), as
   `roc` on the PATH or named with `-Droc=<path>`. Every build compiles
   `app/todo.roc`, and `build.zig` (`rocCompiler`) stops at configure time if
-  there is no Roc or `roc version` names another.
+  there is no Roc or `roc version` names another. `tools/get_roc.sh`
+  installs the pinned one into `~/roc-<pin>/` and links `~/.local/bin/roc`
+  to it; it stops if a sibling dog-park pins another nightly.
 
 ## Build, test, serve
 

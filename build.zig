@@ -137,14 +137,14 @@ const roc_pin = std.mem.trim(u8, @embedFile("roc-version"), " \n");
 /// different Roc versions fail here rather than link.
 fn rocCompiler(b: *std.Build) []const u8 {
     const named = b.option([]const u8, "roc", "the Roc compiler (default: `roc` on the PATH); the version roc-version pins") orelse "roc";
-    const none = "the TODO list is built from Roc, and there is no Roc compiler at `{s}`: put Roc {s} (roc-version) on the PATH, or name it with -Droc=<path>";
+    const none = "the TODO list is built from Roc, and there is no Roc compiler at `{s}`: put Roc {s} (roc-version) on the PATH (tools/get_roc.sh installs it), or name it with -Droc=<path>";
     const found = if (std.mem.indexOfScalar(u8, named, '/') == null)
         b.findProgram(.{ .names = &.{named} }) orelse std.process.fatal(none, .{ named, roc_pin })
     else
         b.root.root_dir.handle.realPathFileAlloc(b.graph.io, named, b.allocator) catch std.process.fatal(none, .{ named, roc_pin });
     const said = std.mem.trim(u8, b.run(&.{ found, "version" }), " \n");
     const version = if (std.mem.lastIndexOfScalar(u8, said, ' ')) |i| said[i + 1 ..] else said;
-    if (!std.mem.eql(u8, version, roc_pin)) std.process.fatal("the TODO list is pinned to Roc {s} (roc-version), and `{s}` is {s}: put the pinned one on the PATH or name it with -Droc=<path>; in a combination, the primary's Roc builds every part, so their pins must agree", .{ roc_pin, found, version });
+    if (!std.mem.eql(u8, version, roc_pin)) std.process.fatal("the TODO list is pinned to Roc {s} (roc-version), and `{s}` is {s}: put the pinned one on the PATH (tools/get_roc.sh) or name it with -Droc=<path>; in a combination, the primary's Roc builds every part, so their pins must agree", .{ roc_pin, found, version });
     return found;
 }
 
