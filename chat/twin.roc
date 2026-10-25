@@ -9,6 +9,7 @@ import Time
 import ZigText
 import Paths
 import Codec
+import Count
 
 call : { which : U8, args : List(List(U8)) } -> List(List(U8))
 call = |req| {
@@ -40,7 +41,31 @@ call = |req| {
 			d = Codec.decode_file(arg(0))
 			List.fold(d.messages, [Str.to_utf8(U64.to_str(d.refused))], |out, m| List.concat(out, [m.id, m.from, m.at, m.uid, m.markdown]))
 		}
-		16 => [Codec.stored_form(ZigText.parse_u64(arg(0)) ?? 0, { id: arg(1), from: arg(2), at: arg(3), uid: arg(4), markdown: arg(5) })]
+		16 => [Codec.stored_form(u64(arg(0)), { id: arg(1), from: arg(2), at: arg(3), uid: arg(4), markdown: arg(5) })]
+		17 => [num(Count.count_blocks(arg(0)))]
+		18 => maybe(Count.number_in(arg(0), arg(1)))
+		19 => maybe(Count.index_of(arg(0), arg(1)))
+		20 =>
+			match Count.parse(arg(0)) {
+				Ok({ count, size, last: Known(l) }) => [num(count), num(size), num(l.offset), l.uid]
+				Ok({ count, size, last: Unknown }) => [num(count), num(size)]
+				Err(None) => []
+			}
+		21 => {
+			last = if List.len(req.args) == 4 Known({ offset: u64(arg(2)), uid: arg(3) }) else Unknown
+			[Count.text(u64(arg(0)), u64(arg(1)), last)]
+		}
+		22 => maybe(Count.believed(Count.parse(arg(0)), u64(arg(1))))
+		23 =>
+			match Count.recorded_author(Count.parse(arg(0)), u64(arg(1)), u64(arg(2))) {
+				Ok(uid) => [uid]
+				Err(None) => []
+			}
+		24 =>
+			match Count.window_last(u64(arg(0)), arg(1), arg(2) == [49], arg(3)) {
+				Ok(w) => [num(w.number), bool(w.current), w.msg.id, w.msg.from, w.msg.at, w.msg.uid, w.msg.markdown]
+				Err(None) => []
+			}
 		_ => crash "twin: no function ${U8.to_str(req.which)}"
 	}
 }
@@ -53,4 +78,16 @@ int : List(U8) -> I64
 int = |digits| match digits {
 	[45, .. as rest] => 0 - List.fold(rest, 0, |n, c| n * 10 + U8.to_i64(c - 48))
 	_ => List.fold(digits, 0, |n, c| n * 10 + U8.to_i64(c - 48))
+}
+
+num : U64 -> List(U8)
+num = |n| Str.to_utf8(U64.to_str(n))
+
+u64 : List(U8) -> U64
+u64 = |digits| ZigText.parse_u64(digits) ?? 0
+
+maybe : Try(U64, [None]) -> List(List(U8))
+maybe = |t| match t {
+	Ok(n) => [num(n)]
+	Err(None) => []
 }
