@@ -49,20 +49,20 @@ pub fn build(b: *std.Build) void {
     withApp(b, hosted_metal, metal_roc);
     _ = b.addModule("roc_hooks", .{ .root_source_file = b.path("src/roc_hooks.zig") });
 
-    // **THE ROC CHAT, FOR ANGRY-GOPHER TO MOUNT** (docs/ROC-CHAT.md, T1):
-    // `roc_chat`, chat/main.roc as a host takes it (chat_hosted.zig), and
-    // `roc_chat_metal`, the same for gopher.elf (no target, mode or webbox:
-    // the kernel's; Roc for its target).
-    const chat_roc = appArchive(b, roc, "chat/main.roc", "chat", rocTarget(target.result));
+    // **THE ROC CHAT'S ROUTER, FOR ANGRY-GOPHER** (docs/ROC-CHAT.md §3):
+    // `roc_chat`, chat/main.roc as angry-gopher calls it (chat_hosted.zig),
+    // its Roc for this build's target; and `roc_chat_metal`, the same for
+    // gopher.elf (no target or mode: the kernel's; Roc for its target). It
+    // imports nothing but std.
+    const chat_roc = appArchive(b, roc, "chat", &chat_inputs, rocTarget(target.result));
     const chat = b.addModule("roc_chat", .{
         .root_source_file = b.path("src/chat_hosted.zig"),
         .target = target,
         .optimize = optimize,
-        .imports = imports[0..2],
     });
     chat.addObjectFile(chat_roc);
     const chat_metal = b.addModule("roc_chat_metal", .{ .root_source_file = b.path("src/chat_hosted.zig") });
-    chat_metal.addObjectFile(appArchive(b, roc, "chat/main.roc", "chat", "x64v1elf"));
+    chat_metal.addObjectFile(appArchive(b, roc, "chat", &chat_inputs, "x64v1elf"));
 
     _ = demo(b, roc, optimize);
 
@@ -187,16 +187,18 @@ fn rocTarget(t: std.Target) []const u8 {
 
 /// app/todo.roc built for Roc's target `roc_target`.
 fn rocArchive(b: *std.Build, roc: []const u8, roc_target: []const u8) std.Build.LazyPath {
-    return appArchive(b, roc, "app/todo.roc", "todo", roc_target);
+    return appArchive(b, roc, "todo", &.{ "app/todo.roc", "platform/main.roc", "platform/File.roc", "platform/Http.roc" }, roc_target);
 }
 
-/// The Roc app at `app` (on the platform in platform/) built for Roc's
-/// target `roc_target`, as `<name>-<target>.a`.
-fn appArchive(b: *std.Build, roc: []const u8, app: []const u8, name: []const u8, roc_target: []const u8) std.Build.LazyPath {
-    const run = b.addSystemCommand(&.{ roc, "build", app, b.fmt("--target={s}", .{roc_target}) });
+/// The Roc chat (chat/main.roc, on its own platform in chat/platform/).
+const chat_inputs = [_][]const u8{ "chat/main.roc", "chat/Route.roc", "chat/platform/main.roc", "chat/platform/Chat.roc", "chat/platform/Host.roc" };
+
+/// The Roc app `inputs[0]` (its other files the rest of `inputs`) built for
+/// Roc's target `roc_target`, as `<name>-<target>.a`.
+fn appArchive(b: *std.Build, roc: []const u8, name: []const u8, inputs: []const []const u8, roc_target: []const u8) std.Build.LazyPath {
+    const run = b.addSystemCommand(&.{ roc, "build", inputs[0], b.fmt("--target={s}", .{roc_target}) });
     run.setCwd(b.path("."));
-    run.addFileInput(b.path(app));
-    for ([_][]const u8{ "platform/main.roc", "platform/File.roc", "platform/Http.roc" }) |f| run.addFileInput(b.path(f));
+    for (inputs) |f| run.addFileInput(b.path(f));
     // The compiler too: a new Roc builds the archive again.
     run.addFileInput(.{ .cwd_relative = roc });
     return run.addPrefixedOutputFileArg("--output=", b.fmt("{s}-{s}.a", .{ name, roc_target }));

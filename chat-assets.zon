@@ -1,7 +1,0 @@
-// **WHAT THE ROC CHAT SERVES BESIDES ITS CODE** (webbox's Phase B contract):
-// nothing yet. A part of a kernel (zig-metal-unikernel's addAppKernel
-// `parts`) names its assets.zon; this is the chat's.
-.{
-    .embedded = .{},
-    .site = .{},
-}

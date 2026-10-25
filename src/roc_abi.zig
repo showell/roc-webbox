@@ -160,7 +160,7 @@ fn allocate(len: usize, alignment: usize) [*]u8 {
 
 /// `len` bytes of string data after a refcount word set to 1, as Roc's
 /// `allocateWithRefcount` lays them (the word is a `usize`).
-fn withRefcount(len: usize) [*]u8 {
+pub fn withRefcount(len: usize) [*]u8 {
     const w = @sizeOf(usize);
     const base = allocate(w + len, w);
     std.mem.writeInt(usize, base[0..w], 1, .little);
