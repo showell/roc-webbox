@@ -407,6 +407,19 @@ Concatenating 400 KB of strings took about 2 ms. C1 repeats this on the
 largest production transcript, on metal, and reports peak arena bytes, not
 only time.
 
+**C1's codec, measured** (angry-gopher `zig build codec-bench`, native,
+a synthetic 5.4 MB, 11,392-block transcript): 20 ms against Zig's 10
+(2.1x), the call's arena at most 21.7 MB against the Zig decoder's 15.0
+(1.5x, the arena's copy of the input included). The first cut was 17x and
+7x, for two reasons worth keeping:
+- **A transcript is bytes, so the codec cannot use `Str`'s builtins** (the
+  probe did, which is why it was faster). Found by hand, a line must be a
+  `List.sublist` slice found by offset, never built a byte at a time.
+- **`List.prepend` in a fold is quadratic.** ZigText.trim reversed every
+  piece that way, and every block of a transcript is trimmed.
+The run on the largest production transcript, on metal, is still the
+box's: `codec-bench -- <transcript>` takes the file.
+
 ## 5. The platform, extended
 
 All types below are in the pinned nightly's syntax.
@@ -807,7 +820,7 @@ Each is a release, with its twin test. A route that moves answers with
 
 | # | item | repo | owner | size |
 |---|---|---|---|---|
-| C1 | Codec, Count (both trust rules), Paths, ZigText, Time, the frame builder, with the Zig fixtures; benchmark on the largest transcript with peak arena bytes | rw | CC | XL |
+| C1 | Codec, Count (both trust rules), Paths, ZigText, Time, the frame builder, with the Zig fixtures; benchmark on the largest transcript with peak arena bytes (**done but the metal run**: chat/{Time,ZigText,Paths,Codec,Count,Frame}.roc behind the test-only `chat/twin.roc`, each held to its Zig in angry-gopher `src/chat_twin_test.zig`, every module mutation-checked; chat_count's pure decisions pulled out of its I/O to be twinned; `zig build codec-bench` for R6; the run on the largest production transcript, on metal, is the box's) | rw | CC | XL |
 | C4 | React, reactions, pin, unpin | rw | CC | M |
 | C3 | Page, chrome (matches Zig's settings page byte for byte; a twin test), sidebar JSON, 404 and empty pages, conversations, msg (302), default/resume, new topic (with the `general<N>` announcement) | rw | CC | XL |
 | C5 | Fan-out (notify, sidebar, recent, `users/<member>/images.md`, `users/<member>/code.md` with the fence scanner and its quirk), replacing angry-gopher's | rw | CC | L |
