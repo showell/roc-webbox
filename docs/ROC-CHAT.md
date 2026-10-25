@@ -1,14 +1,22 @@
 # Roc Chat: porting angry-gopher's chat to Roc on webbox
 
 Status: **revised draft, after review** (§9 lists what the four reviews
-changed), **updated for the new bus** (§5.4): since angry-gopher `e4a0f60`, a
-topic's bus blobs are finished SSE frames, built once at send and the same
-for every viewer, and the client decides `mine`. That removed the Splice
-protocol this draft had designed, and most of R1.
+changed), **updated for the new bus** (§5.4) and **for the Zig-side
+cleanups** (§8, "Done in Zig"):
+- since angry-gopher `e4a0f60`, a topic's bus blobs are finished SSE frames,
+  built once at send and the same for every viewer, and the client decides
+  `mine`. That removed the Splice protocol this draft had designed, and most
+  of R1;
+- since `f2601c4`, `3425d51`, `62155c5` and `838f357`, the Zig chat parses
+  numbers strictly, refuses non-UTF-8 names and messages, records each
+  message's author by uid, reads the clock once per request, and uses the
+  names this doc uses. Several of the port's "match Zig's quirk" items are
+  now plain rules instead.
 
 Still open:
-- It assumes the shape of LC's user support for the TODO app (§6.3), which
-  has not landed.
+- LC's user support for the TODO app has landed (`20f6505`) as a signed
+  visitor id, not accounts; §6.3 says what that leaves for a standalone
+  chat.
 - Steve is not bought in to an incremental cutover in production (§10, 1).
   §3, §7 and §8 still describe one; they are reworked once that is decided.
 
@@ -87,7 +95,7 @@ one copy of each:
 | Function | angry-gopher module |
 |---|---|
 | Markdown | `markdown.zig`: render, render trusted, hostile check |
-| Users | `users.zig`: exists, name, authorized roster, only-member-named, agent rule |
+| Users | `users.zig`: exists, name, authorized roster, agent rule; only-member-named, for blocks from before `uid:` |
 | Presence | `presence.zig`: mark, is online |
 | Search | `search_index.zig`: note append |
 | Counters | the chat counters `/admin/host` and `/version` read: edge rejects, fan-out failures, malformed channels, refused blocks |
@@ -195,6 +203,11 @@ The turn makes that safe from interleaving. It does not make the two agree.
 3. **The format facts that bite** (the full list is in the format note):
    - the transcript separator `\n\n-------------\n` (16 bytes) and its
      body-line escape;
+   - the block header `MSG_<sid>_<n>`, `from:`, `date:`, and since `3425d51`
+     `uid:` (only on blocks written since; every reader skips header lines
+     it does not know, so a block without it still reads);
+   - a reaction appended to a file that does not end in `\n` starts with
+     one, so a line torn by a stop loses only itself (`f2601c4`);
    - the `users/<member>/images.md`/`users/<member>/code.md` separator (17 bytes, a different one);
    - `.count`'s two lines and **two** trust rules:
      - `messageCount` trusts it only when the recorded size matches;
@@ -209,14 +222,19 @@ The turn makes that safe from interleaving. It does not make the two agree.
    - It writes DEL, `/` and non-ASCII raw.
    - It writes a string that is not UTF-8 **as an array of byte numbers**.
 5. **Parsing numbers.**
-   - **Zig `parseInt`** accepts `+`, `-0` for unsigned types, and `_`
-     anywhere inside (`1__0` is 10).
-   - **Roc's `U64.from_str` is a number-literal parser, not parseInt.** It
-     accepts `0x10`, `0b11`, `0o17` and `1e3`, and refuses `1__0`.
+   - **Since `f2601c4` Zig parses digits only.** Message ids, `.count`
+     fields, the react form's number, `general<N>`, account folders and
+     Range offsets go through `decimal.parseInt`: one or more ASCII digits,
+     nothing else, overflow refused. Before, Zig's `std.fmt.parseInt`
+     accepted `+`, `_` inside (`topic_1_0` was message 10), and the port
+     would have had to copy that.
+   - **Roc's `U64.from_str` is a number-literal parser.** It accepts `0x10`,
+     `0b11`, `0o17` and `1e3`, so it is still not the rule.
    - So **no Roc code parses an id, count, size or offset with `from_str`**:
-     ZigText has a byte-level parseInt (probe: `docs/roc-chat-probes/p7/chat/ZigText.roc`).
-   - Today's TODO app has this bug (`/api/todos/0x1/toggle` works); P1 fixes
-     it.
+     ZigText has the same digits-only parser (probe: `docs/roc-chat-probes/p7/chat/ZigText.roc`,
+     to be narrowed to it).
+   - Today's TODO app has the `from_str` bug (`/api/todos/0x1/toggle`
+     works); P1 fixes it.
 
 ### R3. A Roc crash
 
@@ -251,7 +269,9 @@ reported, not fatal, in a dev build.
 
 Roc's `Str` is UTF-8 by type. Chat's bytes are not guaranteed to be:
 - transcript bodies are stored as sent;
-- display names admit any byte ≥ 0x80 (names.zig);
+- display names admitted any byte ≥ 0x80 until `f2601c4`; registration now
+  refuses a name that is not UTF-8, but a name from before may still be one
+  (C0 counts them);
 - form fields are percent-decoded bytes;
 - the multipart filename is decoded lossily on purpose (chat_upload.zig).
 
@@ -260,17 +280,14 @@ Roc's `Str` is UTF-8 by type. Chat's bytes are not guaranteed to be:
   contents, and **the display name**.
   - A name is written into transcripts, reactions and feeds.
   - Decoding it lossily would write U+FFFD where Zig wrote the raw bytes.
-  - Zig's `mine` and `onlyMemberNamed` would then stop matching that author,
-    after rollback too.
+  - Zig's `onlyMemberNamed`, which still credits blocks written before
+    `uid:`, would then stop matching that author, after rollback too.
 - **ZigText's JSON writer** emits Zig's byte-number array for non-UTF-8, so
   the files match.
-- **A new message whose markdown is not UTF-8 is refused with a 400.** This
-  is a deliberate change.
-  - Zig stores it, and its stream then sends the client a number array where
-    a string belongs.
-  - Browsers and `chat_client.py` always send UTF-8, so no existing client
-    sees the change.
-  - The upload filename stays lossy, as in Zig.
+- **A new message whose markdown is not UTF-8 is refused with a 400**, as
+  Zig has done since `f2601c4`. Before, Zig stored it and its stream sent
+  the client a number array where a string belongs. The upload filename
+  stays lossy, as in Zig.
 - **Read-modify-write files are handled as byte lines, never through
   lossy `Str`:** pins, and the bookmark compare. `/raw` and `/reactions`
   pass bytes through untouched.
@@ -330,13 +347,24 @@ Request : {
     body : List(U8),
     peer : Str,
     user : [Nobody, Member({ id : Str, name : List(U8) })],
+    now : { unix_ms : I64, awake_ms : I64 },        # read inside the turn
 }
 ```
 
-**No clock in the request.** Today's `at_unix_ms` is read before the turn is
-taken. A request that waited for the turn would then be stamped before one
-that went first, and the transcript's dates would run backwards. Zig stamps
-inside the turn, so Roc reads `Clock.now_unix_ms!` inside it too.
+**The request carries its time, read once, inside the turn.** Since
+`62155c5` the Zig chat reads both clocks once as a handler starts
+(`request_time.Now.read`) and hands that one reading to everything that
+stamps or compares a time: message and reaction dates, a new DM's dated
+topic, a doc's Recent entry, presence, the search rate limit. The host does
+the same for Roc: it reads `now` after taking the turn, just before
+`handle!`.
+- It is not the host's `at_unix_ms`, which is read before the turn for the
+  log line; with that, a request that waited for the turn would be stamped
+  before one that went first.
+- One reading per request means everything one request writes carries one
+  time, and Roc needs no clock effect: the time is data, so the pure modules
+  can take it and C2 hands both chats the same fixed `now` (Zig's
+  `Now.at`).
 
 ### 5.2 Response
 
@@ -388,10 +416,9 @@ as an argument.
 |---|---|
 | `File` | `read!`, `read_at!`, `stat!`, `list!`, `append!` (answers the new size), `write!` (truncate), `replace!` (temporary file then rename), `make_dir!`, `remove!`, under the data root. Absent and failed are distinct answers; per-call size limits. **Never the auth root.** |
 | `Bus` | `publish! : Str, List(U8) => {}` |
-| `Clock` | `now_unix_ms!`, `awake_ms!` |
 | `Random` | `bytes! : U64 => List(U8)` |
 | `Markdown` | `render!`, `render_trusted!`, `hostile!` |
-| `Users` | `exists!`, `name!`, `authorized!` (the roster), `only_member_named!`, `is_agent!` |
+| `Users` | `exists!`, `name!`, `authorized!` (the roster), `only_member_named!` (blocks from before `uid:` only), `is_agent!` |
 | `Presence` | `mark!`, `online!` |
 | `Search` | `note_append!` |
 | `Counter` | `bump!(name, detail)` |
@@ -417,18 +444,20 @@ webbox/angry-gopher Zig, and neither runs any chat code:
 - **`Verbatim`**: each blob is written as it is. This is the topic streams'
   render (chat_sse.zig `verbatim`). The blob is one of:
   - a message frame (chat_frame.zig `messageFrame`):
-    `id: N\ndata: {"index":…,"from":…,"at":…,"html":…,"markdown":…,"id":…}\n\n`,
-    with `,"cid":…` before the closing brace when the send carried one;
+    `id: N\ndata: {"index":…,"from":…,"from_uid":…,"at":…,"html":…,"markdown":…,"id":…}\n\n`,
+    with `from_uid` only when the block records its author (`3425d51`), and
+    `,"cid":…` before the closing brace when the send carried one;
   - a reaction frame (`reactionFrame`): `event: reaction\ndata: <sidecar line>\n\n`.
 
 A Roc chat builds these frames inside the turn: at `/send` (and react), to
 publish; and while handling a stream request, for its backlog, with the same
 function, so a message reads the same live or replayed.
 
-**The client decides `mine`.** The frame no longer carries it: the page has
-`data-me-name`, and chat.js sets `m.mine = (m.from === ME_NAME)`, the rule
-the server used. That keeps its staleness after a rename. Names are unique
-among members.
+**The client decides `mine`, by account.** The frame no longer carries it.
+Since `3425d51` chat.js sets `m.mine = m.from_uid ? (m.from_uid === ME) :
+(m.from === ME_NAME)`: the page's `data-me` against the author's uid, as
+reactions already did, and the name only for a message from before `uid:`
+was stored. A rename no longer turns your own messages into someone else's.
 
 **`cid` goes to every viewer, as before**, and is harmless now: the "your
 message was sent" notice shows only for cids the tab itself sent (chat.js,
@@ -441,9 +470,9 @@ chat_compose.js `sentHere`).
 ```
 chat/                      the Roc app
   main.roc                 handle!: dispatch (chat.zig handle/topicRoute)
-  Codec.roc                transcript blocks: encode, decode, escape       (pure)
-  Count.roc                .count: parse, format, both trust rules          (pure)
-  Paths.roc                keys, validators, path builders                  (pure)
+  Codec.roc                transcript blocks: encode, decode, escape (chat_codec.zig) (pure)
+  Count.roc                .count: parse, format, both trust rules (chat_count.zig) (pure)
+  Paths.roc                keys, validators, path builders, firstOf (chat_paths.zig) (pure)
   ZigText.roc              parseInt, std.json.fmt, trims, byte lines        (pure)
   Time.roc                 RFC3339 UTC, civil dates (timefmt.zig)           (pure)
   Feeds.roc                images.md / code.md entries, fence scanner       (pure)
@@ -463,7 +492,7 @@ exits 1 on failure, using fixtures copied from the Zig tests.
 2. **Form.** Decode the form. Then:
    - no `markdown` field: 400;
    - whitespace only: 400;
-   - not UTF-8: 400 (R4).
+   - not UTF-8: 400 (R4, as Zig).
 3. **Topic and membership.**
    - Validate the pair key and the topic id.
    - The DM's other half must **exist**: `Users.exists!`, an account
@@ -474,10 +503,11 @@ exits 1 on failure, using fixtures copied from the Zig tests.
    the edge counter is bumped.
 5. **Bookmarks.** DMs only: write them if changed (`File.write!`, as Zig's
    `write`).
-6. **Author.** An empty author name is refused (`NoAuthor`).
+6. **Author.** An empty author name is refused (`NoAuthor`). The block
+   records the author's uid (`uid:`) as well as their name.
 7. **Number.** `messageCount`, then the id `<sid>_<n>` in the request's
    spelling of the sid, as Zig does.
-8. **Stamp and build.** `Clock.now_unix_ms!` gives the date. Then the block,
+8. **Stamp and build.** The request's `now` gives the date. Then the block,
    then `Markdown.render!` once, then the message frame (§5.4). **Everything
    that can fail is built here, before the store.**
 9. **Store.** `File.append!` the block. From here on **nothing fails the
@@ -512,10 +542,18 @@ does:**
 - the upload gate, judged from the request head;
 - `/login/full?next=`.
 
-**To check when LC's work lands:**
-- what shape its `user` has;
-- whether it is verified before `handle!`;
-- whether its accounts are angry-gopher's files.
+**What LC's work gives (`20f6505`), checked:**
+- **Its shape:** `Http.Request.user : Str`, the visitor's id, 16 hex digits,
+  and a new one on a first visit. §5.1's `user` is a tag
+  (`Nobody`/`Member`) with a name; the chat needs that.
+- **Verified before `handle!`:** yes. The host reads webbox's
+  `signed_cookie.visitor` before the body, and answers with its Set-Cookie
+  when one is due. The site secret is made once in the app's auth folder.
+- **angry-gopher's accounts:** no. A visitor is anonymous, with no name, no
+  password, no API key and no agent rule, so none of the list above is
+  covered yet. The signed-cookie mechanism is the part I3 builds on: the
+  same verification before `handle!`, answering for an account instead of
+  a visitor.
 
 ## 7. Milestone 1: one topic, live, on metal
 
@@ -565,17 +603,35 @@ Each item lands with tests, and the chat items with C2 cases.
 | P2 | `Request` (§5.1); the zero-copy body on Linux; measure the copy on metal | rw | CC | M |
 | P3 | `Response` (§5.2) `Bytes` | rw | CC | S |
 | P4 | `File` effects: `write` vs `replace` per site, per-call limits, no double copy, absent ≠ failed | rw | CC | M |
-| P5 | `Clock` (read in the turn), `Random`, `Counter`, `Asset` | rw | CC | S |
+| P5 | `now` in the request (read in the turn), `Random`, `Counter`, `Asset` | rw | CC | S |
 | P6 | `File` and `TarGz` responses (moved from chat_upload/chat_download) | rw | CC | M |
 | P7 | The busy word (CAS) per app inside its `roc_hooks` bracket, checked in `roc_alloc` and in every hosted function; the arena with a retention limit; a capped region on metal | rw | CC | M |
 | P9 | A crash is a 500: `roc_crashed` longjmps to the call's entry; proved on Linux and on metal | rw | CC (+ LC on metal) | M |
 | U1 | The mounted hosted functions over angry-gopher's modules (Markdown, Users, Presence, Search, Counter) | ag | CC → box | M |
 
+### Done in Zig
+
+Fixes made in angry-gopher on their own merit, each also something the port
+no longer has to copy. All are on `claude/great-wright-i7aste`; the box has
+merged Z1 (master `c9ac283`), and Z2-Z5 await its merge.
+
+| # | commit | what changed | what the port no longer copies |
+|---|---|---|---|
+| Z1 | `e4a0f60` | Frames built once at send, the same for every viewer; the client decides `mine`; reactions as finished frames; the "sent" notice only in the sender's tab | A per-viewer render; the Splice protocol |
+| Z2 | `f2601c4` | Torn-reaction guard; digits-only `decimal.parseInt`; UTF-8 checked for new names and messages; the read-only routes answer only GET and HEAD; the self-DM lists its member once (`ConvMeta.dm`); the store's `Topic` is `TopicAddress` | `parseInt`'s `+` and `_`; storing non-UTF-8; doubled feed entries |
+| Z3 | `3425d51` | `uid:` header on new blocks; `from_uid` in the frame; `mine` and author lookups by uid | Name matching, except for old blocks |
+| Z4 | `62155c5` | The clock read once per request, inside the turn (`request_time.Now`), passed to everything that stamps or compares a time | A clock effect; a fake clock for the harness |
+| Z5 | `838f357` | Names: "topic" for session in the code (`listTopics`, `transcriptPath`, `readTranscript`, `validTopicID`, `lastViewedTopic`, `pinnedTopics`, …); `firstTopic` (the conversation's pick, one pure `firstOf`) and `resumeTopic` (the viewer's last view, then that pick, then today); `at` for a message's time; chat_store's re-exports gone, each name imported from its module | Translating the code's words; the modules map one to one onto §6.1's |
+
+Not changed, on purpose: the disk keeps `<conv>/sessions/<sid>.md`,
+`<uid>/last-sessions/<conv>` and `<uid>/pinned-sessions/<conv>`; `sid` stays the topic id's name, as in URLs and JSON;
+the transcript header stays `date:`; and `.count` still has two trust rules
+(R2, 3), which Count.roc copies as they are.
+
 ### Streams
 
 | # | item | repo | owner | size |
 |---|---|---|---|---|
-| Z1 | **Done**, angry-gopher `e4a0f60` (on `claude/great-wright-i7aste`, for the box to merge): frames built once at send, the same for every viewer; the client decides `mine`; reactions as finished frames; the "sent" notice only in the sender's tab | ag | CC → box | — |
 | S1 | `Bus.publish!`; the `Stream` response; the `Forward` and `Verbatim` renders | rw | CC | S |
 | S2 | Tests: subscribe before any write; exactly once (backlog xor live) under sends; `Last-Event-ID` and `?since=` resume; on Linux and metal | rw | CC (+ LC) | M |
 | S3 | Mailbox worst case on metal (64 KiB of markdown that escapes badly × 16 slots × subscribers), measured on the Zig chat first, since it publishes the same frames now; the frame cap | ag, rw | CC (+ LC) | S |
@@ -585,7 +641,7 @@ Each item lands with tests, and the chat items with C2 cases.
 | # | item | repo | owner | size |
 |---|---|---|---|---|
 | C1 | Codec, Count (both trust rules), Paths, ZigText, Time, with the Zig fixtures; benchmark on the largest transcript with peak arena bytes | rw | CC | XL |
-| C2a | Zig side of the harness: a fake `Io` (clock, randomness) and a persistent Hub that drains kept streams | ag | CC → box | M |
+| C2a | Zig side of the harness: a fixed `Now` per request (the seam exists since `62155c5`), seeded randomness, and a persistent Hub that drains kept streams | ag | CC → box | M |
 | C2b | Skeleton mount reached by test requests, with the per-route switch | ag | CC → box | M |
 | C2c | The diff: both chats as separate processes on copies of one tree; trees sorted and compared with mtimes dropped; uploads renamed by order of creation; tars unpacked; leftover `~*.tmp` files are findings; fault injection; a poison-block corpus; mixed-case sids; GETs included (page views write bookmarks) | rw | CC | XL |
 | M1 | **Milestone 1** (§7): raw, stream, send | rw, ag | CC; box flips | L |
@@ -606,7 +662,7 @@ Each item lands with tests, and the chat items with C2 cases.
 1. P1, P8, C0, T1.
 2. P2-P5, P7, P9 and U1, each booting on metal, with C1's Codec, Count and
    ZigText started in parallel.
-3. S1-S3 (Z1 is done).
+3. S1-S3 (Z1-Z5 are done).
 4. C2a-c.
 5. M1, flipped in production.
 6. C4, C3, C5, C6, C7, each flipped route by route.
@@ -662,6 +718,12 @@ streams read.** That became R2's first decision and item Z1.
   instead of once per viewer, no chat code outside the turn, one stream
   mechanism, and the "sent" notice bug fixed. It replaced the Splice
   protocol (old §5.4), the `ctx`, and item Z1's design.
+- **The Zig cleanups (Z2-Z5).** Steve asked what else on the Zig side was a
+  flaw worth fixing anyway. Each fix removed a rule the port would have had
+  to reproduce exactly: lenient `parseInt` (R2, 5), non-UTF-8 messages
+  stored (R4), authors known only by name (§5.4), clocks read wherever a
+  date was needed (§5.1, and the `Clock` effect is gone), and names that
+  differed between the UI, the code and this doc.
 
 ## 10. Questions for Steve
 
@@ -670,11 +732,12 @@ streams read.** That became R2's first decision and item Z1.
    replaces it (for example, the Roc chat proved against a copy of the data
    and switched over whole), and whether mounting still makes sense without
    route-by-route flips. §3, §7 and §8 are reworked once decided.
-2. ~~Z1, one producer of topic blobs?~~ Done (`e4a0f60`), awaiting the box's
-   merge.
+2. ~~Z1, one producer of topic blobs?~~ Done (`e4a0f60`), merged by the box.
 3. **Roc in `gopher.elf` (T1)?** The pinned nightly becomes part of the
    production kernel's build.
-4. **Refuse a new message that is not UTF-8, with a 400?** After C0.
+4. ~~Refuse a new message that is not UTF-8, with a 400?~~ Done in Zig
+   (`f2601c4`); the Roc chat matches it. C0 still counts old non-UTF-8
+   transcripts and names.
 5. ~~`cid` to every viewer, or only the sender?~~ Settled by `e4a0f60`: it
    still goes to every viewer, and the client shows "sent" only for its own.
 6. **Docs, the reading list and the search routes stay Zig for v1?**
