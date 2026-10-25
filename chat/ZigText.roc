@@ -74,11 +74,20 @@ ZigText := [].{
 	trim = |s| {
 		ws = |c| c == 32 or c == 9 or c == 13 or c == 10
 		front = List.drop_first(s, count_while(s, ws, 0))
-		List.drop_last(front, count_while(reverse(front), ws, 0))
+		List.drop_last(front, count_back_while(front, ws, 0))
 	}
 
-	reverse : List(U8) -> List(U8)
-	reverse = |l| List.fold(l, [], |acc, c| List.prepend(acc, c))
+	## How many bytes from the end of `l` keep `keep`.
+	count_back_while : List(U8), (U8 -> Bool), U64 -> U64
+	count_back_while = |l, keep, n|
+		if n >= List.len(l) {
+			n
+		} else {
+			match List.get(l, List.len(l) - 1 - n) {
+				Ok(c) if keep(c) => count_back_while(l, keep, n + 1)
+				_ => n
+			}
+		}
 
 	count_while : List(U8), (U8 -> Bool), U64 -> U64
 	count_while = |l, keep, n| match List.get(l, n) {

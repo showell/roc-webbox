@@ -32,26 +32,38 @@ Codec := [].{
 
 	## One block: an optional `MSG_` line, headers to the first blank line
 	## (`from`, `date`, `uid` kept, the last of each, the rest passed over),
-	## then the body, each line unescaped.
+	## then the body, each line unescaped. Lines are found by offset and
+	## kept as slices of the piece: nothing is copied but an escaped body.
 	decode_block : List(U8) -> Msg
 	decode_block = |piece| {
-		lines = split_byte(piece, 10)
-		(id, start) = match List.first(lines) {
-			Ok(l) if starts_with(l, Str.to_utf8("MSG_")) => (List.drop_first(l, 4), 1)
-			_ => ([], 0)
-		}
-		empty = { id, from: [], at: [], uid: [], markdown: [] }
-		(msg, blank) = headers(lines, start, empty)
-		body = List.drop_first(lines, blank + 1)
-		{ ..msg, markdown: join_lines(List.map(body, unescape_line)) }
+		first = line_at(piece, 0)
+		(id, start) = if starts_with(first, msg_prefix) (List.drop_first(first, 4), List.len(first) + 1) else ([], 0)
+		headers(piece, start, { id, from: [], at: [], uid: [], markdown: [] })
 	}
 
-	headers : List(List(U8)), U64, Msg -> (Msg, U64)
-	headers = |lines, i, m| match List.get(lines, i) {
-		Err(_) => (m, i)
-		Ok(l) =>
+	msg_prefix : List(U8)
+	msg_prefix = Str.to_utf8("MSG_")
+
+	## The line of `piece` that begins at `at`, without its newline.
+	line_at : List(U8), U64 -> List(U8)
+	line_at = |piece, at| List.sublist(piece, { start: at, len: line_len(piece, at, 0) })
+
+	line_len : List(U8), U64, U64 -> U64
+	line_len = |piece, at, n| match List.get(piece, at + n) {
+		Ok(c) if c != 10 => line_len(piece, at, n + 1)
+		_ => n
+	}
+
+	## The header lines from offset `at` to the blank one, then the body:
+	## everything after the blank line (none when there is no blank line).
+	headers : List(U8), U64, Msg -> Msg
+	headers = |piece, at, m|
+		if at > List.len(piece) {
+			m
+		} else {
+			l = line_at(piece, at)
 			if l == [] {
-				(m, i)
+				{ ..m, markdown: unescape_body(List.drop_first(piece, at + 1)) }
 			} else {
 				next = match cut_seq(l, Str.to_utf8(": ")) {
 					Ok((k, v)) =>
@@ -66,9 +78,18 @@ Codec := [].{
 						}
 					Err(None) => m
 				}
-				headers(lines, i + 1, next)
+				headers(piece, at + List.len(l) + 1, next)
 			}
-	}
+		}
+
+	## A body with no backslash before the dashes has no escaped line, and
+	## is the bytes it was.
+	unescape_body : List(U8) -> List(U8)
+	unescape_body = |body|
+		if find(body, escaped_dashes, 0) == Err(None) body else join_lines(List.map(split_byte(body, 10), unescape_line))
+
+	escaped_dashes : List(U8)
+	escaped_dashes = List.prepend(dashes, 92)
 
 	## chatStoredForm: what message `index` adds to the file, its block after
 	## `sep` for every message but the first.
@@ -79,7 +100,7 @@ Codec := [].{
 	## line, the body with each line escaped.
 	encode_block : Msg -> List(U8)
 	encode_block = |m| {
-		body = join_lines(List.map(split_byte(m.markdown, 10), escape_line))
+		body = if find(m.markdown, dashes, 0) == Err(None) m.markdown else join_lines(List.map(split_byte(m.markdown, 10), escape_line))
 		head = List.join([Str.to_utf8("MSG_"), m.id, Str.to_utf8("\nfrom: "), m.from, Str.to_utf8("\ndate: "), m.at])
 		uid = if m.uid == [] [] else List.concat(Str.to_utf8("\nuid: "), m.uid)
 		List.join([head, uid, Str.to_utf8("\n\n"), body])
@@ -113,17 +134,21 @@ Codec := [].{
 	}
 
 	join_lines : List(List(U8)) -> List(U8)
-	join_lines = |lines| {
-		(out, _) = List.fold(lines, ([], Bool.True), |(acc, first), l| (List.concat(if first acc else List.append(acc, 10), l), Bool.False))
-		out
-	}
+	join_lines = |lines| List.join(List.intersperse(lines, [10]))
 
-	## std.mem.splitScalar: every piece, empty ones too.
+	## std.mem.splitScalar: every piece, empty ones too, as slices.
 	split_byte : List(U8), U8 -> List(List(U8))
-	split_byte = |s, b| {
-		(done, cur) = List.fold(s, ([], []), |(pieces, piece), c|
-			if c == b (List.append(pieces, piece), []) else (pieces, List.append(piece, c)))
-		List.append(done, cur)
+	split_byte = |s, b| split_byte_from(s, b, 0, 0, [])
+
+	split_byte_from : List(U8), U8, U64, U64, List(List(U8)) -> List(List(U8))
+	split_byte_from = |s, b, start, i, out| match List.get(s, i) {
+		Err(_) => List.append(out, List.drop_first(s, start))
+		Ok(c) =>
+			if c == b {
+				split_byte_from(s, b, i + 1, i + 1, List.append(out, List.sublist(s, { start, len: i - start })))
+			} else {
+				split_byte_from(s, b, start, i + 1, out)
+			}
 	}
 
 	## std.mem.splitSequence: every piece between non-overlapping matches
@@ -136,7 +161,7 @@ Codec := [].{
 		n = List.len(needle)
 		if i + n > List.len(s) {
 			List.append(out, List.drop_first(s, start))
-		} else if List.sublist(s, { start: i, len: n }) == needle {
+		} else if List.get(s, i) == List.first(needle) and List.sublist(s, { start: i, len: n }) == needle {
 			split_seq_from(s, needle, i + n, i + n, List.append(out, List.sublist(s, { start, len: i - start })))
 		} else {
 			split_seq_from(s, needle, start, i + 1, out)
@@ -154,7 +179,7 @@ Codec := [].{
 	find = |s, needle, i|
 		if i + List.len(needle) > List.len(s) {
 			Err(None)
-		} else if List.sublist(s, { start: i, len: List.len(needle) }) == needle {
+		} else if List.get(s, i) == List.first(needle) and List.sublist(s, { start: i, len: List.len(needle) }) == needle {
 			Ok(i)
 		} else {
 			find(s, needle, i + 1)
