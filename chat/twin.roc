@@ -10,6 +10,7 @@ import ZigText
 import Paths
 import Codec
 import Count
+import Frame
 
 call : { which : U8, args : List(List(U8)) } -> List(List(U8))
 call = |req| {
@@ -66,6 +67,8 @@ call = |req| {
 				Ok(w) => [num(w.number), bool(w.current), w.msg.id, w.msg.from, w.msg.at, w.msg.uid, w.msg.markdown]
 				Err(None) => []
 			}
+		25 => [Frame.message({ index: u64(arg(0)), from: arg(1), from_uid: arg(2), at: arg(3), html: arg(4), markdown: arg(5), id: arg(6), cid: arg(7) })]
+		26 => [Frame.reaction(arg(0))]
 		_ => crash "twin: no function ${U8.to_str(req.which)}"
 	}
 }
