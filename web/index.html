@@ -29,7 +29,8 @@
 <p id="error"></p>
 <ul id="list"></ul>
 <script>
-// The whole client: every answer from /api/todos is the list, drawn as given.
+// The whole client: every answer from api/todos is the list, drawn as given.
+// Relative, so the list works under whatever prefix a host mounts it at.
 const list = document.getElementById("list");
 const error = document.getElementById("error");
 
@@ -48,13 +49,13 @@ function draw(items) {
     const box = document.createElement("input");
     box.type = "checkbox";
     box.checked = t.done;
-    box.onchange = () => call("POST", `/api/todos/${t.id}/toggle`);
+    box.onchange = () => call("POST", `api/todos/${t.id}/toggle`);
     const span = document.createElement("span");
     span.textContent = t.text;
     const del = document.createElement("button");
     del.textContent = "×";
     del.title = "Remove";
-    del.onclick = () => call("DELETE", `/api/todos/${t.id}`);
+    del.onclick = () => call("DELETE", `api/todos/${t.id}`);
     li.append(box, span, del);
     return li;
   }));
@@ -64,11 +65,11 @@ document.getElementById("add").onsubmit = e => {
   e.preventDefault();
   const input = document.getElementById("text");
   if (input.value.trim() === "") return;
-  call("POST", "/api/todos", input.value);
+  call("POST", "api/todos", input.value);
   input.value = "";
 };
 
-call("GET", "/api/todos");
+call("GET", "api/todos");
 </script>
 </body>
 </html>

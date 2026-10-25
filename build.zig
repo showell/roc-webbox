@@ -31,6 +31,19 @@ pub fn build(b: *std.Build) void {
     serve.step.dependOn(b.getInstallStep());
     b.step("serve", "Serve the TODO list on http://localhost:9110 (TODO_PORT), its list in data/todo/todos.json (TODO_DATA)").dependOn(&serve.step);
 
+    // **FOR A COMBINATION** (webbox's combo, beside another app): `roc_todo`,
+    // the list as a host takes it (hosted.zig, its Roc linked); and
+    // `roc_hooks`, which a binary holding more than one Roc app declares in
+    // its root (src/roc_hooks.zig).
+    const hosted = b.addModule("roc_todo", .{
+        .root_source_file = b.path("src/hosted.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = imports[0..2],
+    });
+    withApp(b, hosted, app_roc);
+    _ = b.addModule("roc_hooks", .{ .root_source_file = b.path("src/roc_hooks.zig") });
+
     _ = demo(b, roc, optimize);
 
     // **THE LIST ON METAL**: zig-metal-unikernel's kernel, a sibling
@@ -55,7 +68,7 @@ pub fn build(b: *std.Build) void {
 
     // The host's tests, the Roc app linked: the strings across the seam, and
     // the site's routes against a store in a temporary folder.
-    const tests = b.step("test", "The host's tests, through the Roc app");
+    const tests = b.step("test", "The host's tests, through the Roc app, alone and with roc_hooks (src/shared_check.zig)");
     for ([_][]const u8{"src/todo_test.zig"}) |root| {
         const m = b.createModule(.{
             .root_source_file = b.path(root),
@@ -66,6 +79,17 @@ pub fn build(b: *std.Build) void {
         withApp(b, m, app_roc);
         tests.dependOn(&b.addRunArtifact(b.addTest(.{ .root_module = m })).step);
     }
+    const shared = b.createModule(.{
+        .root_source_file = b.path("src/shared_check.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = imports,
+    });
+    withApp(b, shared, app_roc);
+    const shared_run = b.addRunArtifact(b.addExecutable(.{ .name = "shared-check", .root_module = shared }));
+    shared_run.setCwd(b.path("."));
+    shared_run.has_side_effects = true;
+    tests.dependOn(&shared_run.step);
 }
 
 /// **THE CLIENT TEST BENCH, NOT THE SERVER** (demo/README.md): the page

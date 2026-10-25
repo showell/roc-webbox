@@ -116,14 +116,16 @@
     }
   }
 
-  // ── the page's fetch: /api/ goes to the Roc app, the rest as before ──
+  // ── the page's fetch: .../api/ goes to the Roc app, the rest as before ──
   const realFetch = window.fetch.bind(window);
   window.fetch = async (input, init = {}) => {
     const url = new URL(typeof input === "string" ? input : input.url, location.href);
-    if (!url.pathname.startsWith("/api/")) return realFetch(input, init);
+    // The page asks relative to itself, so /api/ follows wherever it is.
+    const at = url.pathname.indexOf("/api/");
+    if (at < 0) return realFetch(input, init);
     const method = (init.method || "GET").toUpperCase();
     const body = init.body == null ? "" : typeof init.body === "string" ? init.body : await new Response(init.body).text();
-    const r = await serve(method, url.pathname, body);
+    const r = await serve(method, url.pathname.slice(at), body);
     return new Response(r.body, { status: r.status, headers: { "content-type": r.contentType } });
   };
 

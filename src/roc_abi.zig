@@ -104,6 +104,8 @@ pub fn deinit() void {
 /// The app's answer to one request. Its strings are in the call's arena:
 /// good until `end`.
 pub fn call(method: []const u8, path: []const u8, body: []const u8) Response {
+    const was = if (shared) roc_hooks.enter(@This());
+    defer if (shared) roc_hooks.leave(was);
     return roc_handle(.{ .body = .from(body), .method = .from(method), .path = .from(path) });
 }
 
@@ -128,6 +130,21 @@ pub fn inRoot(path: []const u8) bool {
 
 // ── the runtime ─────────────────────────────────────────────────────────────
 
+/// Whether another Roc app shares the binary (roc_hooks.zig, which the
+/// binary's root declares): then the root exports the four below and `call`
+/// brackets the app's; alone, they are exported here.
+const shared = @hasDecl(@import("root"), "roc_hooks");
+const roc_hooks = if (shared) @import("root").roc_hooks else struct {};
+
+comptime {
+    if (!shared) {
+        @export(&roc_alloc, .{ .name = "roc_alloc" });
+        @export(&roc_realloc, .{ .name = "roc_realloc" });
+        @export(&roc_dealloc, .{ .name = "roc_dealloc" });
+        @export(&roc_crashed, .{ .name = "roc_crashed" });
+    }
+}
+
 /// Each allocation's size, just before what Roc is given, so `roc_realloc`
 /// knows how much to copy. 16 bytes: Roc asks for at most 16's alignment.
 const header = 16;
@@ -148,11 +165,11 @@ fn withRefcount(len: usize) [*]u8 {
     return base + w;
 }
 
-export fn roc_alloc(len: usize, alignment: usize) callconv(.c) *anyopaque {
+pub fn roc_alloc(len: usize, alignment: usize) callconv(.c) *anyopaque {
     return allocate(len, alignment);
 }
 
-export fn roc_realloc(ptr: *anyopaque, len: usize, alignment: usize) callconv(.c) *anyopaque {
+pub fn roc_realloc(ptr: *anyopaque, len: usize, alignment: usize) callconv(.c) *anyopaque {
     const old: [*]u8 = @ptrCast(ptr);
     const was = std.mem.readInt(usize, (old - header)[0..@sizeOf(usize)], .little);
     const new = allocate(len, alignment);
@@ -160,7 +177,7 @@ export fn roc_realloc(ptr: *anyopaque, len: usize, alignment: usize) callconv(.c
     return new;
 }
 
-export fn roc_dealloc(ptr: *anyopaque, alignment: usize) callconv(.c) void {
+pub fn roc_dealloc(ptr: *anyopaque, alignment: usize) callconv(.c) void {
     _ = ptr;
     _ = alignment;
 }
@@ -174,7 +191,7 @@ fn stop(message: []const u8) noreturn {
     std.debug.panic("roc crashed: {s}", .{message});
 }
 
-export fn roc_crashed(bytes: [*]const u8, len: usize) callconv(.c) void {
+pub fn roc_crashed(bytes: [*]const u8, len: usize) callconv(.c) void {
     crashed(bytes[0..len]);
 }
 
