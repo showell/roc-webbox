@@ -486,6 +486,20 @@ layouts; the request is `{ sub : List(U8), channel : Bool }`, and the host
 keeps the request's `now` for Zig rather than passing it, since no Roc
 reads it yet.
 
+**As built for C4, the Roc serves routes itself.** `Answer` grew `status`,
+`content_type`, `body` and `allow`, and `kind` names what to send: 2 a
+status and body, 3 a 405 (sent by webbox's `methodNotAllowed`, which also
+declines an `Expect`), 4 already answered by the host inside the call (a
+body too big) or failed there, 5 a malformed form (the site's own 400). The
+request carries its `method`. The Roc's routes ask the host through hosted
+functions inside the call: `presence!`, `topic!` (the conversation lookup,
+O2's until then, and whether the topic is there), `body!`, `reactions!`,
+`react!` and `pin!`. A failure in one is kept by the host and returned once
+the call has ended, as `member!`'s already was. The writes inside a call
+are safe on metal for the reason §6.2's send relies on: a pump runs the
+kernel's turn and its fixed Zig render, never a handler, and the busy word
+refuses any Roc call beside this one.
+
 **Tag unions cross the ABI fine** (probe 2). The layout is the payload
 first, then a `u8` tag. Discriminants are alphabetical, so adding a tag
 renumbers the others. That is why the layout is generated and asserted
@@ -821,7 +835,7 @@ Each is a release, with its twin test. A route that moves answers with
 | # | item | repo | owner | size |
 |---|---|---|---|---|
 | C1 | Codec, Count (both trust rules), Paths, ZigText, Time, the frame builder, with the Zig fixtures; benchmark on the largest transcript with peak arena bytes (**done but the metal run**: chat/{Time,ZigText,Paths,Codec,Count,Frame}.roc behind the test-only `chat/twin.roc`, each held to its Zig in angry-gopher `src/chat_twin_test.zig`, every module mutation-checked; chat_count's pure decisions pulled out of its I/O to be twinned; `zig build codec-bench` for R6; the run on the largest production transcript, on metal, is the box's) | rw | CC | XL |
-| C4 | React, reactions, pin, unpin | rw | CC | M |
+| C4 | React, reactions, pin, unpin (**done**: chat/main.roc `act!` serves them, with chat/Form.roc and chat/Reaction.roc for the form; the store's writes stay Zig's as hosted functions until C8, and a topic Zig cannot find is handed back to it, so its 404s are its own; held to the Zig it replaced by angry-gopher `src/chat_actions_twin_test.zig`, 45 requests both ways on two copies of one tree, every answer and file the same, and by twins of the form, the react form and the glyph rule; every mutant killed but one equivalent) | rw | CC | M |
 | C3 | Page, chrome (matches Zig's settings page byte for byte; a twin test), sidebar JSON, 404 and empty pages, conversations, msg (302), default/resume, new topic (with the `general<N>` announcement) | rw | CC | XL |
 | C5 | Fan-out (notify, sidebar, recent, `users/<member>/images.md`, `users/<member>/code.md` with the fence scanner and its quirk), replacing angry-gopher's | rw | CC | L |
 | C6 | Uploads (multipart, sniff, quota as `write`, lossy filename) and download | rw | CC | L |

@@ -1,13 +1,18 @@
 //! **THE ROC CHAT'S SIDE OF THE SEAM** (chat/platform/): the records
 //! `roc_chat_handle` takes and answers, laid out as Roc lays them (fields
-//! by alignment, then by name; sizes asserted below), and the one hosted
-//! function, `roc_chat_member`. The runtime and the call's arena are
-//! roc_abi.zig's, shared with any other Roc app in the binary.
+//! by alignment, then by name; sizes asserted below), and the hosted
+//! functions (chat/platform/Host.roc), each answered by the host's `Host`
+//! for the call. The runtime and the call's arena are roc_abi.zig's, shared
+//! with any other Roc app in the binary.
 //!
 //! **THE DECISION LEAVES THE CALL**: `decide` copies what Roc answered into
 //! the caller's allocator and ends the call before it returns, so the Zig
-//! that serves the route runs with no Roc call open (docs/ROC-CHAT.md R1):
-//! its writes, and on metal the network pumps inside them, nest nothing.
+//! that serves a delegated route runs with no Roc call open (docs/ROC-CHAT.md
+//! R1): its writes, and on metal the network pumps inside them, nest
+//! nothing. A route the Roc serves itself (C4) writes through the hosted
+//! functions, inside the call, as §6.2's send will: a pump there runs the
+//! kernel's turn and its fixed Zig render, never a handler, and the busy
+//! word refuses any Roc call beside this one.
 
 const std = @import("std");
 const roc = @import("roc_abi.zig");
@@ -18,32 +23,153 @@ pub const Decision = route_mod.Decision;
 
 pub const RocBytes = roc.RocBytes;
 
-/// Chat.roc's `Request`.
-pub const Request = extern struct { sub: RocBytes, channel: bool };
+/// Chat.roc's `Request`; `method` is `methodNumber`'s.
+pub const Request = extern struct { sub: RocBytes, channel: bool, method: u8 };
 /// Chat.roc's `Route`.
 pub const RouteRec = extern struct { key: RocBytes, rest: RocBytes, sid: RocBytes, family: u8, part: u8, tail: u8 };
 /// Chat.roc's `Answer`.
-pub const Answer = extern struct { location: RocBytes, route: RouteRec, kind: u8, presence: bool };
+pub const Answer = extern struct { body: RocBytes, content_type: RocBytes, location: RocBytes, route: RouteRec, status: u16, allow: u8, kind: u8, presence: bool };
+/// Host.roc's `{ ok : Bool, bytes : List(U8) }`.
+pub const Got = extern struct { bytes: RocBytes, ok: bool };
 
 comptime {
     const w = @sizeOf(usize);
-    std.debug.assert(@sizeOf(RocBytes) == 3 * w and @sizeOf(Request) == 4 * w and @sizeOf(RouteRec) == 10 * w and @sizeOf(Answer) == 14 * w);
+    std.debug.assert(@sizeOf(RocBytes) == 3 * w and @sizeOf(Request) == 4 * w and @sizeOf(RouteRec) == 10 * w and @sizeOf(Answer) == 20 * w and @sizeOf(Got) == 4 * w);
 }
 
 extern fn roc_chat_handle(req: Request) callconv(.c) Answer;
 
-/// What answers `Host.member!` during a call: the host's, with its own
-/// context (the request, its `Io`). Set by `decide` for the call alone.
-pub const Member = struct {
+/// Chat.roc's numbers for a method: 1 GET, 2 HEAD, 3 POST, 0 any other.
+pub fn methodNumber(m: std.http.Method) u8 {
+    return switch (m) {
+        .GET => 1,
+        .HEAD => 2,
+        .POST => 3,
+        else => 0,
+    };
+}
+
+/// **WHAT ANSWERS THE HOSTED FUNCTIONS** during a call: the host's, with its
+/// own context (the request, its `Io`, the topic it found). Set by `decide`
+/// for the call alone. Bytes handed in are the call's, good until it ends;
+/// bytes handed back are the host's, copied into the call here.
+pub const Host = struct {
     ctx: *anyopaque,
-    ask: *const fn (ctx: *anyopaque) bool,
+    /// Host.member!.
+    member: *const fn (ctx: *anyopaque) bool,
+    /// Host.presence!.
+    presence: *const fn (ctx: *anyopaque) void,
+    /// Host.topic!: `family` a `Family`'s number.
+    topic: *const fn (ctx: *anyopaque, family: u8, key: []const u8, sid: []const u8) bool,
+    /// Host.body!: null when the host answered (too big) or failed.
+    body: *const fn (ctx: *anyopaque) ?[]const u8,
+    /// Host.reactions!: null when it failed.
+    reactions: *const fn (ctx: *anyopaque) ?[]const u8,
+    /// Host.react!: 0 stored, 1 no such message, 2 failed.
+    react: *const fn (ctx: *anyopaque, msg: u64, emoji: []const u8, on: bool) u8,
+    /// Host.pin!: false when it failed.
+    pin: *const fn (ctx: *anyopaque, pinned: bool) bool,
 };
-var member: ?Member = null;
+var host: ?Host = null;
+
+/// **A HOST FOR THE ROUTER ALONE**, for a test of its decisions: it says
+/// whether the one asking is a member, records whether the Roc counted
+/// presence itself, and finds no topic, so a route the Roc serves goes to
+/// Zig as every other does. Nothing else is asked once no topic is found.
+pub const Routing = struct {
+    member: bool = true,
+    asked: bool = false,
+    /// The Roc counted the request as presence itself (a route it serves).
+    marked: bool = false,
+
+    pub fn host(r: *Routing) Host {
+        var h = askingOnly(r, ask);
+        h.presence = mark;
+        h.topic = none;
+        return h;
+    }
+    fn of(ctx: *anyopaque) *Routing {
+        return @ptrCast(@alignCast(ctx));
+    }
+    fn ask(ctx: *anyopaque) bool {
+        of(ctx).asked = true;
+        return of(ctx).member;
+    }
+    fn mark(ctx: *anyopaque) void {
+        of(ctx).marked = true;
+    }
+    fn none(_: *anyopaque, _: u8, _: []const u8, _: []const u8) bool {
+        return false;
+    }
+};
+
+/// A host that answers who is asking and nothing else, for a test of the
+/// router alone: any other hosted call is a panic.
+pub fn askingOnly(ctx: *anyopaque, ask: *const fn (ctx: *anyopaque) bool) Host {
+    const No = struct {
+        fn presence(_: *anyopaque) void {
+            @panic("presence asked of a host that only answers who is asking");
+        }
+        fn topic(_: *anyopaque, _: u8, _: []const u8, _: []const u8) bool {
+            @panic("topic asked of a host that only answers who is asking");
+        }
+        fn bytes(_: *anyopaque) ?[]const u8 {
+            @panic("bytes asked of a host that only answers who is asking");
+        }
+        fn react(_: *anyopaque, _: u64, _: []const u8, _: bool) u8 {
+            @panic("react asked of a host that only answers who is asking");
+        }
+        fn pin(_: *anyopaque, _: bool) bool {
+            @panic("pin asked of a host that only answers who is asking");
+        }
+    };
+    return .{ .ctx = ctx, .member = ask, .presence = No.presence, .topic = No.topic, .body = No.bytes, .reactions = No.bytes, .react = No.react, .pin = No.pin };
+}
+
+/// The call's host, or a panic for a hosted function Roc ran outside one.
+fn current(comptime name: []const u8) Host {
+    if (!roc.inCall()) @panic("roc_chat_" ++ name ++ ": Roc asked outside a call (docs/ROC-CHAT.md R1)");
+    return host orelse @panic("roc_chat_" ++ name ++ ": Roc asked outside a call (chat_abi.decide sets it)");
+}
+
+fn got(bytes: ?[]const u8) Got {
+    const b = bytes orelse return .{ .bytes = .from(""), .ok = false };
+    return .{ .bytes = .from(b), .ok = true };
+}
 
 export fn roc_chat_member() callconv(.c) bool {
-    if (!roc.inCall()) @panic("roc_chat_member: Roc asked outside a call (docs/ROC-CHAT.md R1)");
-    const m = member orelse @panic("roc_chat_member: Roc asked outside a call (chat_abi.decide sets it)");
-    return m.ask(m.ctx);
+    const h = current("member");
+    return h.member(h.ctx);
+}
+
+export fn roc_chat_presence() callconv(.c) void {
+    const h = current("presence");
+    h.presence(h.ctx);
+}
+
+export fn roc_chat_topic(family: u8, key: RocBytes, sid: RocBytes) callconv(.c) bool {
+    const h = current("topic");
+    return h.topic(h.ctx, family, key.slice(), sid.slice());
+}
+
+export fn roc_chat_body() callconv(.c) Got {
+    const h = current("body");
+    return got(h.body(h.ctx));
+}
+
+export fn roc_chat_reactions() callconv(.c) Got {
+    const h = current("reactions");
+    return got(h.reactions(h.ctx));
+}
+
+export fn roc_chat_react(msg: u64, emoji: RocBytes, on: bool) callconv(.c) u8 {
+    const h = current("react");
+    return h.react(h.ctx, msg, emoji.slice(), on);
+}
+
+export fn roc_chat_pin(pinned: bool) callconv(.c) bool {
+    const h = current("pin");
+    return h.pin(h.ctx, pinned);
 }
 
 // ── a crash is a 500 (docs/ROC-CHAT.md R3, P9) ─────────────────────────────
@@ -78,22 +204,34 @@ noinline fn guarded(req: Request, out: *Answer) bool {
 }
 
 /// The router's decision for `sub` (under /chat, or /channel when
-/// `channel`), its bytes copied into `alloc`, the Roc call ended. A Roc
-/// crash is `error.RocCrashed`; a call inside or beside another,
-/// `error.RocReentered`.
-pub fn decide(alloc: std.mem.Allocator, sub: []const u8, channel: bool, who: Member) !Decision {
+/// `channel`) asked with `method`, its bytes copied into `alloc`, the Roc
+/// call ended. A Roc crash is `error.RocCrashed`; a call inside or beside
+/// another, `error.RocReentered`.
+pub fn decide(alloc: std.mem.Allocator, sub: []const u8, channel: bool, method: std.http.Method, with: Host) !Decision {
     try roc.enter();
     defer roc.leave();
-    member = who;
-    defer member = null;
+    host = with;
+    defer host = null;
     const was = roc.crashed;
     roc.crashed = crashed;
     defer roc.crashed = was;
     defer roc.end();
     var a: Answer = undefined;
-    if (!guarded(.{ .sub = .from(sub), .channel = channel }, &a)) return error.RocCrashed;
-    if (a.kind == 1) return .{ .redirect = try alloc.dupe(u8, a.location.slice()) };
-    if (a.kind != 0) std.debug.panic("roc_chat_handle answered kind {d}", .{a.kind});
+    if (!guarded(.{ .sub = .from(sub), .channel = channel, .method = methodNumber(method) }, &a)) return error.RocCrashed;
+    switch (a.kind) {
+        0 => {},
+        1 => return .{ .redirect = try alloc.dupe(u8, a.location.slice()) },
+        2 => return .{ .respond = .{ .status = a.status, .content_type = try alloc.dupe(u8, a.content_type.slice()), .body = try alloc.dupe(u8, a.body.slice()) } },
+        3 => return .{ .not_allowed = switch (a.allow) {
+            1 => .GET,
+            2 => .HEAD,
+            3 => .POST,
+            else => std.debug.panic("roc_chat_handle: allow {d}", .{a.allow}),
+        } },
+        4 => return .answered,
+        5 => return .malformed_form,
+        else => std.debug.panic("roc_chat_handle answered kind {d}", .{a.kind}),
+    }
     return .{ .serve = .{ .presence = a.presence, .route = .{
         .family = std.enums.fromInt(route_mod.Family, a.route.family) orelse std.debug.panic("roc_chat_handle: family {d}", .{a.route.family}),
         .part = std.enums.fromInt(route_mod.Part, a.route.part) orelse std.debug.panic("roc_chat_handle: part {d}", .{a.route.part}),

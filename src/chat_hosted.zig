@@ -9,7 +9,9 @@ const abi = @import("chat_abi.zig");
 const route = @import("chat_route.zig");
 
 pub const decide = abi.decide;
-pub const Member = abi.Member;
+pub const Host = abi.Host;
+pub const askingOnly = abi.askingOnly;
+pub const Routing = abi.Routing;
 pub const Decision = route.Decision;
 pub const Route = route.Route;
 pub const Family = route.Family;
@@ -26,7 +28,7 @@ pub fn use(base: std.mem.Allocator) void {
 
 const testing = std.testing;
 
-fn answer(member: bool) Member {
+fn answer(member: bool) Host {
     const S = struct {
         fn yes(_: *anyopaque) bool {
             return true;
@@ -36,13 +38,13 @@ fn answer(member: bool) Member {
         }
         var dummy: u8 = 0;
     };
-    return .{ .ctx = &S.dummy, .ask = if (member) S.yes else S.no };
+    return askingOnly(&S.dummy, if (member) S.yes else S.no);
 }
 
 fn expectRoute(sub: []const u8, channel: bool, want: Route, presence: bool) !void {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
-    const got = try decide(arena.allocator(), sub, channel, answer(true));
+    const got = try decide(arena.allocator(), sub, channel, .GET, answer(true));
     const expected: Decision = .{ .serve = .{ .route = want, .presence = presence } };
     if (!got.eql(expected)) {
         std.debug.print("{s}: got {f}, want {f}\n", .{ sub, got, expected });
@@ -69,8 +71,145 @@ test "the router: a topic's tails, a channel, an asset before the gate, the gate
 
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
-    const away = try decide(arena.allocator(), "/c/1_2/general", false, answer(false));
+    const away = try decide(arena.allocator(), "/c/1_2/general", false, .GET, answer(false));
     try testing.expectEqualStrings("/login/full?next=/chat/c/1_2/general", away.redirect);
-    const asset = try decide(arena.allocator(), "/chat.js", false, answer(false));
+    const asset = try decide(arena.allocator(), "/chat.js", false, .GET, answer(false));
     try testing.expectEqual(Family.asset, asset.serve.route.family);
+}
+
+/// A host whose answers a test sets, and which records what it was asked.
+const Scripted = struct {
+    found: bool = true,
+    body: ?[]const u8 = "",
+    reactions: ?[]const u8 = "",
+    react_answer: u8 = 0,
+    pin_ok: bool = true,
+    asked: std.ArrayList(u8) = .empty,
+    alloc: std.mem.Allocator,
+
+    fn host(self: *Scripted) Host {
+        return .{ .ctx = self, .member = member, .presence = presence, .topic = topic, .body = bodyOf, .reactions = reactionsOf, .react = react, .pin = pin };
+    }
+    fn me(ctx: *anyopaque) *Scripted {
+        return @ptrCast(@alignCast(ctx));
+    }
+    fn say(ctx: *anyopaque, comptime fmt: []const u8, args: anytype) void {
+        const s = me(ctx);
+        s.asked.print(s.alloc, fmt ++ ";", args) catch @panic("oom");
+    }
+    fn member(ctx: *anyopaque) bool {
+        say(ctx, "member", .{});
+        return true;
+    }
+    fn presence(ctx: *anyopaque) void {
+        say(ctx, "presence", .{});
+    }
+    fn topic(ctx: *anyopaque, family: u8, key: []const u8, sid: []const u8) bool {
+        say(ctx, "topic {d} {s} {s}", .{ family, key, sid });
+        return me(ctx).found;
+    }
+    fn bodyOf(ctx: *anyopaque) ?[]const u8 {
+        say(ctx, "body", .{});
+        return me(ctx).body;
+    }
+    fn reactionsOf(ctx: *anyopaque) ?[]const u8 {
+        say(ctx, "reactions", .{});
+        return me(ctx).reactions;
+    }
+    fn react(ctx: *anyopaque, msg: u64, emoji: []const u8, on: bool) u8 {
+        say(ctx, "react {d} {s} {}", .{ msg, emoji, on });
+        return me(ctx).react_answer;
+    }
+    fn pin(ctx: *anyopaque, pinned: bool) bool {
+        say(ctx, "pin {}", .{pinned});
+        return me(ctx).pin_ok;
+    }
+};
+
+fn expectAct(sub: []const u8, channel: bool, method: std.http.Method, script: Scripted, want: Decision, asked: []const u8) !void {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    var s = script;
+    s.alloc = arena.allocator();
+    const got = try decide(arena.allocator(), sub, channel, method, s.host());
+    if (!got.eql(want) or !std.mem.eql(u8, s.asked.items, asked)) {
+        std.debug.print("{s}: got {f} asking \"{s}\", want {f} asking \"{s}\"\n", .{ sub, got, s.asked.items, want, asked });
+        return error.TestUnexpectedResult;
+    }
+}
+
+test "a topic's reactions, react, pin and unpin are the Roc's: presence, the topic, the method, then the work" {
+    use(testing.allocator);
+    defer @import("roc_abi.zig").deinit();
+    const a: Scripted = .{ .alloc = undefined };
+    const thumbs = "msg=3&emoji=%F0%9F%91%8D&on=0";
+    try expectAct("/c/1_2/Plans/react", false, .POST, blk: {
+        var s = a;
+        s.body = thumbs;
+        break :blk s;
+    }, .{ .respond = .{ .status = 204 } }, "member;presence;topic 11 1_2 Plans;body;react 3 \u{1F44D} false;");
+    try expectAct("/ops/Plans/react", true, .POST, blk: {
+        var s = a;
+        s.body = "msg=9&emoji=%F0%9F%91%8D";
+        s.react_answer = 1;
+        break :blk s;
+    }, .{ .respond = .{ .status = 400, .body = "react: no such message\n" } }, "member;presence;topic 12 ops Plans;body;react 9 \u{1F44D} true;");
+    // The form judged before the store is asked.
+    try expectAct("/c/1_2/Plans/react", false, .POST, blk: {
+        var s = a;
+        s.body = "msg=x&emoji=%F0%9F%91%8D";
+        break :blk s;
+    }, .{ .respond = .{ .status = 400, .body = "react: msg must be a message number\n" } }, "member;presence;topic 11 1_2 Plans;body;");
+    try expectAct("/c/1_2/Plans/react", false, .POST, blk: {
+        var s = a;
+        s.body = "msg=1&emoji=%F0";
+        break :blk s;
+    }, .{ .respond = .{ .status = 400, .body = "react: emoji must be one glyph\n" } }, "member;presence;topic 11 1_2 Plans;body;");
+    try expectAct("/c/1_2/Plans/react", false, .POST, blk: {
+        var s = a;
+        s.body = "msg=1&msg=2&emoji=%F0%9F%91%8D";
+        break :blk s;
+    }, .malformed_form, "member;presence;topic 11 1_2 Plans;body;");
+    // The host answered (too big) or failed: nothing more.
+    try expectAct("/c/1_2/Plans/react", false, .POST, blk: {
+        var s = a;
+        s.body = null;
+        break :blk s;
+    }, .answered, "member;presence;topic 11 1_2 Plans;body;");
+    try expectAct("/c/1_2/Plans/react", false, .POST, blk: {
+        var s = a;
+        s.body = thumbs;
+        s.react_answer = 2;
+        break :blk s;
+    }, .answered, "member;presence;topic 11 1_2 Plans;body;react 3 \u{1F44D} false;");
+    // The method after the topic, before the body.
+    try expectAct("/c/1_2/Plans/react", false, .GET, a, .{ .not_allowed = .POST }, "member;presence;topic 11 1_2 Plans;");
+    try expectAct("/c/1_2/Plans/reactions", false, .HEAD, a, .{ .not_allowed = .GET }, "member;presence;topic 11 1_2 Plans;");
+    try expectAct("/c/1_2/Plans/reactions", false, .GET, blk: {
+        var s = a;
+        s.reactions = "{\"msg\":1}\n";
+        break :blk s;
+    }, .{ .respond = .{ .status = 200, .content_type = "application/x-ndjson; charset=utf-8", .body = "{\"msg\":1}\n" } }, "member;presence;topic 11 1_2 Plans;reactions;");
+    try expectAct("/c/1_2/Plans/reactions", false, .GET, blk: {
+        var s = a;
+        s.reactions = null;
+        break :blk s;
+    }, .answered, "member;presence;topic 11 1_2 Plans;reactions;");
+    try expectAct("/c/1_2/Plans/pin", false, .POST, a, .{ .respond = .{ .status = 204 } }, "member;presence;topic 11 1_2 Plans;pin true;");
+    try expectAct("/ops/Plans/unpin", true, .POST, a, .{ .respond = .{ .status = 204 } }, "member;presence;topic 12 ops Plans;pin false;");
+    try expectAct("/c/1_2/Plans/unpin", false, .POST, blk: {
+        var s = a;
+        s.pin_ok = false;
+        break :blk s;
+    }, .answered, "member;presence;topic 11 1_2 Plans;pin false;");
+    try expectAct("/c/1_2/Plans/pin", false, .PUT, a, .{ .not_allowed = .POST }, "member;presence;topic 11 1_2 Plans;");
+    // A topic that is not there, or a conversation that is not the member's:
+    // Zig's to answer, presence already counted.
+    try expectAct("/c/1_2/Gone/react", false, .POST, blk: {
+        var s = a;
+        s.found = false;
+        break :blk s;
+    }, .{ .serve = .{ .route = .{ .family = .dm, .key = "1_2", .sid = "Gone", .part = .topic, .tail = .react }, .presence = false } }, "member;presence;topic 11 1_2 Gone;");
+    // Every other route is still Zig's, asking nothing more.
+    try expectAct("/c/1_2/Plans/send", false, .POST, a, .{ .serve = .{ .route = .{ .family = .dm, .key = "1_2", .sid = "Plans", .part = .topic, .tail = .send }, .presence = true } }, "member;");
 }

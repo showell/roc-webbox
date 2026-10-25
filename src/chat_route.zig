@@ -87,15 +87,29 @@ pub const Route = struct {
 };
 
 /// What the router decided: a 303 (the gate's), or a route for Zig, with
-/// whether the request counts as presence (it is not a stream).
+/// whether the request counts as presence (it is not a stream); or, for a
+/// route the Roc served itself, what to send.
 pub const Decision = union(enum) {
     redirect: []const u8,
     serve: struct { route: Route, presence: bool },
+    /// A status and its body, typed `content_type` when it is not empty.
+    respond: struct { status: u16, content_type: []const u8 = "", body: []const u8 = "" },
+    /// A 405 naming the one method the route takes.
+    not_allowed: std.http.Method,
+    /// Answered already by the host, inside the call (a body too big), or
+    /// failed there: the host has its error.
+    answered,
+    /// A malformed form: the site's 400, as every form's.
+    malformed_form,
 
     pub fn eql(a: Decision, b: Decision) bool {
+        if (std.meta.activeTag(a) != std.meta.activeTag(b)) return false;
         return switch (a) {
-            .redirect => |l| b == .redirect and std.mem.eql(u8, l, b.redirect),
-            .serve => |s| b == .serve and s.presence == b.serve.presence and s.route.eql(b.serve.route),
+            .redirect => |l| std.mem.eql(u8, l, b.redirect),
+            .serve => |s| s.presence == b.serve.presence and s.route.eql(b.serve.route),
+            .respond => |r| r.status == b.respond.status and std.mem.eql(u8, r.content_type, b.respond.content_type) and std.mem.eql(u8, r.body, b.respond.body),
+            .not_allowed => |m| m == b.not_allowed,
+            .answered, .malformed_form => true,
         };
     }
 
@@ -103,6 +117,10 @@ pub const Decision = union(enum) {
         switch (d) {
             .redirect => |l| try w.print("303 {s}", .{l}),
             .serve => |s| try w.print("{f}{s}", .{ s.route, if (s.presence) " +presence" else "" }),
+            .respond => |r| try w.print("{d} \"{s}\" {d} bytes", .{ r.status, r.content_type, r.body.len }),
+            .not_allowed => |m| try w.print("405 allow {t}", .{m}),
+            .answered => try w.writeAll("answered by the host"),
+            .malformed_form => try w.writeAll("malformed form"),
         }
     }
 };

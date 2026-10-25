@@ -13,6 +13,12 @@ platform ""
 	provides { "roc_chat_handle": handle_for_host! }
 	hosted {
 		"roc_chat_member": Host.member!,
+		"roc_chat_presence": Host.presence!,
+		"roc_chat_topic": Host.topic!,
+		"roc_chat_body": Host.body!,
+		"roc_chat_reactions": Host.reactions!,
+		"roc_chat_react": Host.react!,
+		"roc_chat_pin": Host.pin!,
 	}
 	targets: {
 		x64musl: {

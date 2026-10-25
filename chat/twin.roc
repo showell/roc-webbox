@@ -11,6 +11,8 @@ import Paths
 import Codec
 import Count
 import Frame
+import Form
+import Reaction
 
 call : { which : U8, args : List(List(U8)) } -> List(List(U8))
 call = |req| {
@@ -69,6 +71,19 @@ call = |req| {
 			}
 		25 => [Frame.message({ index: u64(arg(0)), from: arg(1), from_uid: arg(2), at: arg(3), html: arg(4), markdown: arg(5), id: arg(6), cid: arg(7) })]
 		26 => [Frame.reaction(arg(0))]
+		27 =>
+			match Form.field(arg(0), arg(1)) {
+				Found(v) => [[70], v]
+				Missing => []
+				Malformed => [[77]]
+			}
+		28 =>
+			match Reaction.form(arg(0)) {
+				Reacted(r) => [[82], num(r.msg), r.emoji, bool(r.on)]
+				Bad(why) => [[66], why]
+				Malformed => [[77]]
+			}
+		29 => [bool(Reaction.valid_emoji(arg(0)))]
 		_ => crash "twin: no function ${U8.to_str(req.which)}"
 	}
 }

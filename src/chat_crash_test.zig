@@ -18,13 +18,13 @@ const Asker = struct {
         const self: *Asker = @ptrCast(@alignCast(ctx));
         if (self.nest) {
             var inner: Asker = .{};
-            if (abi.decide(testing.allocator, "/ok", false, inner.member_())) |_| {} else |e| self.nested = e;
+            if (abi.decide(testing.allocator, "/ok", false, .GET, inner.member_())) |_| {} else |e| self.nested = e;
         }
         return self.member;
     }
 
-    fn member_(self: *Asker) abi.Member {
-        return .{ .ctx = self, .ask = ask };
+    fn member_(self: *Asker) abi.Host {
+        return abi.askingOnly(self, ask);
     }
 };
 
@@ -34,16 +34,16 @@ test "a Roc crash is error.RocCrashed, its message kept, and the next call is se
     roc.use(arena.allocator());
     var asker: Asker = .{};
 
-    try testing.expectError(error.RocCrashed, abi.decide(arena.allocator(), "/crash", false, asker.member_()));
+    try testing.expectError(error.RocCrashed, abi.decide(arena.allocator(), "/crash", false, .GET, asker.member_()));
     try testing.expectEqualStrings("a planted crash", abi.last_crash[0..abi.last_crash_len]);
     try testing.expect(!roc.inCall());
 
-    const ok = try abi.decide(arena.allocator(), "/ok", false, asker.member_());
+    const ok = try abi.decide(arena.allocator(), "/ok", false, .GET, asker.member_());
     try testing.expectEqual(abi.Route.eql(ok.serve.route, .{ .family = .default }), true);
 
-    try testing.expectError(error.RocCrashed, abi.decide(arena.allocator(), "/crash-after-asking", false, asker.member_()));
+    try testing.expectError(error.RocCrashed, abi.decide(arena.allocator(), "/crash-after-asking", false, .GET, asker.member_()));
     try testing.expectEqualStrings("a planted crash, after asking", abi.last_crash[0..abi.last_crash_len]);
-    _ = try abi.decide(arena.allocator(), "/ok", false, asker.member_());
+    _ = try abi.decide(arena.allocator(), "/ok", false, .GET, asker.member_());
 }
 
 test "a Roc call inside another is refused, error.RocReentered, and the outer call goes on" {
@@ -53,7 +53,7 @@ test "a Roc call inside another is refused, error.RocReentered, and the outer ca
     // The planted app asks who it is on `/crash-after-asking`; this asker
     // tries a Roc call of its own while asked, inside the outer one.
     var asking: Asker = .{ .nest = true };
-    try testing.expectError(error.RocCrashed, abi.decide(arena.allocator(), "/crash-after-asking", false, asking.member_()));
+    try testing.expectError(error.RocCrashed, abi.decide(arena.allocator(), "/crash-after-asking", false, .GET, asking.member_()));
     try testing.expectEqual(@as(?anyerror, error.RocReentered), asking.nested);
     try testing.expect(!roc.inCall());
 }
