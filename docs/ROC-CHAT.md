@@ -1,8 +1,16 @@
 # Roc Chat: porting angry-gopher's chat to Roc on webbox
 
 Status: **revised draft, after review** (§9 lists what the four reviews
-changed). It still assumes the shape of LC's user support for the TODO app
-(§6.3), which has not landed; it is revised again when that does.
+changed), **updated for the new bus** (§5.4): since angry-gopher `e4a0f60`, a
+topic's bus blobs are finished SSE frames, built once at send and the same
+for every viewer, and the client decides `mine`. That removed the Splice
+protocol this draft had designed, and most of R1.
+
+Still open:
+- It assumes the shape of LC's user support for the TODO app (§6.3), which
+  has not landed.
+- Steve is not bought in to an incremental cutover in production (§10, 1).
+  §3, §7 and §8 still describe one; they are reworked once that is decided.
 
 ## 1. Goal
 
@@ -35,7 +43,9 @@ neighbours, about 6,800 lines) to a Roc app on the platform in this repo.
   - Each open stream has a **subscriber**, a 16-slot mailbox that gets its
     own copy.
   - The host calls the stream's **render** function to turn each blob into
-    that viewer's frame.
+    a frame. Since `e4a0f60` a topic stream's blob already is its frame, the
+    same for every viewer, so its render only copies it through
+    (chat_sse.zig `verbatim`).
 - **Mounted.** The Roc chat runs inside angry-gopher's process, serving some
   of its routes, the way angry-gopher already mounts cobble-webbox's
   `codex_chat` (router.zig:30, :170).
@@ -128,8 +138,9 @@ or working around it.
 
 ### R1. Roc must never run outside a call, on either host
 
-The Zig chat renders markdown and computes `mine` inside **render**, once
-per viewer per live message. Render runs in two places:
+Until `e4a0f60` the Zig chat rendered markdown and computed `mine` inside
+**render**, once per viewer per live message. Render still runs in two
+places, though it now only copies bytes:
 - **On Linux**, on each connection's own thread, outside the turn, alongside
   other streams and the handler (webbox bus.zig `serveKept`).
 - **On metal**, inside the turn. Every network pump while a handler writes
@@ -139,11 +150,14 @@ per viewer per live message. Render runs in two places:
 
 The glue (`src/roc_abi.zig`) has one arena, reset by `end()`. So a render
 that called Roc would be concurrent corruption on Linux and re-entrant
-corruption on metal.
+corruption on metal. The cause is how compiled Roc reaches memory: through
+four global functions with no context, so the host can only say which call
+an allocation belongs to by global state.
 
 **Decision:**
-- **No Roc in render.** §5.4's Splice frames are built by the publisher,
-  inside the turn, and render is fixed Zig.
+- **No Roc in render.** This now holds by construction: the publisher builds
+  each frame inside the turn (§5.4), and render is fixed Zig that copies
+  bytes.
 - **Never Roc in the host's other hooks.** `bodyLimit`, `uploader` and
   `family` run before the turn on Linux, so they are host-only too. The same
   goes for any `between`.
@@ -166,15 +180,15 @@ The turn makes that safe from interleaving. It does not make the two agree.
 
 **Decisions:**
 
-1. **One producer of per-topic bus blobs.** Zig's frame code (chat_sse.zig
-   `emitWire`) is factored into a function that builds the Splice blob, and
-   Zig's `appendMessage` publishes that.
-   - Zig callers (welcome DM, docs post) then reach Roc streams in the new
+1. **One frame format on topic keys.** Done in angry-gopher `e4a0f60`
+   (item Z1): Zig's `appendMessage` publishes the finished frame
+   (chat_frame.zig `messageFrame`), and a reaction its `event: reaction`
+   frame.
+   - Zig callers (welcome DM, docs post) reach any topic stream in the one
      format.
-   - Zig streams render Splice blobs with the same fixed render.
-   - This is a **box change to angry-gopher, landed before milestone 1**
-     (item Z1). Until it lands, a docs post into a topic watched by a Roc
-     stream shows nothing live.
+   - A Roc publisher must build **byte-identical** frames for the same
+     message: field order, JSON escaping (item 4 below), `cid` last and only
+     when non-empty, HTML from the one markdown renderer. C2 compares them.
 2. **One check that the two agree.** The differential harness (C2) runs Zig's
    own writers too (a docs post, a welcome DM) against Roc-written files.
    Every Zig-side change to these files after the port is a harness case.
@@ -286,11 +300,13 @@ Roc's `Str` is UTF-8 by type. Chat's bytes are not guaranteed to be:
     (drain.zig:201), so it is copied, unless the box changes the drain.
   - A 100 MiB copy cost 55-170 ms in the probe.
 - **Mailboxes.**
-  - A Splice blob is markdown plus HTML, JSON-escaped: up to about 0.5-0.8
-    MiB for a 64 KiB message, by escaping alone.
-  - The bus copies it per subscriber, up to 16 slots each, and render makes
-    one more copy per frame.
-  - S3 measures the worst case on metal. Sends past a frame cap are refused.
+  - A topic blob is now the finished frame: markdown plus HTML, JSON-escaped.
+    That is up to about 0.5-0.8 MiB for a 64 KiB message, by escaping alone;
+    before `e4a0f60` the blob carried the markdown only.
+  - The bus copies it per subscriber, up to 16 slots each. On Linux render
+    makes no further copy; on metal `nextFrame` dupes it once more.
+  - This is the same for the Zig chat today, so S3 measures it there first,
+    on metal. Sends past a frame cap are refused.
 
 ### R6. Speed (low risk)
 
@@ -327,7 +343,7 @@ inside the turn, so Roc reads `Clock.now_unix_ms!` inside it too.
 ```roc
 Response : [
     Bytes({ status : U16, headers : List({ name : Str, value : Str }), body : List(U8) }),
-    Stream({ key : Str, preamble : List(U8), live : [Verbatim, Splice] }),
+    Stream({ key : Str, preamble : List(U8), live : [Forward, Verbatim] }),
     File({ path : Str, content_type : Str, headers : List({ name : Str, value : Str }) }),
     TarGz({ name : Str, entries : List({ path : Str, as : Str }) }),
 ]
@@ -350,9 +366,8 @@ What the host does with each:
     anything;
   - writes the head and the preamble (the backlog-size and backlog frames,
     which Roc built);
-  - keeps the stream with the fixed `Verbatim` or `Splice` render;
-  - takes the Splice `ctx` (the viewer's name) from `Request.user`, duped
-    into the hub's allocator.
+  - keeps the stream with the fixed `Forward` or `Verbatim` render (§5.4).
+    Neither needs to know the viewer.
 - **`File`**: stat; Range with 206/416 and an 8 MiB window; files up to
   4 MiB read whole; bigger ones streamed in 256 KiB pieces. This is
   chat_upload.zig's serving, moved into the platform.
@@ -388,34 +403,36 @@ Counter over its own modules (§3).
 **Lifetimes.** A Roc string can alias the buffer it was decoded from, so
 anything the host keeps past `end()` is copied in, and anything it hands
 Roc is copied into the call's arena. That covers publish blobs, the stream
-preamble, response bodies and the `ctx`.
+preamble and response bodies.
 
-### 5.4 Splice: streams with no Roc after the call
+### 5.4 Streams: what is published is what goes out
 
-- **`Verbatim`**: each blob is written as `data: <blob>\n\n`. This is webbox
-  `sse.forward`, used unchanged by the five per-user streams (`ntf:`, `sb:`,
-  `rec:`, `img:`, `code:`).
-- **`Splice`**: for topic streams.
-  - A blob is `author ++ "\n" ++ before ++ "\x00" ++ after`.
-  - The frame is `before ++ (author == ctx ? "true" : "false") ++ after`.
-  - `before` is `id: N\ndata: {"index":…,"from":…,"at":…,"html":…,"markdown":…,"id":…,"mine":`
-    (field order as chat_sse.zig `emitWire`).
-  - `after` is `}\n\n`, or `,"cid":…}\n\n` when the send carried a `cid`.
-    It is omitted when empty, and backlog frames never carry one.
-  - A blob with no NUL after its first line is sent as-is after that line:
-    the reaction frame is the same for everyone.
-  - A blob with no newline at all is dropped and counted.
-  - NUL never appears inside the JSON: control bytes are escaped, and
-    non-UTF-8 strings become number arrays.
+Since angry-gopher `e4a0f60`, every blob on every chat key is exactly what a
+browser is sent, or its `data:` payload. There are two fixed renders, both
+webbox/angry-gopher Zig, and neither runs any chat code:
 
-**Comparing names** matches today's `mine`, including its staleness after a
-rename. Names are unique among members and cannot contain a newline.
+- **`Forward`**: each blob is written as `data: <blob>\n\n`. This is webbox
+  `sse.forward`, used by the five per-user streams (`ntf:`, `sb:`, `rec:`,
+  `img:`, `code:`).
+- **`Verbatim`**: each blob is written as it is. This is the topic streams'
+  render (chat_sse.zig `verbatim`). The blob is one of:
+  - a message frame (chat_frame.zig `messageFrame`):
+    `id: N\ndata: {"index":…,"from":…,"at":…,"html":…,"markdown":…,"id":…}\n\n`,
+    with `,"cid":…` before the closing brace when the send carried one;
+  - a reaction frame (`reactionFrame`): `event: reaction\ndata: <sidecar line>\n\n`.
 
-**One change Steve may want:** today every viewer's frame carries the
-sender's `cid`, and the client shows "your message was sent" for any frame
-that has one (chat.js:292-302), someone else's included. Splice could move
-`cid` into the per-viewer part, which fixes that bug but changes the bytes.
-It is left byte-identical unless Steve says otherwise.
+A Roc chat builds these frames inside the turn: at `/send` (and react), to
+publish; and while handling a stream request, for its backlog, with the same
+function, so a message reads the same live or replayed.
+
+**The client decides `mine`.** The frame no longer carries it: the page has
+`data-me-name`, and chat.js sets `m.mine = (m.from === ME_NAME)`, the rule
+the server used. That keeps its staleness after a rename. Names are unique
+among members.
+
+**`cid` goes to every viewer, as before**, and is harmless now: the "your
+message was sent" notice shows only for cids the tab itself sent (chat.js,
+chat_compose.js `sentHere`).
 
 ## 6. The Roc chat
 
@@ -461,8 +478,8 @@ exits 1 on failure, using fixtures copied from the Zig tests.
 7. **Number.** `messageCount`, then the id `<sid>_<n>` in the request's
    spelling of the sid, as Zig does.
 8. **Stamp and build.** `Clock.now_unix_ms!` gives the date. Then the block,
-   then `Markdown.render!` once, then the Splice blob. **Everything that can
-   fail is built here, before the store.**
+   then `Markdown.render!` once, then the message frame (§5.4). **Everything
+   that can fail is built here, before the store.**
 9. **Store.** `File.append!` the block. From here on **nothing fails the
    send**: a send that answered an error after storing makes the client
    resend, which is a duplicate.
@@ -508,7 +525,7 @@ Mounted in angry-gopher behind the per-route switch.
 - **Zig serves everything else**, including the page, whose JS opens the
   Roc stream.
 - **Roc owns:** Codec, Count, ZigText, Time, the bookmark write, append and
-  `.count`, and the Splice stream with backlog and resume.
+  `.count`, the message frame, and the stream with backlog and resume.
 - **angry-gopher supplies:** Markdown, Users, Presence, Search, Counter, and
   its fan-out.
 
@@ -537,7 +554,7 @@ Each item lands with tests, and the chat items with C2 cases.
 | # | item | repo | owner | size |
 |---|---|---|---|---|
 | P1 | Bytes cross as `List(U8)` (body, header values); the TODO app's ids parsed byte-wise, not by `from_str` | rw | CC | S |
-| P8 | Pin the nightly; the build checks it. Layouts generated by `roc glue`, asserted at compile time. The build checks every hosted `extern` has an export (weak symbols) | rw | CC | M |
+| P8 | Pin the nightly; the build checks it (**done by LC**, `roc-version`). Layouts generated by `roc glue`, asserted at compile time. The build checks every hosted `extern` has an export (weak symbols) | rw | CC | M |
 | C0 | Census of production data (R2, R4, R5 lists) | — | box | S |
 | T1 | A trivial Roc archive linked into angry-gopher and `gopher.elf`, booted under QEMU; build time, size, gate cost; the box agrees the toolchain | ag, zmu | box + CC | M |
 
@@ -558,10 +575,10 @@ Each item lands with tests, and the chat items with C2 cases.
 
 | # | item | repo | owner | size |
 |---|---|---|---|---|
-| Z1 | One producer: `emitWire` factored into the Splice builder; Zig's `appendMessage` publishes Splice blobs; Zig's topic stream uses the Splice render. No change the client can see | ag | CC → box | M |
-| S1 | `Bus.publish!`; the `Stream` response; the `Verbatim` and `Splice` renders | rw | CC | M |
+| Z1 | **Done**, angry-gopher `e4a0f60` (on `claude/great-wright-i7aste`, for the box to merge): frames built once at send, the same for every viewer; the client decides `mine`; reactions as finished frames; the "sent" notice only in the sender's tab | ag | CC → box | — |
+| S1 | `Bus.publish!`; the `Stream` response; the `Forward` and `Verbatim` renders | rw | CC | S |
 | S2 | Tests: subscribe before any write; exactly once (backlog xor live) under sends; `Last-Event-ID` and `?since=` resume; on Linux and metal | rw | CC (+ LC) | M |
-| S3 | Mailbox worst case on metal (64 KiB of markdown that escapes badly × 16 slots × subscribers); the frame cap | rw | CC | S |
+| S3 | Mailbox worst case on metal (64 KiB of markdown that escapes badly × 16 slots × subscribers), measured on the Zig chat first, since it publishes the same frames now; the frame cap | ag, rw | CC (+ LC) | S |
 
 ### The chat in Roc
 
@@ -589,7 +606,7 @@ Each item lands with tests, and the chat items with C2 cases.
 1. P1, P8, C0, T1.
 2. P2-P5, P7, P9 and U1, each booting on metal, with C1's Codec, Count and
    ZigText started in parallel.
-3. Z1, S1-S3.
+3. S1-S3 (Z1 is done).
 4. C2a-c.
 5. M1, flipped in production.
 6. C4, C3, C5, C6, C7, each flipped route by route.
@@ -635,14 +652,29 @@ streams read.** That became R2's first decision and item Z1.
 | Owners and repos unstated | Owner and repo for every item |
 | Sizes | C1, C2 and C3 are XL; I3 is L |
 
+### Since the reviews
+
+- **The bus (angry-gopher `e4a0f60`).** Steve asked what made the bus a
+  problem for Roc and not for Zig. The answer was the per-viewer render
+  callback, which Zig could run concurrently and nested because it is handed
+  its allocator, and compiled Roc cannot. Making that render a plain copy
+  was worth doing in Zig on its own: markdown rendered once per message
+  instead of once per viewer, no chat code outside the turn, one stream
+  mechanism, and the "sent" notice bug fixed. It replaced the Splice
+  protocol (old §5.4), the `ctx`, and item Z1's design.
+
 ## 10. Questions for Steve
 
-1. **Mounted first, route by route, starting with milestone 1?**
-2. **Z1, one producer of topic blobs?** It changes angry-gopher's Zig chat
-   before any Roc serves.
+1. **Mounted first, route by route, starting with milestone 1?** Steve: not
+   bought in to an incremental cutover, at least in production. Open: what
+   replaces it (for example, the Roc chat proved against a copy of the data
+   and switched over whole), and whether mounting still makes sense without
+   route-by-route flips. §3, §7 and §8 are reworked once decided.
+2. ~~Z1, one producer of topic blobs?~~ Done (`e4a0f60`), awaiting the box's
+   merge.
 3. **Roc in `gopher.elf` (T1)?** The pinned nightly becomes part of the
    production kernel's build.
 4. **Refuse a new message that is not UTF-8, with a 400?** After C0.
-5. **`cid` sent to every viewer, as today (and its "sent" bug), or only to
-   the sender?**
+5. ~~`cid` to every viewer, or only the sender?~~ Settled by `e4a0f60`: it
+   still goes to every viewer, and the client shows "sent" only for its own.
 6. **Docs, the reading list and the search routes stay Zig for v1?**
