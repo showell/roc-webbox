@@ -16,6 +16,15 @@ zig build test  -Droc=<path to roc>
 `roc` on the PATH needs no `-Droc`. The Roc used is the nightly
 `2026-10-18-1df370f`.
 
+### Trying the client without a server
+
+`zig build demo` builds a **client test bench**, `demo/`, which is **not the
+server**. It is the same page with the Roc app compiled to WebAssembly,
+answering the page's requests inside the browser tab, with its files in the
+browser's storage. It is a quick way to try the client, and nothing more:
+it runs no webbox code. [demo/README.md](demo/README.md) lists what it does
+not test.
+
 ## The pieces
 
 | | |
@@ -28,6 +37,7 @@ zig build test  -Droc=<path to roc>
 | `src/todo_app.zig` | The webbox site: the page, and `/api/*` sent to Roc. |
 | `src/main.zig` | Linux main: webbox's Linux host. |
 | `web/index.html` | The client. Every API answer is the whole list, and the page draws it. |
+| `demo/` | **Not the server.** A test bench for the client: the Roc app as wasm in the tab (demo/README.md). |
 
 ## The API
 
@@ -46,7 +56,8 @@ site's data root. Only `src/main.zig` names the Linux host, so a bare-metal
 main can serve the same site.
 
 The build picks the Roc target from the Zig target: `x64musl` for Linux, and
-`x64v1elf` for freestanding x86-64.
+`x64v1elf` for freestanding x86-64. (The platform also lists `wasm32`, for
+the client test bench in `demo/` alone.)
 
 The archive asks its host for:
 

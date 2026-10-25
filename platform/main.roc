@@ -24,6 +24,10 @@ platform ""
 			inputs: [app],
 			output: Archive,
 		},
+		wasm32: {
+			inputs: [app],
+			output: Archive,
+		},
 	}
 
 import File

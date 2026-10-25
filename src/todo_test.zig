@@ -6,6 +6,7 @@ const std = @import("std");
 const testing = std.testing;
 const webbox = @import("webbox");
 const roc = @import("roc_abi.zig");
+const files = @import("roc_files.zig");
 
 /// A data root of its own, for one test.
 const Root = struct {
@@ -15,7 +16,8 @@ const Root = struct {
     fn init() !Root {
         var tmp = testing.tmpDir(.{});
         const path = try std.fs.path.join(testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
-        roc.use(testing.allocator, path);
+        roc.use(testing.allocator);
+        files.use(path);
         return .{ .tmp = tmp, .path = path };
     }
 
@@ -33,7 +35,7 @@ const Root = struct {
 
 /// One request: its status and body, which the test frees.
 fn ask(method: []const u8, path: []const u8, body: []const u8) !struct { status: u16, body: []u8 } {
-    const r = roc.handle(testing.io, method, path, body);
+    const r = files.handle(testing.io, method, path, body);
     defer roc.end();
     return .{ .status = r.status, .body = try testing.allocator.dupe(u8, r.body.slice()) };
 }
@@ -106,4 +108,5 @@ test "a file that cannot be read is an error, not an absent file" {
 
 test {
     _ = webbox;
+    _ = files;
 }

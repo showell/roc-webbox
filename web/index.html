@@ -3,16 +3,21 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Todos</title>
+<title>Roc Todo List</title>
 <style>
-  body { font: 16px/1.4 system-ui, sans-serif; max-width: 32rem; margin: 2rem auto; padding: 0 1rem; }
+  /* One narrow column: the form, then the list. */
+  :root { --bg: #fbfbf8; --fg: #1d2421; --muted: #66706b; --line: #d9ddd8; --done: #8d9691; --error: #b3261e; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #161a18; --fg: #e4e8e5; --muted: #a0aaa4; --line: #343b37; --done: #7b847f; --error: #f2948c; color-scheme: dark; } }
+  :root[data-theme="dark"] { --bg: #161a18; --fg: #e4e8e5; --muted: #a0aaa4; --line: #343b37; --done: #7b847f; --error: #f2948c; color-scheme: dark; }
+  body { font: 16px/1.4 system-ui, sans-serif; max-width: 32rem; margin: 2rem auto; padding: 0 1rem; background: var(--bg); color: var(--fg); }
   form { display: flex; gap: .5rem; }
   input[type=text] { flex: 1; padding: .4rem; font: inherit; }
   ul { list-style: none; padding: 0; }
-  li { display: flex; align-items: center; gap: .5rem; padding: .3rem 0; border-bottom: 1px solid #ddd; }
+  li { display: flex; align-items: center; gap: .5rem; padding: .3rem 0; border-bottom: 1px solid var(--line); }
   li span { flex: 1; }
-  li.done span { text-decoration: line-through; color: #888; }
-  #error { color: #b00; }
+  li.done span { text-decoration: line-through; color: var(--done); }
+  li span { min-width: 0; overflow-wrap: anywhere; }
+  #error { color: var(--error); }
 </style>
 </head>
 <body>
