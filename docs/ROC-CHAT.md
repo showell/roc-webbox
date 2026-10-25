@@ -17,8 +17,10 @@ Still open:
 - LC's user support for the TODO app has landed (`20f6505`) as a signed
   visitor id, not accounts; §6.3 says what that leaves for a standalone
   chat.
-- Steve is not bought in to an incremental cutover in production (§10, 1).
-  §3, §7 and §8 still describe one; they are reworked once that is decided.
+- §3, §7 and §8 follow Steve's proposal (2026-10-25): a Roc router over the
+  whole chat from day one, delegating every route to Zig, and then Zig's
+  guts replaced by Roc's, release by release. The route-by-route production
+  switch is gone.
 
 ## 1. Goal
 
@@ -29,8 +31,8 @@ neighbours, about 6,800 lines) to a Roc app on the platform in this repo.
   metal. Production (lynrummy.com) is bare metal: zig-metal-unikernel builds
   `gopher.elf` from angry-gopher's checkout.
 - **The same files.** The Roc chat reads and writes exactly the files the Zig
-  chat does, so there is no migration, and going back is serving the Zig
-  routes again.
+  chat does, so there is no migration, and going back is the previous
+  release.
 - **The client is unchanged.** The same `chat/*.js` sees the same HTTP and
   SSE wire, byte for byte where the client could notice.
 - **Real effects.** Roc calls the host during a request (`File.append!`,
@@ -54,10 +56,18 @@ neighbours, about 6,800 lines) to a Roc app on the platform in this repo.
     a frame. Since `e4a0f60` a topic stream's blob already is its frame, the
     same for every viewer, so its render only copies it through
     (chat_sse.zig `verbatim`).
-- **Mounted.** The Roc chat runs inside angry-gopher's process, serving some
-  of its routes, the way angry-gopher already mounts cobble-webbox's
-  `codex_chat` (router.zig:30, :170).
-- **Switch.** A per-route choice, read once at start, of Roc or Zig.
+- **Mounted.** The Roc chat runs inside angry-gopher's process, the way
+  angry-gopher already mounts cobble-webbox's `codex_chat` (router.zig:30,
+  :170).
+- **Router.** The Roc chat's entry point, for every `/chat` and `/channel`
+  request after the static assets. It parses the path, runs the prelude
+  (the gate, presence, the method checks) and answers.
+- **Delegation.** An answer of `Zig(route)` (§5.2): the host runs
+  angry-gopher's Zig handler for that route once the Roc call has returned.
+- **Twin test.** A Zig function and the Roc function replacing it, run on the
+  same inputs, their answers and the files they leave compared.
+- **Fallback.** A build option that dispatches with Zig's own router instead,
+  for an emergency (§3).
 - **Owners.**
   - **CC** is the cloud session: it writes code on `claude/*` branches.
   - **LC** is the local session on the box: the bare-metal work.
@@ -67,30 +77,61 @@ neighbours, about 6,800 lines) to a Roc app on the platform in this repo.
 
 ## 3. Scope
 
-**The cut: mounted first, route by route.** The Roc chat runs inside
-angry-gopher, which keeps every route the Roc chat does not serve yet. Each
-route moves to Roc behind the switch, and moves back the same way.
+**The cut: the Roc router first, for the whole chat.** The Roc chat starts as
+a router, mounted in angry-gopher. angry-gopher's top router hands it every
+`/chat` and `/channel` path once its static-asset table has passed on it.
+On day one it:
+- **parses the path** into a typed route (`Route.roc`, pure) by Zig's rules:
+  the pair key, the channel name, `validTopicID`, the reserved `new`, the
+  tails. For the conversation and topic routes it is the only parser: their
+  Zig handlers take the parsed route and never read the path again. The
+  families delegated whole (docs, search, recent, images, code, links) are
+  handed the rest of their path, which their Zig parses as it does today;
+- **runs the prelude** Zig's `handle` and `handleChannel` run today: the chat
+  gate (a 303 to `/login/full?next=`), presence (`Presence.mark!`, except on
+  streams), the method checks;
+- **answers with a delegation**, `Zig(route)`: the host runs the Zig handler
+  for that route after the Roc call has returned, with the request's `now`
+  and user. The lookups that need the disk stay in the handler on day one:
+  the participant check, the other account, the channel's members, the first
+  topic, whether the topic exists.
 
-That makes Zig a **permanent second writer of some chat files**, not a
-temporary one. These callers stay in Zig and keep calling Zig's
-`appendMessage`:
+So production switches once, when the router ships, and nothing the chat
+does changes that day: every route is still served by Zig's own code.
+
+**Then Roc takes over the guts, one release at a time.** Each step replaces
+one Zig piece with a Roc one, and ships as an ordinary release; going back is
+the previous release. There is no per-route switch in production, and no
+route is ever served two ways. In order (§8):
+1. **Orchestration.** `send` runs §6.2's steps in Roc, calling Zig's pieces
+   as hosted functions (milestone 2). Then the conversation lookup.
+2. **The pure guts:** Codec, Count, Paths, ZigText, Time, the frame builder.
+3. **The routes, a family at a time:** react, reactions, pin and unpin; the
+   page and its sidebar data, the empty and 404 pages, `/chat/conversations`,
+   `/chat/msg/<id>`, default/resume and new topic; the cross-page fan-out
+   and feeds; uploads and download; the recent, images, code and links
+   pages.
+4. **Last, the store's writers** (append, `.count`, reactions, bookmarks,
+   pins), because Zig outside the chat calls them (below).
+
+**Each job has one implementation at a time.** A piece moving to Roc lands
+with a twin test against the Zig function it replaces (C2); the Zig function
+stays as the test's oracle while that is useful, and its Zig callers switch
+in the same release.
+
+**Zig callers outside the chat.** These stay Zig and use the chat's store:
 - login's welcome DM (login.zig:344-362);
 - docs' post to chat (docs.zig:270-299);
 - admin retire.
 
-R2 deals with the consequences.
+While the store is Zig they call it as now. When it moves (C8), they call
+Roc's, through a second entry point the platform provides: a Roc call the
+host opens outside a request, bracketed like any other. §10 asks whether
+that, or keeping those writers in Zig for good, is the better end.
 
-**Roc takes, in order (§8):**
-1. Milestone 1: `raw`, `stream` and `send` for topics.
-2. Then react, reactions, pin and unpin.
-3. Then the page and its sidebar data, the empty and 404 pages,
-   `/chat/conversations`, `/chat/msg/<id>`, default/resume, and new topic.
-4. Then the cross-page fan-out and feeds (notify, sidebar, recent, images,
-   code), uploads and download, and the recent, images, code and links pages.
-
-**Supplied to Roc by angry-gopher's own Zig, while mounted.** These are
-hosted functions over the existing modules. Nothing is moved, and there is
-one copy of each:
+**Supplied to Roc by angry-gopher's own Zig.** These are hosted functions
+over the existing modules. Nothing is moved, and there is one copy of each.
+Milestone 1 needs only Users and Presence:
 
 | Function | angry-gopher module |
 |---|---|
@@ -102,11 +143,21 @@ one copy of each:
 
 **Stays Zig, not ported:**
 - login, logout, settings and API keys;
-- docs and the reading list: `/chat/docs/*`, plus `…/<sid>/saved`, which
-  stays a Zig route under the mount;
+- docs and the reading list: `/chat/docs/*`, plus `…/<sid>/saved`. The
+  router parses them and delegates, for good in v1;
 - admin tools;
 - the startup `.count` backfill;
-- the search routes, for v1.
+- the search routes, for v1 (parsed and delegated the same way).
+
+**Never Roc: the host's hooks before the turn.** angry-gopher's `bodyLimit`,
+uploader and `family` classify paths before the turn (R1), so they stay Zig
+path classifiers beside the Roc parser. A3 holds them to the route each path
+parses to.
+
+**The fallback.** A build option keeps Zig's own dispatch (chat.zig `handle`
+and `handleChannel`) for an emergency: a Roc toolchain bug that would
+otherwise block a chat release (R0). A3's corpus and A4's tests run on both
+builds. It is deleted once the router has been steady for a while (§10).
 
 **Later, for a standalone Roc chat (I3):**
 - markdown moved into webbox;
@@ -138,6 +189,9 @@ or working around it.
 - The layouts come from `roc glue`, never by hand, and every layout is
   asserted at compile time (P8).
 - The build checks that every hosted `extern` has a host export.
+- **A hard dependency from day one.** With the router, every chat release
+  builds Roc, so a toolchain bug blocks chat releases until it is fixed or
+  worked around. The fallback build (§3) is the way out meanwhile.
 - **More than one Roc app in a binary** (the chat beside Dog Park's Roc, or
   the TODO list) works through LC's `src/roc_hooks.zig`. The root exports
   the four runtime functions once, and hands each call to the app whose
@@ -177,14 +231,21 @@ an allocation belongs to by global state.
     any bracketed call. `roc_hooks` lets one app's call nest inside
     another's on purpose (`enter` keeps the previous app), so the busy word
     is per app, inside its own bracket.
+- **A delegated handler runs after the call.** The host runs a `Zig(route)`
+  handler once `handle!` has returned and its call has ended, so the
+  handler's writes, and on metal the network pumps inside them, nest
+  nothing in Roc.
 - **Subscribe before writing.** The host subscribes as soon as `handle!`
   returns, before it writes the preamble. On metal a write pumps the network.
 
 ### R2. Two writers of one set of files
 
-Roc and Zig both append transcripts, write `.count`, write bookmarks,
-append to `users/<member>/images.md`/`users/<member>/code.md`, and publish on topic keys, in one process.
-The turn makes that safe from interleaving. It does not make the two agree.
+While the guts move, Roc's pieces and Zig's write the same files in one
+process: a Roc send over a Zig fan-out, a Zig welcome DM into a topic whose
+page Roc builds, and, until C8, Zig's store under Roc's orchestration. They
+append transcripts, write `.count` and bookmarks, append to
+`users/<member>/images.md`/`users/<member>/code.md`, and publish on topic keys. The turn makes that safe
+from interleaving. It does not make the two agree.
 
 **Decisions:**
 
@@ -197,9 +258,10 @@ The turn makes that safe from interleaving. It does not make the two agree.
    - A Roc publisher must build **byte-identical** frames for the same
      message: field order, JSON escaping (item 4 below), `cid` last and only
      when non-empty, HTML from the one markdown renderer. C2 compares them.
-2. **One check that the two agree.** The differential harness (C2) runs Zig's
-   own writers too (a docs post, a welcome DM) against Roc-written files.
-   Every Zig-side change to these files after the port is a harness case.
+2. **One check that the two agree.** Every piece that moves has its twin
+   test (C2), and the twin tests cover Zig's remaining writers too: a docs
+   post and a welcome DM into Roc-written files, while those callers are
+   Zig. Every Zig-side change to these files after the port is a case.
 3. **The format facts that bite** (the full list is in the format note):
    - the transcript separator `\n\n-------------\n` (16 bytes) and its
      body-line escape;
@@ -363,7 +425,7 @@ the same for Roc: it reads `now` after taking the turn, just before
   before one that went first.
 - One reading per request means everything one request writes carries one
   time, and Roc needs no clock effect: the time is data, so the pure modules
-  can take it and C2 hands both chats the same fixed `now` (Zig's
+  can take it and a twin test hands both twins the same fixed `now` (Zig's
   `Now.at`).
 
 ### 5.2 Response
@@ -374,7 +436,17 @@ Response : [
     Stream({ key : Str, preamble : List(U8), live : [Forward, Verbatim] }),
     File({ path : Str, content_type : Str, headers : List({ name : Str, value : Str }) }),
     TarGz({ name : Str, entries : List({ path : Str, as : Str }) }),
+    Zig(ZigRoute),
 ]
+
+ZigRoute : [
+    Default, Conversations, Msg(Str), Notifications, SidebarStream,
+    Docs(Str), Recent(Str), Images(Str), Code(Str), Links(Str), Search(Str),
+    Landing(Conv), NewTopic(Conv),
+    Topic({ conv : Conv, sid : Str, tail : Tail }),
+]
+Conv : [Dm(Str), Channel(Str)]
+Tail : [Page, Stream, Send, Upload, Uploads(Str), Pin, Unpin, Raw, Download, Saved, Reactions, React]
 ```
 
 **Tag unions cross the ABI fine** (probe 2). The layout is the payload
@@ -389,6 +461,11 @@ Two layout facts:
   refcount).
 
 What the host does with each:
+- **`Zig`**: copies the route's strings out of the call's arena, ends the
+  call, and runs the Zig handler for it with the request's `now` and user
+  (R1). This is milestone 1's only answer besides the prelude's `Bytes`.
+  A route leaves `Zig` when Roc starts doing its work and answers with one
+  of the others.
 - **`Stream`**:
   - subscribes to `key` right after `handle!` returns, before writing
     anything;
@@ -469,7 +546,8 @@ chat_compose.js `sentHere`).
 
 ```
 chat/                      the Roc app
-  main.roc                 handle!: dispatch (chat.zig handle/topicRoute)
+  main.roc                 handle!: the prelude, then the route's answer (chat.zig handle)
+  Route.roc                the path parsed into a route, by Zig's rules     (pure)
   Codec.roc                transcript blocks: encode, decode, escape (chat_codec.zig) (pure)
   Count.roc                .count: parse, format, both trust rules (chat_count.zig) (pure)
   Paths.roc                keys, validators, path builders, firstOf (chat_paths.zig) (pure)
@@ -487,8 +565,8 @@ exits 1 on failure, using fixtures copied from the Zig tests.
 
 ### 6.2 One send, in Zig's order
 
-1. **Gate.** The mount's router has already applied the chat gate (a member
-   or the agent) and filled `user`.
+1. **Gate.** The router's prelude has already applied the chat gate (a
+   member or the agent) and marked presence; the host filled `user`.
 2. **Form.** Decode the form. Then:
    - no `markdown` field: 400;
    - whitespace only: 400;
@@ -516,13 +594,14 @@ exits 1 on failure, using fixtures copied from the Zig tests.
    - `File.write!` the `.count`;
    - `Search.note_append!`;
    - `Bus.publish!`;
-   - fan out (Zig's `fanoutCrossPage` while mounted; Roc's own from C5).
+   - fan out (Zig's `fanoutCrossPage` until C5; Roc's own after).
    - Each of these is best-effort: a failure bumps a counter, never fails the
      send.
 10. **Answer.** 204 for `X-Chat-Async`, else 303 to the topic.
 
-C2 injects failures at every step (as Zig's FailingAllocator tests do) and
-checks that stored implies echoed, and that an error implies nothing stored.
+O1's tests inject failures at every step (as Zig's FailingAllocator tests do)
+and check that stored implies echoed, and that an error implies nothing
+stored.
 
 ### 6.3 Identity (depends on LC's user support)
 
@@ -555,32 +634,46 @@ does:**
   same verification before `handle!`, answering for an account instead of
   a visitor.
 
-## 7. Milestone 1: one topic, live, on metal
+## 7. Milestones
 
-Mounted in angry-gopher behind the per-route switch.
-- **Roc serves only** `GET …/<sid>/raw`, `GET …/<sid>/stream` and
-  `POST …/<sid>/send`.
-- **Zig serves everything else**, including the page, whose JS opens the
-  Roc stream.
-- **Roc owns:** Codec, Count, ZigText, Time, the bookmark write, append and
-  `.count`, the message frame, and the stream with backlog and resume.
-- **angry-gopher supplies:** Markdown, Users, Presence, Search, Counter, and
-  its fan-out.
+### Milestone 1: the Roc router serves the whole chat, on metal
+
+Every `/chat` and `/channel` request enters Roc. Roc parses it, runs the
+prelude, and delegates every route to Zig (§3). Nothing else is Roc's yet.
+
+It proves, on every chat request and before any chat logic moves: the
+toolchain in `gopher.elf` (R0), the Request and Response layouts with the
+delegation, the busy word (R1), the arena's peak (R5), and a crash as a 500
+(R3).
 
 **Exit criteria:**
-1. C2 clean on these routes, including a docs post and a welcome DM landing
-   while a Roc stream is open.
-2. A planted Roc crash on `gopher.elf` under QEMU answers 500, is logged with
+1. **The router agrees with Zig's dispatch** on A3's corpus: the same route,
+   or the same refusal, for every path, method and gate state.
+2. **angry-gopher's route tests pass through the router** (A4): the existing
+   tests are the harness. The fallback build passes them too.
+3. The box's judges and metal-vmm's checks pass on `gopher.elf` with the
+   router.
+4. A planted Roc crash on `gopher.elf` under QEMU answers 500, is logged with
    its route, and does not loop.
-3. Peak arena bytes on the largest production transcript, on metal.
-4. `gopher.elf` build time and size with Roc.
-5. Steve using it on one DM.
+5. Peak arena bytes and the router's cost per request on metal; `gopher.elf`
+   build time and size with Roc.
+6. Steve using it.
 
-This proves R0-R5 and the mount before the other routes are built.
+### Milestone 2: one send, orchestrated in Roc
+
+`send` leaves `Zig`: Roc runs §6.2's steps, calling Zig's pieces as hosted
+functions (membership, the count, the frame, the append, the publish, the
+fan-out).
+
+**Exit criteria:** O1's failure injection at every step (stored implies
+echoed; an error implies nothing stored); the twin test of a send, Roc's
+order against Zig's `appendMessage`, on the same tree and `now`; the judges
+on `gopher.elf`.
 
 ## 8. Work items
 
-Each item lands with tests, and the chat items with C2 cases.
+Each item lands with tests; a piece that replaces Zig lands with its twin
+test (C2).
 - **Sizes:** S is under a day, M a few days, L about a week, XL two or more
   weeks.
 - **Repo:** rw is roc-webbox, ag is angry-gopher, wb is zig-webbox, zmu is
@@ -600,14 +693,14 @@ Each item lands with tests, and the chat items with C2 cases.
 
 | # | item | repo | owner | size |
 |---|---|---|---|---|
-| P2 | `Request` (§5.1); the zero-copy body on Linux; measure the copy on metal | rw | CC | M |
-| P3 | `Response` (§5.2) `Bytes` | rw | CC | S |
-| P4 | `File` effects: `write` vs `replace` per site, per-call limits, no double copy, absent ≠ failed | rw | CC | M |
-| P5 | `now` in the request (read in the turn), `Random`, `Counter`, `Asset` | rw | CC | S |
-| P6 | `File` and `TarGz` responses (moved from chat_upload/chat_download) | rw | CC | M |
+| P2 | `Request` (§5.1) with `now` and `user`; the zero-copy body on Linux; measure the copy on metal | rw | CC | M |
+| P3 | `Response` (§5.2): `Bytes`, and the `Zig` delegation | rw | CC | S |
+| P5 | `Random`, `Counter`, `Asset` | rw | CC | S |
 | P7 | The busy word (CAS) per app inside its `roc_hooks` bracket, checked in `roc_alloc` and in every hosted function; the arena with a retention limit; a capped region on metal | rw | CC | M |
 | P9 | A crash is a 500: `roc_crashed` longjmps to the call's entry; proved on Linux and on metal | rw | CC (+ LC on metal) | M |
-| U1 | The mounted hosted functions over angry-gopher's modules (Markdown, Users, Presence, Search, Counter) | ag | CC → box | M |
+| U1 | Hosted functions over angry-gopher's modules: Users and Presence for milestone 1; Markdown, Search and Counter as the guts need them | ag | CC → box | M |
+| P4 | `File` effects: `write` vs `replace` per site, per-call limits, no double copy, absent ≠ failed. Needed from the first gut that touches the disk itself (O2, C8) | rw | CC | M |
+| P6 | `File` and `TarGz` responses (moved from chat_upload/chat_download). Needed for C6 | rw | CC | M |
 
 ### Done in Zig
 
@@ -628,55 +721,78 @@ Not changed, on purpose: the disk keeps `<conv>/sessions/<sid>.md`,
 the transcript header stays `date:`; and `.count` still has two trust rules
 (R2, 3), which Count.roc copies as they are.
 
-### Streams
+### The router
 
 | # | item | repo | owner | size |
 |---|---|---|---|---|
-| S1 | `Bus.publish!`; the `Stream` response; the `Forward` and `Verbatim` renders | rw | CC | S |
+| A1 | Zig side: the chat handlers take a parsed route, the uid and `now`, and no longer read the path; the prelude leaves `handle`/`handleChannel`; the host's `Zig(route)` dispatch; the fallback build option | ag | CC → box | M |
+| A2 | `Route.roc`: every chat path parsed by Zig's rules; the prelude; `Zig(route)` | rw | CC | M |
+| A3 | Agreement: Roc's parse against Zig's over a corpus (router.zig's path tables, every path in the route tests, and generated ones: case, `new`, trailing and doubled slashes, `.js`, over-long ids); the pre-turn hooks (`bodyLimit`, `family`) against the route each path parses to; on both builds | ag, rw | CC | M |
+| A4 | The route tests (router_harness.zig and the router_*_test files) driven through the router, on both builds | ag | CC → box | M |
+| M1 | **Milestone 1** (§7) | rw, ag | CC; box releases | L |
+
+### Orchestration in Roc
+
+| # | item | repo | owner | size |
+|---|---|---|---|---|
+| U2 | The send's pieces as hosted functions: `appendMessage` split into its steps, so §6.2's order is Roc's | ag | CC → box | M |
+| C2 | The twin-test kit: a Zig function and its Roc twin run on the same inputs (a fixed `now`, a copy of one tree, seeded randomness), their answers and the files they leave compared; corpora of poison blocks, mixed-case sids and non-UTF-8 names; failure injection | ag, rw | CC | L |
+| O1 | `send` in Roc (§6.2) over U2, with failure injection at every step | rw | CC | M |
+| M2 | **Milestone 2** (§7) | rw, ag | CC; box releases | S |
+| O2 | The conversation lookup in Roc: the participant check, the other account, the channel's members, the first topic, whether the topic exists, the titles | rw | CC | M |
+
+### Streams
+
+S3 measures the Zig chat as it is, and can run any time.
+
+| # | item | repo | owner | size |
+|---|---|---|---|---|
+| S1 | `Bus.publish!`; the `Stream` response; the `Forward` and `Verbatim` renders. Needed when Roc builds frames (C1) and serves streams itself | rw | CC | S |
 | S2 | Tests: subscribe before any write; exactly once (backlog xor live) under sends; `Last-Event-ID` and `?since=` resume; on Linux and metal | rw | CC (+ LC) | M |
 | S3 | Mailbox worst case on metal (64 KiB of markdown that escapes badly × 16 slots × subscribers), measured on the Zig chat first, since it publishes the same frames now; the frame cap | ag, rw | CC (+ LC) | S |
 
-### The chat in Roc
+### The guts in Roc
+
+Each is a release, with its twin test. A route that moves answers with
+`Bytes`, `Stream` or `File` instead of `Zig`.
 
 | # | item | repo | owner | size |
 |---|---|---|---|---|
-| C1 | Codec, Count (both trust rules), Paths, ZigText, Time, with the Zig fixtures; benchmark on the largest transcript with peak arena bytes | rw | CC | XL |
-| C2a | Zig side of the harness: a fixed `Now` per request (the seam exists since `62155c5`), seeded randomness, and a persistent Hub that drains kept streams | ag | CC → box | M |
-| C2b | Skeleton mount reached by test requests, with the per-route switch | ag | CC → box | M |
-| C2c | The diff: both chats as separate processes on copies of one tree; trees sorted and compared with mtimes dropped; uploads renamed by order of creation; tars unpacked; leftover `~*.tmp` files are findings; fault injection; a poison-block corpus; mixed-case sids; GETs included (page views write bookmarks) | rw | CC | XL |
-| M1 | **Milestone 1** (§7): raw, stream, send | rw, ag | CC; box flips | L |
+| C1 | Codec, Count (both trust rules), Paths, ZigText, Time, the frame builder, with the Zig fixtures; benchmark on the largest transcript with peak arena bytes | rw | CC | XL |
 | C4 | React, reactions, pin, unpin | rw | CC | M |
-| C3 | Page, chrome (matches Zig's settings page byte for byte; a harness case), sidebar JSON, 404 and empty pages, conversations, msg (302), default/resume, new topic (with the `general<N>` announcement) | rw | CC | XL |
-| C5 | Fan-out ported (notify, sidebar, recent, `users/<member>/images.md`, `users/<member>/code.md` with the fence scanner and its quirk), replacing angry-gopher's | rw | CC | L |
+| C3 | Page, chrome (matches Zig's settings page byte for byte; a twin test), sidebar JSON, 404 and empty pages, conversations, msg (302), default/resume, new topic (with the `general<N>` announcement) | rw | CC | XL |
+| C5 | Fan-out (notify, sidebar, recent, `users/<member>/images.md`, `users/<member>/code.md` with the fence scanner and its quirk), replacing angry-gopher's | rw | CC | L |
 | C6 | Uploads (multipart, sniff, quota as `write`, lossy filename) and download | rw | CC | L |
 | C7 | Recent (including doc rows from docs_store), images, code and links pages | rw | CC | L |
+| C8 | The store's writers: append, `.count`, reactions, bookmarks, pins; the Zig callers outside the chat switch to Roc's through the second entry point, in the same release (§3) | rw, ag | CC → box | L |
 
-### Standalone, after the mounted chat serves everything
+### Standalone, after Roc serves everything
 
 | # | item | repo | owner | size |
 |---|---|---|---|---|
 | I3 | Standalone main with LC's user support (§6.3) | rw | LC + CC | L |
-| M2 | Markdown moved into webbox; search held by the platform; presence and the rate limit in a Roc model (feasible; needs ownership beyond the per-call arena) | wb, rw | CC → box | XL |
+| I4 | Markdown moved into webbox; search held by the platform; presence and the rate limit in a Roc model (feasible; needs ownership beyond the per-call arena) | wb, rw | CC → box | XL |
 
 **Order:**
 1. P1, P8, C0, T1.
-2. P2-P5, P7, P9 and U1, each booting on metal, with C1's Codec, Count and
-   ZigText started in parallel.
-3. S1-S3 (Z1-Z5 are done).
-4. C2a-c.
-5. M1, flipped in production.
-6. C4, C3, C5, C6, C7, each flipped route by route.
-7. I3, M2.
+2. P2, P3, P7, P9, U1 and A1-A4, each booting on metal. C1's pure modules
+   start in parallel; they reach production only when a gut uses them.
+3. M1, released.
+4. U2, C2, O1; M2, released. Then O2.
+5. C1, C4, C3, C5, C6, C7, each a release.
+6. C8, with P4.
+7. I3, I4.
 
-**Flips.** The switch is read at start, so a flip is a restart, not a
-release. Changing the Roc code is a release, through the box's gates.
-
-**Rollback.** Flip the route back. These are lost, as on any restart:
+**Releases and rollback.** There is no production switch. Each step is a
+release through the box's gates, and going back is the previous release.
+Every release reads and writes the same files in the same formats, which
+each twin test checks, so going back loses only what a restart loses:
 - presence (came-online fires again);
 - the rate limit;
 - bus subscribers, whose clients reconnect and resume by index.
 
-Nothing Roc writes is unknown to Zig, which C2 proves.
+**The fallback build** is not a rollback: it is for a Roc build that is
+itself broken, so that a chat fix can still ship.
 
 ## 9. What the reviews changed
 
@@ -710,6 +826,23 @@ streams read.** That became R2's first decision and item Z1.
 
 ### Since the reviews
 
+- **The Roc router (Steve, 2026-10-25).** Steve was not bought in to a
+  route-by-route cutover in production, and proposed instead a Roc platform
+  for the chat whose Roc routes all delegate to Zig from day one, with Roc
+  then replacing Zig's guts at leisure. §3, §7 and §8 now follow it. What it
+  changed:
+  - one production switch, the day the router ships, instead of one per
+    route, and no route ever served two ways;
+  - the riskiest parts (R0, R1, R3, R5) proved on every chat request at
+    milestone 1, before any chat logic moves;
+  - the two-process differential harness (old C2a-c) replaced by twin tests
+    of each piece, angry-gopher's own route tests run through the router,
+    and the judges;
+  - the per-route switch replaced by a fallback build, for a broken Roc
+    build only;
+  - the cost: Roc is a hard dependency of every chat release from day one
+    (R0).
+
 - **The bus (angry-gopher `e4a0f60`).** Steve asked what made the bus a
   problem for Roc and not for Zig. The answer was the per-viewer render
   callback, which Zig could run concurrently and nested because it is handed
@@ -727,11 +860,8 @@ streams read.** That became R2's first decision and item Z1.
 
 ## 10. Questions for Steve
 
-1. **Mounted first, route by route, starting with milestone 1?** Steve: not
-   bought in to an incremental cutover, at least in production. Open: what
-   replaces it (for example, the Roc chat proved against a copy of the data
-   and switched over whole), and whether mounting still makes sense without
-   route-by-route flips. §3, §7 and §8 are reworked once decided.
+1. ~~Mounted first, route by route?~~ Replaced by the Roc router (§3),
+   Steve's proposal.
 2. ~~Z1, one producer of topic blobs?~~ Done (`e4a0f60`), merged by the box.
 3. **Roc in `gopher.elf` (T1)?** The pinned nightly becomes part of the
    production kernel's build.
@@ -741,3 +871,10 @@ streams read.** That became R2's first decision and item Z1.
 5. ~~`cid` to every viewer, or only the sender?~~ Settled by `e4a0f60`: it
    still goes to every viewer, and the client shows "sent" only for its own.
 6. **Docs, the reading list and the search routes stay Zig for v1?**
+7. **The fallback build: keep it, and until when?** It costs every A3 and A4
+   run twice. Until the router has gone some months without a Roc build
+   problem is my suggestion.
+8. **When the store moves (C8), do login's welcome DM, docs' post and admin
+   retire call Roc's store through a second entry point, or keep a Zig
+   store of their own for good?** The second entry point keeps one writer;
+   keeping Zig's means the twin tests run for as long as both exist.
