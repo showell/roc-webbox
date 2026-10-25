@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Todos</title>
+<style>
+  body { font: 16px/1.4 system-ui, sans-serif; max-width: 32rem; margin: 2rem auto; padding: 0 1rem; }
+  form { display: flex; gap: .5rem; }
+  input[type=text] { flex: 1; padding: .4rem; font: inherit; }
+  ul { list-style: none; padding: 0; }
+  li { display: flex; align-items: center; gap: .5rem; padding: .3rem 0; border-bottom: 1px solid #ddd; }
+  li span { flex: 1; }
+  li.done span { text-decoration: line-through; color: #888; }
+  #error { color: #b00; }
+</style>
+</head>
+<body>
+<h1>Todos</h1>
+<form id="add">
+  <input type="text" id="text" placeholder="Something to do" autofocus>
+  <button>Add</button>
+</form>
+<p id="error"></p>
+<ul id="list"></ul>
+<script>
+// The whole client: every answer from /api/todos is the list, drawn as given.
+const list = document.getElementById("list");
+const error = document.getElementById("error");
+
+async function call(method, path, body) {
+  const r = await fetch(path, { method, body });
+  const text = await r.text();
+  if (!r.ok) { error.textContent = text; return; }
+  error.textContent = "";
+  draw(JSON.parse(text));
+}
+
+function draw(items) {
+  list.replaceChildren(...items.map(t => {
+    const li = document.createElement("li");
+    if (t.done) li.className = "done";
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.checked = t.done;
+    box.onchange = () => call("POST", `/api/todos/${t.id}/toggle`);
+    const span = document.createElement("span");
+    span.textContent = t.text;
+    const del = document.createElement("button");
+    del.textContent = "×";
+    del.title = "Remove";
+    del.onclick = () => call("DELETE", `/api/todos/${t.id}`);
+    li.append(box, span, del);
+    return li;
+  }));
+}
+
+document.getElementById("add").onsubmit = e => {
+  e.preventDefault();
+  const input = document.getElementById("text");
+  if (input.value.trim() === "") return;
+  call("POST", "/api/todos", input.value);
+  input.value = "";
+};
+
+call("GET", "/api/todos");
+</script>
+</body>
+</html>
