@@ -691,13 +691,18 @@ delegation, the busy word (R1), the arena's peak (R5), and a crash as a 500
    presence is read from the route).
 2. Met: the route tests run through the router; a broken `/c/` in the Roc
    fails seven of them.
-3. Open: the box's judges on KVM. Under QEMU (TCG) here, `/chat`,
-   `/channel/ops` and a script answer from the router on `gopher.elf` with
-   zig-metal-unikernel's diff (metal-vmm QUEUE, T1/A).
-4. Open: a crash is still a panic. P9 (longjmp to the call's entry) and P7
-   (the busy word) are not built; the router calls no Roc outside a call
-   (the decision is copied out and the call ended before Zig serves it),
-   but nothing yet checks it.
+3. Met under QEMU (TCG), open on KVM: probe/judge_gopher.py on the router's
+   `gopher.elf` against the Linux server of the same commit passed every
+   case but two, neither the router's: `/version` (built `-Dstamp=off`, so
+   it names no commit) and an upload bigger than the kernel's heap (a
+   broken pipe where Linux answers 413; the pre-Roc kernel fails it the
+   same way here, so it is the box's to see on KVM). The member story's 53
+   requests and both chat stream cases passed through the router.
+4. Met (roc-webbox `3fe6000`): a Roc crash jumps back to the call's entry
+   (P9) and is a 500. On `gopher.elf` under QEMU, with the planted crash
+   app in the router's place: `GET /chat/crash -> RocCrashed, 500` in the
+   log, and the machine went on serving. The busy word (P7) refuses a call
+   inside or beside another and stops Roc running outside one.
 5. Partly: build size and time measured (41,529,840 bytes; 84 s). The
    router's Roc memory is the request's own allocator now, so R5's "the
    arena keeps its peak" is gone for it; its cost per request on metal is
@@ -740,8 +745,8 @@ test (C2).
 | P2 | `Request` (§5.1) with `now` and `user`; the zero-copy body on Linux; measure the copy on metal | rw | CC | M |
 | P3 | `Response` (§5.2): `Bytes`, and the `Zig` delegation | rw | CC | S |
 | P5 | `Random`, `Counter`, `Asset` | rw | CC | S |
-| P7 | The busy word (CAS) per app inside its `roc_hooks` bracket, checked in `roc_alloc` and in every hosted function; the arena with a retention limit; a capped region on metal | rw | CC | M |
-| P9 | A crash is a 500: `roc_crashed` longjmps to the call's entry; proved on Linux and on metal | rw | CC (+ LC on metal) | M |
+| P7 | The busy word (CAS) per app inside its `roc_hooks` bracket, checked in `roc_alloc` and in every hosted function (**done**, roc-webbox `3fe6000`, one word for the binary); the arena with a retention limit; a capped region on metal (the router's arena is the request's already) | rw | CC | M |
+| P9 | **Done** for the router, roc-webbox `3fe6000`: `roc_crashed` longjmps to the call's entry; a test on Linux, a planted crash on gopher.elf under QEMU (TCG); on KVM, the box's | rw | CC (+ LC on metal) | M |
 | U1 | Hosted functions over angry-gopher's modules: Users and Presence for milestone 1; Markdown, Search and Counter as the guts need them | ag | CC → box | M |
 | P4 | `File` effects: `write` vs `replace` per site, per-call limits, no double copy, absent ≠ failed. Needed from the first gut that touches the disk itself (O2, C8) | rw | CC | M |
 | P6 | `File` and `TarGz` responses (moved from chat_upload/chat_download). Needed for C6 | rw | CC | M |
