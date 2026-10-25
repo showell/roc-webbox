@@ -175,7 +175,7 @@ an allocation belongs to by global state.
 ### R2. Two writers of one set of files
 
 Roc and Zig both append transcripts, write `.count`, write bookmarks,
-append to `images.md`/`code.md`, and publish on topic keys, in one process.
+append to `users/<member>/images.md`/`users/<member>/code.md`, and publish on topic keys, in one process.
 The turn makes that safe from interleaving. It does not make the two agree.
 
 **Decisions:**
@@ -195,13 +195,13 @@ The turn makes that safe from interleaving. It does not make the two agree.
 3. **The format facts that bite** (the full list is in the format note):
    - the transcript separator `\n\n-------------\n` (16 bytes) and its
      body-line escape;
-   - the `images.md`/`code.md` separator (17 bytes, a different one);
+   - the `users/<member>/images.md`/`users/<member>/code.md` separator (17 bytes, a different one);
    - `.count`'s two lines and **two** trust rules:
      - `messageCount` trusts it only when the recorded size matches;
      - `lastMessage` trusts the offset when the last block's number is at
        least the count, and uses line 2's uid only on an exact match;
    - message numbers come from the **block count**, refused blocks included;
-   - `code.md`'s lossy fence round-trip;
+   - `users/<member>/code.md`'s lossy fence round-trip;
    - Zig `write` (truncate) vs `replace` (temporary file then rename), site
      by site (P4).
 4. **What `std.json.fmt` writes.**
@@ -214,7 +214,7 @@ The turn makes that safe from interleaving. It does not make the two agree.
    - **Roc's `U64.from_str` is a number-literal parser, not parseInt.** It
      accepts `0x10`, `0b11`, `0o17` and `1e3`, and refuses `1__0`.
    - So **no Roc code parses an id, count, size or offset with `from_str`**:
-     ZigText has a byte-level parseInt (probe: `p7/chat/ZigText.roc`).
+     ZigText has a byte-level parseInt (probe: `docs/roc-chat-probes/p7/chat/ZigText.roc`).
    - Today's TODO app has this bug (`/api/todos/0x1/toggle` works); P1 fixes
      it.
 
@@ -231,7 +231,7 @@ crash loop, not one 500.
 **Decision: a crash is a 500.**
 - `roc_crashed` longjmps out to the call's entry, the per-call arena is
   dropped, and the host answers 500 and logs the route.
-- The probe proved this on x86-64 Linux (`p4/hostjmp.zig`, using Roc's own
+- The probe proved this on x86-64 Linux (`docs/roc-chat-probes/p4/hostjmp.zig`, using Roc's own
   `sljmp`). It is architecture code, not OS code, and P9 proves it on metal.
 - The per-call arena is what makes it clean: Roc owns nothing that outlives
   the call. Effects already performed stay performed, as when a Zig handler
@@ -277,7 +277,7 @@ Roc's `Str` is UTF-8 by type. Chat's bytes are not guaranteed to be:
 - **`Str.from_utf8_lossy`** exists, and turns a *run* of invalid bytes into
   one U+FFFD. That is display only; the harness expects it.
 - **The census (C0) counts** invalid UTF-8 in transcripts and in `auth/*/name`
-  files, and number arrays already in `reactions.jsonl`/`images.md`.
+  files, and number arrays already in `reactions.jsonl`/`users/<member>/images.md`.
 
 ### R5. Memory
 
@@ -591,7 +591,7 @@ Each item lands with tests, and the chat items with C2 cases.
 | M1 | **Milestone 1** (§7): raw, stream, send | rw, ag | CC; box flips | L |
 | C4 | React, reactions, pin, unpin | rw | CC | M |
 | C3 | Page, chrome (matches Zig's settings page byte for byte; a harness case), sidebar JSON, 404 and empty pages, conversations, msg (302), default/resume, new topic (with the `general<N>` announcement) | rw | CC | XL |
-| C5 | Fan-out ported (notify, sidebar, recent, `images.md`, `code.md` with the fence scanner and its quirk), replacing angry-gopher's | rw | CC | L |
+| C5 | Fan-out ported (notify, sidebar, recent, `users/<member>/images.md`, `users/<member>/code.md` with the fence scanner and its quirk), replacing angry-gopher's | rw | CC | L |
 | C6 | Uploads (multipart, sniff, quota as `write`, lossy filename) and download | rw | CC | L |
 | C7 | Recent (including doc rows from docs_store), images, code and links pages | rw | CC | L |
 

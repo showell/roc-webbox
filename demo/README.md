@@ -10,7 +10,7 @@
 | file | what |
 |---|---|
 | `index.html` | `web/index.html`, unchanged except for one `<script src="host.js">` before its own script. |
-| `artifact.html` | The same page without its `<html>`, `<head>` and `<body>` tags, for a claude.ai artifact (which supplies them). |
+| `zig-out/demo/artifact.html` | The same page without its `<html>`, `<head>` and `<body>` tags, for a claude.ai artifact (which supplies them). |
 | `host.js` | The stand-in. It answers the page's `/api/` requests in the tab. |
 | `todo.wasm` | `app/todo.roc` built for wasm32, with `demo/wasm_host.zig`. |
 

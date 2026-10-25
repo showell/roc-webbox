@@ -44,7 +44,7 @@ because a test's root is the test runner's.
 | `TODO_CONFIG` | path of a `key = value` file naming `data_dir` and `auth_dir` (zig-webbox's `src/linux_config.zig`); its `data_dir` wins over `TODO_DATA` |
 | `TODO_TRUSTED_PROXY`, `TODO_KEEPALIVE_MS` | webbox's Linux host settings |
 
-**Where the data lives:** one file, `todos.json`, in the folder the host
+**Where the data lives:** one file, `<data>/todos.json`, in the folder the host
 gives the app. Standalone that is `data/todos.json`; mounted by a
 combination at `/todo`, `<data>/todo/todos.json`. The host also opens an
 auth folder (default `auth/`); the list keeps nothing in it.
@@ -119,7 +119,7 @@ not test.
 | `platform/main.roc` | The platform. The app provides `handle! : Http.Request => Http.Response`; the host calls it as `roc_handle`. |
 | `platform/Http.roc` | `Request` `{ method, path, body }`, `Response` `{ status, content_type, body }`, and `json`/`text` helpers. |
 | `platform/File.roc` | The effects: `read!`, `write!`, `delete!`. Each takes a path relative to the host's data root. |
-| `app/todo.roc` | The TODO list: one JSON file, `todos.json` in the folder the host gives it. |
+| `app/todo.roc` | The TODO list: one JSON file, `<data>/todos.json`, in the folder the host gives it. |
 | `src/roc_abi.zig` | The host's side of the seam: `RocStr`, the records, Roc's runtime (`roc_alloc` and the rest), and the hosted functions. |
 | `src/roc_files.zig` | The hosted file functions over `webbox.store`, under the data root. |
 | `src/roc_hooks.zig` | Roc's runtime for a binary holding more than one Roc app. |
