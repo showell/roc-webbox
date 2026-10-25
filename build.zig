@@ -110,6 +110,15 @@ pub fn build(b: *std.Build) void {
     });
     chat_test.addObjectFile(chat_roc);
     tests.dependOn(&b.addRunArtifact(b.addTest(.{ .root_module = chat_test })).step);
+    // A Roc crash through the chat's seam: the planted crash (chat/test/
+    // crash.roc) linked in place of the router, for the tests alone.
+    const crash_test = b.createModule(.{
+        .root_source_file = b.path("src/chat_crash_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    crash_test.addObjectFile(appArchive(b, roc, "chat-crash", &.{ "chat/test/crash.roc", "chat/platform/main.roc", "chat/platform/Chat.roc", "chat/platform/Host.roc" }, rocTarget(target.result)));
+    tests.dependOn(&b.addRunArtifact(b.addTest(.{ .root_module = crash_test })).step);
     const shared = b.createModule(.{
         .root_source_file = b.path("src/shared_check.zig"),
         .target = target,

@@ -104,9 +104,41 @@ pub fn deinit() void {
 /// The app's answer to one request. Its strings are in the call's arena:
 /// good until `end`.
 pub fn call(method: []const u8, path: []const u8, body: []const u8, user: []const u8) Response {
+    enter() catch @panic("roc_abi.call: a Roc call inside another, or beside one (docs/ROC-CHAT.md R1)");
+    defer leave();
     const was = if (shared) roc_hooks.enter(@This());
     defer if (shared) roc_hooks.leave(was);
     return roc_handle(.{ .body = .from(body), .method = .from(method), .path = .from(path), .user = .from(user) });
+}
+
+// ── one call at a time (docs/ROC-CHAT.md R1, P7) ───────────────────────────
+
+/// **ONE ROC CALL AT A TIME, AND NO ROC OUTSIDE ONE**: compiled Roc reaches
+/// memory through four context-free functions, so a call made beside
+/// another (another thread, on Linux) or inside another (a render, on metal,
+/// nested in a network pump) would share the one arena and corrupt it. The
+/// word is set by compare-and-swap as a call starts, so both are caught
+/// (a plain "inside a call?" flag would pass both), and the runtime's four
+/// refuse to run with it clear.
+var busy = std.atomic.Value(bool).init(false);
+
+/// A Roc call starts: refused when one is open.
+pub fn enter() error{RocReentered}!void {
+    if (busy.cmpxchgStrong(false, true, .acquire, .monotonic) != null) return error.RocReentered;
+}
+
+/// The call is over.
+pub fn leave() void {
+    busy.store(false, .release);
+}
+
+/// Whether a Roc call is open (a hosted function's check).
+pub fn inCall() bool {
+    return busy.load(.monotonic);
+}
+
+fn inside(comptime what: []const u8) void {
+    if (!inCall()) @panic(what ++ ": Roc ran outside a call (docs/ROC-CHAT.md R1)");
 }
 
 /// The call's memory, all of it, back to the arena (kept for the next call).
@@ -168,10 +200,12 @@ pub fn withRefcount(len: usize) [*]u8 {
 }
 
 pub fn roc_alloc(len: usize, alignment: usize) callconv(.c) *anyopaque {
+    inside("roc_alloc");
     return allocate(len, alignment);
 }
 
 pub fn roc_realloc(ptr: *anyopaque, len: usize, alignment: usize) callconv(.c) *anyopaque {
+    inside("roc_realloc");
     const old: [*]u8 = @ptrCast(ptr);
     const was = std.mem.readInt(usize, (old - header)[0..@sizeOf(usize)], .little);
     const new = allocate(len, alignment);
@@ -180,6 +214,7 @@ pub fn roc_realloc(ptr: *anyopaque, len: usize, alignment: usize) callconv(.c) *
 }
 
 pub fn roc_dealloc(ptr: *anyopaque, alignment: usize) callconv(.c) void {
+    inside("roc_dealloc");
     _ = ptr;
     _ = alignment;
 }
