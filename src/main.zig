@@ -15,6 +15,13 @@ pub fn main(init: std.process.Init.Minimal) !void {
     // The data root the list goes in (todos.json) when no config names
     // one: TODO_DATA, else data/ under where the server runs.
     if (env.get("TODO_DATA")) |p| app.data_dir = try std.heap.page_allocator.dupe(u8, p);
+    if (env.get("TODO_INSECURE_COOKIE")) |v| {
+        if (!std.mem.eql(u8, v, "yes")) {
+            std.debug.print("roc-todo: TODO_INSECURE_COOKIE is \"{s}\": unset it, or set it to yes for plain-http development\n", .{v});
+            return error.BadInsecureCookieSetting;
+        }
+        @import("hosted.zig").insecureCookie();
+    }
     try @import("webbox_linux").linux_host.Server(site).run(init, .{
         .name = "roc-todo",
         .env = .{
@@ -26,8 +33,8 @@ pub fn main(init: std.process.Init.Minimal) !void {
         },
         .default_port = 9110,
         .default_trusted_proxy = "127.0.0.1",
-        // The host opens a second root at the start; the list keeps no
-        // secret in it.
+        // The secrets' root: the site secret the visitor's cookie is signed
+        // with.
         .default_auth_dir = "auth",
         .routes_hint = "(/, /api/todos)",
         .free_space = unread,
@@ -40,5 +47,9 @@ fn unread(_: *const std.process.Environ.Map) webbox.free_space.FreeSpace {
 }
 
 fn report(started: *const site.Started) void {
-    std.debug.print("roc-todo: the list in {s}/todos.json\n", .{started.app.data_dir});
+    var buf: [512]u8 = undefined;
+    var w: std.Io.Writer = .fixed(&buf);
+    @import("hosted.zig").hosting.describeStart(started.app, &w) catch @panic("the start report is past its buffer");
+    var lines = std.mem.splitScalar(u8, std.mem.trimEnd(u8, w.buffered(), "\n"), '\n');
+    while (lines.next()) |line| std.debug.print("roc-todo: {s}\n", .{line});
 }

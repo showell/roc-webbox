@@ -2,8 +2,10 @@
 ## Each crosses to the host as a C struct (src/roc_abi.zig lays them out).
 Http := [].{
 	## `path` is the target's path, the query with it; `body` the request's
-	## body, read by the host up to its cap.
-	Request : { method : Str, path : Str, body : Str }
+	## body, read by the host up to its cap; `user` who is asking: the
+	## visitor's id the host's signed cookie names (16 hex digits), a new
+	## one on a first visit.
+	Request : { method : Str, path : Str, body : Str, user : Str }
 
 	Response : { status : U16, content_type : Str, body : Str }
 

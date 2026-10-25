@@ -27,15 +27,27 @@ const Root = struct {
         r.tmp.cleanup();
     }
 
-    /// The list's file, as the app last wrote it.
+    /// The visitor's list's file, as the app last wrote it.
     fn file(r: *Root) ![]u8 {
-        return r.tmp.dir.readFileAlloc(testing.io, "todos.json", testing.allocator, .limited(1 << 16));
+        return r.tmp.dir.readFileAlloc(testing.io, ann_file, testing.allocator, .limited(1 << 16));
     }
 };
 
-/// One request: its status and body, which the test frees.
-fn ask(method: []const u8, path: []const u8, body: []const u8) !struct { status: u16, body: []u8 } {
-    const r = files.handle(testing.io, method, path, body);
+/// The visitor most tests ask as (an id the host's cookie would name), and
+/// another.
+const ann = "00000000000000a1";
+const bob = "00000000000000b2";
+const ann_file = "lists/" ++ ann ++ ".json";
+
+/// One request, as `ann`: its status and body, which the test frees.
+const Answer = struct { status: u16, body: []u8 };
+
+fn ask(method: []const u8, path: []const u8, body: []const u8) !Answer {
+    return askAs(ann, method, path, body);
+}
+
+fn askAs(user: []const u8, method: []const u8, path: []const u8, body: []const u8) !Answer {
+    const r = files.handle(testing.io, method, path, body, user);
     defer roc.end();
     return .{ .status = r.status, .body = try testing.allocator.dupe(u8, r.body.slice()) };
 }
@@ -85,9 +97,10 @@ test "what cannot be done is said, and the file is left alone" {
 test "a file that is not a list is an error, never an empty list written over it" {
     var root = try Root.init();
     defer root.deinit();
-    try root.tmp.dir.writeFile(testing.io, .{ .sub_path = "todos.json", .data = "garbage" });
-    try expectAnswer(500, "todos.json is not a list of todos", "GET", "/api/todos", "");
-    try expectAnswer(500, "todos.json is not a list of todos", "POST", "/api/todos", "milk");
+    try root.tmp.dir.createDirPath(testing.io, "lists");
+    try root.tmp.dir.writeFile(testing.io, .{ .sub_path = ann_file, .data = "garbage" });
+    try expectAnswer(500, ann_file ++ " is not a list of todos", "GET", "/api/todos", "");
+    try expectAnswer(500, ann_file ++ " is not a list of todos", "POST", "/api/todos", "milk");
     const f = try root.file();
     defer testing.allocator.free(f);
     try testing.expectEqualStrings("garbage", f);
@@ -98,14 +111,31 @@ test "a file that cannot be read is an error, not an absent file" {
     defer root.deinit();
     // A folder where the file should be: a read that fails, not one that
     // finds nothing.
-    try root.tmp.dir.createDirPath(testing.io, "todos.json");
+    try root.tmp.dir.createDirPath(testing.io, ann_file);
     const got = try ask("POST", "/api/todos", "milk");
     defer testing.allocator.free(got.body);
     try testing.expectEqual(500, got.status);
-    try testing.expect(std.mem.startsWith(u8, got.body, "todos.json: "));
+    try testing.expect(std.mem.startsWith(u8, got.body, ann_file ++ ": "));
 }
 
 test {
     _ = webbox;
     _ = files;
+}
+
+test "two visitors, two lists: each sees only their own, each in its own file" {
+    var root = try Root.init();
+    defer root.deinit();
+    for ([_][2][]const u8{ .{ ann, "milk" }, .{ bob, "eggs" } }) |v| {
+        const got = try askAs(v[0], "POST", "/api/todos", v[1]);
+        testing.allocator.free(got.body);
+    }
+    for ([_][2][]const u8{ .{ ann, "[{\"done\":false,\"id\":1,\"text\":\"milk\"}]" }, .{ bob, "[{\"done\":false,\"id\":1,\"text\":\"eggs\"}]" } }) |v| {
+        const got = try askAs(v[0], "GET", "/api/todos", "");
+        defer testing.allocator.free(got.body);
+        try testing.expectEqualStrings(v[1], got.body);
+    }
+    const bobs = try root.tmp.dir.readFileAlloc(testing.io, "lists/" ++ bob ++ ".json", testing.allocator, .limited(1 << 16));
+    defer testing.allocator.free(bobs);
+    try testing.expect(std.mem.indexOf(u8, bobs, "eggs") != null and std.mem.indexOf(u8, bobs, "milk") == null);
 }

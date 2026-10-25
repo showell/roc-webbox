@@ -22,10 +22,10 @@ pub fn use(root: []const u8) void {
 
 /// The app's answer to one request, its effects done by `io`. Good until
 /// `roc.end`.
-pub fn handle(io: Io, method: []const u8, path: []const u8, body: []const u8) roc.Response {
+pub fn handle(io: Io, method: []const u8, path: []const u8, body: []const u8, user: []const u8) roc.Response {
     call_io = io;
     defer call_io = null;
-    return roc.call(method, path, body);
+    return roc.call(method, path, body, user);
 }
 
 /// The most of a file `File.read!` answers.

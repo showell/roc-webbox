@@ -62,7 +62,7 @@ pub const RocStr = extern struct {
 
 /// What the app is handed for a request (platform/Http.roc's `Request`):
 /// fields in Roc's order, by alignment and then by name.
-pub const Request = extern struct { body: RocStr, method: RocStr, path: RocStr };
+pub const Request = extern struct { body: RocStr, method: RocStr, path: RocStr, user: RocStr };
 
 /// What the app answers (`Response`).
 pub const Response = extern struct { body: RocStr, content_type: RocStr, status: u16 };
@@ -78,7 +78,7 @@ extern fn roc_handle(req: Request) callconv(.c) Response;
 
 comptime {
     const w = @sizeOf(usize);
-    std.debug.assert(@sizeOf(RocStr) == 3 * w and @sizeOf(Request) == 9 * w and @sizeOf(Response) == 7 * w and @sizeOf(Read) == 4 * w);
+    std.debug.assert(@sizeOf(RocStr) == 3 * w and @sizeOf(Request) == 12 * w and @sizeOf(Response) == 7 * w and @sizeOf(Read) == 4 * w);
 }
 
 // ── the call ────────────────────────────────────────────────────────────────
@@ -103,10 +103,10 @@ pub fn deinit() void {
 
 /// The app's answer to one request. Its strings are in the call's arena:
 /// good until `end`.
-pub fn call(method: []const u8, path: []const u8, body: []const u8) Response {
+pub fn call(method: []const u8, path: []const u8, body: []const u8, user: []const u8) Response {
     const was = if (shared) roc_hooks.enter(@This());
     defer if (shared) roc_hooks.leave(was);
-    return roc_handle(.{ .body = .from(body), .method = .from(method), .path = .from(path) });
+    return roc_handle(.{ .body = .from(body), .method = .from(method), .path = .from(path), .user = .from(user) });
 }
 
 /// The call's memory, all of it, back to the arena (kept for the next call).

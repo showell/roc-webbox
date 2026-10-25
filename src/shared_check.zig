@@ -22,7 +22,7 @@ pub fn main(init: std.process.Init) !void {
         .{ "POST", "/api/todos/1/toggle", "" },
         .{ "GET", "/api/todos", "" },
     }) |r| {
-        const got = files.handle(init.io, r[0], r[1], r[2]);
+        const got = files.handle(init.io, r[0], r[1], r[2], "00000000000000a1");
         defer roc.end();
         if (got.status != 200) return fail(r[1], got.body.slice());
         if (std.mem.eql(u8, r[0], "GET") and !std.mem.eql(u8, got.body.slice(), "[{\"done\":true,\"id\":1,\"text\":\"a line past twenty-three bytes, so Roc allocates\"}]")) return fail(r[1], got.body.slice());

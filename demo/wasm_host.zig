@@ -76,11 +76,14 @@ export fn demo_alloc(n: usize) [*]u8 {
 const Answer = extern struct { status: u32, content_type: [*]const u8, content_type_len: usize, body: [*]const u8, body_len: usize };
 
 /// Kept here, not on the stack: a small string's bytes are in it.
+/// The bench's one visitor: the tab is one person, and its files are the
+/// page's storage.
+const demo_user = "0000000000000000";
 var response: roc.Response = undefined;
 var answer: Answer = undefined;
 
 export fn demo_handle(method: [*]const u8, method_len: usize, path: [*]const u8, path_len: usize, body: [*]const u8, body_len: usize) *const Answer {
-    response = roc.call(method[0..method_len], path[0..path_len], body[0..body_len]);
+    response = roc.call(method[0..method_len], path[0..path_len], body[0..body_len], demo_user);
     const ct = response.content_type.slice();
     const b = response.body.slice();
     answer = .{ .status = response.status, .content_type = ct.ptr, .content_type_len = ct.len, .body = b.ptr, .body_len = b.len };
