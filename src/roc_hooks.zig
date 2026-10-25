@@ -5,9 +5,11 @@
 //! TODO list's allocates from a request's arena).
 //!
 //! So a binary with more than one declares this module in its root, as
-//! `pub const roc_hooks = @import("roc_hooks");`. These are then the only
+//! `pub const roc_hooks = @import("roc_hooks");` (and a host whose root is
+//! its own forwards the application's: zig-metal-unikernel's declares
+//! `struct {}` for an application with none). These are then the only
 //! four exports, and each hands a call to the app inside its Roc call. An
-//! app sees the declaration (`@hasDecl(@import("root"), "roc_hooks")`, and
+//! app sees the declaration (a `roc_hooks` in the root with `enter`, and
 //! reaches this module only through the root, so the file is in one module),
 //! exports nothing itself, and brackets each call into its Roc with
 //! `enter`/`leave`. Alone in a binary it exports its own and calls neither:

@@ -22,6 +22,6 @@ pub const hosting = struct {
     pub const cache_largest_most = 1024 * 1024;
     /// Its setup's report, a line each, for the host's log.
     pub fn describeStart(r: app.StartReport, w: *std.Io.Writer) std.Io.Writer.Error!void {
-        try w.print("the list in {s}/todo/todos.json\n", .{r.data_dir});
+        try w.print("the list in {s}/todos.json\n", .{r.data_dir});
     }
 };

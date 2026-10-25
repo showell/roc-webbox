@@ -28,7 +28,7 @@ own (a sibling checkout, through its `addAppKernel`, as Dog Park does):
 about itself, `assets.zon` what it serves besides its code, and the Roc is
 built for freestanding x86-64. The kernel needs a disk: a GPT disk whose
 partition 1 is FAT16, empty to start; the list is made on it at
-`data/todo/todos.json` and survives a reboot.
+`data/todos.json` and survives a reboot.
 
 ### Trying the client without a server
 
@@ -46,7 +46,7 @@ not test.
 | `platform/main.roc` | The platform. The app provides `handle! : Http.Request => Http.Response`; the host calls it as `roc_handle`. |
 | `platform/Http.roc` | `Request` `{ method, path, body }`, `Response` `{ status, content_type, body }`, and `json`/`text` helpers. |
 | `platform/File.roc` | The effects: `read!`, `write!`, `delete!`. Each takes a path relative to the host's data root. |
-| `app/todo.roc` | The TODO list: one JSON file, `todo/todos.json`. |
+| `app/todo.roc` | The TODO list: one JSON file, `todos.json` in the folder the host gives it. |
 | `src/roc_abi.zig` | The host's side of the seam: `RocStr`, the records, Roc's runtime (`roc_alloc` and the rest), and the hosted functions. |
 | `src/todo_app.zig` | The webbox site: the page, and `/api/*` sent to Roc. |
 | `src/main.zig` | Linux main: webbox's Linux host. |

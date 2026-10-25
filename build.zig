@@ -15,8 +15,8 @@ pub fn build(b: *std.Build) void {
 
     // **THE APP'S ROC, BUILT BY EVERY BUILD**: app/todo.roc for the
     // platform in platform/, an archive the host links (`roc_handle`, and
-    // the hosted functions it calls back). `roc` on the PATH, or -Droc=<path>.
-    const roc = b.option([]const u8, "roc", "the Roc compiler (default: `roc` on the PATH)") orelse "roc";
+    // the hosted functions it calls back), by the Roc roc-version pins.
+    const roc = rocCompiler(b);
     const app_roc = rocArchive(b, roc, rocTarget(target.result));
 
     const exe = b.addExecutable(.{ .name = "roc-todo", .root_module = b.createModule(.{
@@ -29,7 +29,7 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(exe);
     const serve = b.addRunArtifact(exe);
     serve.step.dependOn(b.getInstallStep());
-    b.step("serve", "Serve the TODO list on http://localhost:9110 (TODO_PORT), its list in data/todo/todos.json (TODO_DATA)").dependOn(&serve.step);
+    b.step("serve", "Serve the TODO list on http://localhost:9110 (TODO_PORT), its list in data/todos.json (TODO_DATA)").dependOn(&serve.step);
 
     // **FOR A COMBINATION** (webbox's combo, beside another app): `roc_todo`,
     // the list as a host takes it (hosted.zig, its Roc linked); and
@@ -42,6 +42,11 @@ pub fn build(b: *std.Build) void {
         .imports = imports[0..2],
     });
     withApp(b, hosted, app_roc);
+    // The same for a combination on zig-metal-unikernel (its addAppKernel
+    // `parts`): no target, mode or webbox (the kernel's), Roc for its target.
+    const hosted_metal = b.addModule("roc_todo_metal", .{ .root_source_file = b.path("src/hosted.zig") });
+    const metal_roc = rocArchive(b, roc, "x64v1elf");
+    withApp(b, hosted_metal, metal_roc);
     _ = b.addModule("roc_hooks", .{ .root_source_file = b.path("src/roc_hooks.zig") });
 
     _ = demo(b, roc, optimize);
@@ -54,8 +59,10 @@ pub fn build(b: *std.Build) void {
     const metal_step = b.step("metal", "Build the TODO list as a zig-metal-unikernel kernel, zig-out/bin/roc-todo.elf (ReleaseSafe; ../zig-metal-unikernel)");
     if (b.lazyDependency("zig_metal_unikernel", .{})) |kernel| {
         if (b.lazyImport(@This(), "zig_metal_unikernel")) |kernel_build| {
+            // Its own module: the kernel makes a module its machine's in
+            // place, and `roc_todo_metal` is a combination's to give.
             const metal_app = b.createModule(.{ .root_source_file = b.path("src/hosted.zig") });
-            withApp(b, metal_app, rocArchive(b, roc, "x64v1elf"));
+            withApp(b, metal_app, metal_roc);
             const elf = kernel_build.addAppKernel(b, kernel, .{
                 .name = "roc-todo.elf",
                 .module = metal_app,
@@ -122,6 +129,25 @@ fn demo(b: *std.Build, roc: []const u8, optimize: std.lang.Optimize) *std.Build.
     return step;
 }
 
+const roc_pin = std.mem.trim(u8, @embedFile("roc-version"), " \n");
+
+/// **THE ROC IS PINNED** (roc-version): -Droc=<path>, or `roc` on the PATH,
+/// and it must be the pinned one. A combination builds each of its Roc apps
+/// with its primary's compiler, handed down as -Droc, so two apps that pin
+/// different Roc versions fail here rather than link.
+fn rocCompiler(b: *std.Build) []const u8 {
+    const named = b.option([]const u8, "roc", "the Roc compiler (default: `roc` on the PATH); the version roc-version pins") orelse "roc";
+    const none = "the TODO list is built from Roc, and there is no Roc compiler at `{s}`: put Roc {s} (roc-version) on the PATH, or name it with -Droc=<path>";
+    const found = if (std.mem.indexOfScalar(u8, named, '/') == null)
+        b.findProgram(.{ .names = &.{named} }) orelse std.process.fatal(none, .{ named, roc_pin })
+    else
+        b.root.root_dir.handle.realPathFileAlloc(b.graph.io, named, b.allocator) catch std.process.fatal(none, .{ named, roc_pin });
+    const said = std.mem.trim(u8, b.run(&.{ found, "version" }), " \n");
+    const version = if (std.mem.lastIndexOfScalar(u8, said, ' ')) |i| said[i + 1 ..] else said;
+    if (!std.mem.eql(u8, version, roc_pin)) std.process.fatal("the TODO list is pinned to Roc {s} (roc-version), and `{s}` is {s}: put the pinned one on the PATH or name it with -Droc=<path>; in a combination, the primary's Roc builds every part, so their pins must agree", .{ roc_pin, found, version });
+    return found;
+}
+
 /// The page at `/` and the Roc app, for the module `m` that serves them.
 fn withApp(b: *std.Build, m: *std.Build.Module, app_roc: std.Build.LazyPath) void {
     m.addAnonymousImport("todo_page", .{ .root_source_file = b.path("web/index.html") });
@@ -140,5 +166,7 @@ fn rocArchive(b: *std.Build, roc: []const u8, roc_target: []const u8) std.Build.
     const run = b.addSystemCommand(&.{ roc, "build", "app/todo.roc", b.fmt("--target={s}", .{roc_target}) });
     run.setCwd(b.path("."));
     for ([_][]const u8{ "app/todo.roc", "platform/main.roc", "platform/File.roc", "platform/Http.roc" }) |f| run.addFileInput(b.path(f));
+    // The compiler too: a new Roc builds the archive again.
+    run.addFileInput(.{ .cwd_relative = roc });
     return run.addPrefixedOutputFileArg("--output=", b.fmt("todo-{s}.a", .{roc_target}));
 }

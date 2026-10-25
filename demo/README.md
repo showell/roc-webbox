@@ -44,7 +44,7 @@ python3 -m http.server -d zig-out/demo     # then open http://localhost:8000/
 From the browser console:
 
 ```js
-rocDemo.files.put("todo/todos.json", "garbage")  // the next request answers 500
+rocDemo.files.put("todos.json", "garbage")  // the next request answers 500
 rocDemo.files.failNext = "disk on fire"          // the next file call fails
 rocDemo.files.clear()                            // an empty list again
 ```

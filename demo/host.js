@@ -13,7 +13,7 @@
 // host. The real server is src/: `zig build serve`.
 //
 // To try the page's error paths from the browser console:
-//   rocDemo.files.put("todo/todos.json", "garbage")   // the next request is a 500
+//   rocDemo.files.put("todos.json", "garbage")   // the next request is a 500
 //   rocDemo.files.failNext = "disk on fire"           // the next file call fails
 //   rocDemo.files.clear()                             // an empty list again
 (() => {

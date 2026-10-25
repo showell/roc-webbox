@@ -133,7 +133,9 @@ pub fn inRoot(path: []const u8) bool {
 /// Whether another Roc app shares the binary (roc_hooks.zig, which the
 /// binary's root declares): then the root exports the four below and `call`
 /// brackets the app's; alone, they are exported here.
-const shared = @hasDecl(@import("root"), "roc_hooks");
+/// A root may declare it empty (`struct {}`: a host that forwards whatever
+/// its application declares), which is none.
+const shared = @hasDecl(@import("root"), "roc_hooks") and @hasDecl(@import("root").roc_hooks, "enter");
 const roc_hooks = if (shared) @import("root").roc_hooks else struct {};
 
 comptime {
@@ -209,5 +211,5 @@ test "a path that would leave the data root is refused" {
     try std.testing.expect(!inRoot("/etc/passwd"));
     try std.testing.expect(!inRoot("todo/../../x"));
     try std.testing.expect(!inRoot(""));
-    try std.testing.expect(inRoot("todo/todos.json"));
+    try std.testing.expect(inRoot("todos.json"));
 }

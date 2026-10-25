@@ -62,6 +62,6 @@ test "a path under the data root" {
     roc.use(std.testing.allocator);
     defer roc.deinit();
     use("data");
-    try std.testing.expectEqualStrings("data/todo/todos.json", under("todo/todos.json").?);
+    try std.testing.expectEqualStrings("data/todos.json", under("todos.json").?);
     try std.testing.expect(under("../x") == null);
 }

@@ -12,7 +12,7 @@ pub const site = webbox.site.Site(app);
 pub fn main(init: std.process.Init.Minimal) !void {
     var env = try std.process.Environ.createMap(init.environ, std.heap.page_allocator);
     defer env.deinit();
-    // The data root the list goes under (todo/ in it) when no config names
+    // The data root the list goes in (todos.json) when no config names
     // one: TODO_DATA, else data/ under where the server runs.
     if (env.get("TODO_DATA")) |p| app.data_dir = try std.heap.page_allocator.dupe(u8, p);
     try @import("webbox_linux").linux_host.Server(site).run(init, .{
@@ -40,5 +40,5 @@ fn unread(_: *const std.process.Environ.Map) webbox.free_space.FreeSpace {
 }
 
 fn report(started: *const site.Started) void {
-    std.debug.print("roc-todo: the list in {s}/todo/todos.json\n", .{started.app.data_dir});
+    std.debug.print("roc-todo: the list in {s}/todos.json\n", .{started.app.data_dir});
 }

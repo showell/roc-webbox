@@ -1,6 +1,6 @@
 ## A TODO LIST, served by webbox: the app the platform's host calls for each
-## request under /api/. The list is one file, todo/todos.json under the host's
-## data root, read and written as each request runs.
+## request under /api/. The list is one file, todos.json in the folder the host
+## gives it, read and written as each request runs.
 ##
 ##   GET    /api/todos              the list
 ##   POST   /api/todos              a new item, its text the body
@@ -19,7 +19,7 @@ Todo : { id : U64, text : Str, done : Bool }
 Todos : { next_id : U64, items : List(Todo) }
 
 store_path : Str
-store_path = "todo/todos.json"
+store_path = "todos.json"
 
 ## The list as the file holds it; a list with nothing in it when there is no
 ## file yet. A file that is not one, or one that could not be read, is an

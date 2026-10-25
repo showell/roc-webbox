@@ -29,7 +29,7 @@ const Root = struct {
 
     /// The list's file, as the app last wrote it.
     fn file(r: *Root) ![]u8 {
-        return r.tmp.dir.readFileAlloc(testing.io, "todo/todos.json", testing.allocator, .limited(1 << 16));
+        return r.tmp.dir.readFileAlloc(testing.io, "todos.json", testing.allocator, .limited(1 << 16));
     }
 };
 
@@ -85,10 +85,9 @@ test "what cannot be done is said, and the file is left alone" {
 test "a file that is not a list is an error, never an empty list written over it" {
     var root = try Root.init();
     defer root.deinit();
-    try root.tmp.dir.createDirPath(testing.io, "todo");
-    try root.tmp.dir.writeFile(testing.io, .{ .sub_path = "todo/todos.json", .data = "garbage" });
-    try expectAnswer(500, "todo/todos.json is not a list of todos", "GET", "/api/todos", "");
-    try expectAnswer(500, "todo/todos.json is not a list of todos", "POST", "/api/todos", "milk");
+    try root.tmp.dir.writeFile(testing.io, .{ .sub_path = "todos.json", .data = "garbage" });
+    try expectAnswer(500, "todos.json is not a list of todos", "GET", "/api/todos", "");
+    try expectAnswer(500, "todos.json is not a list of todos", "POST", "/api/todos", "milk");
     const f = try root.file();
     defer testing.allocator.free(f);
     try testing.expectEqualStrings("garbage", f);
@@ -99,11 +98,11 @@ test "a file that cannot be read is an error, not an absent file" {
     defer root.deinit();
     // A folder where the file should be: a read that fails, not one that
     // finds nothing.
-    try root.tmp.dir.createDirPath(testing.io, "todo/todos.json");
+    try root.tmp.dir.createDirPath(testing.io, "todos.json");
     const got = try ask("POST", "/api/todos", "milk");
     defer testing.allocator.free(got.body);
     try testing.expectEqual(500, got.status);
-    try testing.expect(std.mem.startsWith(u8, got.body, "todo/todos.json: "));
+    try testing.expect(std.mem.startsWith(u8, got.body, "todos.json: "));
 }
 
 test {
