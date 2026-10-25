@@ -45,11 +45,18 @@ because a test's root is the test runner's.
 | `TODO_DATA` | the data folder; default `data/` in the directory it runs in |
 | `TODO_CONFIG` | path of a `key = value` file naming `data_dir` and `auth_dir` (zig-webbox's `src/linux_config.zig`); its `data_dir` wins over `TODO_DATA` |
 | `TODO_TRUSTED_PROXY`, `TODO_KEEPALIVE_MS` | webbox's Linux host settings |
+| `TODO_INSECURE_COOKIE=yes` | plain-http development: the visitor's cookie is `roc-todo`, not Secure (a browser drops a Secure one over plain http) |
 
-**Where the data lives:** one file, `<data>/todos.json`, in the folder the host
-gives the app. Standalone that is `data/todos.json`; mounted by a
-combination at `/todo`, `<data>/todo/todos.json`. The host also opens an
-auth folder (default `auth/`); the list keeps nothing in it.
+**Each visitor has their own list**, with no names or passwords: the host
+gives a visitor a random id in a signed cookie on the first `/api/` request
+(zig-webbox's `signed_cookie.visitor`; `__Host-roc-todo`, Secure, a year,
+renewed when used), and hands it to Roc as `Http.Request.user`. A cookie
+that does not verify is a new visitor. The list is `<data>/lists/<id>.json`
+in the folder the host gives the app: standalone `data/lists/`; mounted by
+a combination at `/todo`, `<data>/todo/lists/`. The site secret it signs
+with is made once in the auth folder (default `auth/`; `<auth>/todo/`
+mounted). An older single `<data>/todos.json` beside `lists/` is left
+unread.
 
 ### On the unikernel
 
@@ -59,13 +66,12 @@ auth folder (default `auth/`); the list keeps nothing in it.
 and what only the app can say about itself, `assets.zon` what it serves
 besides its code, and the Roc is built for freestanding x86-64. It is
 always ReleaseSafe. The kernel needs a disk: a GPT disk whose partition 1
-is FAT16, empty to start; the list is made on it at `data/todos.json` and
-survives a reboot.
+is FAT16, empty to start; the lists are made on it under `data/lists/` and
+survive a reboot. Behind no HTTPS (QEMU on a laptop), a browser drops the
+Secure cookie, so every request is a new visitor; a script sends it back by
+hand. To boot it, from the folder that holds the checkouts:
 
-This repo has no script to boot it. zig-metal-unikernel's README covers
-QEMU and the disk image (`droplet/app_image.py`); dog-park's
-`tools/metal_gate.mjs` is a worked example of booting an application kernel
-under QEMU.
+    shale repos:zig-metal-unikernel/tools/boot_app.shale elf=repos:roc-webbox/zig-out/bin/roc-todo.elf work=scratch:qemu/roc-todo port=9214
 
 ## Combined with other webbox apps
 
@@ -119,9 +125,9 @@ not test.
 |---|---|
 | `roc-version` | The Roc nightly every build uses. |
 | `platform/main.roc` | The platform. The app provides `handle! : Http.Request => Http.Response`; the host calls it as `roc_handle`. |
-| `platform/Http.roc` | `Request` `{ method, path, body }`, `Response` `{ status, content_type, body }`, and `json`/`text` helpers. |
+| `platform/Http.roc` | `Request` `{ method, path, body, user }`, `Response` `{ status, content_type, body }`, and `json`/`text` helpers. |
 | `platform/File.roc` | The effects: `read!`, `write!`, `delete!`. Each takes a path relative to the host's data root. |
-| `app/todo.roc` | The TODO list: one JSON file, `<data>/todos.json`, in the folder the host gives it. |
+| `app/todo.roc` | The TODO list: a JSON file per visitor, `<data>/lists/<id>.json`, in the folder the host gives it. |
 | `src/roc_abi.zig` | The host's side of the seam: `RocStr`, the records, Roc's runtime (`roc_alloc` and the rest), and the hosted functions. |
 | `src/roc_files.zig` | The hosted file functions over `webbox.store`, under the data root. |
 | `src/roc_hooks.zig` | Roc's runtime for a binary holding more than one Roc app. |
