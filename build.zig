@@ -218,7 +218,7 @@ fn rocArchive(b: *std.Build, roc: []const u8, roc_target: []const u8) std.Build.
 }
 
 /// The pure modules' twin app (chat/twin.roc, on chat/twin/platform/).
-const twin_inputs = [_][]const u8{ "chat/twin.roc", "chat/twin/platform/main.roc", "chat/Time.roc", "chat/ZigText.roc", "chat/Paths.roc", "chat/Codec.roc", "chat/Count.roc", "chat/Frame.roc", "chat/Form.roc", "chat/Reaction.roc" };
+const twin_inputs = [_][]const u8{ "chat/twin.roc", "chat/twin/platform/main.roc", "chat/Time.roc", "chat/ZigText.roc", "chat/Paths.roc", "chat/Codec.roc", "chat/Count.roc", "chat/Frame.roc", "chat/Form.roc", "chat/Reaction.roc", "chat/Chrome.roc", "chat/Pages.roc", "chat/Html.roc" };
 
 /// The Roc chat (chat/main.roc, on its own platform in chat/platform/).
 const chat_inputs = [_][]const u8{ "chat/main.roc", "chat/Route.roc", "chat/Paths.roc", "chat/ZigText.roc", "chat/Reaction.roc", "chat/Form.roc", "chat/Codec.roc", "chat/platform/main.roc", "chat/platform/Chat.roc", "chat/platform/Host.roc" };
