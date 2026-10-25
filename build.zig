@@ -49,6 +49,17 @@ pub fn build(b: *std.Build) void {
     withApp(b, hosted_metal, metal_roc);
     _ = b.addModule("roc_hooks", .{ .root_source_file = b.path("src/roc_hooks.zig") });
 
+    // **THE PURE MODULES' TWINS, FOR TESTS ONLY** (docs/ROC-CHAT.md C1):
+    // `roc_chat_twin`, chat/twin.roc behind one entry (src/twin_abi.zig),
+    // which angry-gopher's twin tests hold to the Zig each Roc module
+    // replaces. Never in a server.
+    const twin = b.addModule("roc_chat_twin", .{
+        .root_source_file = b.path("src/twin_abi.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    twin.addObjectFile(appArchive(b, roc, "chat-twin", &twin_inputs, rocTarget(target.result)));
+
     // **THE ROC CHAT'S ROUTER, FOR ANGRY-GOPHER** (docs/ROC-CHAT.md §3):
     // `roc_chat`, chat/main.roc as angry-gopher calls it (chat_hosted.zig),
     // its Roc for this build's target; and `roc_chat_metal`, the same for
@@ -119,6 +130,13 @@ pub fn build(b: *std.Build) void {
     });
     crash_test.addObjectFile(appArchive(b, roc, "chat-crash", &.{ "chat/test/crash.roc", "chat/platform/main.roc", "chat/platform/Chat.roc", "chat/platform/Host.roc" }, rocTarget(target.result)));
     tests.dependOn(&b.addRunArtifact(b.addTest(.{ .root_module = crash_test })).step);
+    const twin_test = b.createModule(.{
+        .root_source_file = b.path("src/twin_abi.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    twin_test.addObjectFile(appArchive(b, roc, "chat-twin", &twin_inputs, rocTarget(target.result)));
+    tests.dependOn(&b.addRunArtifact(b.addTest(.{ .root_module = twin_test })).step);
     const shared = b.createModule(.{
         .root_source_file = b.path("src/shared_check.zig"),
         .target = target,
@@ -198,6 +216,9 @@ fn rocTarget(t: std.Target) []const u8 {
 fn rocArchive(b: *std.Build, roc: []const u8, roc_target: []const u8) std.Build.LazyPath {
     return appArchive(b, roc, "todo", &.{ "app/todo.roc", "platform/main.roc", "platform/File.roc", "platform/Http.roc" }, roc_target);
 }
+
+/// The pure modules' twin app (chat/twin.roc, on chat/twin/platform/).
+const twin_inputs = [_][]const u8{ "chat/twin.roc", "chat/twin/platform/main.roc", "chat/Time.roc" };
 
 /// The Roc chat (chat/main.roc, on its own platform in chat/platform/).
 const chat_inputs = [_][]const u8{ "chat/main.roc", "chat/Route.roc", "chat/platform/main.roc", "chat/platform/Chat.roc", "chat/platform/Host.roc" };

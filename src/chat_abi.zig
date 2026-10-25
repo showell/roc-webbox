@@ -16,27 +16,7 @@ const sljmp = @import("sljmp.zig");
 pub const Route = route_mod.Route;
 pub const Decision = route_mod.Decision;
 
-/// A Roc `List(U8)` (roc's builtins/list.zig): pointer, length, then the
-/// capacity (shifted, as `RocStr.from` makes a string's), the bytes after a
-/// refcount word.
-pub const RocBytes = extern struct {
-    ptr: ?[*]u8,
-    length: usize,
-    capacity_or_alloc_ptr: usize,
-
-    pub fn slice(b: *const RocBytes) []const u8 {
-        const p = b.ptr orelse return "";
-        return p[0..b.length];
-    }
-
-    /// A new list holding `bytes`, in the call's arena.
-    pub fn from(bytes: []const u8) RocBytes {
-        if (bytes.len == 0) return .{ .ptr = null, .length = 0, .capacity_or_alloc_ptr = 0 };
-        const data = roc.withRefcount(bytes.len);
-        @memcpy(data[0..bytes.len], bytes);
-        return .{ .ptr = data, .length = bytes.len, .capacity_or_alloc_ptr = bytes.len << 1 };
-    }
-};
+pub const RocBytes = roc.RocBytes;
 
 /// Chat.roc's `Request`.
 pub const Request = extern struct { sub: RocBytes, channel: bool };

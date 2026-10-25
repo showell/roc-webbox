@@ -60,6 +60,55 @@ pub const RocStr = extern struct {
     }
 };
 
+/// A Roc `List(U8)` (roc's builtins/list.zig): pointer, length, then the
+/// capacity (shifted, as `RocStr.from` makes a string's), the bytes after a
+/// refcount word.
+pub const RocBytes = extern struct {
+    ptr: ?[*]u8,
+    length: usize,
+    capacity_or_alloc_ptr: usize,
+
+    pub fn slice(b: *const RocBytes) []const u8 {
+        const p = b.ptr orelse return "";
+        return p[0..b.length];
+    }
+
+    /// A new list holding `bytes`, in the call's arena.
+    pub fn from(bytes: []const u8) RocBytes {
+        if (bytes.len == 0) return .{ .ptr = null, .length = 0, .capacity_or_alloc_ptr = 0 };
+        const data = withRefcount(bytes.len);
+        @memcpy(data[0..bytes.len], bytes);
+        return .{ .ptr = data, .length = bytes.len, .capacity_or_alloc_ptr = bytes.len << 1 };
+    }
+};
+
+/// A Roc `List(List(U8))`: a list whose elements are refcounted (each a
+/// `List(U8)`) has two words before them, the element count and then the
+/// refcount (the crash probe's p8/rt.zig, which took it from Roc's
+/// builtins).
+pub const RocBytesList = extern struct {
+    ptr: ?[*]RocBytes,
+    length: usize,
+    capacity_or_alloc_ptr: usize,
+
+    pub fn slice(l: *const RocBytesList) []const RocBytes {
+        const p = l.ptr orelse return &.{};
+        return p[0..l.length];
+    }
+
+    /// A new list of `items`, each copied, in the call's arena.
+    pub fn from(items: []const []const u8) RocBytesList {
+        if (items.len == 0) return .{ .ptr = null, .length = 0, .capacity_or_alloc_ptr = 0 };
+        const w = @sizeOf(usize);
+        const base = allocate(2 * w + items.len * @sizeOf(RocBytes), w);
+        std.mem.writeInt(usize, base[0..w], items.len, .little);
+        std.mem.writeInt(usize, base[w..][0..w], 1, .little);
+        const elems: [*]RocBytes = @ptrCast(@alignCast(base + 2 * w));
+        for (items, 0..) |it, k| elems[k] = .from(it);
+        return .{ .ptr = elems, .length = items.len, .capacity_or_alloc_ptr = items.len << 1 };
+    }
+};
+
 /// What the app is handed for a request (platform/Http.roc's `Request`):
 /// fields in Roc's order, by alignment and then by name.
 pub const Request = extern struct { body: RocStr, method: RocStr, path: RocStr, user: RocStr };
