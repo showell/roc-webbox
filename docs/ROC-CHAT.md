@@ -66,8 +66,6 @@ neighbours, about 6,800 lines) to a Roc app on the platform in this repo.
   angry-gopher's Zig handler for that route once the Roc call has returned.
 - **Twin test.** A Zig function and the Roc function replacing it, run on the
   same inputs, their answers and the files they leave compared.
-- **Fallback.** A build option that dispatches with Zig's own router instead,
-  for an emergency (§3).
 - **Owners.**
   - **CC** is the cloud session: it writes code on `claude/*` branches.
   - **LC** is the local session on the box: the bare-metal work.
@@ -111,23 +109,34 @@ route is ever served two ways. In order (§8):
    `/chat/msg/<id>`, default/resume and new topic; the cross-page fan-out
    and feeds; uploads and download; the recent, images, code and links
    pages.
-4. **Last, the store's writers** (append, `.count`, reactions, bookmarks,
-   pins), because Zig outside the chat calls them (below).
+4. **The store's callers outside the chat** (below): docs and the reading
+   list, login with its welcome DM, and admin retire.
+5. **Last, the store's writers** (append, `.count`, reactions, bookmarks,
+   pins), once every caller of them is Roc.
 
 **Each job has one implementation at a time.** A piece moving to Roc lands
 with a twin test against the Zig function it replaces (C2); the Zig function
 stays as the test's oracle while that is useful, and its Zig callers switch
 in the same release.
 
-**Zig callers outside the chat.** These stay Zig and use the chat's store:
+**The store's callers outside the chat move to Roc too** (Steve,
+2026-10-25: "hopefully we can move to Roc for everything"). Three Zig
+callers use the chat's store today:
 - login's welcome DM (login.zig:344-362);
 - docs' post to chat (docs.zig:270-299);
 - admin retire.
 
-While the store is Zig they call it as now. When it moves (C8), they call
-Roc's, through a second entry point the platform provides: a Roc call the
-host opens outside a request, bracketed like any other. §10 asks whether
-that, or keeping those writers in Zig for good, is the better end.
+Each moves to Roc (C9-C11) before the store does (C8), so when the store
+moves every caller of it is already Roc, and nothing needs a way into Roc
+from outside a request. Until then they call Zig's store as now.
+- **Login in Roc keeps the secrets in Zig.** Roc never reads the auth root
+  (§6.3): passwords, the session secret and the cookie signing stay behind
+  hosted functions (`Users.register!`, `Users.check_password!`,
+  `Users.sign_in!`), and Roc runs the flow around them: the form, the
+  checks, the welcome DM, the redirect.
+- **Docs and the reading list** are a family like the chat's others: their
+  routes are already the router's, delegated, from milestone 1.
+- **Admin retire** is reached through the router too, behind the admin gate.
 
 **Supplied to Roc by angry-gopher's own Zig.** These are hosted functions
 over the existing modules. Nothing is moved, and there is one copy of each.
@@ -136,28 +145,21 @@ Milestone 1 needs only Users and Presence:
 | Function | angry-gopher module |
 |---|---|
 | Markdown | `markdown.zig`: render, render trusted, hostile check |
-| Users | `users.zig`: exists, name, authorized roster, agent rule; only-member-named, for blocks from before `uid:` |
+| Users | `users.zig`: exists, name, authorized roster, agent rule; only-member-named, for blocks from before `uid:`; register, check password and sign in, for login (C10) |
 | Presence | `presence.zig`: mark, is online |
 | Search | `search_index.zig`: note append |
 | Counters | the chat counters `/admin/host` and `/version` read: edge rejects, fan-out failures, malformed channels, refused blocks |
 
-**Stays Zig, not ported:**
-- login, logout, settings and API keys;
-- docs and the reading list: `/chat/docs/*`, plus `…/<sid>/saved`. The
-  router parses them and delegates, for good in v1;
-- admin tools;
+**Stays Zig for now, not yet planned:**
+- logout, settings and API keys;
+- the admin tools other than retire;
 - the startup `.count` backfill;
-- the search routes, for v1 (parsed and delegated the same way).
+- the search routes (parsed by the router and delegated, like the others).
 
 **Never Roc: the host's hooks before the turn.** angry-gopher's `bodyLimit`,
 uploader and `family` classify paths before the turn (R1), so they stay Zig
 path classifiers beside the Roc parser. A3 holds them to the route each path
 parses to.
-
-**The fallback.** A build option keeps Zig's own dispatch (chat.zig `handle`
-and `handleChannel`) for an emergency: a Roc toolchain bug that would
-otherwise block a chat release (R0). A3's corpus and A4's tests run on both
-builds. It is deleted once the router has been steady for a while (§10).
 
 **Later, for a standalone Roc chat (I3):**
 - markdown moved into webbox;
@@ -179,8 +181,10 @@ The nightly is young, and churns in exactly the places this design leans on:
 - hosted symbols are **weak**, so a missing host export links cleanly and
   jumps to address 0 at its first call.
 
-A bug found in month two means moving the pin across every hosted signature,
-or working around it.
+With the router, every chat release builds Roc from day one, so a toolchain
+bug blocks chat releases until it is fixed or worked around. Steve's call
+(2026-10-25): Roc can handle small-scale chat, so there is no Zig fallback
+build; the answer is how the pin is kept.
 
 **Mitigation:**
 - **T1 first:** a trivial Roc archive in angry-gopher and in `gopher.elf`,
@@ -189,9 +193,13 @@ or working around it.
 - The layouts come from `roc glue`, never by hand, and every layout is
   asserted at compile time (P8).
 - The build checks that every hosted `extern` has a host export.
-- **A hard dependency from day one.** With the router, every chat release
-  builds Roc, so a toolchain bug blocks chat releases until it is fixed or
-  worked around. The fallback build (§3) is the way out meanwhile.
+- **Stay on the current nightly, pinned to known-good builds.** The pin
+  (`roc-version`) names a nightly that has passed the whole gate: the Roc
+  tests, A3, A4, the judges on `gopher.elf`. Moving it is a small, frequent
+  change of its own, never folded into a chat change, so a nightly that
+  breaks something is found alone and the pin stays on the last good one.
+  Small steps keep each move's churn in hosted signatures small. Each
+  known-good nightly is recorded with what it passed.
 - **More than one Roc app in a binary** (the chat beside Dog Park's Roc, or
   the TODO list) works through LC's `src/roc_hooks.zig`. The root exports
   the four runtime functions once, and hands each call to the app whose
@@ -495,7 +503,7 @@ as an argument.
 | `Bus` | `publish! : Str, List(U8) => {}` |
 | `Random` | `bytes! : U64 => List(U8)` |
 | `Markdown` | `render!`, `render_trusted!`, `hostile!` |
-| `Users` | `exists!`, `name!`, `authorized!` (the roster), `only_member_named!` (blocks from before `uid:` only), `is_agent!` |
+| `Users` | `exists!`, `name!`, `authorized!` (the roster), `only_member_named!` (blocks from before `uid:` only), `is_agent!`; for login (C10), `register!`, `check_password!`, `sign_in!` (the cookie) |
 | `Presence` | `mark!`, `online!` |
 | `Search` | `note_append!` |
 | `Counter` | `bump!(name, detail)` |
@@ -650,7 +658,7 @@ delegation, the busy word (R1), the arena's peak (R5), and a crash as a 500
 1. **The router agrees with Zig's dispatch** on A3's corpus: the same route,
    or the same refusal, for every path, method and gate state.
 2. **angry-gopher's route tests pass through the router** (A4): the existing
-   tests are the harness. The fallback build passes them too.
+   tests are the harness.
 3. The box's judges and metal-vmm's checks pass on `gopher.elf` with the
    router.
 4. A planted Roc crash on `gopher.elf` under QEMU answers 500, is logged with
@@ -685,7 +693,7 @@ test (C2).
 | # | item | repo | owner | size |
 |---|---|---|---|---|
 | P1 | Bytes cross as `List(U8)` (body, header values); the TODO app's ids parsed byte-wise, not by `from_str` | rw | CC | S |
-| P8 | Pin the nightly; the build checks it (**done by LC**, `roc-version`). Layouts generated by `roc glue`, asserted at compile time. The build checks every hosted `extern` has an export (weak symbols) | rw | CC | M |
+| P8 | Pin the nightly; the build checks it (**done by LC**, `roc-version`). Layouts generated by `roc glue`, asserted at compile time. The build checks every hosted `extern` has an export (weak symbols). Moving the pin is its own change, gated like a release, and each known-good nightly is recorded (R0) | rw | CC | M |
 | C0 | Census of production data (R2, R4, R5 lists) | — | box | S |
 | T1 | A trivial Roc archive linked into angry-gopher and `gopher.elf`, booted under QEMU; build time, size, gate cost; the box agrees the toolchain | ag, zmu | box + CC | M |
 
@@ -725,10 +733,10 @@ the transcript header stays `date:`; and `.count` still has two trust rules
 
 | # | item | repo | owner | size |
 |---|---|---|---|---|
-| A1 | Zig side: the chat handlers take a parsed route, the uid and `now`, and no longer read the path; the prelude leaves `handle`/`handleChannel`; the host's `Zig(route)` dispatch; the fallback build option | ag | CC → box | M |
+| A1 | Zig side: the chat handlers take a parsed route, the uid and `now`, and no longer read the path; the prelude leaves `handle`/`handleChannel`; the host's `Zig(route)` dispatch | ag | CC → box | M |
 | A2 | `Route.roc`: every chat path parsed by Zig's rules; the prelude; `Zig(route)` | rw | CC | M |
-| A3 | Agreement: Roc's parse against Zig's over a corpus (router.zig's path tables, every path in the route tests, and generated ones: case, `new`, trailing and doubled slashes, `.js`, over-long ids); the pre-turn hooks (`bodyLimit`, `family`) against the route each path parses to; on both builds | ag, rw | CC | M |
-| A4 | The route tests (router_harness.zig and the router_*_test files) driven through the router, on both builds | ag | CC → box | M |
+| A3 | Agreement: Roc's parse against Zig's over a corpus (router.zig's path tables, every path in the route tests, and generated ones: case, `new`, trailing and doubled slashes, `.js`, over-long ids); the pre-turn hooks (`bodyLimit`, `family`) against the route each path parses to | ag, rw | CC | M |
+| A4 | The route tests (router_harness.zig and the router_*_test files) driven through the router | ag | CC → box | M |
 | M1 | **Milestone 1** (§7) | rw, ag | CC; box releases | L |
 
 ### Orchestration in Roc
@@ -764,7 +772,10 @@ Each is a release, with its twin test. A route that moves answers with
 | C5 | Fan-out (notify, sidebar, recent, `users/<member>/images.md`, `users/<member>/code.md` with the fence scanner and its quirk), replacing angry-gopher's | rw | CC | L |
 | C6 | Uploads (multipart, sniff, quota as `write`, lossy filename) and download | rw | CC | L |
 | C7 | Recent (including doc rows from docs_store), images, code and links pages | rw | CC | L |
-| C8 | The store's writers: append, `.count`, reactions, bookmarks, pins; the Zig callers outside the chat switch to Roc's through the second entry point, in the same release (§3) | rw, ag | CC → box | L |
+| C9 | Docs and the reading list (`/chat/docs/*`, `…/<sid>/saved`), including docs' post to chat | rw | CC | L |
+| C10 | Login in Roc, with its welcome DM; the secrets behind `Users` hosted functions (§3) | rw, ag | CC → box | L |
+| C11 | Admin retire, through the router behind the admin gate | rw | CC | M |
+| C8 | The store's writers: append, `.count`, reactions, bookmarks, pins, once C9-C11 have made every caller Roc | rw | CC | L |
 
 ### Standalone, after Roc serves everything
 
@@ -780,8 +791,9 @@ Each is a release, with its twin test. A route that moves answers with
 3. M1, released.
 4. U2, C2, O1; M2, released. Then O2.
 5. C1, C4, C3, C5, C6, C7, each a release.
-6. C8, with P4.
-7. I3, I4.
+6. C9, C10, C11, each a release.
+7. C8, with P4.
+8. I3, I4.
 
 **Releases and rollback.** There is no production switch. Each step is a
 release through the box's gates, and going back is the previous release.
@@ -790,9 +802,6 @@ each twin test checks, so going back loses only what a restart loses:
 - presence (came-online fires again);
 - the rate limit;
 - bus subscribers, whose clients reconnect and resume by index.
-
-**The fallback build** is not a rollback: it is for a Roc build that is
-itself broken, so that a chat fix can still ship.
 
 ## 9. What the reviews changed
 
@@ -838,8 +847,9 @@ streams read.** That became R2's first decision and item Z1.
   - the two-process differential harness (old C2a-c) replaced by twin tests
     of each piece, angry-gopher's own route tests run through the router,
     and the judges;
-  - the per-route switch replaced by a fallback build, for a broken Roc
-    build only;
+  - no per-route switch, and no Zig fallback build either (Steve: Roc can
+    handle small-scale chat); the pin is kept on known-good nightlies,
+    moved often and on its own (R0);
   - the cost: Roc is a hard dependency of every chat release from day one
     (R0).
 
@@ -870,11 +880,9 @@ streams read.** That became R2's first decision and item Z1.
    transcripts and names.
 5. ~~`cid` to every viewer, or only the sender?~~ Settled by `e4a0f60`: it
    still goes to every viewer, and the client shows "sent" only for its own.
-6. **Docs, the reading list and the search routes stay Zig for v1?**
-7. **The fallback build: keep it, and until when?** It costs every A3 and A4
-   run twice. Until the router has gone some months without a Roc build
-   problem is my suggestion.
-8. **When the store moves (C8), do login's welcome DM, docs' post and admin
-   retire call Roc's store through a second entry point, or keep a Zig
-   store of their own for good?** The second entry point keeps one writer;
-   keeping Zig's means the twin tests run for as long as both exist.
+6. ~~Docs and the reading list stay Zig for v1?~~ They move to Roc (C9).
+   The search routes are parsed and delegated; when they move is open.
+7. ~~The fallback build?~~ None (Steve): Roc can handle small-scale chat;
+   the pin stays on known-good nightlies, as current as they come (R0).
+8. ~~Login, docs and retire when the store moves?~~ They move to Roc first
+   (C9-C11), so the store moves with only Roc callers (§3).
