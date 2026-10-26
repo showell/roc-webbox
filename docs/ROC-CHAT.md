@@ -17,10 +17,12 @@ Still open:
 - LC's user support for the TODO app has landed (`20f6505`) as a signed
   visitor id, not accounts; §6.3 says what that leaves for a standalone
   chat.
-- §3, §7 and §8 follow Steve's proposal (2026-10-25): a Roc router over the
-  whole chat from day one, delegating every route to Zig, and then Zig's
-  guts replaced by Roc's, release by release. The route-by-route production
-  switch is gone.
+- §3, §7 and §8 follow Steve's direction (2026-10-26, through the box):
+  port route by route on the branch, each route proven against the Zig it
+  replaces (its twin, the judges), and **ship once, when the chat is mostly
+  Roc**, in one release. "Mostly Roc" is CC's to propose in QUEUE (the
+  routes still Zig), and the box takes it as the release candidate's scope.
+- Z1 (one producer of topic blobs, `e4a0f60`) is merged and live (v39).
 
 ## 1. Goal
 
@@ -98,13 +100,13 @@ On day one it:
   the participant check, the other account, the channel's members, the first
   topic, whether the topic exists.
 
-So production switches once, when the router ships, and nothing the chat
-does changes that day: every route is still served by Zig's own code.
-
-**Then Roc takes over the guts, one release at a time.** Each step replaces
-one Zig piece with a Roc one, and ships as an ordinary release; going back is
-the previous release. There is no per-route switch in production, and no
-route is ever served two ways. In order (§8):
+**Then Roc takes over the routes, one at a time, on the branch** (Steve,
+2026-10-26). Each replaces one Zig piece with a Roc one and is proven
+against it: its twin test, and the box's judges on KVM when CC marks a
+milestone in QUEUE. **Production gets the Roc chat once, when it is mostly
+Roc**, in one release the box gates like any other; going back is the
+previous release. There is no per-route switch in production, and no route
+is ever served two ways. In order (§8):
 1. **Orchestration.** `send` runs §6.2's steps in Roc, calling Zig's pieces
    as hosted functions (milestone 2). Then the conversation lookup.
 2. **The pure guts:** Codec, Count, Paths, ZigText, Time, the frame builder.
@@ -114,7 +116,8 @@ route is ever served two ways. In order (§8):
    and feeds; uploads and download; the recent, images, code and links
    pages.
 4. **The store's callers outside the chat** (below): docs and the reading
-   list, login with its welcome DM, and admin retire.
+   list (after v1: they stay Zig for the first release, Steve), login with
+   its welcome DM, and admin retire.
 5. **Last, the store's writers** (append, `.count`, reactions, bookmarks,
    pins), once every caller of them is Roc.
 
@@ -868,15 +871,21 @@ Each is a release, with its twin test. A route that moves answers with
 1. P1, P8, C0, T1.
 2. P2, P3, P7, P9, U1 and A1-A4, each booting on metal. C1's pure modules
    start in parallel; they reach production only when a gut uses them.
-3. M1, released.
-4. U2, C2, O1; M2, released. Then O2.
-5. C1, C4, C3, C5, C6, C7, each a release.
-6. C9, C10, C11, each a release.
+3. M1, judged by the box (not released: Steve ships once, mostly Roc).
+4. C1, C4, C3 (done on the branch), then U2, O1 and M2, then C7's pages,
+   each a milestone the box judges.
+5. **v1, one release**: the chat as mostly Roc, its scope the QUEUE line
+   naming what is still Zig (proposed there by CC, taken by the box).
+6. After v1: O2, C5, C6, the streams (S1, S2), C9 (docs, the reading list,
+   search), C10, C11.
 7. C8, with P4.
 8. I3, I4.
 
-**Releases and rollback.** There is no production switch. Each step is a
-release through the box's gates, and going back is the previous release.
+**Releases and rollback.** There is no production switch, and the steps are
+not each a release (Steve, 2026-10-26): they land on CC's branch, the box
+judges each milestone CC marks, and production takes the Roc chat once, in
+one release, when it is mostly Roc (QUEUE names what is still Zig). Going
+back is the previous release.
 Every release reads and writes the same files in the same formats, which
 each twin test checks, so going back loses only what a restart loses:
 - presence (came-online fires again);
@@ -950,18 +959,21 @@ streams read.** That became R2's first decision and item Z1.
 
 ## 10. Questions for Steve
 
-1. ~~Mounted first, route by route?~~ Replaced by the Roc router (§3),
-   Steve's proposal.
-2. ~~Z1, one producer of topic blobs?~~ Done (`e4a0f60`), merged by the box.
-3. **Roc in `gopher.elf` (T1)?** The pinned nightly becomes part of the
-   production kernel's build.
+1. ~~A route-by-route cutover in production?~~ No (Steve, 2026-10-26):
+   route by route on the branch, proven there; production gets the Roc chat
+   once it is mostly Roc, in one release.
+2. ~~Z1, one producer of topic blobs?~~ Done (`e4a0f60`), merged and live.
+3. ~~Roc in `gopher.elf` (T1)?~~ Yes (Steve): the pinned nightly joins the
+   lynrummy.com kernel's build when the Roc chat ships; T1/A's diff is the
+   way in, kept current.
 4. ~~Refuse a new message that is not UTF-8, with a 400?~~ Done in Zig
    (`f2601c4`); the Roc chat matches it. C0 still counts old non-UTF-8
    transcripts and names.
 5. ~~`cid` to every viewer, or only the sender?~~ Settled by `e4a0f60`: it
    still goes to every viewer, and the client shows "sent" only for its own.
-6. ~~Docs and the reading list stay Zig for v1?~~ They move to Roc (C9).
-   The search routes are parsed and delegated; when they move is open.
+6. ~~Docs and the reading list stay Zig for v1?~~ Yes, and search too
+   (Steve, 2026-10-26): the router delegates them to Zig in v1; C9 is after
+   v1.
 7. ~~The fallback build?~~ None (Steve): Roc can handle small-scale chat;
    the pin stays on known-good nightlies, as current as they come (R0).
 8. ~~Login, docs and retire when the store moves?~~ They move to Roc first
