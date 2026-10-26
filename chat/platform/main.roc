@@ -19,6 +19,9 @@ platform ""
 		"roc_chat_reactions": Host.reactions!,
 		"roc_chat_react": Host.react!,
 		"roc_chat_pin": Host.pin!,
+		"roc_chat_landing": Host.landing!,
+		"roc_chat_page": Host.page!,
+		"roc_chat_srcs": Host.srcs!,
 	}
 	targets: {
 		x64musl: {

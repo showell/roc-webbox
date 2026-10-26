@@ -142,6 +142,32 @@ Pages := [].{
 		]))
 	}
 
+	## The sidebar as it crosses from the host (angry-gopher chat_page.zig
+	## `sidebarFields`): the viewer, "1" for a DM, the key, base and topic,
+	## then each list counted: the others (id, name, "1" when online), the
+	## channels, the pins, the topics.
+	decode_sidebar : List(List(U8)) -> Sidebar
+	decode_sidebar = |fields| {
+		at = |i| List.get(fields, i) ?? []
+		n_others = ZigText.parse_u64(at(5)) ?? 0
+		others = List.sublist(fields, { start: 6, len: n_others }) |> List.map_with_index(|_, k| { id: at(6 + 3 * k), name: at(7 + 3 * k), online: at(8 + 3 * k) == [49] })
+		(channels, after_channels) = counted(fields, 6 + 3 * n_others)
+		(pins, after_pins) = counted(fields, after_channels)
+		(topics, _) = counted(fields, after_pins)
+		{ uid: at(0), dm: at(1) == [49], key: at(2), base: at(3), sid: at(4), others, channels, pins, topics }
+	}
+
+	## A count at `i`, then that many: the items, and where the next begins.
+	counted : List(List(U8)), U64 -> (List(List(U8)), U64)
+	counted = |fields, i| {
+		n = ZigText.parse_u64(List.get(fields, i) ?? []) ?? 0
+		(List.sublist(fields, { start: i + 1, len: n }), i + 1 + n)
+	}
+
+	## A number the host sent as its digits.
+	number : List(U8) -> U64
+	number = |digits| ZigText.parse_u64(digits) ?? 0
+
 	bool : Bool -> List(U8)
 	bool = |b| if b Str.to_utf8("true") else Str.to_utf8("false")
 }

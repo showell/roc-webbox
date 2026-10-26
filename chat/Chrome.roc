@@ -44,6 +44,17 @@ Chrome := [].{
 		List.join(List.intersperse(links, Str.to_utf8(" · ")))
 	}
 
+	## A script's src from `name, src` pairs (the host's `srcs!`), or none.
+	src_in : List(List(U8)) -> (List(U8) -> List(U8))
+	src_in = |pairs| |name| find_src(pairs, name, 0)
+
+	find_src : List(List(U8)), List(U8), U64 -> List(U8)
+	find_src = |pairs, name, i| match List.get(pairs, i) {
+		Ok(n) if n == name => List.get(pairs, i + 1) ?? []
+		Ok(_) => find_src(pairs, name, i + 2)
+		Err(_) => []
+	}
+
 	## A template with each `{s}` slot filled in turn.
 	fill : Str, List(List(U8)) -> List(U8)
 	fill = |template, values| {

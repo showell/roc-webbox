@@ -19,6 +19,8 @@ import pf.Chat
 import pf.Host
 import Route
 import Reaction
+import Pages
+import Chrome
 
 handle! : Chat.Request => Chat.Answer
 handle! = |req|
@@ -30,7 +32,7 @@ handle! = |req|
 				Chat.redirect(List.concat(Str.to_utf8("/login/full?next=${area}"), req.sub))
 			} else {
 				route = if req.channel Route.under_channel(req.sub) else Route.under_chat(req.sub)
-				if is_action(route) act!(req, route) else Chat.zig(route, !Route.is_stream(route))
+				if is_action(route) or is_page(route) act!(req, route) else Chat.zig(route, !Route.is_stream(route))
 			}
 	}
 
@@ -40,14 +42,24 @@ is_action : Route.R -> Bool
 is_action = |r|
 	(r.family == 11 or r.family == 12) and r.part == 3 and (r.tail == 5 or r.tail == 6 or r.tail == 10 or r.tail == 11)
 
-## The four, in the Zig's order: presence; the conversation and the topic
-## (a miss is Zig's to answer, the same 404s); the method; then the route's
-## own work.
+## A conversation's landing (part 0) or a topic's page (part 3, tail 0), in
+## a DM or a channel (docs/ROC-CHAT.md C3).
+is_page : Route.R -> Bool
+is_page = |r|
+	(r.family == 11 or r.family == 12) and (r.part == 0 or (r.part == 3 and r.tail == 0))
+
+## The Roc's own routes, in the Zig's order: presence; the conversation and
+## the topic (a miss is Zig's to answer, the same 404s); the method; then
+## the route's own work.
 act! : Chat.Request, Route.R => Chat.Answer
 act! = |req, route| {
 	Host.presence!({})
-	if !Host.topic!(route.family, route.key, route.sid) {
+	if route.part == 0 {
+		landing!(route)
+	} else if !Host.topic!(route.family, route.key, route.sid) {
 		Chat.zig(route, Bool.False)
+	} else if route.tail == 0 {
+		if req.method != Chat.get and req.method != Chat.head Chat.not_allowed(Chat.get) else page!(route)
 	} else if route.tail == 10 {
 		if req.method != Chat.get {
 			Chat.not_allowed(Chat.get)
@@ -85,3 +97,29 @@ react! = |{}| {
 		}
 	}
 }
+
+html : List(U8)
+html = Str.to_utf8("text/html; charset=utf-8")
+
+## A conversation's landing: its first topic, or, with none, the page that
+## offers one.
+landing! : Route.R => Chat.Answer
+landing! = |route|
+	match Host.landing!(route.family, route.key) {
+		[base, first] => Chat.redirect(List.join([base, [47], first]))
+		[base, _, viewer, title] => Chat.respond(200, html, Pages.no_topics(Chrome.src_in(Host.srcs!({})), viewer, base, title))
+		_ => Chat.zig(route, Bool.False)
+	}
+
+## A topic's page, from what the host read.
+page! : Route.R => Chat.Answer
+page! = |route|
+	match Host.page!({}) {
+		[viewer, title, image_max, video_max, accept, search_min, .. as fields] => {
+			sb = Pages.decode_sidebar(fields)
+			limits = { image_max: Pages.number(image_max), video_max: Pages.number(video_max), accept, search_min: Pages.number(search_min) }
+			view = { key: route.key, base: sb.base, sid: route.sid, title, uid: sb.uid, viewer, sidebar_json: Pages.sidebar_json(sb) }
+			Chat.respond(200, html, Pages.conversation(Chrome.src_in(Host.srcs!({})), limits, view))
+		}
+		_ => Chat.answered
+	}

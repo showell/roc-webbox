@@ -31,4 +31,20 @@ Host := [].{
 
 	## Pin the topic for the member, or unpin it; false when it failed.
 	pin! : Bool => Bool
+
+	## A DM's or channel's landing (`family`, `key` the route's): none when
+	## the conversation is not the member's (Zig answers why); else its URL
+	## base and its first topic, and when it has none ("" ), the viewer and
+	## the conversation's title.
+	landing! : U8, List(U8) => List(List(U8))
+
+	## The conversation page's data, for the topic `topic!` found: the
+	## viewer, the title, the four limits (image, video, accept, search),
+	## then the sidebar's fields (Pages.decode_sidebar). Reading it records
+	## the topic as a DM's place to resume. None when it failed.
+	page! : {} => List(List(U8))
+
+	## Where a page names each script, as `name, src` pairs (a src's hash is
+	## of bytes the host holds).
+	srcs! : {} => List(List(U8))
 }

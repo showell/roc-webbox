@@ -69,7 +69,26 @@ pub const Host = struct {
     react: *const fn (ctx: *anyopaque, msg: u64, emoji: []const u8, on: bool) u8,
     /// Host.pin!: false when it failed.
     pin: *const fn (ctx: *anyopaque, pinned: bool) bool,
+    /// Host.landing!: none when the conversation is not the member's (or
+    /// the lookup failed); else its base and first topic, and when it has
+    /// none, the viewer and the conversation's title.
+    landing: *const fn (ctx: *anyopaque, family: u8, key: []const u8) []const []const u8 = noLanding,
+    /// Host.page!: the conversation page's data (Pages.roc reads it), or
+    /// none when it failed.
+    page: *const fn (ctx: *anyopaque) []const []const u8 = noPage,
+    /// Host.srcs!: where a page names each script, as `name, src` pairs.
+    srcs: *const fn (ctx: *anyopaque) []const []const u8 = noSrcs,
 };
+
+fn noLanding(_: *anyopaque, _: u8, _: []const u8) []const []const u8 {
+    @panic("landing asked of a host that does not answer it");
+}
+fn noPage(_: *anyopaque) []const []const u8 {
+    @panic("page asked of a host that does not answer it");
+}
+fn noSrcs(_: *anyopaque) []const []const u8 {
+    @panic("srcs asked of a host that does not answer it");
+}
 var host: ?Host = null;
 
 /// **A HOST FOR THE ROUTER ALONE**, for a test of its decisions: it says
@@ -86,6 +105,7 @@ pub const Routing = struct {
         var h = askingOnly(r, ask);
         h.presence = mark;
         h.topic = none;
+        h.landing = noConv;
         return h;
     }
     fn of(ctx: *anyopaque) *Routing {
@@ -100,6 +120,9 @@ pub const Routing = struct {
     }
     fn none(_: *anyopaque, _: u8, _: []const u8, _: []const u8) bool {
         return false;
+    }
+    fn noConv(_: *anyopaque, _: u8, _: []const u8) []const []const u8 {
+        return &.{};
     }
 };
 
@@ -170,6 +193,21 @@ export fn roc_chat_react(msg: u64, emoji: RocBytes, on: bool) callconv(.c) u8 {
 export fn roc_chat_pin(pinned: bool) callconv(.c) bool {
     const h = current("pin");
     return h.pin(h.ctx, pinned);
+}
+
+export fn roc_chat_landing(family: u8, key: RocBytes) callconv(.c) roc.RocBytesList {
+    const h = current("landing");
+    return .from(h.landing(h.ctx, family, key.slice()));
+}
+
+export fn roc_chat_page() callconv(.c) roc.RocBytesList {
+    const h = current("page");
+    return .from(h.page(h.ctx));
+}
+
+export fn roc_chat_srcs() callconv(.c) roc.RocBytesList {
+    const h = current("srcs");
+    return .from(h.srcs(h.ctx));
 }
 
 // ── a crash is a 500 (docs/ROC-CHAT.md R3, P9) ─────────────────────────────

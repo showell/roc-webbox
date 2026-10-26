@@ -91,7 +91,7 @@ call = |req| {
 		31 => [Pages.not_found(srcs(req.args, 3), arg(0), arg(1), arg(2))]
 		32 => [Pages.no_topics(srcs(req.args, 3), arg(0), arg(1), arg(2))]
 		33 => [Pages.no_conversations(srcs(req.args, 1), arg(0))]
-		34 => [Pages.sidebar_json(sidebar(req.args))]
+		34 => [Pages.sidebar_json(Pages.decode_sidebar(req.args))]
 		35 => {
 			limits = { image_max: u64(arg(7)), video_max: u64(arg(8)), accept: arg(9), search_min: u64(arg(10)) }
 			view = { key: arg(0), base: arg(1), sid: arg(2), title: arg(3), uid: arg(4), viewer: arg(5), sidebar_json: arg(6) }
@@ -127,35 +127,4 @@ maybe = |t| match t {
 
 ## The scripts' srcs, as `name, src` pairs from argument `from` on.
 srcs : List(List(U8)), U64 -> (List(U8) -> List(U8))
-srcs = |args, from| {
-	pairs = List.drop_first(args, from)
-	|name| find_src(pairs, name, 0)
-}
-
-find_src : List(List(U8)), List(U8), U64 -> List(U8)
-find_src = |pairs, name, i| match List.get(pairs, i) {
-	Ok(n) if n == name => List.get(pairs, i + 1) ?? []
-	Ok(_) => find_src(pairs, name, i + 2)
-	Err(_) => crash "twin: no src for a script"
-}
-
-## A sidebar from its arguments: the viewer, `1` for a DM, the key, base and
-## topic, then each list counted: others (id, name, online), channels, pins,
-## topics.
-sidebar : List(List(U8)) -> Pages.Sidebar
-sidebar = |args| {
-	at = |i| List.get(args, i) ?? []
-	n_others = u64(at(5))
-	others = List.map(List.sublist(args, { start: 6, len: n_others }), |_| {}) |> List.map_with_index(|_, k| { id: at(6 + 3 * k), name: at(7 + 3 * k), online: at(8 + 3 * k) == [49] })
-	(channels, after_channels) = counted(args, 6 + 3 * n_others)
-	(pins, after_pins) = counted(args, after_channels)
-	(topics, _) = counted(args, after_pins)
-	{ uid: at(0), dm: at(1) == [49], key: at(2), base: at(3), sid: at(4), others, channels, pins, topics }
-}
-
-## A count at `i`, then that many: the items, and where the next begins.
-counted : List(List(U8)), U64 -> (List(List(U8)), U64)
-counted = |args, i| {
-	n = u64(List.get(args, i) ?? [])
-	(List.sublist(args, { start: i + 1, len: n }), i + 1 + n)
-}
+srcs = |args, from| Chrome.src_in(List.drop_first(args, from))
