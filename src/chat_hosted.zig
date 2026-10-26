@@ -88,11 +88,16 @@ const Scripted = struct {
     reactions: ?[]const u8 = "",
     react_answer: u8 = 0,
     pin_ok: bool = true,
+    send_to: []const []const u8 = &.{ "/chat/c/1_2", "1" },
+    is_async: bool = false,
+    hostile_answer: u8 = 0,
+    bookmark_ok: bool = true,
+    append_ok: bool = true,
     asked: std.ArrayList(u8) = .empty,
     alloc: std.mem.Allocator,
 
     fn host(self: *Scripted) Host {
-        return .{ .ctx = self, .member = member, .presence = presence, .topic = topic, .body = bodyOf, .reactions = reactionsOf, .react = react, .pin = pin };
+        return .{ .ctx = self, .member = member, .presence = presence, .topic = topic, .body = bodyOf, .reactions = reactionsOf, .react = react, .pin = pin, .send_conv = sendConv, .header = header, .hostile = hostile, .viewer = viewer, .bookmark = bookmark, .append = append };
     }
     fn me(ctx: *anyopaque) *Scripted {
         return @ptrCast(@alignCast(ctx));
@@ -127,6 +132,30 @@ const Scripted = struct {
     fn pin(ctx: *anyopaque, pinned: bool) bool {
         say(ctx, "pin {}", .{pinned});
         return me(ctx).pin_ok;
+    }
+    fn sendConv(ctx: *anyopaque, family: u8, key: []const u8, sid: []const u8) []const []const u8 {
+        say(ctx, "send_conv {d} {s} {s}", .{ family, key, sid });
+        return me(ctx).send_to;
+    }
+    fn header(ctx: *anyopaque, name: []const u8) []const []const u8 {
+        say(ctx, "header {s}", .{name});
+        return if (me(ctx).is_async) &.{"1"} else &.{};
+    }
+    fn hostile(ctx: *anyopaque, markdown: []const u8) u8 {
+        say(ctx, "hostile {s}", .{markdown});
+        return me(ctx).hostile_answer;
+    }
+    fn viewer(ctx: *anyopaque) []const u8 {
+        say(ctx, "viewer", .{});
+        return "Steve";
+    }
+    fn bookmark(ctx: *anyopaque, sid: []const u8) bool {
+        say(ctx, "bookmark {s}", .{sid});
+        return me(ctx).bookmark_ok;
+    }
+    fn append(ctx: *anyopaque, sid: []const u8, name: []const u8, markdown: []const u8, cid: []const u8) bool {
+        say(ctx, "append {s} {s} {s} {s}", .{ sid, name, markdown, cid });
+        return me(ctx).append_ok;
     }
 };
 
@@ -214,6 +243,61 @@ test "a topic's reactions, react, pin and unpin are the Roc's: presence, the top
         s.found = false;
         break :blk s;
     }, .{ .serve = .{ .route = .{ .family = .dm, .key = "1_2", .sid = "Gone", .part = .topic, .tail = .react }, .presence = false } }, "member;presence;topic 11 1_2 Gone;");
-    // Every other route is still Zig's, asking nothing more.
-    try expectAct("/c/1_2/Plans/send", false, .POST, a, .{ .serve = .{ .route = .{ .family = .dm, .key = "1_2", .sid = "Plans", .part = .topic, .tail = .send }, .presence = true } }, "member;");
+    // A route still Zig's goes there, asking nothing more.
+    try expectAct("/c/1_2/Plans/stream", false, .GET, a, .{ .serve = .{ .route = .{ .family = .dm, .key = "1_2", .sid = "Plans", .part = .topic, .tail = .stream }, .presence = false } }, "member;");
+}
+
+test "a send is the Roc's: the conversation, the method, the header, the body, the message judged, the bookmark, then the store" {
+    use(testing.allocator);
+    defer @import("roc_abi.zig").deinit();
+    const a: Scripted = .{ .alloc = undefined, .body = "markdown=hi&cid=c-1" };
+    const asked = "member;presence;send_conv 11 1_2 Plans;header x-chat-async;body;";
+    try expectAct("/c/1_2/Plans/send", false, .POST, a, .{ .redirect = "/chat/c/1_2/Plans" }, asked ++ "hostile hi;viewer;bookmark Plans;append Plans Steve hi c-1;");
+    // A channel's send moves no bookmark; an async sender is answered 204.
+    try expectAct("/ops/Plans/send", true, .POST, blk: {
+        var s = a;
+        s.send_to = &.{ "/channel/ops", "0" };
+        s.is_async = true;
+        break :blk s;
+    }, .{ .respond = .{ .status = 204 } }, "member;presence;send_conv 12 ops Plans;header x-chat-async;body;hostile hi;viewer;append Plans Steve hi c-1;");
+    // Hostile, a bookmark or a store that failed: the host answered, and
+    // nothing after it is asked.
+    try expectAct("/c/1_2/Plans/send", false, .POST, blk: {
+        var s = a;
+        s.hostile_answer = 1;
+        break :blk s;
+    }, .answered, asked ++ "hostile hi;");
+    try expectAct("/c/1_2/Plans/send", false, .POST, blk: {
+        var s = a;
+        s.hostile_answer = 2;
+        break :blk s;
+    }, .answered, asked ++ "hostile hi;");
+    try expectAct("/c/1_2/Plans/send", false, .POST, blk: {
+        var s = a;
+        s.bookmark_ok = false;
+        break :blk s;
+    }, .answered, asked ++ "hostile hi;viewer;bookmark Plans;");
+    try expectAct("/c/1_2/Plans/send", false, .POST, blk: {
+        var s = a;
+        s.append_ok = false;
+        break :blk s;
+    }, .answered, asked ++ "hostile hi;viewer;bookmark Plans;append Plans Steve hi c-1;");
+    // Judged by the Roc before the host is asked to: empty, not UTF-8.
+    try expectAct("/c/1_2/Plans/send", false, .POST, blk: {
+        var s = a;
+        s.body = "markdown=%20%0A";
+        break :blk s;
+    }, .{ .respond = .{ .status = 400, .body = "not sent: the message is empty\n" } }, asked);
+    try expectAct("/c/1_2/Plans/send", false, .POST, blk: {
+        var s = a;
+        s.body = "markdown=%FF";
+        break :blk s;
+    }, .{ .respond = .{ .status = 400, .body = "not sent: the message is not UTF-8 text\n" } }, asked);
+    // No conversation to send to: back to the Zig, which says why.
+    try expectAct("/c/1_2/Plans/send", false, .POST, blk: {
+        var s = a;
+        s.send_to = &.{};
+        break :blk s;
+    }, .{ .serve = .{ .route = .{ .family = .dm, .key = "1_2", .sid = "Plans", .part = .topic, .tail = .send }, .presence = false } }, "member;presence;send_conv 11 1_2 Plans;");
+    try expectAct("/c/1_2/Plans/send", false, .GET, a, .{ .not_allowed = .POST }, "member;presence;send_conv 11 1_2 Plans;");
 }

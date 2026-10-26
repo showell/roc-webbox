@@ -32,6 +32,9 @@ platform ""
 		"roc_chat_conv": Host.conv!,
 		"roc_chat_bookmark": Host.bookmark!,
 		"roc_chat_append": Host.append!,
+		"roc_chat_send_conv": Host.send_conv!,
+		"roc_chat_header": Host.header!,
+		"roc_chat_hostile": Host.hostile!,
 	}
 	targets: {
 		x64musl: {

@@ -84,7 +84,23 @@ Host := [].{
 	## found; false when it failed.
 	bookmark! : List(U8) => Bool
 
-	## Append a message to topic `sid` of the conversation `conv!` found, by
-	## the member under `name`, and send it live; false when it failed.
-	append! : List(U8), List(U8), List(U8) => Bool
+	## Append a message to topic `sid` of the conversation `conv!` or
+	## `send_conv!` found, by the member under `name`, with the sender's
+	## client id `cid` ("" for none), and send it live: the store's whole
+	## append (its number, date, block, count, search, publish, fan-out).
+	## False when it failed.
+	append! : List(U8), List(U8), List(U8), List(U8) => Bool
+
+	## A topic to send to (`family`, `key`, `sid` the route's): none when the
+	## conversation is not the member's (Zig answers why); else its URL base
+	## and "1" for a DM. Reads the conversation's title, as the Zig did. The
+	## host holds it for `bookmark!` and `append!`.
+	send_conv! : U8, List(U8), List(U8) => List(List(U8))
+
+	## A request header's value, or none (read before the body).
+	header! : List(U8) => List(List(U8))
+
+	## Whether markdown is hostile: 0 no, 1 yes and the host has refused it
+	## (webbox's edge counter and its 400), 2 the check failed.
+	hostile! : List(U8) => U8
 }

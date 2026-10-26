@@ -53,10 +53,11 @@ is_page = |r|
 	(r.family == 11 or r.family == 12) and (r.part == 0 or (r.part == 3 and r.tail == 0))
 
 ## /chat and /chat/default (2), /chat/conversations (9), /chat/msg/<id>
-## (10), and a new topic in a DM or a channel (part 1).
+## (10), and in a DM or a channel a new topic (part 1) or a send (tail 3,
+## or 13 with segments after it).
 is_own : Route.R -> Bool
 is_own = |r|
-	r.family == 2 or r.family == 9 or r.family == 10 or ((r.family == 11 or r.family == 12) and r.part == 1)
+	r.family == 2 or r.family == 9 or r.family == 10 or ((r.family == 11 or r.family == 12) and (r.part == 1 or (r.part == 3 and (r.tail == 3 or r.tail == 13))))
 
 ## The Roc's own routes, in the Zig's order: presence; the conversation and
 ## the topic (a miss is Zig's to answer, the same 404s); the method; then
@@ -72,6 +73,8 @@ act! = |req, route| {
 		msg!(route.rest)
 	} else if route.part == 1 {
 		new_topic!(req, route)
+	} else if route.tail == 3 or route.tail == 13 {
+		send!(req, route)
 	} else if route.part == 0 {
 		landing!(route)
 	} else if !Host.topic!(route.family, route.key, route.sid) {
@@ -261,7 +264,7 @@ make! = |route, base, dm, topic|
 		# The bookmark first, as a send's: one that fails makes no topic.
 		if dm and !Host.bookmark!(topic) {
 			Chat.answered
-		} else if !Host.append!(topic, name, Str.to_utf8("hi")) {
+		} else if !Host.append!(topic, name, Str.to_utf8("hi"), []) {
 			Chat.answered
 		} else if dm and !announce!(route, base, topic, name) {
 			Chat.answered
@@ -276,6 +279,66 @@ announce! : Route.R, List(U8), List(U8), List(U8) => Bool
 announce! = |route, base, topic, name|
 	match Topics.highest_general(Host.topics!(route.family, route.key)) {
 		Ok(gen) if gen != topic =>
-			Host.append!(gen, name, List.join([Str.to_utf8("New topic: ["), topic, Str.to_utf8("]("), base, [47], topic, Str.to_utf8(")")]))
+			Host.append!(gen, name, List.join([Str.to_utf8("New topic: ["), topic, Str.to_utf8("]("), base, [47], topic, Str.to_utf8(")")]), [])
 		_ => Bool.True
+	}
+
+## POST .../<sid>/send: docs/ROC-CHAT.md §6.2's steps, the store's append
+## the host's. A send makes its topic, so no topic need be there; the
+## conversation must be the member's.
+send! : Chat.Request, Route.R => Chat.Answer
+send! = |req, route|
+	match Host.send_conv!(route.family, route.key, route.sid) {
+		[base, dm] =>
+			if route.tail == 13 {
+				Chat.not_found
+			} else if req.method != Chat.post {
+				Chat.not_allowed(Chat.post)
+			} else {
+				# The header before the body: reading the body moves past it.
+				is_async = Host.header!(Str.to_utf8("x-chat-async")) == [[49]]
+				body = Host.body!(1)
+				if !body.ok {
+					Chat.answered
+				} else {
+					match Form.field(body.bytes, Str.to_utf8("markdown")) {
+						Malformed => Chat.malformed
+						Missing => refuse("not sent: no message (the form has no markdown field)\n")
+						Found(md) =>
+							match Form.field(body.bytes, Str.to_utf8("cid")) {
+								Malformed => Chat.malformed
+								Found(cid) => store!(route, List.join([base, [47], route.sid]), dm == [49], is_async, md, cid)
+								Missing => store!(route, List.join([base, [47], route.sid]), dm == [49], is_async, md, [])
+							}
+					}
+				}
+			}
+		_ => Chat.zig(route, Bool.False)
+	}
+
+refuse : Str -> Chat.Answer
+refuse = |why| Chat.respond(400, [], Str.to_utf8(why))
+
+## The message judged, then stored: empty, not UTF-8 text, or hostile is
+## refused; the bookmark (a DM's) before the store, so one that fails
+## stores nothing; then 204 for an async sender, else back to the topic.
+store! : Route.R, List(U8), Bool, Bool, List(U8), List(U8) => Chat.Answer
+store! = |route, back, dm, is_async, md, cid|
+	if ZigText.trim(md) == [] {
+		refuse("not sent: the message is empty\n")
+	} else if Str.from_utf8(md).is_err() {
+		refuse("not sent: the message is not UTF-8 text\n")
+	} else if Host.hostile!(md) != 0 {
+		Chat.answered
+	} else {
+		name = Host.viewer!({})
+		if dm and !Host.bookmark!(route.sid) {
+			Chat.answered
+		} else if !Host.append!(route.sid, name, md, cid) {
+			Chat.answered
+		} else if is_async {
+			Chat.respond(204, [], [])
+		} else {
+			Chat.redirect(back)
+		}
 	}

@@ -669,6 +669,20 @@ O1's tests inject failures at every step (as Zig's FailingAllocator tests do)
 and check that stored implies echoed, and that an error implies nothing
 stored.
 
+**As O1 landed (2026-10-26).** Steps 1, 2 and 10 are the Roc's (chat/main.roc
+`send!`, `store!`), and so is the order of 3-5: the conversation first
+(`Host.send_conv!`, which is the old `findConv`: the pair's other account,
+the channel's members), then the method, the `X-Chat-Async` header, the
+body, the empty and non-UTF-8 checks, the hostile check (`Host.hostile!`,
+whose 400 and edge count are the host's), the bookmark for a DM, and the
+store. Steps 6-9 are one hosted `Host.append!`: Zig's `appendMessage`, which
+builds everything that can fail before it stores and fails nothing after.
+Splitting it (U2) would make that order the Roc's too; it is a move of the
+store's writer, so it goes with C8, after v1. The hostile check cannot be
+reached by any message a person could send (16 units of work a byte; 200,000
+random messages of the formatting characters found none), so its branch is
+held by the scripted host, not the twin.
+
 ### 6.3 Identity (depends on LC's user support)
 
 **Mounted:** angry-gopher fills `user` from `users.currentUserID` and
@@ -761,6 +775,12 @@ echoed; an error implies nothing stored); the twin test of a send, Roc's
 order against Zig's `appendMessage`, on the same tree and `now`; the judges
 on `gopher.elf`.
 
+**Where it stands (2026-10-26):** met but for U2. The send is the Roc's
+(O1), held by its twin and by failures injected at the host's three steps
+(the members, the bookmark, the append); the append's own steps are still
+one Zig call, whose failures its own tests inject. The box judges it on
+`gopher.elf` as a milestone (QUEUE RC-M2).
+
 ## 8. Work items
 
 Each item lands with tests; a piece that replaces Zig lands with its twin
@@ -826,9 +846,9 @@ the transcript header stays `date:`; and `.count` still has two trust rules
 
 | # | item | repo | owner | size |
 |---|---|---|---|---|
-| U2 | The send's pieces as hosted functions: `appendMessage` split into its steps, so §6.2's order is Roc's | ag | CC → box | M |
+| U2 | The send's pieces as hosted functions: `appendMessage` split into its steps, so §6.2's order is Roc's (**proposed: after v1, with C8**; O1 took steps 1-5 and 10 without it, and steps 6-9 are one hosted `append!`, as C4's and C3's writes are; see the note under §6.2) | ag | CC → box | M |
 | C2 | The twin-test kit: a Zig function and its Roc twin run on the same inputs (a fixed `now`, a copy of one tree, seeded randomness), their answers and the files they leave compared; corpora of poison blocks, mixed-case sids and non-UTF-8 names; failure injection | ag, rw | CC | L |
-| O1 | `send` in Roc (§6.2) over U2, with failure injection at every step | rw | CC | M |
+| O1 | `send` in Roc (§6.2) over U2, with failure injection at every step (**done for steps 1-5 and 10**: chat/main.roc `send!` and `store!` serve every send, a DM's and a channel's, judging the form, the empty and non-UTF-8 message, the async header and the bookmark's order in Roc; the conversation, the hostile check and the store's `appendMessage` are the host's, as hosted functions; a conversation that is not there or not the member's is handed back, so its 404s are the Zig's own; held to the old Zig by angry-gopher `chat_actions_twin_test.zig`, now 129 requests both ways, every answer and file the same, by chat_hosted.zig's scripted host for the order of the calls and the hostile and failed-store paths no request can reach, and by router_failures_test.zig for a store, a bookmark and a member list that fail; every mutant killed) | rw | CC | M |
 | M2 | **Milestone 2** (§7) | rw, ag | CC; box releases | S |
 | O2 | The conversation lookup in Roc: the participant check, the other account, the channel's members, the first topic, whether the topic exists, the titles | rw | CC | M |
 
@@ -872,7 +892,7 @@ Each is a release, with its twin test. A route that moves answers with
 2. P2, P3, P7, P9, U1 and A1-A4, each booting on metal. C1's pure modules
    start in parallel; they reach production only when a gut uses them.
 3. M1, judged by the box (not released: Steve ships once, mostly Roc).
-4. C1, C4, C3 (done on the branch), then U2, O1 and M2, then C7's pages,
+4. C1, C4, C3, O1 (done on the branch), then raw, links and C7's pages,
    each a milestone the box judges.
 5. **v1, one release**: the chat as mostly Roc, its scope the QUEUE line
    naming what is still Zig (proposed there by CC, taken by the box).

@@ -96,8 +96,24 @@ pub const Host = struct {
     conv: *const fn (ctx: *anyopaque, family: u8, key: []const u8) []const []const u8 = noLanding,
     /// Host.bookmark!, Host.append!: false when they failed.
     bookmark: *const fn (ctx: *anyopaque, sid: []const u8) bool = noBookmark,
-    append: *const fn (ctx: *anyopaque, sid: []const u8, name: []const u8, markdown: []const u8) bool = noAppend,
+    append: *const fn (ctx: *anyopaque, sid: []const u8, name: []const u8, markdown: []const u8, cid: []const u8) bool = noAppend,
+    /// Host.send_conv!: a topic to send to, or none.
+    send_conv: *const fn (ctx: *anyopaque, family: u8, key: []const u8, sid: []const u8) []const []const u8 = noSendConv,
+    /// Host.header!: a request header's value, or none.
+    header: *const fn (ctx: *anyopaque, name: []const u8) []const []const u8 = noHeader,
+    /// Host.hostile!: 0 no, 1 refused, 2 failed.
+    hostile: *const fn (ctx: *anyopaque, markdown: []const u8) u8 = noHostile,
 };
+
+fn noSendConv(_: *anyopaque, _: u8, _: []const u8, _: []const u8) []const []const u8 {
+    @panic("send_conv asked of a host that does not answer it");
+}
+fn noHeader(_: *anyopaque, _: []const u8) []const []const u8 {
+    @panic("header asked of a host that does not answer it");
+}
+fn noHostile(_: *anyopaque, _: []const u8) u8 {
+    @panic("hostile asked of a host that does not answer it");
+}
 
 fn noBytes(_: *anyopaque) []const u8 {
     @panic("a hosted read asked of a host that does not answer it");
@@ -108,7 +124,7 @@ fn noKeyBytes(_: *anyopaque, _: []const u8) []const u8 {
 fn noBookmark(_: *anyopaque, _: []const u8) bool {
     @panic("bookmark asked of a host that does not answer it");
 }
-fn noAppend(_: *anyopaque, _: []const u8, _: []const u8, _: []const u8) bool {
+fn noAppend(_: *anyopaque, _: []const u8, _: []const u8, _: []const u8, _: []const u8) bool {
     @panic("append asked of a host that does not answer it");
 }
 
@@ -148,6 +164,7 @@ pub const Routing = struct {
         h.members = nothing;
         h.channels = nothing;
         h.topics = noConv;
+        h.send_conv = noSendTo;
         return h;
     }
     fn of(ctx: *anyopaque) *Routing {
@@ -164,6 +181,9 @@ pub const Routing = struct {
         return false;
     }
     fn noConv(_: *anyopaque, _: u8, _: []const u8) []const []const u8 {
+        return &.{};
+    }
+    fn noSendTo(_: *anyopaque, _: u8, _: []const u8, _: []const u8) []const []const u8 {
         return &.{};
     }
     fn empty(_: *anyopaque) []const u8 {
@@ -301,9 +321,24 @@ export fn roc_chat_bookmark(sid: RocBytes) callconv(.c) bool {
     return h.bookmark(h.ctx, sid.slice());
 }
 
-export fn roc_chat_append(sid: RocBytes, name: RocBytes, markdown: RocBytes) callconv(.c) bool {
+export fn roc_chat_append(sid: RocBytes, name: RocBytes, markdown: RocBytes, cid: RocBytes) callconv(.c) bool {
     const h = current("append");
-    return h.append(h.ctx, sid.slice(), name.slice(), markdown.slice());
+    return h.append(h.ctx, sid.slice(), name.slice(), markdown.slice(), cid.slice());
+}
+
+export fn roc_chat_send_conv(family: u8, key: RocBytes, sid: RocBytes) callconv(.c) roc.RocBytesList {
+    const h = current("send_conv");
+    return .from(h.send_conv(h.ctx, family, key.slice(), sid.slice()));
+}
+
+export fn roc_chat_header(name: RocBytes) callconv(.c) roc.RocBytesList {
+    const h = current("header");
+    return .from(h.header(h.ctx, name.slice()));
+}
+
+export fn roc_chat_hostile(markdown: RocBytes) callconv(.c) u8 {
+    const h = current("hostile");
+    return h.hostile(h.ctx, markdown.slice());
 }
 
 export fn roc_chat_srcs() callconv(.c) roc.RocBytesList {
