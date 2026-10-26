@@ -141,6 +141,35 @@ test "the Roc fails a request by a reason, as the host's error for it; and a mal
     try probe("/malformed/Abad", "counted", "malformed Abad;", null);
 }
 
+test "every account crosses with its id, kind and name, in the host's order; a read that failed is `failed`, never no accounts" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    roc.use(arena.allocator());
+    defer roc.deinit();
+    const S = struct {
+        var fails: bool = false;
+        fn accounts(ctx: *anyopaque) abi.Accounts {
+            Files.say(ctx, "accounts", "");
+            if (fails) {
+                Files.fail(ctx, error.IsDir);
+                return .failed;
+            }
+            return .{ .found = &.{ .{ .id = "10", .name = "Ten\r\n", .kind = .member }, .{ .id = "3", .name = "Claude", .kind = .agent }, .{ .id = "9", .name = "", .kind = .guest } } };
+        }
+    };
+    for ([_]bool{ false, true }) |fails| {
+        S.fails = fails;
+        var f: Files = .{};
+        defer f.asked.deinit(testing.allocator);
+        var h = f.host();
+        h.accounts = S.accounts;
+        const got = try abi.decide(arena.allocator(), "/accounts", false, .GET, h);
+        try testing.expectEqualStrings(if (fails) "failed" else "found m:10=Ten\r\n a:3=Claude g:9=", got.respond.body);
+        try testing.expectEqualStrings("accounts ;", f.asked.items);
+        try testing.expectEqual(if (fails) @as(?anyerror, error.IsDir) else null, f.failed);
+    }
+}
+
 test "a Roc crash is error.RocCrashed, its message kept, and the next call is served; a crash after a hosted call too" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();

@@ -20,6 +20,7 @@ import Feeds
 import Recent
 import ChatState
 import Conversation
+import Accounts
 
 call : { which : U8, args : List(List(U8)) } -> List(List(U8))
 call = |req| {
@@ -144,6 +145,16 @@ call = |req| {
 			List.join([[num(List.len(got.malformed))], got.malformed, List.join(List.map(got.rosters, |r| List.concat([r.name, num(List.len(r.members))], r.members)))])
 		}
 		59 => [Paths.sessions_dir(Paths.dm_conv_dir(arg(0))), Paths.sessions_dir(Paths.channel_conv_dir(arg(1))), Paths.channel_path(arg(1)), Paths.reactions_path(Paths.dm_conv_dir(arg(0)), arg(2))]
+		60 => {
+			# The ids asked, then the accounts as `id, kind, name` triples (the
+			# kind `a`, `g` or `m`): each id's exists and name, then the
+			# authorized as `id, name` pairs.
+			n = u64(arg(0))
+			ids = List.sublist(req.args, { start: 1, len: n })
+			all = accounts(req.args, 1 + n, [])
+			asked = List.join(List.map(ids, |id| [bool(Accounts.exists(all, id)), Accounts.name(all, id)]))
+			List.concat(asked, List.join(List.map(Accounts.authorized(all), |a| [a.id, a.name])))
+		}
 		_ => crash "twin: no function ${U8.to_str(req.which)}"
 	}
 }
@@ -172,6 +183,22 @@ entries = |args, i, out|
 				_ => Other
 			}
 			entries(args, i + 2, List.append(out, { kind, name }))
+		}
+		_ => out
+	}
+
+## Accounts as the test wrote them: `id, kind, name` triples from argument
+## `i`, the kind `a` (the agent), `m` (a member) or anything else (a guest).
+accounts : List(List(U8)), U64, List(Accounts.Account) -> List(Accounts.Account)
+accounts = |args, i, out|
+	match (List.get(args, i), List.get(args, i + 1), List.get(args, i + 2)) {
+		(Ok(id), Ok(k), Ok(name)) => {
+			kind = match k {
+				[97] => Agent
+				[109] => Member
+				_ => Guest
+			}
+			accounts(args, i + 3, List.append(out, { id, kind, name }))
 		}
 		_ => out
 	}

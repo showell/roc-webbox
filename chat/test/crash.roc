@@ -4,8 +4,9 @@
 ## the next request served) is seen. It also names any path a test likes
 ## to the file primitives (`/read/<path>`, `/write/<path>`,
 ## `/remove/<path>`, `/list/<path>`), as the chat's own Roc never would, so
-## the seam's check of each is seen, and asks `fail!` (`/fail`) and
-## `malformed_channel!` (`/malformed/<name>`). Never linked into a server.
+## the seam's check of each is seen, and asks `fail!` (`/fail`),
+## `malformed_channel!` (`/malformed/<name>`) and `accounts!`
+## (`/accounts`). Never linked into a server.
 app [handle!] { pf: platform "../platform/main.roc" }
 
 import pf.Chat
@@ -38,6 +39,20 @@ handle! = |req|
 			File => " f:"
 			Other => " o:"
 		}), e.name)))
+		Chat.respond(200, [], List.concat(Str.to_utf8(said), each))
+	} else if req.sub == Str.to_utf8("/accounts") {
+		got = Host.accounts!({})
+		said = match got.status {
+			Found => "found"
+			Failed => "failed"
+		}
+		# Each account as ` <kind>:<id>=<name>`, so a record laid out wrong
+		# shows.
+		each = List.join(List.map(got.accounts, |a| List.join([Str.to_utf8(match a.kind {
+			Agent => " a:"
+			Guest => " g:"
+			Member => " m:"
+		}), a.id, [61], a.name])))
 		Chat.respond(200, [], List.concat(Str.to_utf8(said), each))
 	} else if req.sub == Str.to_utf8("/fail") {
 		Host.fail!(MalformedChannel)

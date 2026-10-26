@@ -42,29 +42,48 @@ pub const ReadRec = extern struct { bytes: RocBytes, status: route_mod.ReadStatu
 pub const EntryRec = extern struct { name: RocBytes, kind: route_mod.EntryKind };
 /// Host.roc's `list!` answer: `{ entries : List(...), status : [Failed, Found, Missing] }`.
 pub const ListRec = extern struct { entries: EntryList, status: route_mod.ReadStatus };
+/// One of Host.roc's `accounts!` accounts: `{ id : List(U8), kind : [Agent, Guest, Member], name : List(U8) }`.
+pub const AccountRec = extern struct { id: RocBytes, name: RocBytes, kind: route_mod.AccountKind };
+/// Host.roc's `accounts!` answer: `{ accounts : List(...), status : [Failed, Found] }`.
+pub const AccountsRec = extern struct { accounts: AccountList, status: route_mod.AccountsStatus };
 
-/// A Roc list of `EntryRec`: its elements hold a refcounted list, so it has
-/// the two-word header (count, refcount) a `List(List(U8))` has.
-pub const EntryList = extern struct {
-    ptr: ?[*]EntryRec,
-    length: usize,
-    capacity_or_alloc_ptr: usize,
+/// A Roc list of `Rec`, each made of an `Item` by `rec`: its elements hold
+/// a refcounted list, so it has the two-word header (count, refcount) a
+/// `List(List(U8))` has.
+fn RecList(comptime Rec: type, comptime Item: type, comptime rec: fn (Item) Rec) type {
+    return extern struct {
+        ptr: ?[*]Rec,
+        length: usize,
+        capacity_or_alloc_ptr: usize,
 
-    fn from(items: []const Entry) EntryList {
-        if (items.len == 0) return .{ .ptr = null, .length = 0, .capacity_or_alloc_ptr = 0 };
-        const w = @sizeOf(usize);
-        const base = roc.allocate(2 * w + items.len * @sizeOf(EntryRec), w);
-        std.mem.writeInt(usize, base[0..w], items.len, .little);
-        std.mem.writeInt(usize, base[w..][0..w], 1, .little);
-        const elems: [*]EntryRec = @ptrCast(@alignCast(base + 2 * w));
-        for (items, 0..) |it, k| elems[k] = .{ .name = .from(it.name), .kind = it.kind };
-        return .{ .ptr = elems, .length = items.len, .capacity_or_alloc_ptr = items.len << 1 };
+        fn from(items: []const Item) @This() {
+            if (items.len == 0) return .{ .ptr = null, .length = 0, .capacity_or_alloc_ptr = 0 };
+            const w = @sizeOf(usize);
+            const base = roc.allocate(2 * w + items.len * @sizeOf(Rec), w);
+            std.mem.writeInt(usize, base[0..w], items.len, .little);
+            std.mem.writeInt(usize, base[w..][0..w], 1, .little);
+            const elems: [*]Rec = @ptrCast(@alignCast(base + 2 * w));
+            for (items, 0..) |it, k| elems[k] = rec(it);
+            return .{ .ptr = elems, .length = items.len, .capacity_or_alloc_ptr = items.len << 1 };
+        }
+    };
+}
+
+pub const EntryList = RecList(EntryRec, Entry, struct {
+    fn rec(it: Entry) EntryRec {
+        return .{ .name = .from(it.name), .kind = it.kind };
     }
-};
+}.rec);
+
+pub const AccountList = RecList(AccountRec, Account, struct {
+    fn rec(it: Account) AccountRec {
+        return .{ .id = .from(it.id), .name = .from(it.name), .kind = it.kind };
+    }
+}.rec);
 
 comptime {
     const w = @sizeOf(usize);
-    std.debug.assert(@sizeOf(RocBytes) == 3 * w and @sizeOf(Request) == 4 * w and @sizeOf(RouteRec) == 10 * w and @sizeOf(Answer) == 20 * w and @sizeOf(Got) == 4 * w and @sizeOf(ConvRec) == 10 * w and @sizeOf(ReadRec) == 4 * w and @sizeOf(EntryRec) == 4 * w and @sizeOf(ListRec) == 4 * w);
+    std.debug.assert(@sizeOf(RocBytes) == 3 * w and @sizeOf(Request) == 4 * w and @sizeOf(RouteRec) == 10 * w and @sizeOf(Answer) == 20 * w and @sizeOf(Got) == 4 * w and @sizeOf(ConvRec) == 10 * w and @sizeOf(ReadRec) == 4 * w and @sizeOf(EntryRec) == 4 * w and @sizeOf(ListRec) == 4 * w and @sizeOf(AccountRec) == 7 * w and @sizeOf(AccountsRec) == 4 * w);
 }
 
 /// **A FILE AS THE HOST READ IT**: its bytes, nothing there, or a read that
@@ -80,6 +99,14 @@ pub const Entry = struct { name: []const u8, kind: route_mod.EntryKind };
 /// gives them; nothing there; or a listing that failed (the host has failed
 /// the request). Missing and failed are never one answer.
 pub const Listing = union(route_mod.ReadStatus) { failed, found: []const Entry, missing };
+
+/// An account as the host read it: its id (a canonical folder's name), its
+/// `name` file's bytes as stored ("" when it has none), its kind.
+pub const Account = struct { id: []const u8, name: []const u8, kind: route_mod.AccountKind };
+
+/// **EVERY ACCOUNT, OR A READ THAT FAILED** (the host has failed the
+/// request): never "no accounts" for a read that failed.
+pub const Accounts = union(route_mod.AccountsStatus) { failed, found: []const Account };
 
 /// **A CONVERSATION THE ROC FOUND TO BE THE MEMBER'S** (chat/main.roc
 /// `find!`), handed to each hosted function that works on one: the host
@@ -111,10 +138,11 @@ pub const Host = struct {
     member: *const fn (ctx: *anyopaque) bool,
     /// Host.presence!.
     presence: *const fn (ctx: *anyopaque) void,
-    /// Host.account!: whether account `id` exists.
-    account: *const fn (ctx: *anyopaque, id: []const u8) bool = noAccount,
-    /// Host.name!: account `id`'s name, or "".
-    name: *const fn (ctx: *anyopaque, id: []const u8) []const u8 = noKeyBytes,
+    /// Host.accounts!: every account (canonical folders, in the disk's
+    /// order), its kind and its name file's bytes; the Roc does every
+    /// lookup. **NEVER A READ OF THE AUTH ROOT'S SECRETS**: the folders,
+    /// whether each has a password, each name.
+    accounts: *const fn (ctx: *anyopaque) Accounts = noAccounts,
     /// Host.body!: read to `which` form's limit; null
     /// when the host answered (too big) or failed.
     body: *const fn (ctx: *anyopaque, which: route_mod.Form) ?[]const u8,
@@ -146,13 +174,10 @@ pub const Host = struct {
     page: *const fn (ctx: *anyopaque, conv: Conv, sid: []const u8) []const []const u8 = noPage,
     /// Host.srcs!: where a page names each script, as `name, src` pairs.
     srcs: *const fn (ctx: *anyopaque) []const []const u8 = noSrcs,
-    /// Host.me!, Host.viewer!: the member's id and name.
+    /// Host.me!: the member's id.
     me: *const fn (ctx: *anyopaque) []const u8 = noBytes,
-    viewer: *const fn (ctx: *anyopaque) []const u8 = noBytes,
     /// Host.now!: the request's time, Unix seconds.
     now: *const fn (ctx: *anyopaque) i64 = noNow,
-    /// Host.members!: every member as `id, name` pairs.
-    members: *const fn (ctx: *anyopaque) []const []const u8 = noList,
     /// Host.append!: a message appended to topic `sid` of `conv`. False
     /// when it failed.
     append: *const fn (ctx: *anyopaque, conv: Conv, sid: []const u8, name: []const u8, markdown: []const u8, cid: []const u8) bool = noAppend,
@@ -194,8 +219,8 @@ fn noFail(_: *anyopaque, e: anyerror) void {
 fn noMalformed(_: *anyopaque, _: []const u8) void {
     @panic("malformed_channel asked of a host that does not answer it");
 }
-fn noAccount(_: *anyopaque, _: []const u8) bool {
-    @panic("account asked of a host that does not answer it");
+fn noAccounts(_: *anyopaque) Accounts {
+    @panic("accounts asked of a host that does not answer it");
 }
 fn noHeader(_: *anyopaque, _: []const u8) []const []const u8 {
     @panic("header asked of a host that does not answer it");
@@ -205,9 +230,6 @@ fn noHostile(_: *anyopaque, _: []const u8) route_mod.Hostility {
 }
 
 fn noBytes(_: *anyopaque) []const u8 {
-    @panic("a hosted read asked of a host that does not answer it");
-}
-fn noKeyBytes(_: *anyopaque, _: []const u8) []const u8 {
     @panic("a hosted read asked of a host that does not answer it");
 }
 fn noNow(_: *anyopaque) i64 {
@@ -245,11 +267,10 @@ pub const Routing = struct {
         // id (so no DM is theirs), no files (no last DM, no feed, no
         // channel), no folders (no topics, no channels), no other members.
         h.me = empty;
-        h.viewer = empty;
+        h.accounts = noAccount;
         h.read = noFile;
         h.list = noFolder;
         h.srcs = nothing;
-        h.members = nothing;
         h.links = holdsNone;
         h.recent = nothing;
         return h;
@@ -275,6 +296,9 @@ pub const Routing = struct {
     }
     fn noFile(_: *anyopaque, _: []const u8) Read {
         return .missing;
+    }
+    fn noAccount(_: *anyopaque) Accounts {
+        return .{ .found = &.{} };
     }
     fn noFolder(_: *anyopaque, _: []const u8) Listing {
         return .missing;
@@ -319,14 +343,12 @@ export fn roc_chat_presence() callconv(.c) void {
     h.presence(h.ctx);
 }
 
-export fn roc_chat_account(id: RocBytes) callconv(.c) bool {
-    const h = current("account");
-    return h.account(h.ctx, id.slice());
-}
-
-export fn roc_chat_name(id: RocBytes) callconv(.c) RocBytes {
-    const h = current("name");
-    return .from(h.name(h.ctx, id.slice()));
+export fn roc_chat_accounts() callconv(.c) AccountsRec {
+    const h = current("accounts");
+    return switch (h.accounts(h.ctx)) {
+        .found => |all| .{ .accounts = .from(all), .status = .found },
+        .failed => .{ .accounts = .from(&.{}), .status = .failed },
+    };
 }
 
 export fn roc_chat_body(which: route_mod.Form) callconv(.c) Got {
@@ -414,19 +436,9 @@ export fn roc_chat_me() callconv(.c) RocBytes {
     return .from(h.me(h.ctx));
 }
 
-export fn roc_chat_viewer() callconv(.c) RocBytes {
-    const h = current("viewer");
-    return .from(h.viewer(h.ctx));
-}
-
 export fn roc_chat_now() callconv(.c) i64 {
     const h = current("now");
     return h.now(h.ctx);
-}
-
-export fn roc_chat_members() callconv(.c) roc.RocBytesList {
-    const h = current("members");
-    return .from(h.members(h.ctx));
 }
 
 export fn roc_chat_append(conv: ConvRec, sid: RocBytes, name: RocBytes, markdown: RocBytes, cid: RocBytes) callconv(.c) bool {

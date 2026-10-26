@@ -114,6 +114,15 @@ pub const ReadStatus = enum(u8) { failed, found, missing };
 /// tells them (`directory` is `dir`; a link, a device or the like `other`).
 pub const EntryKind = enum(u8) { dir, file, other };
 
+/// Host.roc's `accounts!`: each account's kind (the agent, which the host
+/// alone decides; a member, who has a password; a guest, who has neither).
+pub const AccountKind = enum(u8) { agent, guest, member };
+
+/// Host.roc's `accounts!` answer's `status`: every account read, or a read
+/// that failed (the host has failed the request, and the list is no
+/// answer). An auth root not there is no accounts, as store.list holds it.
+pub const AccountsStatus = enum(u8) { failed, found };
+
 /// Host.roc's `fail!` argument: why the Roc fails the request, as the
 /// host's own error for it (the error the Zig it replaced returned).
 pub const FailReason = enum(u8) {
@@ -128,7 +137,7 @@ pub const FailReason = enum(u8) {
 
 comptime {
     @setEvalBranchQuota(20_000);
-    for (.{ Family, Part, Tail, Method, Kind, Form, Reacted, Hostility, ReadStatus, EntryKind, FailReason }) |E| assertRocOrder(E);
+    for (.{ Family, Part, Tail, Method, Kind, Form, Reacted, Hostility, ReadStatus, EntryKind, AccountKind, AccountsStatus, FailReason }) |E| assertRocOrder(E);
 }
 
 /// That `E`'s values are Roc's for the same tags: numbered from 0 in the

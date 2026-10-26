@@ -13,14 +13,16 @@ Host := [].{
 	## a request the Roc serves itself).
 	presence! : {} => {}
 
-	## Whether account `id` exists (angry-gopher's `users.principalExists`):
-	## a DM's other half must, its folder and fan-out being named after
-	## both.
-	account! : List(U8) => Bool
-
-	## Account `id`'s name, or "" when it has none (`users.getUserName`).
-	name! : List(U8) => List(U8)
-
+	## **EVERY ACCOUNT, THE ONE IDENTITY PRIMITIVE**: each account folder
+	## named as a counter names one (a canonical id), in the disk's order,
+	## with its kind (the agent; a member, who has a password; a guest, who
+	## has neither) and its `name` file's bytes as stored ("" when it has
+	## none). Accounts.roc does every lookup on them. `Failed` when one would
+	## not read: the request has failed, and the list is no answer. **NEVER
+	## THE AUTH ROOT ITSELF**: the host reads only the folders, whether each
+	## has a password, and each name, never a password or a key. Asked at
+	## most once a request.
+	accounts! : {} => { accounts : List({ id : List(U8), kind : [Agent, Guest, Member], name : List(U8) }), status : [Failed, Found] }
 	## The request's body, read to a form's limit (`which`: the react
 	## form's or a message's); not `ok` when the host answered instead (too
 	## big) or failed.
@@ -83,15 +85,9 @@ Host := [].{
 	## The member's own id.
 	me! : {} => List(U8)
 
-	## The member's name.
-	viewer! : {} => List(U8)
-
 	## The request's time, in Unix seconds: the one time everything it
 	## stamps carries (a new conversation's topic is named for its date).
 	now! : {} => I64
-
-	## Every member and the agent, as `id, name` pairs.
-	members! : {} => List(List(U8))
 
 	## Append a message to topic `sid` of `conv`, by the member under
 	## `name`, with the sender's client id `cid` ("" for none), and send it
