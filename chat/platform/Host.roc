@@ -84,8 +84,10 @@ Host := [].{
 	## Roc found malformed, on the channel's own route
 	## (channelMembers's error.MalformedChannel); account `whose`'s kind or
 	## name, which a lookup needed and which `accounts!` listed as
-	## unreadable (the error that read failed with, as the host kept it).
-	fail! : [KindUnreadable, MalformedChannel, NameUnreadable], List(U8) => {}
+	## unreadable (the error that read failed with, as the host kept it); a
+	## message with no author's name (appendMessage's error.NoAuthor, `whose`
+	## unused).
+	fail! : [KindUnreadable, MalformedChannel, NameUnreadable, NoAuthor], List(U8) => {}
 
 	## Count channel `name` as one a listing skipped as malformed: the
 	## operator's count, kept by the host for /admin/host.
@@ -111,11 +113,26 @@ Host := [].{
 	## stamps carries (a new conversation's topic is named for its date).
 	now! : {} => I64
 
-	## Append a message to topic `sid` of `conv`, by the member under
-	## `name`, with the sender's client id `cid` ("" for none), and send it
-	## live to `conv`'s members: the store's whole append (its number, date,
-	## block, count, search, publish, fan-out). False when it failed.
-	append! : Chat.Conv, List(U8), List(U8), List(U8), List(U8) => Bool
+	## **THE ONE MARKDOWN PROCESSOR** (angry-gopher markdown.zig `render`):
+	## a message's markdown as the HTML its frame carries. `Failed` when it
+	## could not be rendered (the request has failed): never an empty page.
+	render! : List(U8) => { html : List(U8), status : [Failed, Rendered] }
+
+	## **A MESSAGE STORED**: `block` (Transcript.stored_form of message
+	## `index` of topic `sid` in `conv`) appended to the topic's transcript,
+	## then the store's infrastructure told: the count cache (`index` + 1,
+	## the transcript's new size, the block's offset and its author) and the
+	## search index (`message`, as it lands). False when the append failed
+	## (the request has failed, and nothing was stored). **STORED IS DONE**:
+	## the count and the search are best-effort and never fail it.
+	store_message! : Chat.Conv, List(U8), List(U8), U64, Chat.Message => Bool
+
+	## **THE CROSS-PAGE FAN-OUT, STILL ZIG'S** (angry-gopher chat_fanout
+	## `fanoutCrossPage`; docs/ROC-CHAT.md C8b ports it): message `index` of
+	## topic `sid` in `conv`, stored, out to every member's notify, sidebar
+	## (a topic's first message), recent, images and code. Best-effort: a
+	## failure is counted by the host and never fails the send.
+	fan_out! : Chat.Conv, List(U8), Chat.Message, U64 => {}
 
 	## A request header's value, or none (read before the body).
 	header! : List(U8) => List(List(U8))

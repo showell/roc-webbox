@@ -137,12 +137,18 @@ pub const AccountsStatus = enum(u8) { failed, found };
 /// Host.roc's `fail!` argument: why the Roc fails the request. A malformed
 /// channel is error.MalformedChannel, the error the Zig it replaced
 /// returned; an account whose kind or name a lookup needed and which would
-/// not read is that read's own error, as the host kept it.
-pub const FailReason = enum(u8) { kind_unreadable, malformed_channel, name_unreadable };
+/// not read is that read's own error, as the host kept it; a message with no
+/// author's name is error.NoAuthor, appendMessage's own.
+pub const FailReason = enum(u8) { kind_unreadable, malformed_channel, name_unreadable, no_author };
+
+/// Host.roc's `render!` answer's `status`: the markdown rendered (the HTML
+/// beside it), or a render that failed (the host has failed the request):
+/// never an empty page for one that failed.
+pub const RenderStatus = enum(u8) { failed, rendered };
 
 comptime {
     @setEvalBranchQuota(20_000);
-    for (.{ Family, Part, Tail, Method, Kind, Form, CountStatus, Hostility, ReadStatus, EntryKind, AccountKind, NameRead, AccountsStatus, FailReason }) |E| assertRocOrder(E);
+    for (.{ Family, Part, Tail, Method, Kind, Form, CountStatus, Hostility, ReadStatus, EntryKind, AccountKind, NameRead, AccountsStatus, FailReason, RenderStatus }) |E| assertRocOrder(E);
 }
 
 /// That `E`'s values are Roc's for the same tags: numbered from 0 in the

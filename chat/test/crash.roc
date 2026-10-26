@@ -5,8 +5,9 @@
 ## to the file primitives (`/read/<path>`, `/write/<path>`,
 ## `/remove/<path>`, `/list/<path>`, `/append/<path>`), as the chat's own
 ## Roc never would, so the seam's check of each is seen; it publishes
-## (`/publish/<key>`), counts (`/count/<sid>`), and asks `fail!`
-## (`/fail/<reason>/<whose>`),
+## (`/publish/<key>`), counts (`/count/<sid>`), renders (`/render/<md>`),
+## stores and fans out a message (`/store/<sid>`, `/fan/<sid>`), and asks
+## `fail!` (`/fail/<reason>/<whose>`),
 ## `malformed_channel!` (`/malformed/<name>`) and `accounts!`
 ## (`/accounts`). Never linked into a server.
 app [handle!] { pf: platform "../platform/main.roc" }
@@ -39,6 +40,20 @@ handle! = |req|
 			Failed => "failed"
 		}
 		Chat.respond(200, [], Str.to_utf8(said))
+	} else if starts(req.sub, "/render/") {
+		got = Host.render!(List.drop_first(req.sub, 8))
+		said = match got.status {
+			Rendered => "rendered "
+			Failed => "failed"
+		}
+		Chat.respond(200, [], List.concat(Str.to_utf8(said), got.html))
+	} else if starts(req.sub, "/store/") {
+		# Message 9 of DM 1_2's topic `<sid>`: every field of the message a
+		# different string, so a record laid out wrong shows.
+		Chat.respond(200, [], done(Host.store_message!(dm12, List.drop_first(req.sub, 7), Str.to_utf8("the block"), 8, probe_message)))
+	} else if starts(req.sub, "/fan/") {
+		Host.fan_out!(dm12, List.drop_first(req.sub, 5), probe_message, 8)
+		Chat.respond(200, [], Str.to_utf8("fanned"))
 	} else if starts(req.sub, "/remove/") {
 		Chat.respond(200, [], done(Host.remove!(List.drop_first(req.sub, 8))))
 	} else if starts(req.sub, "/list/") {
@@ -82,6 +97,8 @@ handle! = |req|
 			Host.fail!(KindUnreadable, List.drop_first(rest, 5))
 		} else if starts(rest, "name/") {
 			Host.fail!(NameUnreadable, List.drop_first(rest, 5))
+		} else if starts(rest, "author/") {
+			Host.fail!(NoAuthor, List.drop_first(rest, 7))
 		} else {
 			crash "crash.roc: /fail/ with no reason"
 		}
@@ -112,6 +129,12 @@ starts = |l, p| {
 	pre = Str.to_utf8(p)
 	List.take_first(l, List.len(pre)) == pre
 }
+
+dm12 : Chat.Conv
+dm12 = { family: Dm, key: Str.to_utf8("1_2"), base: Str.to_utf8("/chat/c/1_2"), members: [Str.to_utf8("1"), Str.to_utf8("2")] }
+
+probe_message : Chat.Message
+probe_message = { id: Str.to_utf8("Plans_9"), from: Str.to_utf8("Steve"), at: Str.to_utf8("2026-10-26T00:00:00Z"), uid: Str.to_utf8("1"), markdown: Str.to_utf8("**hi**") }
 
 done : Bool -> List(U8)
 done = |ok| Str.to_utf8(if ok "done" else "failed")

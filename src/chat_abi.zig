@@ -48,6 +48,11 @@ pub const AccountRec = extern struct { id: RocBytes, name: RocBytes, kind: route
 pub const AccountsRec = extern struct { accounts: AccountList, status: route_mod.AccountsStatus };
 /// Host.roc's `message_count!` answer: `{ count : U64, status : [Counted, Failed] }`.
 pub const CountRec = extern struct { count: u64, status: route_mod.CountStatus };
+/// Host.roc's `render!` answer: `{ html : List(U8), status : [Failed, Rendered] }`.
+pub const RenderRec = extern struct { html: RocBytes, status: route_mod.RenderStatus };
+/// Chat.roc's `Message`: `{ id, from, at, uid, markdown }`, every field
+/// `List(U8)`, so laid out by name alone.
+pub const MessageRec = extern struct { at: RocBytes, from: RocBytes, id: RocBytes, markdown: RocBytes, uid: RocBytes };
 
 /// A Roc list of `Rec`, each made of an `Item` by `rec`: its elements hold
 /// a refcounted list, so it has the two-word header (count, refcount) a
@@ -88,7 +93,7 @@ pub const AccountList = RecList(AccountRec, Account, struct {
 
 comptime {
     const w = @sizeOf(usize);
-    std.debug.assert(@sizeOf(RocBytes) == 3 * w and @sizeOf(Request) == 4 * w and @sizeOf(RouteRec) == 10 * w and @sizeOf(Answer) == 20 * w and @sizeOf(Got) == 4 * w and @sizeOf(ConvRec) == 10 * w and @sizeOf(ReadRec) == 4 * w and @sizeOf(EntryRec) == 4 * w and @sizeOf(ListRec) == 4 * w and @sizeOf(AccountRec) == 7 * w and @sizeOf(AccountsRec) == 4 * w and @sizeOf(CountRec) == 16);
+    std.debug.assert(@sizeOf(RocBytes) == 3 * w and @sizeOf(Request) == 4 * w and @sizeOf(RouteRec) == 10 * w and @sizeOf(Answer) == 20 * w and @sizeOf(Got) == 4 * w and @sizeOf(ConvRec) == 10 * w and @sizeOf(ReadRec) == 4 * w and @sizeOf(EntryRec) == 4 * w and @sizeOf(ListRec) == 4 * w and @sizeOf(AccountRec) == 7 * w and @sizeOf(AccountsRec) == 4 * w and @sizeOf(CountRec) == 16 and @sizeOf(RenderRec) == 4 * w and @sizeOf(MessageRec) == 15 * w);
 }
 
 /// **A FILE AS THE HOST READ IT**: its bytes, nothing there, or a read that
@@ -125,6 +130,24 @@ pub const Accounts = union(route_mod.AccountsStatus) { failed, found: []const Ac
 /// **A TOPIC'S MESSAGES AS THE HOST COUNTED THEM**, or a count that failed
 /// (the host has failed the request): never 0 for a count that failed.
 pub const Count = union(route_mod.CountStatus) { counted: u64, failed };
+
+/// **A MESSAGE'S MARKDOWN AS THE HOST RENDERED IT**, or a render that
+/// failed (the host has failed the request): never "" for one that failed.
+pub const Rendered = union(route_mod.RenderStatus) { failed, rendered: []const u8 };
+
+/// A message as the Roc made it (Chat.Message): what the store's count and
+/// search, and the fan-out, take. Its bytes are the call's.
+pub const Message = struct {
+    id: []const u8,
+    from: []const u8,
+    at: []const u8,
+    uid: []const u8,
+    markdown: []const u8,
+
+    fn of(r: MessageRec) Message {
+        return .{ .id = r.id.slice(), .from = r.from.slice(), .at = r.at.slice(), .uid = r.uid.slice(), .markdown = r.markdown.slice() };
+    }
+};
 
 /// Which of an account's reads a lookup needed, and failed on: its kind
 /// (the password's stat) or its name.
@@ -218,9 +241,18 @@ pub const Host = struct {
     me: *const fn (ctx: *anyopaque) []const u8 = noBytes,
     /// Host.now!: the request's time, Unix seconds.
     now: *const fn (ctx: *anyopaque) i64 = noNow,
-    /// Host.append!: a message appended to topic `sid` of `conv`. False
-    /// when it failed.
-    append: *const fn (ctx: *anyopaque, conv: Conv, sid: []const u8, name: []const u8, markdown: []const u8, cid: []const u8) bool = noAppend,
+    /// Host.render!: a message's markdown as its frame's HTML, or `.failed`
+    /// (the host has failed the request).
+    render: *const fn (ctx: *anyopaque, markdown: []const u8) Rendered = noRender,
+    /// Host.store_message!: `block`, message `index` of topic `sid` in
+    /// `conv`, appended to its transcript, then the count cache and the
+    /// search index told of `message`. False when the append failed (the
+    /// host has failed the request; nothing stored).
+    store_message: *const fn (ctx: *anyopaque, conv: Conv, sid: []const u8, block: []const u8, index: u64, message: Message) bool = noStoreMessage,
+    /// Host.fan_out!: the Zig's cross-page fan-out of message `index` of
+    /// topic `sid` in `conv` (C8b ports it). Best-effort: it cannot fail
+    /// the request.
+    fan_out: *const fn (ctx: *anyopaque, conv: Conv, sid: []const u8, message: Message, index: u64) void = noFanOut,
     /// Host.header!: a request header's value, or none.
     header: *const fn (ctx: *anyopaque, name: []const u8) []const []const u8 = noHeader,
     /// Host.hostile!.
@@ -287,8 +319,14 @@ fn noBytes(_: *anyopaque) []const u8 {
 fn noNow(_: *anyopaque) i64 {
     @panic("now asked of a host that does not answer it");
 }
-fn noAppend(_: *anyopaque, _: Conv, _: []const u8, _: []const u8, _: []const u8, _: []const u8) bool {
-    @panic("append asked of a host that does not answer it");
+fn noRender(_: *anyopaque, _: []const u8) Rendered {
+    @panic("render asked of a host that does not answer it");
+}
+fn noStoreMessage(_: *anyopaque, _: Conv, _: []const u8, _: []const u8, _: u64, _: Message) bool {
+    @panic("store_message asked of a host that does not answer it");
+}
+fn noFanOut(_: *anyopaque, _: Conv, _: []const u8, _: Message, _: u64) void {
+    @panic("fan_out asked of a host that does not answer it");
 }
 
 fn noPage(_: *anyopaque, _: Conv, _: []const u8) []const []const u8 {
@@ -487,6 +525,7 @@ export fn roc_chat_fail(reason: route_mod.FailReason, whose: RocBytes) callconv(
         .malformed_channel => h.fail(h.ctx, error.MalformedChannel),
         .kind_unreadable => h.fail_account(h.ctx, .kind, whose.slice()),
         .name_unreadable => h.fail_account(h.ctx, .name, whose.slice()),
+        .no_author => h.fail(h.ctx, error.NoAuthor),
     }
 }
 
@@ -510,9 +549,22 @@ export fn roc_chat_now() callconv(.c) i64 {
     return h.now(h.ctx);
 }
 
-export fn roc_chat_append(conv: ConvRec, sid: RocBytes, name: RocBytes, markdown: RocBytes, cid: RocBytes) callconv(.c) bool {
-    const h = current("append");
-    return h.append(h.ctx, .of(conv), sid.slice(), name.slice(), markdown.slice(), cid.slice());
+export fn roc_chat_render(markdown: RocBytes) callconv(.c) RenderRec {
+    const h = current("render");
+    return switch (h.render(h.ctx, markdown.slice())) {
+        .rendered => |html| .{ .html = .from(html), .status = .rendered },
+        .failed => .{ .html = .from(""), .status = .failed },
+    };
+}
+
+export fn roc_chat_store_message(conv: ConvRec, sid: RocBytes, block: RocBytes, index: u64, message: MessageRec) callconv(.c) bool {
+    const h = current("store_message");
+    return h.store_message(h.ctx, .of(conv), sid.slice(), block.slice(), index, .of(message));
+}
+
+export fn roc_chat_fan_out(conv: ConvRec, sid: RocBytes, message: MessageRec, index: u64) callconv(.c) void {
+    const h = current("fan_out");
+    h.fan_out(h.ctx, .of(conv), sid.slice(), .of(message), index);
 }
 
 export fn roc_chat_header(name: RocBytes) callconv(.c) roc.RocBytesList {

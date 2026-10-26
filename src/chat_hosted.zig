@@ -20,6 +20,9 @@ pub const Tail = route.Tail;
 pub const Form = route.Form;
 pub const Count = abi.Count;
 pub const CountStatus = route.CountStatus;
+pub const Rendered = abi.Rendered;
+pub const RenderStatus = route.RenderStatus;
+pub const Message = abi.Message;
 pub const Hostility = route.Hostility;
 pub const ReadStatus = route.ReadStatus;
 pub const Read = abi.Read;
@@ -126,7 +129,10 @@ const Scripted = struct {
     page: []const []const u8 = &.{},
     is_async: bool = false,
     hostile_answer: route.Hostility = .fine,
-    append_ok: bool = true,
+    /// Whether markdown renders (as `<p>` around it), and whether a
+    /// message's block is stored.
+    render_ok: bool = true,
+    store_ok: bool = true,
     transcript: bool = true,
     linked: bool = false,
     asked: std.ArrayList(u8) = .empty,
@@ -136,7 +142,7 @@ const Scripted = struct {
     const Channel = struct { name: []const u8, read: abi.Read };
 
     fn host(self: *Scripted) Host {
-        return .{ .ctx = self, .member = member, .presence = presence, .accounts = accountsOf, .me = meId, .now = nowOf, .body = bodyOf, .publish = publish, .append_line = appendLine, .message_count = messageCount, .read = readOf, .write = writeOf, .remove = removeOf, .list = listOf, .fail = failOf, .fail_account = failAccountOf, .malformed_channel = malformed, .page = pageOf, .header = header, .hostile = hostile, .append = append, .raw = raw, .links = links, .srcs = srcs };
+        return .{ .ctx = self, .member = member, .presence = presence, .accounts = accountsOf, .me = meId, .now = nowOf, .body = bodyOf, .publish = publish, .append_line = appendLine, .message_count = messageCount, .read = readOf, .write = writeOf, .remove = removeOf, .list = listOf, .fail = failOf, .fail_account = failAccountOf, .malformed_channel = malformed, .page = pageOf, .header = header, .hostile = hostile, .render = render, .store_message = storeMessage, .fan_out = fanOut, .raw = raw, .links = links, .srcs = srcs };
     }
     fn me(ctx: *anyopaque) *Scripted {
         return @ptrCast(@alignCast(ctx));
@@ -250,10 +256,22 @@ const Scripted = struct {
         say(ctx, "srcs", .{});
         return &.{};
     }
-    fn append(ctx: *anyopaque, conv: Conv, sid: []const u8, author: []const u8, markdown: []const u8, cid: []const u8) bool {
-        sayConv(ctx, "append", conv);
-        say(ctx, " {s} {s} {s} {s}", .{ sid, author, markdown, cid });
-        return me(ctx).append_ok;
+    fn render(ctx: *anyopaque, markdown: []const u8) abi.Rendered {
+        say(ctx, "render {s}", .{markdown});
+        const s = me(ctx);
+        if (!s.render_ok) return .failed;
+        return .{ .rendered = std.fmt.allocPrint(s.alloc, "<p>{s}</p>", .{markdown}) catch @panic("oom") };
+    }
+    /// The block escaped and every field of the message in Chat.Message's
+    /// order, so a record laid out wrong across the seam shows.
+    fn storeMessage(ctx: *anyopaque, conv: Conv, sid: []const u8, block: []const u8, index: u64, m: abi.Message) bool {
+        sayConv(ctx, "store", conv);
+        say(ctx, " {s} {f} {d} {s}|{s}|{s}|{s}|{s}", .{ sid, std.zig.fmtString(block), index, m.id, m.from, m.at, m.uid, m.markdown });
+        return me(ctx).store_ok;
+    }
+    fn fanOut(ctx: *anyopaque, conv: Conv, sid: []const u8, m: abi.Message, index: u64) void {
+        sayConv(ctx, "fan_out", conv);
+        say(ctx, " {s} {s}|{s}|{s}|{s}|{s} {d}", .{ sid, m.id, m.from, m.at, m.uid, m.markdown, index });
     }
 };
 
@@ -478,6 +496,87 @@ test "a DM's page and landing, and the DM with yourself: the title the Roc's, a 
     try expectAct("/c/1_1/Plans/reactions", false, .GET, a, .{ .respond = .{ .status = 200, .content_type = "application/x-ndjson; charset=utf-8", .body = "" } }, "member;presence;accounts;list 1_1/sessions;read 1_1/sessions/Plans.reactions.jsonl;");
 }
 
+/// What storing a message asks, step by step: message 4 (index 3, the
+/// scripted count) of topic `sid` in `conv` (as `sayConv` says it), the
+/// conversation's key `key`, by member 1 named `name`, at the scripted
+/// time. The count, the render, the store (the block escaped, then the
+/// message's fields), the frame on the topic's key, then the fan-out.
+const Sent = struct { count: []const u8, render: []const u8, store: []const u8, publish: []const u8, fan_out: []const u8 };
+
+fn sent(comptime conv: []const u8, comptime key: []const u8, comptime sid: []const u8, comptime name: []const u8, comptime md: []const u8, comptime cid: []const u8) Sent {
+    const at = "2025-10-25T13:46:40Z";
+    const id = sid ++ "_4";
+    const block = "\n\n-------------\nMSG_" ++ id ++ "\nfrom: " ++ name ++ "\ndate: " ++ at ++ "\nuid: 1\n\n" ++ md;
+    const frame = "id: 3\ndata: {\"index\":3,\"from\":\"" ++ name ++ "\",\"from_uid\":\"1\",\"at\":\"" ++ at ++ "\",\"html\":\"<p>" ++ md ++ "</p>\",\"markdown\":\"" ++ md ++ "\",\"id\":\"" ++ id ++ "\"" ++ (if (cid.len == 0) "" else ",\"cid\":\"" ++ cid ++ "\"") ++ "}\n\n";
+    const message = id ++ "|" ++ name ++ "|" ++ at ++ "|1|" ++ md;
+    return comptime .{
+        .count = "count " ++ conv ++ " " ++ sid ++ ";",
+        .render = "render " ++ md ++ ";",
+        .store = std.fmt.comptimePrint("store {s} {s} {f} 3 {s};", .{ conv, sid, std.zig.fmtString(block), message }),
+        .publish = std.fmt.comptimePrint("publish {s}/{s} {f};", .{ key, sid, std.zig.fmtString(frame) }),
+        .fan_out = "fan_out " ++ conv ++ " " ++ sid ++ " " ++ message ++ " 3;",
+    };
+}
+
+/// The whole of a message stored and sent.
+fn sentAll(comptime s: Sent) []const u8 {
+    return comptime s.count ++ s.render ++ s.store ++ s.publish ++ s.fan_out;
+}
+
+const dm_said = "dm 1_2 /chat/c/1_2 [1,2]";
+
+test "a message is the Roc's: no author, no message; the count, the id, the stamp, the block and the frame made before the store; then the store, the publish and the fan-out, in that order; nothing after a step that failed" {
+    use(testing.allocator);
+    defer @import("roc_abi.zig").deinit();
+    const a: Scripted = .{ .alloc = undefined, .body = "markdown=hi&cid=c-1" };
+    const before = "member;presence;accounts;header x-chat-async;body;hostile hi;" ++ bookmarked("Plans");
+    const plans = comptime sent(dm_said, "1_2", "Plans", "Steve", "hi", "c-1");
+    try expectAct("/c/1_2/Plans/send", false, .POST, a, .{ .redirect = "/chat/c/1_2/Plans" }, before ++ comptime sentAll(plans));
+    // **NO AUTHOR, NO MESSAGE**: the member's name empty fails the request
+    // with appendMessage's error, nothing counted, stored or sent.
+    try expectAct("/c/1_2/Plans/send", false, .POST, blk: {
+        var s = a;
+        s.accounts = &.{ .{ .id = "1", .name = .{ .found = "" }, .kind = .member }, .{ .id = "2", .name = .{ .found = "Debbie" }, .kind = .member } };
+        break :blk s;
+    }, .answered, before ++ "fail NoAuthor;");
+    // A count that failed: nothing rendered, stored or sent.
+    try expectAct("/c/1_2/Plans/send", false, .POST, blk: {
+        var s = a;
+        s.count = .failed;
+        break :blk s;
+    }, .answered, before ++ plans.count);
+    // **THE FRAME IS MADE BEFORE THE STORE**: a render that failed stores nothing.
+    try expectAct("/c/1_2/Plans/send", false, .POST, blk: {
+        var s = a;
+        s.render_ok = false;
+        break :blk s;
+    }, .answered, before ++ plans.count ++ plans.render);
+    // **A MESSAGE NOT STORED IS NEVER SENT**: no publish, no fan-out.
+    try expectAct("/c/1_2/Plans/send", false, .POST, blk: {
+        var s = a;
+        s.store_ok = false;
+        break :blk s;
+    }, .answered, before ++ plans.count ++ plans.render ++ plans.store);
+    // A topic's first message is index 0: its id `_1`, its block with no
+    // separator before it, its frame `id: 0`.
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    var first = a;
+    first.alloc = arena.allocator();
+    first.count = .{ .counted = 0 };
+    first.body = "markdown=one";
+    _ = try decide(arena.allocator(), "/c/1_2/Plans/send", false, .POST, first.host());
+    const at = "2025-10-25T13:46:40Z";
+    for ([_][]const u8{
+        "store " ++ dm_said ++ " Plans MSG_Plans_1\\nfrom: Steve\\ndate: " ++ at ++ "\\nuid: 1\\n\\none 0 Plans_1|Steve|" ++ at ++ "|1|one;",
+        "publish 1_2/Plans id: 0\\ndata: {\\\"index\\\":0,",
+        "fan_out " ++ dm_said ++ " Plans Plans_1|Steve|" ++ at ++ "|1|one 0;",
+    }) |want| if (std.mem.indexOf(u8, first.asked.items, want) == null) {
+        std.debug.print("not asked: {s}\nin: {s}\n", .{ want, first.asked.items });
+        return error.TestUnexpectedResult;
+    };
+}
+
 test "a send is the Roc's: the conversation, the method, the header, the body, the message judged, the bookmark, then the store" {
     use(testing.allocator);
     defer @import("roc_abi.zig").deinit();
@@ -486,13 +585,13 @@ test "a send is the Roc's: the conversation, the method, the header, the body, t
     // the title before a send), once.
     const found = "member;presence;accounts;";
     const asked = found ++ "header x-chat-async;body;";
-    try expectAct("/c/1_2/Plans/send", false, .POST, a, .{ .redirect = "/chat/c/1_2/Plans" }, asked ++ "hostile hi;" ++ bookmarked("Plans") ++ "append dm 1_2 /chat/c/1_2 [1,2] Plans Steve hi c-1;");
+    try expectAct("/c/1_2/Plans/send", false, .POST, a, .{ .redirect = "/chat/c/1_2/Plans" }, asked ++ "hostile hi;" ++ bookmarked("Plans") ++ comptime sentAll(sent(dm_said, "1_2", "Plans", "Steve", "hi", "c-1")));
     // A channel's send moves no bookmark; an async sender is answered 204.
     try expectAct("/ops/Plans/send", true, .POST, blk: {
         var s = a;
         s.is_async = true;
         break :blk s;
-    }, .{ .respond = .{ .status = 204 } }, "member;presence;read channels/ops.channel;header x-chat-async;body;hostile hi;accounts;append channel ops /channel/ops [1,3] Plans Steve hi c-1;");
+    }, .{ .respond = .{ .status = 204 } }, "member;presence;read channels/ops.channel;header x-chat-async;body;hostile hi;accounts;" ++ comptime sentAll(sent("channel ops /channel/ops [1,3]", "ops", "Plans", "Steve", "hi", "c-1")));
     // Hostile, a bookmark or a store that failed: the host answered, and
     // nothing after it is asked.
     try expectAct("/c/1_2/Plans/send", false, .POST, blk: {
@@ -512,9 +611,12 @@ test "a send is the Roc's: the conversation, the method, the header, the body, t
     }, .answered, asked ++ "hostile hi;read users/1/last-sessions/1_2;write users/1/last-sessions/1_2 Plans\n;");
     try expectAct("/c/1_2/Plans/send", false, .POST, blk: {
         var s = a;
-        s.append_ok = false;
+        s.store_ok = false;
         break :blk s;
-    }, .answered, asked ++ "hostile hi;" ++ bookmarked("Plans") ++ "append dm 1_2 /chat/c/1_2 [1,2] Plans Steve hi c-1;");
+    }, .answered, asked ++ "hostile hi;" ++ bookmarked("Plans") ++ comptime blk: {
+        const s = sent(dm_said, "1_2", "Plans", "Steve", "hi", "c-1");
+        break :blk s.count ++ s.render ++ s.store;
+    });
     // Judged by the Roc before the host is asked to: empty, not UTF-8.
     try expectAct("/c/1_2/Plans/send", false, .POST, blk: {
         var s = a;
@@ -540,7 +642,7 @@ test "a send is the Roc's: the conversation, the method, the header, the body, t
         s.body = "topic=Ideas";
         s.topics = &.{ "general2", "Plans" };
         break :blk s;
-    }, .{ .respond = .{ .status = 200, .content_type = "application/json; charset=utf-8", .body = "{\"conv\":\"1_2\",\"sid\":\"Ideas\"}" } }, "member;presence;accounts;body;list 1_2/sessions;" ++ bookmarked("Ideas") ++ "append dm 1_2 /chat/c/1_2 [1,2] Ideas Steve hi ;list 1_2/sessions;append dm 1_2 /chat/c/1_2 [1,2] general2 Steve New topic: [Ideas](/chat/c/1_2/Ideas) ;");
+    }, .{ .respond = .{ .status = 200, .content_type = "application/json; charset=utf-8", .body = "{\"conv\":\"1_2\",\"sid\":\"Ideas\"}" } }, "member;presence;accounts;body;list 1_2/sessions;" ++ bookmarked("Ideas") ++ comptime sentAll(sent(dm_said, "1_2", "Ideas", "Steve", "hi", "")) ++ "list 1_2/sessions;" ++ sentAll(sent(dm_said, "1_2", "general2", "Steve", "New topic: [Ideas](/chat/c/1_2/Ideas)", "")));
 }
 
 test "a topic's raw transcript and /chat/links are the Roc's: a transcript the host has not is a plain 404, never handed back" {
@@ -772,7 +874,7 @@ test "an account that will not read fails only what reads it, with its own read'
         s.body = "topic=Ideas";
         s.topics = &.{"Plans"};
         break :blk s;
-    }, .{ .respond = .{ .status = 200, .content_type = "application/json; charset=utf-8", .body = "{\"conv\":\"1_2\",\"sid\":\"Ideas\"}" } }, "member;presence;accounts;body;list 1_2/sessions;" ++ bookmarked("Ideas") ++ "append dm 1_2 /chat/c/1_2 [1,2] Ideas Steve hi ;list 1_2/sessions;");
+    }, .{ .respond = .{ .status = 200, .content_type = "application/json; charset=utf-8", .body = "{\"conv\":\"1_2\",\"sid\":\"Ideas\"}" } }, "member;presence;accounts;body;list 1_2/sessions;" ++ bookmarked("Ideas") ++ comptime sentAll(sent(dm_said, "1_2", "Ideas", "Steve", "hi", "")) ++ "list 1_2/sessions;");
     for ([_][]const u8{ "/links", "/images", "" }) |sub| {
         var arena = std.heap.ArenaAllocator.init(testing.allocator);
         defer arena.deinit();
@@ -853,7 +955,7 @@ test "the accounts are the Roc's to read: a guest's DM is opened, the roster is 
     // A guest is an account: its DM is the member's, titled by its name;
     // the viewer's name cut of its CR LF as it is stored.
     const guest: Scripted = .{ .alloc = undefined, .accounts = &all, .body = "markdown=hi" };
-    try expectAct("/c/1_4/Plans/send", false, .POST, guest, .{ .redirect = "/chat/c/1_4/Plans" }, "member;presence;accounts;header x-chat-async;body;hostile hi;read users/1/last-sessions/1_4;write users/1/last-sessions/1_4 Plans\n;read users/1/last-conv;write users/1/last-conv 1_4\n;append dm 1_4 /chat/c/1_4 [1,4] Plans Steve hi ;");
+    try expectAct("/c/1_4/Plans/send", false, .POST, guest, .{ .redirect = "/chat/c/1_4/Plans" }, "member;presence;accounts;header x-chat-async;body;hostile hi;read users/1/last-sessions/1_4;write users/1/last-sessions/1_4 Plans\n;read users/1/last-conv;write users/1/last-conv 1_4\n;" ++ comptime sentAll(sent("dm 1_4 /chat/c/1_4 [1,4]", "1_4", "Plans", "Steve", "hi", "")));
     // Not an account: the Zig's to answer.
     try expectAct("/c/1_5/Plans/send", false, .POST, guest, .{ .serve = .{ .route = .{ .family = .dm, .key = "1_5", .sid = "Plans", .part = .topic, .tail = .send }, .presence = false } }, "member;presence;accounts;");
 }

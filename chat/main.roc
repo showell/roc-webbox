@@ -13,8 +13,10 @@
 ## A topic's reactions, react, pin and unpin are the Roc's (docs/ROC-CHAT.md
 ## C4, `act!`); a reaction is the Roc's whole (its reactor, its bound, its
 ## stamp, its line and its frame), stored and sent through the primitives
-## (`append_line!`, `message_count!`, `publish!`); a message's store stays
-## Zig's, a hosted `append!`, until C8. The files and folders it reads by name (the member's own, a
+## (`append_line!`, `message_count!`, `publish!`); a message is the Roc's
+## too (`appended!`: its author, number, stamp, block and frame), stored
+## through `store_message!` (the append, the count cache, the search index)
+## and fanned out by the Zig's `fan_out!` until C8b. The files and folders it reads by name (the member's own, a
 ## conversation's topics, a channel's members, the rosters, a topic's
 ## reactions) it reads through the file primitives, the names and formats
 ## its own.
@@ -37,6 +39,7 @@ import Conversation
 import Accounts
 import Frame
 import Time
+import Transcript
 
 handle! : Chat.Request => Chat.Answer
 handle! = |req|
@@ -723,7 +726,7 @@ make! = |route, conv, who, topic|
 				# The bookmark first, as a send's: one that fails makes no topic.
 				if dm and !bookmark!(conv, topic) {
 					Chat.answered
-				} else if !Host.append!(conv, topic, name, Str.to_utf8("hi"), []) {
+				} else if !appended!(conv, topic, name, Str.to_utf8("hi"), []) {
 					Chat.answered
 				} else if dm and !announce!(route, conv, topic, name) {
 					Chat.answered
@@ -740,7 +743,7 @@ announce! : Route.R, Chat.Conv, List(U8), List(U8) => Bool
 announce! = |route, conv, topic, name|
 	match Topics.highest_general(topics!(route.family, route.key)) {
 		Ok(gen) if gen != topic =>
-			Host.append!(conv, gen, name, List.join([Str.to_utf8("New topic: ["), topic, Str.to_utf8("]("), conv.base, [47], topic, Str.to_utf8(")")]), [])
+			appended!(conv, gen, name, List.join([Str.to_utf8("New topic: ["), topic, Str.to_utf8("]("), conv.base, [47], topic, Str.to_utf8(")")]), [])
 		_ => Bool.True
 	}
 
@@ -809,12 +812,71 @@ store! = |route, conv, who, is_async, md, cid|
 			Ok(name) =>
 				if conv.family == Dm and !bookmark!(conv, route.sid) {
 					Chat.answered
-				} else if !Host.append!(conv, route.sid, name, md, cid) {
+				} else if !appended!(conv, route.sid, name, md, cid) {
 					Chat.answered
 				} else if is_async {
 					Chat.respond(204, [], [])
 				} else {
 					Chat.redirect(List.join([conv.base, [47], route.sid]))
 				}
+		}
+	}
+
+## **A MESSAGE STORED, THEN SENT LIVE** (angry-gopher chat_store
+## `appendMessage`, its comments the spec): by the member, named `name`, to
+## topic `sid` of `conv` (the sid as the request spelled it), with the
+## sender's client id `cid` ("" for none). Its number is the topic's count
+## (`message_count!`), its id `<sid>_<n>`, its stamp the request's time; its
+## block and its frame are made, then the block stored (`store_message!`:
+## the append, the count cache, the search index), then the frame published
+## on the topic's key, then the fan-out (`fan_out!`). False when a step
+## before the store failed (the request has, with its error), and nothing
+## was stored.
+appended! : Chat.Conv, List(U8), List(U8), List(U8), List(U8) => Bool
+appended! = |conv, sid, name, md, cid|
+	# **NO MESSAGE WITHOUT AN AUTHOR** (the review of 156): the decoder
+	# refuses such a block on every read, so it would go out live and be
+	# gone on reload. A nameless member (a release cut short) cannot post.
+	if name == [] {
+		Host.fail!(NoAuthor, [])
+		Bool.False
+	} else {
+		counted = Host.message_count!(conv, sid)
+		match counted.status {
+			Failed => Bool.False
+			Counted => {
+				index = counted.count
+				uid = Host.me!({})
+				# A count of the largest U64 has no next number: the call
+				# crashes into a 500, storing nothing.
+				id = List.join([sid, [95], Str.to_utf8(U64.to_str(index + 1))])
+				message = { id, from: name, at: Str.to_utf8(Time.rfc3339(Host.now!({}))), uid, markdown: md }
+				block = Transcript.stored_form(index, message)
+				rendered = Host.render!(md)
+				match rendered.status {
+					Failed => Bool.False
+					Rendered => {
+						# **THE ECHO IS MADE BEFORE THE STORE** (metal-vmm QUEUE
+						# 177.1): the live publish's key and frame, so nothing
+						# can fail between the store and the publish. A live
+						# publish that failed after the store answered success
+						# with no echo on the sender's stream, whose client then
+						# sent the message again: a duplicate.
+						key = List.join([conv.key, [47], sid])
+						frame = Frame.message({ index, from: name, from_uid: uid, at: message.at, html: rendered.html, markdown: md, id, cid })
+						if Host.store_message!(conv, sid, block, index, message) {
+							# **STORED IS DONE** (metal-vmm QUEUE 172): from here
+							# nothing fails the send, which a client would answer
+							# by sending it again. The publish cannot fail; the
+							# fan-out is best-effort, each failure counted.
+							Host.publish!(key, frame)
+							Host.fan_out!(conv, sid, message, index)
+							Bool.True
+						} else {
+							Bool.False
+						}
+					}
+				}
+			}
 		}
 	}

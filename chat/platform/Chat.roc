@@ -77,6 +77,12 @@ Chat := [].{
 	## conversation between calls: each operation is handed this.
 	Conv : { family : Family, key : List(U8), base : List(U8), members : List(List(U8)) }
 
+	## A message as the store keeps it (angry-gopher chat_store `ChatMessage`,
+	## the Roc's Transcript.Msg): its id (`<sid>_<n>`), its author's name as
+	## sent and account (`uid`), its stamp, its markdown. Handed to the store
+	## (the count and the search index take it) and to the fan-out.
+	Message : { id : List(U8), from : List(U8), at : List(U8), uid : List(U8), markdown : List(U8) }
+
 	## What the answer is:
 	## - `Serve`: Zig serves `route` (marking presence first when `presence`);
 	## - `Redirect`: a 303 to `location`;

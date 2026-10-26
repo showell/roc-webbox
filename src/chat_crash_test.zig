@@ -48,7 +48,31 @@ const Files = struct {
         h.append_line = appendLine;
         h.publish = publish;
         h.message_count = count;
+        h.render = render;
+        h.store_message = storeMessage;
+        h.fan_out = fanOut;
         return h;
+    }
+    /// `boom` will not render; anything else is its own HTML, marked.
+    fn render(ctx: *anyopaque, md: []const u8) abi.Rendered {
+        of(ctx).asked.print(testing.allocator, "render {s};", .{md}) catch @panic("oom");
+        if (std.mem.eql(u8, md, "boom")) {
+            fail(ctx, error.OutOfMemory);
+            return .failed;
+        }
+        return .{ .rendered = "<p>html</p>" };
+    }
+    /// Topic `Broken` will not store.
+    fn storeMessage(ctx: *anyopaque, conv: abi.Conv, sid: []const u8, block: []const u8, index: u64, m: abi.Message) bool {
+        of(ctx).asked.print(testing.allocator, "store {t} {s} {s} {s},{s} {s} {s} {d} id={s} from={s} at={s} uid={s} md={s};", .{ conv.family, conv.key, conv.base, conv.members[0], conv.members[1], sid, block, index, m.id, m.from, m.at, m.uid, m.markdown }) catch @panic("oom");
+        if (std.mem.eql(u8, sid, "Broken")) {
+            fail(ctx, error.IsDir);
+            return false;
+        }
+        return true;
+    }
+    fn fanOut(ctx: *anyopaque, conv: abi.Conv, sid: []const u8, m: abi.Message, index: u64) void {
+        of(ctx).asked.print(testing.allocator, "fan_out {t} {s} {s} {s},{s} {s} id={s} from={s} at={s} uid={s} md={s} {d};", .{ conv.family, conv.key, conv.base, conv.members[0], conv.members[1], sid, m.id, m.from, m.at, m.uid, m.markdown, index }) catch @panic("oom");
     }
     /// `users/1/broken` will not take a line; any other path does.
     fn appendLine(ctx: *anyopaque, path: []const u8, line: []const u8) bool {
@@ -168,6 +192,19 @@ test "a line appended: a path that would leave the root fails the request at the
     try probe("/publish/1_2/Plans", "published", "publish 1_2/Plans event: reaction\\ndata: x\\n\\n;", null);
 }
 
+test "a message's render, store and fan-out cross the seam: the HTML or a render that failed, never empty; every field of the conversation and the message in its place, the index beside them; a store that failed is no store" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    roc.use(arena.allocator());
+    defer roc.deinit();
+    try probe("/render/**hi**", "rendered <p>html</p>", "render **hi**;", null);
+    try probe("/render/boom", "failed", "render boom;", error.OutOfMemory);
+    const fields = "id=Plans_9 from=Steve at=2026-10-26T00:00:00Z uid=1 md=**hi**";
+    try probe("/store/Plans", "done", "store dm 1_2 /chat/c/1_2 1,2 Plans the block 8 " ++ fields ++ ";", null);
+    try probe("/store/Broken", "failed", "store dm 1_2 /chat/c/1_2 1,2 Broken the block 8 " ++ fields ++ ";", error.IsDir);
+    try probe("/fan/Plans", "fanned", "fan_out dm 1_2 /chat/c/1_2 1,2 Plans " ++ fields ++ " 8;", null);
+}
+
 test "a folder's listing: a path that would leave the root fails the request at the seam; under it, its entries and their kinds, nothing there, and a listing that failed are three answers" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
@@ -181,7 +218,7 @@ test "a folder's listing: a path that would leave the root fails the request at 
     try probe("/list/1_2/sessions", "failed", "list 1_2/sessions;", error.NotDir);
 }
 
-test "the Roc fails a request by a reason, each reason its own byte across: a malformed channel as error.MalformedChannel, an account's kind or name as the error the host kept for that read of that account; and a malformed channel is counted by the host" {
+test "the Roc fails a request by a reason, each reason its own byte across: a malformed channel as error.MalformedChannel, an account's kind or name as the error the host kept for that read of that account, a message with no author as error.NoAuthor; and a malformed channel is counted by the host" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     roc.use(arena.allocator());
@@ -189,6 +226,7 @@ test "the Roc fails a request by a reason, each reason its own byte across: a ma
     try probe("/fail/malformed/Abad", "failed", "", error.MalformedChannel);
     try probe("/fail/kind/7", "failed", "fail_account kind 7;", error.SymLinkLoop);
     try probe("/fail/name/12", "failed", "fail_account name 12;", error.IsDir);
+    try probe("/fail/author/x", "failed", "", error.NoAuthor);
     try probe("/malformed/Abad", "counted", "malformed Abad;", null);
 }
 
