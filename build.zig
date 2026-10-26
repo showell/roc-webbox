@@ -58,14 +58,14 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    twin.addObjectFile(appArchive(b, roc, "chat-twin", &twin_inputs, rocTarget(target.result)));
+    twin.addObjectFile(appArchive(b, roc, "chat-twin", twinInputs(b), rocTarget(target.result)));
 
     // **THE ROC CHAT'S ROUTER, FOR ANGRY-GOPHER** (docs/ROC-CHAT.md §3):
     // `roc_chat`, chat/main.roc as angry-gopher calls it (chat_hosted.zig),
     // its Roc for this build's target; and `roc_chat_metal`, the same for
     // gopher.elf (no target or mode: the kernel's; Roc for its target). It
     // imports nothing but std.
-    const chat_roc = appArchive(b, roc, "chat", &chat_inputs, rocTarget(target.result));
+    const chat_roc = appArchive(b, roc, "chat", chatInputs(b), rocTarget(target.result));
     const chat = b.addModule("roc_chat", .{
         .root_source_file = b.path("src/chat_hosted.zig"),
         .target = target,
@@ -73,7 +73,7 @@ pub fn build(b: *std.Build) void {
     });
     chat.addObjectFile(chat_roc);
     const chat_metal = b.addModule("roc_chat_metal", .{ .root_source_file = b.path("src/chat_hosted.zig") });
-    chat_metal.addObjectFile(appArchive(b, roc, "chat", &chat_inputs, "x64v1elf"));
+    chat_metal.addObjectFile(appArchive(b, roc, "chat", chatInputs(b), "x64v1elf"));
 
     _ = demo(b, roc, optimize);
 
@@ -135,7 +135,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    twin_test.addObjectFile(appArchive(b, roc, "chat-twin", &twin_inputs, rocTarget(target.result)));
+    twin_test.addObjectFile(appArchive(b, roc, "chat-twin", twinInputs(b), rocTarget(target.result)));
     tests.dependOn(&b.addRunArtifact(b.addTest(.{ .root_module = twin_test })).step);
     const shared = b.createModule(.{
         .root_source_file = b.path("src/shared_check.zig"),
@@ -218,10 +218,36 @@ fn rocArchive(b: *std.Build, roc: []const u8, roc_target: []const u8) std.Build.
 }
 
 /// The pure modules' twin app (chat/twin.roc, on chat/twin/platform/).
-const twin_inputs = [_][]const u8{ "chat/twin.roc", "chat/twin/platform/main.roc", "chat/Time.roc", "chat/ZigText.roc", "chat/Paths.roc", "chat/Transcript.roc", "chat/Bytes.roc", "chat/Count.roc", "chat/Frame.roc", "chat/Form.roc", "chat/Reaction.roc", "chat/Chrome.roc", "chat/Pages.roc", "chat/Html.roc", "chat/Feeds.roc", "chat/Recent.roc", "chat/JsonText.roc", "chat/ChatState.roc", "chat/Conversation.roc", "chat/Topics.roc", "chat/Accounts.roc", "chat/Fanout.roc" };
+fn twinInputs(b: *std.Build) []const []const u8 {
+    return chatModules(b, &.{ "chat/twin.roc", "chat/twin/platform/main.roc" });
+}
 
 /// The Roc chat (chat/main.roc, on its own platform in chat/platform/).
-const chat_inputs = [_][]const u8{ "chat/main.roc", "chat/Route.roc", "chat/Paths.roc", "chat/ZigText.roc", "chat/Reaction.roc", "chat/Form.roc", "chat/Transcript.roc", "chat/Bytes.roc", "chat/Pages.roc", "chat/Chrome.roc", "chat/Html.roc", "chat/Topics.roc", "chat/Feeds.roc", "chat/Recent.roc", "chat/JsonText.roc", "chat/Time.roc", "chat/ChatState.roc", "chat/Conversation.roc", "chat/Accounts.roc", "chat/Frame.roc", "chat/Fanout.roc", "chat/platform/main.roc", "chat/platform/Chat.roc", "chat/platform/Host.roc" };
+fn chatInputs(b: *std.Build) []const []const u8 {
+    return chatModules(b, &.{ "chat/main.roc", "chat/platform/main.roc", "chat/platform/Chat.roc", "chat/platform/Host.roc" });
+}
+
+/// **EVERY MODULE IN chat/ IS AN INPUT, FOUND, NEVER LISTED**: `own` (the
+/// app first, then its platform's files), then each `chat/*.roc`. A list kept
+/// by hand drifts, and a module missing from it rebuilds nothing when
+/// edited: the tests run the old archive. A module an app does
+/// not import costs a rebuild, never a stale one.
+fn chatModules(b: *std.Build, own: []const []const u8) []const []const u8 {
+    const io = b.graph.io;
+    var out: std.ArrayList([]const u8) = .empty;
+    out.appendSlice(b.allocator, own) catch @panic("OOM");
+    var dir = b.root.root_dir.handle.openDir(io, "chat", .{ .iterate = true }) catch |e| std.process.fatal("the Roc chat's modules: cannot open chat/ ({t})", .{e});
+    defer dir.close(io);
+    var it = dir.iterate();
+    while (it.next(io) catch |e| std.process.fatal("the Roc chat's modules: cannot list chat/ ({t})", .{e})) |entry| {
+        if (entry.kind != .file or !std.mem.endsWith(u8, entry.name, ".roc")) continue;
+        const path = b.fmt("chat/{s}", .{entry.name});
+        for (own) |o| {
+            if (std.mem.eql(u8, o, path)) break;
+        } else out.append(b.allocator, path) catch @panic("OOM");
+    }
+    return out.items;
+}
 
 /// The Roc app `inputs[0]` (its other files the rest of `inputs`) built for
 /// Roc's target `roc_target`, as `<name>-<target>.a`.
