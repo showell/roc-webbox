@@ -500,6 +500,18 @@ are safe on metal for the reason §6.2's send relies on: a pump runs the
 kernel's turn and its fixed Zig render, never a handler, and the busy word
 refuses any Roc call beside this one.
 
+**As built for C3**, more answers and hosted functions: `kind` 6 is
+webbox's plain 404 and 7 a 302 to `location`; the reads are `landing!`,
+`page!`, `srcs!`, `me!`, `viewer!`, `last_conv!`, `resume_topic!`,
+`topics!`, `channels!`, `members!` and `conv!`, the writes `bookmark!` and
+`append!`, and `body!` takes which form's limit. Lists of records (the
+sidebar, the members) cross as flat lists of byte strings, one decoder
+each side, until P8 generates layouts. **After a failure the host does
+nothing more** for the call: every hosted function answers its empty or
+"failed" value once one has failed, so a Roc that goes on (a duplicate
+check that could not read, then the bookmark and the append) writes
+nothing; the host returns the first failure.
+
 **Tag unions cross the ABI fine** (probe 2). The layout is the payload
 first, then a `u8` tag. Discriminants are alphabetical, so adding a tag
 renumbers the others. That is why the layout is generated and asserted
@@ -836,7 +848,7 @@ Each is a release, with its twin test. A route that moves answers with
 |---|---|---|---|---|
 | C1 | Codec, Count (both trust rules), Paths, ZigText, Time, the frame builder, with the Zig fixtures; benchmark on the largest transcript with peak arena bytes (**done but the metal run**: chat/{Time,ZigText,Paths,Codec,Count,Frame}.roc behind the test-only `chat/twin.roc`, each held to its Zig in angry-gopher `src/chat_twin_test.zig`, every module mutation-checked; chat_count's pure decisions pulled out of its I/O to be twinned; `zig build codec-bench` for R6; the run on the largest production transcript, on metal, is the box's) | rw | CC | XL |
 | C4 | React, reactions, pin, unpin (**done**: chat/main.roc `act!` serves them, with chat/Form.roc and chat/Reaction.roc for the form; the store's writes stay Zig's as hosted functions until C8, and a topic Zig cannot find is handed back to it, so its 404s are its own; held to the Zig it replaced by angry-gopher `src/chat_actions_twin_test.zig`, 45 requests both ways on two copies of one tree, every answer and file the same, and by twins of the form, the react form and the glyph rule; every mutant killed but one equivalent) | rw | CC | M |
-| C3 | Page, chrome (matches Zig's settings page byte for byte; a twin test), sidebar JSON, 404 and empty pages, conversations, msg (302), default/resume, new topic (with the `general<N>` announcement) (**under way**: chat/Chrome.roc, Pages.roc and Html.roc build the chrome, the conversation page, its sidebar JSON, the first-topic shell, the 404 that says why and the empty /chat, byte for byte to the Zig's by twins; a conversation's landing and a topic's page are served by the Roc, their reads and the page's resume pointer the host's (`landing!`, `page!`, `srcs!`), held to the old Zig by angry-gopher `chat_actions_twin_test.zig`; to come: default/resume, conversations, msg, new topic) | rw | CC | XL |
+| C3 | Page, chrome (matches Zig's settings page byte for byte; a twin test), sidebar JSON, 404 and empty pages, conversations, msg (302), default/resume, new topic (with the `general<N>` announcement) (**done**: chat/Chrome.roc, Pages.roc and Html.roc build the chrome and the pages byte for byte to the Zig's, by twins; the Roc serves a conversation's landing, a topic's page, /chat and /chat/default, /chat/conversations, /chat/msg/<id> and a new topic, chat/Topics.roc judging names without case and the `general<N>` an announcement goes to; the reads and writes are the host's, as hosted functions; held to the old Zig by angry-gopher `chat_actions_twin_test.zig`, 97 requests both ways, every answer and file the same; every mutant killed but two equivalent) | rw | CC | XL |
 | C5 | Fan-out (notify, sidebar, recent, `users/<member>/images.md`, `users/<member>/code.md` with the fence scanner and its quirk), replacing angry-gopher's | rw | CC | L |
 | C6 | Uploads (multipart, sniff, quota as `write`, lossy filename) and download | rw | CC | L |
 | C7 | Recent (including doc rows from docs_store), images, code and links pages | rw | CC | L |

@@ -101,6 +101,10 @@ pub const Decision = union(enum) {
     answered,
     /// A malformed form: the site's 400, as every form's.
     malformed_form,
+    /// webbox's plain 404.
+    not_found,
+    /// A 302 to the location (a lookup, then go).
+    found: []const u8,
 
     pub fn eql(a: Decision, b: Decision) bool {
         if (std.meta.activeTag(a) != std.meta.activeTag(b)) return false;
@@ -109,7 +113,8 @@ pub const Decision = union(enum) {
             .serve => |s| s.presence == b.serve.presence and s.route.eql(b.serve.route),
             .respond => |r| r.status == b.respond.status and std.mem.eql(u8, r.content_type, b.respond.content_type) and std.mem.eql(u8, r.body, b.respond.body),
             .not_allowed => |m| m == b.not_allowed,
-            .answered, .malformed_form => true,
+            .answered, .malformed_form, .not_found => true,
+            .found => |l| std.mem.eql(u8, l, b.found),
         };
     }
 
@@ -121,6 +126,8 @@ pub const Decision = union(enum) {
             .not_allowed => |m| try w.print("405 allow {t}", .{m}),
             .answered => try w.writeAll("answered by the host"),
             .malformed_form => try w.writeAll("malformed form"),
+            .not_found => try w.writeAll("404"),
+            .found => |l| try w.print("302 {s}", .{l}),
         }
     }
 };

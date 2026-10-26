@@ -22,6 +22,16 @@ platform ""
 		"roc_chat_landing": Host.landing!,
 		"roc_chat_page": Host.page!,
 		"roc_chat_srcs": Host.srcs!,
+		"roc_chat_me": Host.me!,
+		"roc_chat_viewer": Host.viewer!,
+		"roc_chat_last_conv": Host.last_conv!,
+		"roc_chat_resume_topic": Host.resume_topic!,
+		"roc_chat_topics": Host.topics!,
+		"roc_chat_channels": Host.channels!,
+		"roc_chat_members": Host.members!,
+		"roc_chat_conv": Host.conv!,
+		"roc_chat_bookmark": Host.bookmark!,
+		"roc_chat_append": Host.append!,
 	}
 	targets: {
 		x64musl: {

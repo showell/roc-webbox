@@ -18,9 +18,10 @@ Host := [].{
 	## which answers why.
 	topic! : U8, List(U8), List(U8) => Bool
 
-	## The request's body, read to the react form's limit; not `ok` when the
-	## host answered instead (too big) or failed.
-	body! : {} => { ok : Bool, bytes : List(U8) }
+	## The request's body, read to a form's limit (`which`: 0 the react
+	## form's, 1 a message's); not `ok` when the host answered instead (too
+	## big) or failed.
+	body! : U8 => { ok : Bool, bytes : List(U8) }
 
 	## The topic's reaction sidecar, as stored; not `ok` when it failed.
 	reactions! : {} => { ok : Bool, bytes : List(U8) }
@@ -47,4 +48,43 @@ Host := [].{
 	## Where a page names each script, as `name, src` pairs (a src's hash is
 	## of bytes the host holds).
 	srcs! : {} => List(List(U8))
+
+	## **AFTER A FAILURE THE HOST DOES NOTHING MORE** for the call: a hosted
+	## function the Roc calls once one has failed answers empty, false or
+	## "failed", writes nothing, and the host returns the failure.
+
+	## The member's own id.
+	me! : {} => List(U8)
+
+	## The member's name.
+	viewer! : {} => List(U8)
+
+	## The DM the member was last in (their bookmark), or "".
+	last_conv! : {} => List(U8)
+
+	## Where the member resumes DM `conv`: its last topic, else a default.
+	resume_topic! : List(U8) => List(U8)
+
+	## The topics of a DM (`family` 11, `key` its pair) or a channel (12, its
+	## name), as the store lists them.
+	topics! : U8, List(U8) => List(List(U8))
+
+	## The channels the member is in.
+	channels! : {} => List(List(U8))
+
+	## Every member and the agent, as `id, name` pairs.
+	members! : {} => List(List(U8))
+
+	## A DM's or channel's conversation, for a new topic in it: none when it
+	## is not the member's (Zig answers why); else its URL base and "1" for a
+	## DM. The host holds it for `bookmark!` and `append!`.
+	conv! : U8, List(U8) => List(List(U8))
+
+	## Record topic `sid` as the member's place to resume the DM `conv!`
+	## found; false when it failed.
+	bookmark! : List(U8) => Bool
+
+	## Append a message to topic `sid` of the conversation `conv!` found, by
+	## the member under `name`, and send it live; false when it failed.
+	append! : List(U8), List(U8), List(U8) => Bool
 }

@@ -44,7 +44,11 @@ fn answer(member: bool) Host {
 fn expectRoute(sub: []const u8, channel: bool, want: Route, presence: bool) !void {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
-    const got = try decide(arena.allocator(), sub, channel, .GET, answer(true));
+    // A route the Roc serves itself counts presence itself, then, finding
+    // nothing, hands the route to Zig.
+    var routing: Routing = .{};
+    var got = try decide(arena.allocator(), sub, channel, .GET, routing.host());
+    if (got == .serve and routing.marked) got.serve.presence = true;
     const expected: Decision = .{ .serve = .{ .route = want, .presence = presence } };
     if (!got.eql(expected)) {
         std.debug.print("{s}: got {f}, want {f}\n", .{ sub, got, expected });
@@ -67,7 +71,7 @@ test "the router: a topic's tails, a channel, an asset before the gate, the gate
     try expectRoute("/searchX", false, .{ .family = .search, .rest = "X" }, true);
     try expectRoute("/chat.js", false, .{ .family = .asset, .rest = "chat.js" }, false);
     // Bytes that are not UTF-8 come back as they went.
-    try expectRoute("/msg/\xff\xfe", false, .{ .family = .msg, .rest = "\xff\xfe" }, true);
+    try expectRoute("/docs/\xff\xfe", false, .{ .family = .docs, .rest = "/\xff\xfe" }, true);
 
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
@@ -108,7 +112,7 @@ const Scripted = struct {
         say(ctx, "topic {d} {s} {s}", .{ family, key, sid });
         return me(ctx).found;
     }
-    fn bodyOf(ctx: *anyopaque) ?[]const u8 {
+    fn bodyOf(ctx: *anyopaque, _: u8) ?[]const u8 {
         say(ctx, "body", .{});
         return me(ctx).body;
     }

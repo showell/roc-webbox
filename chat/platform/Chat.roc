@@ -26,7 +26,9 @@ Chat := [].{
 	## - 3: a 405 naming `allow`, a method's number;
 	## - 4: answered already, by the host inside the call (a body too big),
 	##   or failed there (the host returns its error);
-	## - 5: a malformed form (the site's own 400).
+	## - 5: a malformed form (the site's own 400);
+	## - 6: webbox's plain 404;
+	## - 7: a 302 to `location` (a lookup, then go).
 	Answer : { kind : U8, location : List(U8), presence : Bool, route : Route, status : U16, content_type : List(U8), body : List(U8), allow : U8 }
 
 	## A route of `family` with nothing else.
@@ -68,4 +70,12 @@ Chat := [].{
 	## A malformed form: the site's 400, as for every form.
 	malformed : Answer
 	malformed = { ..none, kind: 5 }
+
+	## webbox's plain "not found".
+	not_found : Answer
+	not_found = { ..none, kind: 6 }
+
+	## A 302 to `location`.
+	found : List(U8) -> Answer
+	found = |location| { ..none, kind: 7, location }
 }
