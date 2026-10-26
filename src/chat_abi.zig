@@ -36,11 +36,19 @@ pub const Answer = extern struct { body: RocBytes, content_type: RocBytes, locat
 pub const Got = extern struct { bytes: RocBytes, ok: bool };
 /// Chat.roc's `Conv`, as Roc hands it to a hosted function.
 pub const ConvRec = extern struct { base: RocBytes, key: RocBytes, members: roc.RocBytesList, family: Family };
+/// Host.roc's `read!` answer: `{ bytes : List(U8), status : [Failed, Found, Missing] }`.
+pub const ReadRec = extern struct { bytes: RocBytes, status: route_mod.ReadStatus };
 
 comptime {
     const w = @sizeOf(usize);
-    std.debug.assert(@sizeOf(RocBytes) == 3 * w and @sizeOf(Request) == 4 * w and @sizeOf(RouteRec) == 10 * w and @sizeOf(Answer) == 20 * w and @sizeOf(Got) == 4 * w and @sizeOf(ConvRec) == 10 * w);
+    std.debug.assert(@sizeOf(RocBytes) == 3 * w and @sizeOf(Request) == 4 * w and @sizeOf(RouteRec) == 10 * w and @sizeOf(Answer) == 20 * w and @sizeOf(Got) == 4 * w and @sizeOf(ConvRec) == 10 * w and @sizeOf(ReadRec) == 4 * w);
 }
+
+/// **A FILE AS THE HOST READ IT**: its bytes, nothing there, or a read that
+/// failed (the host has failed the request: `fail`). Missing and failed are
+/// never one answer: a set read as empty because the disk failed would be
+/// written back empty.
+pub const Read = union(route_mod.ReadStatus) { failed, found: []const u8, missing };
 
 /// **A CONVERSATION THE ROC FOUND TO BE THE MEMBER'S** (chat/main.roc
 /// `find!`), handed to each hosted function that works on one: the host
@@ -85,25 +93,27 @@ pub const Host = struct {
     reactions: *const fn (ctx: *anyopaque, conv: Conv, sid: []const u8) ?[]const u8,
     /// Host.react!.
     react: *const fn (ctx: *anyopaque, conv: Conv, sid: []const u8, msg: u64, emoji: []const u8, on: bool) route_mod.Reacted,
-    /// Host.pins!: the member's pinned file for `conv` ("" for none); null
-    /// when the read failed, never "".
-    pins: *const fn (ctx: *anyopaque, conv: Conv) ?[]const u8,
-    /// Host.write_pins!, Host.remove_pins!: that file written as the Roc
-    /// made it, or removed; false when it failed.
-    write_pins: *const fn (ctx: *anyopaque, conv: Conv, bytes: []const u8) bool,
-    remove_pins: *const fn (ctx: *anyopaque, conv: Conv) bool,
+    /// **THE FILE PRIMITIVES** (Host.read!, Host.write!, Host.remove!): a
+    /// file under the chat root, `path` relative to it, its bytes and its
+    /// name the Roc's. Every path is checked here first (`inRoot`); the host
+    /// sees only one that stays under the root. `write` makes the folders;
+    /// `remove` of a file not there succeeds. False, or `.failed`, when it
+    /// failed (the host has failed the request).
+    read: *const fn (ctx: *anyopaque, path: []const u8) Read = noRead,
+    write: *const fn (ctx: *anyopaque, path: []const u8, bytes: []const u8) bool = noWrite,
+    remove: *const fn (ctx: *anyopaque, path: []const u8) bool = noRemove,
+    /// Fail the request with `e` (a 500), as a hosted function's own failure
+    /// does: the seam's, for a path the Roc should never have named. A host
+    /// that has failed already keeps its first failure.
+    fail: *const fn (ctx: *anyopaque, e: anyerror) void = noFail,
     /// Host.page!: topic `sid`'s page's data in `conv` (Pages.roc reads
     /// it), or none when it failed.
     page: *const fn (ctx: *anyopaque, conv: Conv, sid: []const u8) []const []const u8 = noPage,
     /// Host.srcs!: where a page names each script, as `name, src` pairs.
     srcs: *const fn (ctx: *anyopaque) []const []const u8 = noSrcs,
-    /// Host.me!, Host.viewer!, Host.last_conv!: the member's id, name, and
-    /// last DM.
+    /// Host.me!, Host.viewer!: the member's id and name.
     me: *const fn (ctx: *anyopaque) []const u8 = noBytes,
     viewer: *const fn (ctx: *anyopaque) []const u8 = noBytes,
-    last_conv: *const fn (ctx: *anyopaque) []const u8 = noBytes,
-    /// Host.last_viewed!: the topic the member last viewed in DM `conv`, or "".
-    last_viewed: *const fn (ctx: *anyopaque, conv: []const u8) []const u8 = noKeyBytes,
     /// Host.now!: the request's time, Unix seconds.
     now: *const fn (ctx: *anyopaque) i64 = noNow,
     /// Host.topics!: a DM's or a channel's topics.
@@ -113,10 +123,8 @@ pub const Host = struct {
     /// `id, name` pairs.
     channel_rosters: *const fn (ctx: *anyopaque) []const []const u8 = noList,
     members: *const fn (ctx: *anyopaque) []const []const u8 = noList,
-    /// Host.bookmark!: topic `sid` recorded as where the member resumes DM
-    /// `conv`; Host.append!: a message appended to topic `sid` of `conv`.
-    /// False when they failed.
-    bookmark: *const fn (ctx: *anyopaque, conv: Conv, sid: []const u8) bool = noBookmark,
+    /// Host.append!: a message appended to topic `sid` of `conv`. False
+    /// when it failed.
     append: *const fn (ctx: *anyopaque, conv: Conv, sid: []const u8, name: []const u8, markdown: []const u8, cid: []const u8) bool = noAppend,
     /// Host.header!: a request header's value, or none.
     header: *const fn (ctx: *anyopaque, name: []const u8) []const []const u8 = noHeader,
@@ -128,8 +136,6 @@ pub const Host = struct {
     /// Host.links!: whether the host holds the member's links page
     /// rendered, for a `held` answer.
     links: *const fn (ctx: *anyopaque) bool = noHeld,
-    /// Host.feed!: the member's images.md or code.md, or none.
-    feed: *const fn (ctx: *anyopaque, which: route_mod.Feed) []const []const u8 = noFeed,
     /// Host.recent!: the member's recent rows, nine fields each, or none.
     recent: *const fn (ctx: *anyopaque) []const []const u8 = noList,
 };
@@ -140,8 +146,17 @@ fn noHeld(_: *anyopaque) bool {
 fn noRaw(_: *anyopaque, _: Conv, _: []const u8) bool {
     @panic("raw asked of a host that does not answer it");
 }
-fn noFeed(_: *anyopaque, _: route_mod.Feed) []const []const u8 {
-    @panic("feed asked of a host that does not answer it");
+fn noRead(_: *anyopaque, _: []const u8) Read {
+    @panic("read asked of a host that does not answer it");
+}
+fn noWrite(_: *anyopaque, _: []const u8, _: []const u8) bool {
+    @panic("write asked of a host that does not answer it");
+}
+fn noRemove(_: *anyopaque, _: []const u8) bool {
+    @panic("remove asked of a host that does not answer it");
+}
+fn noFail(_: *anyopaque, e: anyerror) void {
+    std.debug.panic("a host that cannot fail a request was asked to: {t}", .{e});
 }
 fn noAccount(_: *anyopaque, _: []const u8) bool {
     @panic("account asked of a host that does not answer it");
@@ -164,9 +179,6 @@ fn noKeyBytes(_: *anyopaque, _: []const u8) []const u8 {
 }
 fn noNow(_: *anyopaque) i64 {
     @panic("now asked of a host that does not answer it");
-}
-fn noBookmark(_: *anyopaque, _: Conv, _: []const u8) bool {
-    @panic("bookmark asked of a host that does not answer it");
 }
 fn noAppend(_: *anyopaque, _: Conv, _: []const u8, _: []const u8, _: []const u8, _: []const u8) bool {
     @panic("append asked of a host that does not answer it");
@@ -200,18 +212,17 @@ pub const Routing = struct {
         var h = askingOnly(r, ask);
         h.presence = mark;
         // The routes the Roc serves outright meet a member with nothing: no
-        // id (so no DM is theirs), no last DM, no other members, no
-        // channels, no topics.
+        // id (so no DM is theirs), no files (no last DM, no feed), no other
+        // members, no channels, no topics.
         h.me = empty;
         h.viewer = empty;
-        h.last_conv = empty;
+        h.read = noFile;
         h.channel_members = noMembers;
         h.srcs = nothing;
         h.members = nothing;
         h.channel_rosters = nothing;
         h.topics = noTopicsHere;
         h.links = holdsNone;
-        h.feed = noFile;
         h.recent = nothing;
         return h;
     }
@@ -240,8 +251,8 @@ pub const Routing = struct {
     fn holdsNone(_: *anyopaque) bool {
         return false;
     }
-    fn noFile(_: *anyopaque, _: route_mod.Feed) []const []const u8 {
-        return &.{};
+    fn noFile(_: *anyopaque, _: []const u8) Read {
+        return .missing;
     }
 };
 
@@ -258,20 +269,11 @@ pub fn askingOnly(ctx: *anyopaque, ask: *const fn (ctx: *anyopaque) bool) Host {
         fn topicBytes(_: *anyopaque, _: Conv, _: []const u8) ?[]const u8 {
             @panic("reactions asked of a host that only answers who is asking");
         }
-        fn pins(_: *anyopaque, _: Conv) ?[]const u8 {
-            @panic("pins asked of a host that only answers who is asking");
-        }
         fn react(_: *anyopaque, _: Conv, _: []const u8, _: u64, _: []const u8, _: bool) route_mod.Reacted {
             @panic("react asked of a host that only answers who is asking");
         }
-        fn writePins(_: *anyopaque, _: Conv, _: []const u8) bool {
-            @panic("write_pins asked of a host that only answers who is asking");
-        }
-        fn removePins(_: *anyopaque, _: Conv) bool {
-            @panic("remove_pins asked of a host that only answers who is asking");
-        }
     };
-    return .{ .ctx = ctx, .member = ask, .presence = No.presence, .body = No.body, .reactions = No.topicBytes, .react = No.react, .pins = No.pins, .write_pins = No.writePins, .remove_pins = No.removePins };
+    return .{ .ctx = ctx, .member = ask, .presence = No.presence, .body = No.body, .reactions = No.topicBytes, .react = No.react };
 }
 
 /// The call's host, or a panic for a hosted function Roc ran outside one.
@@ -325,19 +327,37 @@ export fn roc_chat_react(conv: ConvRec, sid: RocBytes, msg: u64, emoji: RocBytes
     return h.react(h.ctx, .of(conv), sid.slice(), msg, emoji.slice(), on);
 }
 
-export fn roc_chat_pins(conv: ConvRec) callconv(.c) Got {
-    const h = current("pins");
-    return got(h.pins(h.ctx, .of(conv)));
+/// **A PATH THAT WOULD LEAVE THE CHAT ROOT IS A ROC BUG, NEVER A MISSING
+/// FILE**: empty, absolute, or through `..` (roc_abi.inRoot). The request
+/// fails (`error.PathOutsideChatRoot`, a 500) and the host is never asked:
+/// a read answered "missing" there would be taken for an empty file and
+/// written over.
+fn underRoot(h: Host, path: []const u8) bool {
+    if (roc.inRoot(path)) return true;
+    h.fail(h.ctx, error.PathOutsideChatRoot);
+    return false;
 }
 
-export fn roc_chat_write_pins(conv: ConvRec, bytes: RocBytes) callconv(.c) bool {
-    const h = current("write_pins");
-    return h.write_pins(h.ctx, .of(conv), bytes.slice());
+export fn roc_chat_read(path: RocBytes) callconv(.c) ReadRec {
+    const h = current("read");
+    if (!underRoot(h, path.slice())) return .{ .bytes = .from(""), .status = .failed };
+    return switch (h.read(h.ctx, path.slice())) {
+        .found => |b| .{ .bytes = .from(b), .status = .found },
+        .missing => .{ .bytes = .from(""), .status = .missing },
+        .failed => .{ .bytes = .from(""), .status = .failed },
+    };
 }
 
-export fn roc_chat_remove_pins(conv: ConvRec) callconv(.c) bool {
-    const h = current("remove_pins");
-    return h.remove_pins(h.ctx, .of(conv));
+export fn roc_chat_write(path: RocBytes, bytes: RocBytes) callconv(.c) bool {
+    const h = current("write");
+    if (!underRoot(h, path.slice())) return false;
+    return h.write(h.ctx, path.slice(), bytes.slice());
+}
+
+export fn roc_chat_remove(path: RocBytes) callconv(.c) bool {
+    const h = current("remove");
+    if (!underRoot(h, path.slice())) return false;
+    return h.remove(h.ctx, path.slice());
 }
 
 export fn roc_chat_page(conv: ConvRec, sid: RocBytes) callconv(.c) roc.RocBytesList {
@@ -353,16 +373,6 @@ export fn roc_chat_me() callconv(.c) RocBytes {
 export fn roc_chat_viewer() callconv(.c) RocBytes {
     const h = current("viewer");
     return .from(h.viewer(h.ctx));
-}
-
-export fn roc_chat_last_conv() callconv(.c) RocBytes {
-    const h = current("last_conv");
-    return .from(h.last_conv(h.ctx));
-}
-
-export fn roc_chat_last_viewed(conv: RocBytes) callconv(.c) RocBytes {
-    const h = current("last_viewed");
-    return .from(h.last_viewed(h.ctx, conv.slice()));
 }
 
 export fn roc_chat_now() callconv(.c) i64 {
@@ -385,11 +395,6 @@ export fn roc_chat_members() callconv(.c) roc.RocBytesList {
     return .from(h.members(h.ctx));
 }
 
-export fn roc_chat_bookmark(conv: ConvRec, sid: RocBytes) callconv(.c) bool {
-    const h = current("bookmark");
-    return h.bookmark(h.ctx, .of(conv), sid.slice());
-}
-
 export fn roc_chat_append(conv: ConvRec, sid: RocBytes, name: RocBytes, markdown: RocBytes, cid: RocBytes) callconv(.c) bool {
     const h = current("append");
     return h.append(h.ctx, .of(conv), sid.slice(), name.slice(), markdown.slice(), cid.slice());
@@ -408,11 +413,6 @@ export fn roc_chat_hostile(markdown: RocBytes) callconv(.c) route_mod.Hostility 
 export fn roc_chat_raw(conv: ConvRec, sid: RocBytes) callconv(.c) bool {
     const h = current("raw");
     return h.raw(h.ctx, .of(conv), sid.slice());
-}
-
-export fn roc_chat_feed(which: route_mod.Feed) callconv(.c) roc.RocBytesList {
-    const h = current("feed");
-    return .from(h.feed(h.ctx, which));
 }
 
 export fn roc_chat_recent() callconv(.c) roc.RocBytesList {

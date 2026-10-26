@@ -497,8 +497,7 @@ body too big) or failed there, 5 a malformed form (the site's own 400). The
 request carries its `method`. The Roc's routes ask the host through hosted
 functions inside the call: `presence!`, the reads the conversation lookup
 decides on (O2: `account!`, `name!`, `channel_members!`, `topics!`), `body!`, `reactions!`,
-`react!` and the pins (`pins!`, `write_pins!`, `remove_pins!`: the set is
-ChatState.roc's, the file the host's); each that works on a conversation is
+`react!` and the file primitives (below); each that works on a conversation is
 handed it (`Chat.Conv`, a record crossing by value) and the host keeps none
 between calls. A failure in one is kept by the host and returned once
 the call has ended, as `member!`'s already was. The writes inside a call
@@ -508,17 +507,34 @@ refuses any Roc call beside this one.
 
 **As built for C3**, more answers and hosted functions: `kind` 6 is
 webbox's plain 404 and 7 a 302 to `location`; the reads are
-`page!`, `srcs!`, `me!`, `viewer!`, `last_conv!`, `last_viewed!`, `now!`
-(where a DM resumes is ChatState.roc's choice),
+`page!`, `srcs!`, `me!`, `viewer!`, `now!`,
 `topics!`, `channel_rosters!` (every channel's members: which are the
-member's is Paths.roc's choice) and `members!`, the writes `bookmark!`
-and `append!`, and `body!` takes which form's limit. Lists of records
+member's is Paths.roc's choice) and `members!`, the write `append!`,
+and `body!` takes which form's limit. Lists of records
 (the sidebar, the members, the rosters) cross as flat lists of byte strings, one decoder
 each side, until P8 generates layouts. **After a failure the host does
 nothing more** for the call: every hosted function answers its empty or
 "failed" value once one has failed, so a Roc that goes on (a duplicate
 check that could not read, then the bookmark and the append) writes
 nothing; the host returns the first failure.
+
+**The file primitives: Roc owns the member's files.** `read!`, `write!`
+and `remove!` take a path relative to the chat root (bytes); the names
+and the formats are the Roc's: the bookmarks (`users/<uid>/last-conv`,
+`users/<uid>/last-sessions/<conv>`: where a DM resumes, read, trimmed and
+written only when changed, ChatState.roc), the pins
+(`users/<uid>/pinned-sessions/<conv>`, ChatState.roc) and the feeds
+(`users/<uid>/images.md`, `code.md`, Feeds.roc). A read has three
+answers, crossing as the bytes beside a payload-less tag union
+(`[Failed, Found, Missing]`, one byte): **missing and failed are never one
+answer**, since a set read as empty because the disk failed would be
+written back empty. `write!` makes the folders; `remove!` of a file not
+there succeeds. **A path that would leave the root is a Roc bug**: empty,
+absolute or through `..`, chat_abi.zig refuses it before the host sees it
+(`roc_abi.inRoot`) and fails the request (`error.PathOutsideChatRoot`, a
+500), never answering "missing". The rule after a failure holds: a failed
+read has failed the request, so the bookmark's "written again" after one
+(the Zig's `writeIfChanged`, kept in ChatState.changed) writes nothing.
 
 **Tag unions cross the ABI fine** (probe 2). The layout is the payload
 first, then a `u8` tag. Discriminants are alphabetical, so adding a tag
@@ -648,9 +664,9 @@ chat/                      the Roc app
   Paths.roc                keys, validators, path builders, firstOf, a member's channels (chat_paths.zig) (pure)
   ZigText.roc              parseInt, std.json.fmt, trims, byte lines        (pure)
   Time.roc                 RFC3339 UTC, civil dates (timefmt.zig)           (pure)
-  ChatState.roc            where a DM resumes; a pin set, parsed and rewritten (chat_state.zig) (pure)
+  ChatState.roc            the member's files: their paths; where a DM resumes, the bookmarks read and their write-if-changed; a pin set, parsed and rewritten (chat_state.zig) (pure)
   Conversation.roc         a route's DM or channel: the pair's other half, members, URL base, titles, a topic found without case (chat.zig findConv) (pure)
-  Feeds.roc                images.md / code.md entries, fence scanner       (pure)
+  Feeds.roc                images.md / code.md: their paths, entries, fence scanner (pure)
   Page.roc                 page, chrome, sidebar JSON, escaping             (pure)
   Store.roc                messageCount, append, reactions, pins, bookmarks (effects)
   Fanout.roc               cross-page publishes per member                  (effects)

@@ -190,16 +190,58 @@ title! = |conv|
 ## is unknown, and writing it would drop every pin. False when a step failed.
 pin! : Chat.Conv, List(U8), Bool => Bool
 pin! = |conv, sid, on| {
-	got = Host.pins!(conv)
-	if !got.ok {
-		Bool.False
-	} else {
-		match ChatState.pinned(got.bytes, sid, on) {
-			Write(bytes) => Host.write_pins!(conv, bytes)
-			Remove => Host.remove_pins!(conv)
-		}
+	path = ChatState.pinned_path(Host.me!({}), conv.key)
+	match read!(path) {
+		Found(stored) => repin!(path, stored, sid, on)
+		Missing => repin!(path, [], sid, on)
+		Failed => Bool.False
 	}
 }
+
+## The pinned file at `path`, read as `stored`, with `sid` pinned or
+## unpinned: written back, or, emptied, removed.
+repin! : List(U8), List(U8), List(U8), Bool => Bool
+repin! = |path, stored, sid, on|
+	match ChatState.pinned(stored, sid, on) {
+		Write(bytes) => Host.write!(path, bytes)
+		Remove => Host.remove!(path)
+	}
+
+## Host.read!'s answer as one tag: the file's bytes, nothing there, or a
+## read that failed (the request has failed: what follows writes nothing).
+read! : List(U8) => [Found(List(U8)), Missing, Failed]
+read! = |path| {
+	got = Host.read!(path)
+	match got.status {
+		Found => Found(got.bytes)
+		Missing => Missing
+		Failed => Failed
+	}
+}
+
+## **WHERE THE MEMBER RESUMES DM `conv`: TOPIC `sid`** (setLastViewedTopic):
+## the topic last viewed there first, then the DM last in, each written
+## only when it changed (ChatState.changed); false when a step failed, and
+## nothing after it is written. A member or topic with no name records
+## nothing.
+bookmark! : Chat.Conv, List(U8) => Bool
+bookmark! = |conv, sid| {
+	me = Host.me!({})
+	if me == [] or sid == [] {
+		Bool.True
+	} else if write_if_changed!(ChatState.last_session_path(me, conv.key), sid) {
+		write_if_changed!(ChatState.last_conv_path(me), conv.key)
+	} else {
+		Bool.False
+	}
+}
+
+## **WRITTEN ONLY WHEN IT CHANGES** (zig-metal-unikernel 153(1)): on every
+## send and view the value is usually the one already there, and a write is
+## disk requests each time.
+write_if_changed! : List(U8), List(U8) => Bool
+write_if_changed! = |path, value|
+	if ChatState.changed(read!(path), value) Host.write!(path, ChatState.bookmark_line(value)) else Bool.True
 
 ## POST .../react: the form, then the store's answer.
 react! : Chat.Conv, List(U8) => Chat.Answer
@@ -262,9 +304,11 @@ feed! = |which, rest|
 		Chat.not_found
 	} else {
 		viewer = Host.viewer!({})
-		file = match Host.feed!(which) {
-			[bytes] => bytes
-			_ => []
+		# A feed that failed is the request's failure; the page made of
+		# nothing is not sent.
+		file = match read!(Feeds.path(Host.me!({}), which)) {
+			Found(bytes) => bytes
+			Missing | Failed => []
 		}
 		src = Chrome.src_in(Host.srcs!({}))
 		page = match which {
@@ -297,7 +341,7 @@ landing! = |route|
 ## what the host read.
 page! : Route.R, Chat.Conv, List(U8) => Chat.Answer
 page! = |route, conv, title|
-	if conv.family == Dm and !Host.bookmark!(conv, route.sid) {
+	if conv.family == Dm and !bookmark!(conv, route.sid) {
 		Chat.answered
 	} else {
 		match Host.page!(conv, route.sid) {
@@ -318,8 +362,9 @@ json = Str.to_utf8("application/json; charset=utf-8")
 ## when it has no topic yet; with none, the empty /chat.
 resume! : {} => Chat.Answer
 resume! = |{}| {
-	conv = Host.last_conv!({})
-	if conv == [] or !Paths.participant(conv, Host.me!({})) {
+	me = Host.me!({})
+	conv = ChatState.bookmark(read!(ChatState.last_conv_path(me)))
+	if conv == [] or !Paths.participant(conv, me) {
 		Chat.respond(200, html, Pages.no_conversations(Chrome.src_in(Host.srcs!({})), Host.viewer!({})))
 	} else {
 		topics = Host.topics!(Dm, conv)
@@ -334,7 +379,10 @@ resume! = |{}| {
 ## Where the member resumes DM `conv`, whose topics are `topics`: the choice
 ## ChatState's, the last-viewed topic and the clock the host's.
 resume_at! : List(U8), List(List(U8)) => List(U8)
-resume_at! = |conv, topics| ChatState.resume_topic(topics, Host.last_viewed!(conv), Host.now!({}))
+resume_at! = |conv, topics| {
+	last = ChatState.bookmark(read!(ChatState.last_session_path(Host.me!({}), conv)))
+	ChatState.resume_topic(topics, last, Host.now!({}))
+}
 
 ## /chat/conversations: a DM with every other member, where the member
 ## resumes it, and its topics.
@@ -437,7 +485,7 @@ make! = |route, conv, topic|
 		name = Host.viewer!({})
 		dm = conv.family == Dm
 		# The bookmark first, as a send's: one that fails makes no topic.
-		if dm and !Host.bookmark!(conv, topic) {
+		if dm and !bookmark!(conv, topic) {
 			Chat.answered
 		} else if !Host.append!(conv, topic, name, Str.to_utf8("hi"), []) {
 			Chat.answered
@@ -511,7 +559,7 @@ store! = |route, conv, is_async, md, cid|
 		Chat.answered
 	} else {
 		name = Host.viewer!({})
-		if conv.family == Dm and !Host.bookmark!(conv, route.sid) {
+		if conv.family == Dm and !bookmark!(conv, route.sid) {
 			Chat.answered
 		} else if !Host.append!(conv, route.sid, name, md, cid) {
 			Chat.answered

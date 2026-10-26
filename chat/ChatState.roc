@@ -1,7 +1,15 @@
 ## A MEMBER'S PLACE IN THE CHAT (angry-gopher chat_state.zig): the topic a
-## bare DM resumes at, and the member's pinned topics in a conversation, as
-## the file that holds them. Pure: the host reads the files and writes them
-## as this says. angry-gopher's chat_twin_test.zig holds each to its Zig.
+## bare DM resumes at, the bookmarks that say where (the DM last in, the
+## topic last viewed in each), and the member's pinned topics in a
+## conversation: their files' names under the chat root and their formats.
+## Pure: the host reads and writes the bytes (Host.read!, Host.write!,
+## Host.remove!) where this names them. angry-gopher's chat_twin_test.zig
+## holds each to its Zig.
+##
+## The member's files, under the chat root:
+##   users/<uid>/last-conv                  the DM last in, a line
+##   users/<uid>/last-sessions/<conv-key>   the topic last viewed there, a line
+##   users/<uid>/pinned-sessions/<conv-key> pinned topics, a line each
 import Bytes
 import Paths
 import Time
@@ -43,4 +51,47 @@ ChatState := [].{
 	## blank ones dropped.
 	parse : List(U8) -> List(List(U8))
 	parse = |b| List.drop_if(List.map(Bytes.split_byte(b, 10), ZigText.trim), |s| s == [])
+
+	## The member's DM last in (lastUserConv's file).
+	last_conv_path : List(U8) -> List(U8)
+	last_conv_path = |uid| Paths.join([Str.to_utf8("users"), uid, Str.to_utf8("last-conv")])
+
+	## The topic the member last viewed in DM `conv` (lastViewedTopic's file).
+	last_session_path : List(U8), List(U8) -> List(U8)
+	last_session_path = |uid, conv| Paths.join([Str.to_utf8("users"), uid, Str.to_utf8("last-sessions"), conv])
+
+	## The member's pins in `conv` (pinnedTopics's file).
+	pinned_path : List(U8), List(U8) -> List(U8)
+	pinned_path = |uid, conv| Paths.join([Str.to_utf8("users"), uid, Str.to_utf8("pinned-sessions"), conv])
+
+	## lastUserConv's and lastViewedTopic's reading of a bookmark: the file
+	## trimmed of spaces, tabs, CRs and newlines; "" when there is none (or
+	## it failed, the request failing with it).
+	bookmark : [Found(List(U8)), Missing, Failed] -> List(U8)
+	bookmark = |file|
+		match file {
+			Found(bytes) => ZigText.trim(bytes)
+			Missing | Failed => []
+		}
+
+	## writeIfChanged's decision: whether `value` is written over the
+	## bookmark read. Unchanged only when it reads, within the Zig's bound,
+	## as `value` once trimmed. **A BOOKMARK THAT CANNOT BE READ IS WRITTEN
+	## AGAIN; THE WRITE SAYS WHETHER IT CAN BE**: a failed read, and one past
+	## the bound (which the Zig's bounded read refused), is changed.
+	changed : [Found(List(U8)), Missing, Failed], List(U8) -> Bool
+	changed = |file, value|
+		match file {
+			Found(bytes) => List.len(bytes) > bookmark_most or ZigText.trim(bytes) != value
+			Missing | Failed => Bool.True
+		}
+
+	## The most of a bookmark the Zig read: setLastViewedTopic's
+	## `.limited(256)` refuses a file of 256 bytes or more.
+	bookmark_most : U64
+	bookmark_most = 255
+
+	## A bookmark as written: the value and a newline.
+	bookmark_line : List(U8) -> List(U8)
+	bookmark_line = |value| List.append(value, 10)
 }

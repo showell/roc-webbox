@@ -20,7 +20,8 @@ pub const Tail = route.Tail;
 pub const Form = route.Form;
 pub const Reacted = route.Reacted;
 pub const Hostility = route.Hostility;
-pub const Feed = route.Feed;
+pub const ReadStatus = route.ReadStatus;
+pub const Read = abi.Read;
 pub const Conv = abi.Conv;
 
 /// roc_abi.zig's arena, from `base`, once, as the host starts.
@@ -108,23 +109,24 @@ const Scripted = struct {
     body: ?[]const u8 = "",
     reactions: ?[]const u8 = "",
     react_answer: route.Reacted = .stored,
-    /// The pinned file read, or null when the read failed.
-    pins: ?[]const u8 = "",
-    /// Whether writing or removing it succeeds.
-    pin_ok: bool = true,
+    /// The files under the chat root, each as read; any other is missing.
+    files: []const File = &.{},
+    /// Whether a write or a remove succeeds.
+    write_ok: bool = true,
     /// The page's data, or none when it failed.
     page: []const []const u8 = &.{},
     is_async: bool = false,
     hostile_answer: route.Hostility = .fine,
-    bookmark_ok: bool = true,
     append_ok: bool = true,
     transcript: bool = true,
     linked: bool = false,
     asked: std.ArrayList(u8) = .empty,
     alloc: std.mem.Allocator,
 
+    const File = struct { path: []const u8, read: abi.Read };
+
     fn host(self: *Scripted) Host {
-        return .{ .ctx = self, .member = member, .presence = presence, .account = account, .name = name, .channel_members = channelMembers, .channel_rosters = rostersOf, .members = membersOf, .topics = topicsOf, .me = meId, .body = bodyOf, .reactions = reactionsOf, .react = react, .pins = pinsOf, .write_pins = writePins, .remove_pins = removePins, .page = pageOf, .header = header, .hostile = hostile, .viewer = viewer, .bookmark = bookmark, .append = append, .raw = raw, .links = links, .srcs = srcs };
+        return .{ .ctx = self, .member = member, .presence = presence, .account = account, .name = name, .channel_members = channelMembers, .channel_rosters = rostersOf, .members = membersOf, .topics = topicsOf, .me = meId, .now = nowOf, .body = bodyOf, .reactions = reactionsOf, .react = react, .read = readOf, .write = writeOf, .remove = removeOf, .fail = failOf, .page = pageOf, .header = header, .hostile = hostile, .viewer = viewer, .append = append, .raw = raw, .links = links, .srcs = srcs };
     }
     fn me(ctx: *anyopaque) *Scripted {
         return @ptrCast(@alignCast(ctx));
@@ -190,17 +192,24 @@ const Scripted = struct {
         say(ctx, " {s} {d} {s} {}", .{ sid, msg, emoji, on });
         return me(ctx).react_answer;
     }
-    fn pinsOf(ctx: *anyopaque, conv: Conv) ?[]const u8 {
-        say(ctx, "pins {s}", .{conv.key});
-        return me(ctx).pins;
+    fn nowOf(_: *anyopaque) i64 {
+        return 1761400000;
     }
-    fn writePins(ctx: *anyopaque, conv: Conv, bytes: []const u8) bool {
-        say(ctx, "write_pins {s} {s}", .{ conv.key, bytes });
-        return me(ctx).pin_ok;
+    fn readOf(ctx: *anyopaque, path: []const u8) abi.Read {
+        say(ctx, "read {s}", .{path});
+        for (me(ctx).files) |f| if (std.mem.eql(u8, f.path, path)) return f.read;
+        return .missing;
     }
-    fn removePins(ctx: *anyopaque, conv: Conv) bool {
-        say(ctx, "remove_pins {s}", .{conv.key});
-        return me(ctx).pin_ok;
+    fn writeOf(ctx: *anyopaque, path: []const u8, bytes: []const u8) bool {
+        say(ctx, "write {s} {s}", .{ path, bytes });
+        return me(ctx).write_ok;
+    }
+    fn removeOf(ctx: *anyopaque, path: []const u8) bool {
+        say(ctx, "remove {s}", .{path});
+        return me(ctx).write_ok;
+    }
+    fn failOf(ctx: *anyopaque, e: anyerror) void {
+        say(ctx, "fail {t}", .{e});
     }
     fn pageOf(ctx: *anyopaque, conv: Conv, sid: []const u8) []const []const u8 {
         sayConv(ctx, "page", conv);
@@ -218,10 +227,6 @@ const Scripted = struct {
     fn viewer(ctx: *anyopaque) []const u8 {
         say(ctx, "viewer", .{});
         return "Steve";
-    }
-    fn bookmark(ctx: *anyopaque, conv: Conv, sid: []const u8) bool {
-        say(ctx, "bookmark {s} {s}", .{ conv.key, sid });
-        return me(ctx).bookmark_ok;
     }
     fn raw(ctx: *anyopaque, conv: Conv, sid: []const u8) bool {
         say(ctx, "raw {s} {s}", .{ conv.key, sid });
@@ -259,6 +264,13 @@ fn expectAct(sub: []const u8, channel: bool, method: std.http.Method, script: Sc
 const dm_topic = "member;presence;account 2;name 2;topics dm 1_2;";
 /// And channel ops's: its members, its topics.
 const ops_topic = "member;presence;channel_members ops;topics channel ops;";
+
+/// What recording topic `sid` as where the member resumes DM 1_2 asks, both
+/// bookmarks missing: the topic last viewed there, then the DM last in,
+/// each read and written as a line.
+inline fn bookmarked(comptime sid: []const u8) []const u8 {
+    return comptime "read users/1/last-sessions/1_2;write users/1/last-sessions/1_2 " ++ sid ++ "\n;read users/1/last-conv;write users/1/last-conv 1_2\n;";
+}
 
 test "a topic's reactions, react, pin and unpin are the Roc's: presence, the conversation and topic found, the method, then the work" {
     use(testing.allocator);
@@ -317,27 +329,36 @@ test "a topic's reactions, react, pin and unpin are the Roc's: presence, the con
         s.reactions = null;
         break :blk s;
     }, .answered, dm_topic ++ "reactions dm 1_2 /chat/c/1_2 [1,2] Plans;");
-    // The set is the Roc's (ChatState.pinned): read, changed, written back
-    // sorted by bytes, or removed when emptied.
-    try expectAct("/c/1_2/Plans/pin", false, .POST, a, .{ .respond = .{ .status = 204 } }, dm_topic ++ "pins 1_2;write_pins 1_2 Plans\n;");
+    // The set is the Roc's (ChatState.pinned), and its file's name: read,
+    // changed, written back sorted by bytes, or removed when emptied. A
+    // missing file is no pins.
+    const pins = "users/1/pinned-sessions/1_2";
+    try expectAct("/c/1_2/Plans/pin", false, .POST, a, .{ .respond = .{ .status = 204 } }, dm_topic ++ "read " ++ pins ++ ";write " ++ pins ++ " Plans\n;");
     try expectAct("/c/1_2/Plans/pin", false, .POST, blk: {
         var s = a;
-        s.pins = "b\r\n  a\n\nPlans\n";
+        s.files = &.{.{ .path = pins, .read = .{ .found = "b\r\n  a\n\nPlans\n" } }};
         break :blk s;
-    }, .{ .respond = .{ .status = 204 } }, dm_topic ++ "pins 1_2;write_pins 1_2 Plans\na\nb\n;");
-    try expectAct("/ops/Plans/unpin", true, .POST, a, .{ .respond = .{ .status = 204 } }, ops_topic ++ "pins ops;remove_pins ops;");
+    }, .{ .respond = .{ .status = 204 } }, dm_topic ++ "read " ++ pins ++ ";write " ++ pins ++ " Plans\na\nb\n;");
+    try expectAct("/ops/Plans/unpin", true, .POST, a, .{ .respond = .{ .status = 204 } }, ops_topic ++ "read users/1/pinned-sessions/ops;remove users/1/pinned-sessions/ops;");
     try expectAct("/c/1_2/Plans/unpin", false, .POST, blk: {
         var s = a;
-        s.pins = "Other\nPlans\n";
-        s.pin_ok = false;
+        s.files = &.{.{ .path = pins, .read = .{ .found = "Other\nPlans\n" } }};
+        s.write_ok = false;
         break :blk s;
-    }, .answered, dm_topic ++ "pins 1_2;write_pins 1_2 Other\n;");
-    // A set that will not read is not an empty set: nothing is written.
+    }, .answered, dm_topic ++ "read " ++ pins ++ ";write " ++ pins ++ " Other\n;");
+    // **A SET THAT WILL NOT READ IS NOT AN EMPTY SET**: a failed read (a
+    // pins file that is a folder) writes nothing, where a missing one
+    // would have written the pin alone.
     try expectAct("/c/1_2/Plans/pin", false, .POST, blk: {
         var s = a;
-        s.pins = null;
+        s.files = &.{.{ .path = pins, .read = .failed }};
         break :blk s;
-    }, .answered, dm_topic ++ "pins 1_2;");
+    }, .answered, dm_topic ++ "read " ++ pins ++ ";");
+    try expectAct("/ops/Plans/unpin", true, .POST, blk: {
+        var s = a;
+        s.files = &.{.{ .path = "users/1/pinned-sessions/ops", .read = .failed }};
+        break :blk s;
+    }, .answered, ops_topic ++ "read users/1/pinned-sessions/ops;");
     try expectAct("/c/1_2/Plans/pin", false, .PUT, a, .{ .not_allowed = .POST }, dm_topic);
     // A topic found without case.
     try expectAct("/c/1_2/plans/pin", false, .PUT, a, .{ .not_allowed = .POST }, dm_topic);
@@ -363,12 +384,12 @@ test "a DM's page and landing, and the DM with yourself: the title the Roc's, a 
     defer @import("roc_abi.zig").deinit();
     const a: Scripted = .{ .alloc = undefined };
     // A page whose data failed: the bookmark was asked first.
-    try expectAct("/c/1_2/Plans", false, .GET, a, .answered, dm_topic ++ "bookmark 1_2 Plans;page dm 1_2 /chat/c/1_2 [1,2] Plans;");
+    try expectAct("/c/1_2/Plans", false, .GET, a, .answered, dm_topic ++ bookmarked("Plans") ++ "page dm 1_2 /chat/c/1_2 [1,2] Plans;");
     try expectAct("/c/1_2/Plans", false, .GET, blk: {
         var s = a;
-        s.bookmark_ok = false;
+        s.write_ok = false;
         break :blk s;
-    }, .answered, dm_topic ++ "bookmark 1_2 Plans;");
+    }, .answered, dm_topic ++ "read users/1/last-sessions/1_2;write users/1/last-sessions/1_2 Plans\n;");
     // A channel's page moves no bookmark.
     try expectAct("/ops/Plans", true, .GET, a, .answered, ops_topic ++ "page channel ops /channel/ops [1,3] Plans;");
     // The landing: the first topic, or the page offering one, titled by the
@@ -391,7 +412,7 @@ test "a send is the Roc's: the conversation, the method, the header, the body, t
     // The partner's name is read, as the Zig read the title before a send.
     const found = "member;presence;account 2;name 2;";
     const asked = found ++ "header x-chat-async;body;";
-    try expectAct("/c/1_2/Plans/send", false, .POST, a, .{ .redirect = "/chat/c/1_2/Plans" }, asked ++ "hostile hi;viewer;bookmark 1_2 Plans;append dm 1_2 /chat/c/1_2 [1,2] Plans Steve hi c-1;");
+    try expectAct("/c/1_2/Plans/send", false, .POST, a, .{ .redirect = "/chat/c/1_2/Plans" }, asked ++ "hostile hi;viewer;" ++ bookmarked("Plans") ++ "append dm 1_2 /chat/c/1_2 [1,2] Plans Steve hi c-1;");
     // A channel's send moves no bookmark; an async sender is answered 204.
     try expectAct("/ops/Plans/send", true, .POST, blk: {
         var s = a;
@@ -412,14 +433,14 @@ test "a send is the Roc's: the conversation, the method, the header, the body, t
     }, .answered, asked ++ "hostile hi;");
     try expectAct("/c/1_2/Plans/send", false, .POST, blk: {
         var s = a;
-        s.bookmark_ok = false;
+        s.write_ok = false;
         break :blk s;
-    }, .answered, asked ++ "hostile hi;viewer;bookmark 1_2 Plans;");
+    }, .answered, asked ++ "hostile hi;viewer;read users/1/last-sessions/1_2;write users/1/last-sessions/1_2 Plans\n;");
     try expectAct("/c/1_2/Plans/send", false, .POST, blk: {
         var s = a;
         s.append_ok = false;
         break :blk s;
-    }, .answered, asked ++ "hostile hi;viewer;bookmark 1_2 Plans;append dm 1_2 /chat/c/1_2 [1,2] Plans Steve hi c-1;");
+    }, .answered, asked ++ "hostile hi;viewer;" ++ bookmarked("Plans") ++ "append dm 1_2 /chat/c/1_2 [1,2] Plans Steve hi c-1;");
     // Judged by the Roc before the host is asked to: empty, not UTF-8.
     try expectAct("/c/1_2/Plans/send", false, .POST, blk: {
         var s = a;
@@ -445,7 +466,7 @@ test "a send is the Roc's: the conversation, the method, the header, the body, t
         s.body = "topic=Ideas";
         s.topics = &.{ "general2", "Plans" };
         break :blk s;
-    }, .{ .respond = .{ .status = 200, .content_type = "application/json; charset=utf-8", .body = "{\"conv\":\"1_2\",\"sid\":\"Ideas\"}" } }, "member;presence;account 2;body;topics dm 1_2;viewer;bookmark 1_2 Ideas;append dm 1_2 /chat/c/1_2 [1,2] Ideas Steve hi ;topics dm 1_2;append dm 1_2 /chat/c/1_2 [1,2] general2 Steve New topic: [Ideas](/chat/c/1_2/Ideas) ;");
+    }, .{ .respond = .{ .status = 200, .content_type = "application/json; charset=utf-8", .body = "{\"conv\":\"1_2\",\"sid\":\"Ideas\"}" } }, "member;presence;account 2;body;topics dm 1_2;viewer;" ++ bookmarked("Ideas") ++ "append dm 1_2 /chat/c/1_2 [1,2] Ideas Steve hi ;topics dm 1_2;append dm 1_2 /chat/c/1_2 [1,2] general2 Steve New topic: [Ideas](/chat/c/1_2/Ideas) ;");
 }
 
 test "a topic's raw transcript and /chat/links are the Roc's: a transcript the host has not is a plain 404, never handed back" {
@@ -462,6 +483,54 @@ test "a topic's raw transcript and /chat/links are the Roc's: a transcript the h
     try expectAct("/c/1_2/Plans/raw", false, .POST, a, .{ .not_allowed = .GET }, dm_topic);
     // /chat/links asks the viewer, the scripts, then the page; below it, nothing.
     try expectAct("/links/x", false, .GET, a, .not_found, "member;presence;");
+}
+
+test "the member's bookmarks are the Roc's files: the topic last viewed first, then the DM last in, each written only when it changed, and read back to resume" {
+    use(testing.allocator);
+    defer @import("roc_abi.zig").deinit();
+    const a: Scripted = .{ .alloc = undefined };
+    const page = "page dm 1_2 /chat/c/1_2 [1,2] Plans;";
+    const ls = "users/1/last-sessions/1_2";
+    const lc = "users/1/last-conv";
+    // Both already say so, whitespace around them: nothing written.
+    try expectAct("/c/1_2/Plans", false, .GET, blk: {
+        var s = a;
+        s.files = &.{ .{ .path = ls, .read = .{ .found = "Plans\r\n" } }, .{ .path = lc, .read = .{ .found = " \t1_2 \n" } } };
+        break :blk s;
+    }, .answered, dm_topic ++ "read " ++ ls ++ ";read " ++ lc ++ ";" ++ page);
+    // Only the topic changed; only the DM changed.
+    try expectAct("/c/1_2/Plans", false, .GET, blk: {
+        var s = a;
+        s.files = &.{ .{ .path = ls, .read = .{ .found = "Other\n" } }, .{ .path = lc, .read = .{ .found = "1_2" } } };
+        break :blk s;
+    }, .answered, dm_topic ++ "read " ++ ls ++ ";write " ++ ls ++ " Plans\n;read " ++ lc ++ ";" ++ page);
+    try expectAct("/c/1_2/Plans", false, .GET, blk: {
+        var s = a;
+        s.files = &.{ .{ .path = ls, .read = .{ .found = "Plans" } }, .{ .path = lc, .read = .{ .found = "1_3\n" } } };
+        break :blk s;
+    }, .answered, dm_topic ++ "read " ++ ls ++ ";read " ++ lc ++ ";write " ++ lc ++ " 1_2\n;" ++ page);
+    // A bookmark that will not read is written again (the write says
+    // whether it can be: a real host has failed the request already).
+    try expectAct("/c/1_2/Plans", false, .GET, blk: {
+        var s = a;
+        s.files = &.{ .{ .path = ls, .read = .failed }, .{ .path = lc, .read = .{ .found = "1_2\n" } } };
+        break :blk s;
+    }, .answered, dm_topic ++ "read " ++ ls ++ ";write " ++ ls ++ " Plans\n;read " ++ lc ++ ";" ++ page);
+    // /chat reads them back: the DM last in, then where it resumes.
+    try expectAct("", false, .GET, blk: {
+        var s = a;
+        s.topics = &.{ "Other", "Plans" };
+        s.files = &.{ .{ .path = ls, .read = .{ .found = "\tPlans \r\n" } }, .{ .path = lc, .read = .{ .found = " 1_2\r\n" } } };
+        break :blk s;
+    }, .{ .redirect = "/chat/c/1_2/Plans" }, "member;presence;read " ++ lc ++ ";topics dm 1_2;read " ++ ls ++ ";");
+    // The feeds are the member's files too, named by the Roc.
+    for ([_][2][]const u8{ .{ "/images", "users/1/images.md" }, .{ "/code", "users/1/code.md" } }) |feed| {
+        var arena = std.heap.ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        var s: Scripted = .{ .alloc = arena.allocator() };
+        _ = try decide(arena.allocator(), feed[0], false, .GET, s.host());
+        try testing.expectEqualStrings(try std.fmt.allocPrint(arena.allocator(), "member;presence;viewer;read {s};srcs;", .{feed[1]}), s.asked.items);
+    }
 }
 
 test "/chat/msg: which channels are the member's, and their order, are the Roc's; the host hands over every roster" {

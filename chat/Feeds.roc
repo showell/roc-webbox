@@ -4,9 +4,21 @@
 ## byte. Pure; angry-gopher's chat_twin_test.zig holds each to its Zig.
 import JsonText
 import Bytes
+import Paths
 import ZigText
 
 Feeds := [].{
+	## The member's feed file under the chat root: users/<uid>/images.md or
+	## code.md, where images_store and code_store keep them.
+	path : List(U8), [Images, Code] -> List(U8)
+	path = |uid, which| {
+		name = match which {
+			Images => "images.md"
+			Code => "code.md"
+		}
+		Paths.join([Str.to_utf8("users"), uid, Str.to_utf8(name)])
+	}
+
 	## One entry's header line: `Sent by <from> at <at>, source MSG_<source_id> in <conv>:`.
 	Header : { from : List(U8), at : List(U8), source_id : List(U8), conv : List(U8) }
 

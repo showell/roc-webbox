@@ -105,12 +105,14 @@ pub const Reacted = enum(u8) { failed, no_such_message, stored };
 /// request (webbox's edge counter and its 400), `failed` when the check did.
 pub const Hostility = enum(u8) { failed, fine, refused };
 
-/// Host.roc's `feed!` argument: images.md or code.md.
-pub const Feed = enum(u8) { code, images };
+/// Host.roc's `read!` answer's `status`: the file found (its bytes beside
+/// it), missing (nothing there), or failed (the host has failed the
+/// request). **MISSING AND FAILED ARE NEVER ONE ANSWER.**
+pub const ReadStatus = enum(u8) { failed, found, missing };
 
 comptime {
     @setEvalBranchQuota(20_000);
-    for (.{ Family, Part, Tail, Method, Kind, Form, Reacted, Hostility, Feed }) |E| assertRocOrder(E);
+    for (.{ Family, Part, Tail, Method, Kind, Form, Reacted, Hostility, ReadStatus }) |E| assertRocOrder(E);
 }
 
 /// That `E`'s values are Roc's for the same tags: numbered from 0 in the

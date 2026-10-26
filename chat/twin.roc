@@ -125,12 +125,24 @@ call = |req| {
 		49 => [bool(Conversation.has_topic(List.drop_first(req.args, 1), arg(0)))]
 		50 => [Conversation.dm_base(arg(0)), Conversation.channel_base(arg(0))]
 		51 => Paths.member_channels(List.drop_first(req.args, 1), arg(0))
+		52 => [ChatState.bookmark(file(arg(0), arg(1)))]
+		53 => [bool(ChatState.changed(file(arg(0), arg(1)), arg(2))), ChatState.bookmark_line(arg(2))]
+		54 => [ChatState.last_conv_path(arg(0)), ChatState.last_session_path(arg(0), arg(1)), ChatState.pinned_path(arg(0), arg(1)), Feeds.path(arg(0), Images), Feeds.path(arg(0), Code)]
 		_ => crash "twin: no function ${U8.to_str(req.which)}"
 	}
 }
 
 bool : Bool -> List(U8)
 bool = |b| if b [49] else [48]
+
+## A read as the test says it went: `F` found (`bytes` the file), `M`
+## missing, anything else failed.
+file : List(U8), List(U8) -> [Found(List(U8)), Missing, Failed]
+file = |how, bytes| match how {
+	[70] => Found(bytes)
+	[77] => Missing
+	_ => Failed
+}
 
 ## A signed decimal the test wrote.
 int : List(U8) -> I64

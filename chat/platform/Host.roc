@@ -39,17 +39,24 @@ Host := [].{
 	## and send it live: `Stored`, `NoSuchMessage`, or `Failed`.
 	react! : Chat.Conv, List(U8), U64, List(U8), Bool => [Stored, NoSuchMessage, Failed]
 
-	## The member's pinned topics in `conv`, as the file holds them ("" when
-	## there is none); not `ok` when the read failed. **A SET THAT WILL NOT
-	## READ IS NOT AN EMPTY SET**: what is read is rewritten, so a failure
-	## read as "no pins" would drop every pin.
-	pins! : Chat.Conv => { ok : Bool, bytes : List(U8) }
+	## **THE FILES, AS PRIMITIVES**: a file under the chat root, `path`
+	## relative to it (ChatState.roc and Feeds.roc name them), its bytes as
+	## the Roc's formats write them. A path that is empty, absolute or
+	## through `..` is the Roc's bug: the request fails (a 500), never a
+	## missing file.
+	##
+	## The file's bytes (`Found`), nothing there (`Missing`), or a read that
+	## failed (`Failed`: the request has failed). **MISSING AND FAILED ARE
+	## NEVER ONE ANSWER**: what is read is often rewritten, so a failure read
+	## as "no file" would write over what could not be seen.
+	read! : List(U8) => { bytes : List(U8), status : [Failed, Found, Missing] }
 
-	## Write that file as `bytes` (ChatState.pinned's); false when it failed.
-	write_pins! : Chat.Conv, List(U8) => Bool
+	## Write the whole file as `bytes`, its folders made as needed; false
+	## when it failed.
+	write! : List(U8), List(U8) => Bool
 
-	## Remove that file, no pin being left; false when it failed.
-	remove_pins! : Chat.Conv => Bool
+	## Remove the file (one not there is gone already); false when it failed.
+	remove! : List(U8) => Bool
 
 	## Topic `sid`'s page's data, in `conv`: the viewer, the four limits
 	## (image, video, accept, search), then the sidebar's fields
@@ -70,13 +77,6 @@ Host := [].{
 	## The member's name.
 	viewer! : {} => List(U8)
 
-	## The DM the member was last in (their bookmark), or "".
-	last_conv! : {} => List(U8)
-
-	## The topic the member last viewed in DM `conv`, or "" (ChatState.resume_topic
-	## judges whether it is still there).
-	last_viewed! : List(U8) => List(U8)
-
 	## The request's time, in Unix seconds: the one time everything it
 	## stamps carries (a new conversation's topic is named for its date).
 	now! : {} => I64
@@ -92,10 +92,6 @@ Host := [].{
 
 	## Every member and the agent, as `id, name` pairs.
 	members! : {} => List(List(U8))
-
-	## Record topic `sid` as the member's place to resume DM `conv` (and
-	## `conv` as the DM they were last in); false when it failed.
-	bookmark! : Chat.Conv, List(U8) => Bool
 
 	## Append a message to topic `sid` of `conv`, by the member under
 	## `name`, with the sender's client id `cid` ("" for none), and send it
@@ -115,10 +111,6 @@ Host := [].{
 	## renders it as the server's own markdown and holds it for the answer
 	## (Chat.held_html) (false when the read failed, too).
 	links! : {} => Bool
-
-	## The member's feed file as stored (images.md or code.md):
-	## none when there is none (or the read failed).
-	feed! : [Images, Code] => List(List(U8))
 
 	## The member's recent feed as gathered (angry-gopher recent.zig
 	## `gatherRows`), nine fields a row: doc, secs, uid, name, key, label,
