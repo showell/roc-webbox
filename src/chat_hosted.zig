@@ -29,6 +29,7 @@ pub const Conv = abi.Conv;
 pub const Account = abi.Account;
 pub const Accounts = abi.Accounts;
 pub const AccountKind = route.AccountKind;
+pub const AccountRead = abi.AccountRead;
 
 /// roc_abi.zig's arena, from `base`, once, as the host starts.
 pub fn use(base: std.mem.Allocator) void {
@@ -104,7 +105,7 @@ test "the router: a topic's tails, a channel, an asset before the gate, the gate
 const Scripted = struct {
     /// Every account, as Host.accounts! hands them; null when the read
     /// failed.
-    accounts: ?[]const abi.Account = &.{ steve, .{ .id = "2", .name = "Debbie", .kind = .member } },
+    accounts: ?[]const abi.Account = &.{ steve, .{ .id = "2", .name = .{ .found = "Debbie" }, .kind = .member } },
     /// Every channel, in the listing's order: `channels/` lists each as
     /// `<name>.channel`, and that file reads as `read`.
     channels: []const Channel = &.{.{ .name = "ops", .read = .{ .found = "1\n3\n" } }},
@@ -131,7 +132,7 @@ const Scripted = struct {
     const Channel = struct { name: []const u8, read: abi.Read };
 
     fn host(self: *Scripted) Host {
-        return .{ .ctx = self, .member = member, .presence = presence, .accounts = accountsOf, .me = meId, .now = nowOf, .body = bodyOf, .react = react, .read = readOf, .write = writeOf, .remove = removeOf, .list = listOf, .fail = failOf, .malformed_channel = malformed, .page = pageOf, .header = header, .hostile = hostile, .append = append, .raw = raw, .links = links, .srcs = srcs };
+        return .{ .ctx = self, .member = member, .presence = presence, .accounts = accountsOf, .me = meId, .now = nowOf, .body = bodyOf, .react = react, .read = readOf, .write = writeOf, .remove = removeOf, .list = listOf, .fail = failOf, .fail_account = failAccountOf, .malformed_channel = malformed, .page = pageOf, .header = header, .hostile = hostile, .append = append, .raw = raw, .links = links, .srcs = srcs };
     }
     fn me(ctx: *anyopaque) *Scripted {
         return @ptrCast(@alignCast(ctx));
@@ -209,6 +210,9 @@ const Scripted = struct {
     fn failOf(ctx: *anyopaque, e: anyerror) void {
         say(ctx, "fail {t}", .{e});
     }
+    fn failAccountOf(ctx: *anyopaque, which: abi.AccountRead, id: []const u8) void {
+        say(ctx, "fail {t} {s}", .{ which, id });
+    }
     fn pageOf(ctx: *anyopaque, conv: Conv, sid: []const u8) []const []const u8 {
         sayConv(ctx, "page", conv);
         say(ctx, " {s}", .{sid});
@@ -241,7 +245,7 @@ const Scripted = struct {
     }
 };
 
-const steve: abi.Account = .{ .id = "1", .name = "Steve", .kind = .member };
+const steve: abi.Account = .{ .id = "1", .name = .{ .found = "Steve" }, .kind = .member };
 
 fn expectAct(sub: []const u8, channel: bool, method: std.http.Method, script: Scripted, want: Decision, asked: []const u8) !void {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
@@ -400,7 +404,7 @@ test "a DM's page and landing, and the DM with yourself: the title the Roc's, a 
     try expectAct("/c/1_2", false, .GET, a, .{ .redirect = "/chat/c/1_2/Plans" }, "member;presence;accounts;list 1_2/sessions;");
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
-    var s: Scripted = .{ .alloc = arena.allocator(), .topics = &.{}, .accounts = &.{ steve, .{ .id = "2", .name = "", .kind = .guest } } };
+    var s: Scripted = .{ .alloc = arena.allocator(), .topics = &.{}, .accounts = &.{ steve, .{ .id = "2", .name = .{ .found = "" }, .kind = .guest } } };
     const got = try decide(arena.allocator(), "/c/1_2", false, .GET, s.host());
     try testing.expectEqualStrings("member;presence;accounts;list 1_2/sessions;srcs;", s.asked.items);
     try testing.expect(std.mem.indexOf(u8, got.respond.body, "Chat w/2") != null);
@@ -674,6 +678,80 @@ test "accounts that will not read fail the request: never \"no such account\" ha
     try expectAct("/msg/Plans_1", false, .GET, a, .answered, "member;presence;accounts;");
 }
 
+test "an account that will not read fails only what reads it, with its own read's error: its name the DM it titles, the viewer's own name the pages that name them, the roster on the first in the disk's order; never no account, never a name of \"\"" {
+    use(testing.allocator);
+    defer @import("roc_abi.zig").deinit();
+    const debbie_unnamed: abi.Account = .{ .id = "2", .name = .unreadable, .kind = .member };
+    const named = [_]abi.Account{ steve, debbie_unnamed };
+    const a: Scripted = .{ .alloc = undefined, .accounts = &named, .body = "markdown=hi" };
+    // The partner's name: every topic route and a send (the title, read
+    // before the topics and before a send's tail) fail with it, nothing
+    // after asked; never handed to the Zig as not the member's.
+    try expectAct("/c/1_2/Plans", false, .GET, a, .answered, "member;presence;accounts;fail name 2;");
+    try expectAct("/c/1_2/Plans/reactions", false, .GET, a, .answered, "member;presence;accounts;fail name 2;");
+    try expectAct("/c/1_2/Plans/send", false, .POST, a, .answered, "member;presence;accounts;fail name 2;");
+    // The roster reads a member's name: the conversations and a message's
+    // topic fail with it.
+    try expectAct("/conversations", false, .GET, a, .answered, "member;presence;accounts;fail name 2;");
+    try expectAct("/msg/Plans_1", false, .GET, a, .answered, "member;presence;accounts;fail name 2;");
+    // **WHAT NEVER READ IT IS SERVED**: a landing with a topic, the
+    // member's own pages, a new topic (the viewer's name only).
+    try expectAct("/c/1_2", false, .GET, a, .{ .redirect = "/chat/c/1_2/Plans" }, "member;presence;accounts;list 1_2/sessions;");
+    try expectAct("/c/1_2/new", false, .POST, blk: {
+        var s = a;
+        s.body = "topic=Ideas";
+        s.topics = &.{"Plans"};
+        break :blk s;
+    }, .{ .respond = .{ .status = 200, .content_type = "application/json; charset=utf-8", .body = "{\"conv\":\"1_2\",\"sid\":\"Ideas\"}" } }, "member;presence;accounts;body;list 1_2/sessions;" ++ bookmarked("Ideas") ++ "append dm 1_2 /chat/c/1_2 [1,2] Ideas Steve hi ;list 1_2/sessions;");
+    for ([_][]const u8{ "/links", "/images", "" }) |sub| {
+        var arena = std.heap.ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        const asked = try askedOf(arena.allocator(), sub, false, .GET, a);
+        if (std.mem.indexOf(u8, asked, "fail") != null) {
+            std.debug.print("{s}: asked \"{s}\", read no other account\n", .{ sub, asked });
+            return error.TestUnexpectedResult;
+        }
+    }
+    // The landing with no topic reads the title, then fails with it.
+    try expectAct("/c/1_2", false, .GET, blk: {
+        var s = a;
+        s.topics = &.{};
+        break :blk s;
+    }, .answered, "member;presence;accounts;list 1_2/sessions;fail name 2;");
+    // The viewer's own name: every page that names them, and a send.
+    const me_unnamed = [_]abi.Account{ .{ .id = "1", .name = .unreadable, .kind = .member }, .{ .id = "2", .name = .{ .found = "Debbie" }, .kind = .member } };
+    const m: Scripted = .{ .alloc = undefined, .accounts = &me_unnamed, .body = "markdown=hi" };
+    try expectAct("/links", false, .GET, m, .answered, "member;presence;accounts;fail name 1;");
+    try expectAct("/images", false, .GET, m, .answered, "member;presence;accounts;fail name 1;");
+    try expectAct("/ops/Plans/send", true, .POST, m, .answered, "member;presence;read channels/ops.channel;header x-chat-async;body;hostile hi;accounts;fail name 1;");
+    // A guest's name: never read by the roster, read by its DM's title.
+    const guest_unnamed = [_]abi.Account{ steve, .{ .id = "2", .name = .unreadable, .kind = .guest } };
+    const g: Scripted = .{ .alloc = undefined, .accounts = &guest_unnamed };
+    {
+        var arena = std.heap.ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        var s = g;
+        s.alloc = arena.allocator();
+        const got = try decide(arena.allocator(), "/conversations", false, .GET, s.host());
+        try testing.expectEqual(@as(u16, 200), got.respond.status);
+        try testing.expectEqualStrings("member;presence;accounts;", s.asked.items);
+    }
+    try expectAct("/c/1_2/Plans", false, .GET, g, .answered, "member;presence;accounts;fail name 2;");
+    // A password whose stat failed: the roster fails with it, the agent's
+    // too; the DM it is half of is found and titled all the same.
+    const unkind = [_]abi.Account{ steve, .{ .id = "2", .name = .{ .found = "Debbie" }, .kind = .unreadable } };
+    const k: Scripted = .{ .alloc = undefined, .accounts = &unkind };
+    try expectAct("/conversations", false, .GET, k, .answered, "member;presence;accounts;fail kind 2;");
+    try expectAct("/c/1_2/Plans/reactions", false, .GET, k, .{ .respond = .{ .status = 200, .content_type = "application/x-ndjson; charset=utf-8", .body = "" } }, "member;presence;accounts;list 1_2/sessions;read 1_2/sessions/Plans.reactions.jsonl;");
+    // **THE ROSTER FAILS ON THE FIRST, IN THE DISK'S ORDER**, as
+    // listAuthorized read them: a name before a kind after it; one account
+    // with both, its kind (the password is read first).
+    const order = [_]abi.Account{ steve, .{ .id = "5", .name = .unreadable, .kind = .agent }, .{ .id = "2", .name = .{ .found = "Debbie" }, .kind = .unreadable } };
+    try expectAct("/conversations", false, .GET, .{ .alloc = undefined, .accounts = &order }, .answered, "member;presence;accounts;fail name 5;");
+    const both = [_]abi.Account{ steve, .{ .id = "2", .name = .unreadable, .kind = .unreadable } };
+    try expectAct("/conversations", false, .GET, .{ .alloc = undefined, .accounts = &both }, .answered, "member;presence;accounts;fail kind 2;");
+}
+
 test "the accounts are the Roc's to read: a guest's DM is opened, the roster is members and the agent by numeric id, and a name is cut of its line end" {
     use(testing.allocator);
     defer @import("roc_abi.zig").deinit();
@@ -681,12 +759,12 @@ test "the accounts are the Roc's to read: a guest's DM is opened, the roster is 
     defer arena.deinit();
     const huge = "99999999999999999999";
     const all = [_]abi.Account{
-        .{ .id = "1", .name = "Steve\r\n", .kind = .member },
-        .{ .id = "10", .name = "Ten\r\n", .kind = .member },
-        .{ .id = "9", .name = " Nine  x", .kind = .member },
-        .{ .id = "4", .name = "Guest", .kind = .guest },
-        .{ .id = huge, .name = "Big", .kind = .member },
-        .{ .id = "3", .name = "Claude", .kind = .agent },
+        .{ .id = "1", .name = .{ .found = "Steve\r\n" }, .kind = .member },
+        .{ .id = "10", .name = .{ .found = "Ten\r\n" }, .kind = .member },
+        .{ .id = "9", .name = .{ .found = " Nine  x" }, .kind = .member },
+        .{ .id = "4", .name = .{ .found = "Guest" }, .kind = .guest },
+        .{ .id = huge, .name = .{ .found = "Big" }, .kind = .member },
+        .{ .id = "3", .name = .{ .found = "Claude" }, .kind = .agent },
     };
     var s: Scripted = .{ .alloc = arena.allocator(), .accounts = &all };
     const got = try decide(arena.allocator(), "/conversations", false, .GET, s.host());

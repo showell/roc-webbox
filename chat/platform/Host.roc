@@ -17,12 +17,17 @@ Host := [].{
 	## named as a counter names one (a canonical id), in the disk's order,
 	## with its kind (the agent; a member, who has a password; a guest, who
 	## has neither) and its `name` file's bytes as stored ("" when it has
-	## none). Accounts.roc does every lookup on them. `Failed` when one would
-	## not read: the request has failed, and the list is no answer. **NEVER
-	## THE AUTH ROOT ITSELF**: the host reads only the folders, whether each
-	## has a password, and each name, never a password or a key. Asked at
-	## most once a request.
-	accounts! : {} => { accounts : List({ id : List(U8), kind : [Agent, Guest, Member], name : List(U8) }), status : [Failed, Found] }
+	## none). Accounts.roc does every lookup on them. **AN ACCOUNT THAT WILL
+	## NOT READ IS LISTED, NEVER LEFT OUT**: a password whose stat failed is
+	## a `kind` of `Unreadable`, a name that would not read a `name_read` of
+	## `Unreadable` (its `name` empty, and never one); the host keeps each
+	## error, and the request fails with it only when a lookup needs that
+	## read (`fail!`). `Failed` when the accounts could not be listed at all:
+	## the request has failed, and the list is no answer. **NEVER THE AUTH
+	## ROOT ITSELF**: the host reads only the folders, whether each has a
+	## password, and each name, never a password or a key. Asked at most once
+	## a request.
+	accounts! : {} => { accounts : List({ id : List(U8), kind : [Agent, Guest, Member, Unreadable], name : List(U8), name_read : [Found, Unreadable] }), status : [Failed, Found] }
 	## The request's body, read to a form's limit (`which`: the react
 	## form's or a message's); not `ok` when the host answered instead (too
 	## big) or failed.
@@ -59,11 +64,13 @@ Host := [].{
 	## one, as store.list fails it).
 	list! : List(U8) => { entries : List({ kind : [Dir, File, Other], name : List(U8) }), status : [Failed, Found, Missing] }
 
-	## Fail the request (a 500), for a reason, as the host fails it with that
-	## reason's error: a channel's member file the Roc found malformed, on
-	## the channel's own route (channelMembers's error.MalformedChannel).
-	## One reason crosses as nothing (chat_abi.zig `roc_chat_fail`).
-	fail! : [MalformedChannel] => {}
+	## Fail the request (a 500), for a reason, about `whose`, with the error
+	## the Zig it replaced failed it with: channel `whose`'s member file the
+	## Roc found malformed, on the channel's own route
+	## (channelMembers's error.MalformedChannel); account `whose`'s kind or
+	## name, which a lookup needed and which `accounts!` listed as
+	## unreadable (the error that read failed with, as the host kept it).
+	fail! : [KindUnreadable, MalformedChannel, NameUnreadable], List(U8) => {}
 
 	## Count channel `name` as one a listing skipped as malformed: the
 	## operator's count, kept by the host for /admin/host.

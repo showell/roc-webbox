@@ -42,8 +42,8 @@ pub const ReadRec = extern struct { bytes: RocBytes, status: route_mod.ReadStatu
 pub const EntryRec = extern struct { name: RocBytes, kind: route_mod.EntryKind };
 /// Host.roc's `list!` answer: `{ entries : List(...), status : [Failed, Found, Missing] }`.
 pub const ListRec = extern struct { entries: EntryList, status: route_mod.ReadStatus };
-/// One of Host.roc's `accounts!` accounts: `{ id : List(U8), kind : [Agent, Guest, Member], name : List(U8) }`.
-pub const AccountRec = extern struct { id: RocBytes, name: RocBytes, kind: route_mod.AccountKind };
+/// One of Host.roc's `accounts!` accounts: `{ id : List(U8), kind : [Agent, Guest, Member, Unreadable], name : List(U8), name_read : [Found, Unreadable] }`.
+pub const AccountRec = extern struct { id: RocBytes, name: RocBytes, kind: route_mod.AccountKind, name_read: route_mod.NameRead };
 /// Host.roc's `accounts!` answer: `{ accounts : List(...), status : [Failed, Found] }`.
 pub const AccountsRec = extern struct { accounts: AccountList, status: route_mod.AccountsStatus };
 
@@ -77,7 +77,10 @@ pub const EntryList = RecList(EntryRec, Entry, struct {
 
 pub const AccountList = RecList(AccountRec, Account, struct {
     fn rec(it: Account) AccountRec {
-        return .{ .id = .from(it.id), .name = .from(it.name), .kind = it.kind };
+        return switch (it.name) {
+            .found => |name| .{ .id = .from(it.id), .name = .from(name), .kind = it.kind, .name_read = .found },
+            .unreadable => .{ .id = .from(it.id), .name = .from(""), .kind = it.kind, .name_read = .unreadable },
+        };
     }
 }.rec);
 
@@ -101,12 +104,25 @@ pub const Entry = struct { name: []const u8, kind: route_mod.EntryKind };
 pub const Listing = union(route_mod.ReadStatus) { failed, found: []const Entry, missing };
 
 /// An account as the host read it: its id (a canonical folder's name), its
-/// `name` file's bytes as stored ("" when it has none), its kind.
-pub const Account = struct { id: []const u8, name: []const u8, kind: route_mod.AccountKind };
+/// kind (`.unreadable` when its password's stat failed), its `name` file's
+/// bytes as stored ("" when it has none) or a read of them that failed.
+/// **AN ACCOUNT THAT WILL NOT READ IS STILL LISTED, ITS ERROR THE HOST'S**:
+/// the request fails only when a lookup needs what failed (Host.fail!,
+/// `fail_account`), as the Zig it replaced failed only the reads that
+/// touched it.
+pub const Account = struct { id: []const u8, kind: route_mod.AccountKind, name: Name };
 
-/// **EVERY ACCOUNT, OR A READ THAT FAILED** (the host has failed the
-/// request): never "no accounts" for a read that failed.
+/// An account's name file: its bytes ("" when there is none), or a read
+/// that failed. Never "" for a read that failed.
+pub const Name = union(route_mod.NameRead) { found: []const u8, unreadable };
+
+/// **EVERY ACCOUNT, OR A LISTING OF THEM THAT FAILED** (the host has failed
+/// the request): never "no accounts" for a listing that failed.
 pub const Accounts = union(route_mod.AccountsStatus) { failed, found: []const Account };
+
+/// Which of an account's reads a lookup needed, and failed on: its kind
+/// (the password's stat) or its name.
+pub const AccountRead = enum { kind, name };
 
 /// **A CONVERSATION THE ROC FOUND TO BE THE MEMBER'S** (chat/main.roc
 /// `find!`), handed to each hosted function that works on one: the host
@@ -141,8 +157,16 @@ pub const Host = struct {
     /// Host.accounts!: every account (canonical folders, in the disk's
     /// order), its kind and its name file's bytes; the Roc does every
     /// lookup. **NEVER A READ OF THE AUTH ROOT'S SECRETS**: the folders,
-    /// whether each has a password, each name.
+    /// whether each has a password, each name. An account whose own read
+    /// failed is listed as unreadable there, and the host keeps the error
+    /// for `fail_account`; only a listing of the auth root that failed is
+    /// `.failed` (and fails the request).
     accounts: *const fn (ctx: *anyopaque) Accounts = noAccounts,
+    /// Host.fail! for an account a lookup needed: fail the request with the
+    /// error account `id`'s `read` failed with when `accounts` listed it,
+    /// as the host kept it. An id whose read did not fail is the Roc's bug,
+    /// and fails the request all the same.
+    fail_account: *const fn (ctx: *anyopaque, read: AccountRead, id: []const u8) void = noFailAccount,
     /// Host.body!: read to `which` form's limit; null
     /// when the host answered (too big) or failed.
     body: *const fn (ctx: *anyopaque, which: route_mod.Form) ?[]const u8,
@@ -163,7 +187,7 @@ pub const Host = struct {
     list: *const fn (ctx: *anyopaque, path: []const u8) Listing = noListing,
     /// Fail the request with `e` (a 500), as a hosted function's own failure
     /// does: the seam's, for a path the Roc should never have named, and the
-    /// Roc's own (Host.fail!, its reason as the error). A host that has
+    /// Roc's own for a malformed channel (Host.fail!). A host that has
     /// failed already keeps its first failure.
     fail: *const fn (ctx: *anyopaque, e: anyerror) void = noFail,
     /// Host.malformed_channel!: channel `name`'s member file skipped by a
@@ -221,6 +245,9 @@ fn noMalformed(_: *anyopaque, _: []const u8) void {
 }
 fn noAccounts(_: *anyopaque) Accounts {
     @panic("accounts asked of a host that does not answer it");
+}
+fn noFailAccount(_: *anyopaque, read: AccountRead, id: []const u8) void {
+    std.debug.panic("a host that listed no account was asked to fail on account {s}'s {t}", .{ id, read });
 }
 fn noHeader(_: *anyopaque, _: []const u8) []const []const u8 {
     @panic("header asked of a host that does not answer it");
@@ -404,21 +431,27 @@ export fn roc_chat_list(path: RocBytes) callconv(.c) ListRec {
     };
 }
 
-/// **THE ROC FAILS THE REQUEST BY A REASON, NEVER BY TEXT**: the reason's
-/// error is the one the Zig it replaced returned (a malformed channel on its
-/// own route: error.MalformedChannel), so the answer and the log are the
-/// same. The first failure is kept, as every other.
+/// **THE ROC FAILS THE REQUEST BY A REASON, NEVER BY TEXT**, about `whose`
+/// (the channel's name; the account's id): the error is the one the Zig it
+/// replaced returned, so the answer and the log are the same. A malformed
+/// channel on its own route is error.MalformedChannel; an account a lookup
+/// needed and that would not read is the error its own read failed with,
+/// which the host kept when it listed the accounts (`fail_account`). The
+/// first failure is kept, as every other.
 ///
 /// **A TAG UNION OF ONE TAG CROSSES AS NOTHING**: it is zero-sized, so Roc
-/// passes no argument (a byte read here was garbage: the crash test's
-/// `/fail`). With one reason, the reason is that one; a second makes it a
-/// byte, and this export must then take `FailReason`, which the check below
-/// refuses to forget.
-export fn roc_chat_fail() callconv(.c) void {
-    comptime if (@typeInfo(route_mod.FailReason).@"enum".field_names.len != 1)
-        @compileError("Host.fail!'s reason now crosses as a byte: roc_chat_fail takes `reason: route_mod.FailReason`");
+/// passes no argument for it (a byte read here was garbage). The reason is
+/// a byte only while FailReason has two tags or more, which the check below
+/// holds.
+export fn roc_chat_fail(reason: route_mod.FailReason, whose: RocBytes) callconv(.c) void {
+    comptime if (@typeInfo(route_mod.FailReason).@"enum".field_names.len < 2)
+        @compileError("Host.fail!'s reason of one tag crosses as nothing: roc_chat_fail must not take it");
     const h = current("fail");
-    h.fail(h.ctx, route_mod.FailReason.malformed_channel.err());
+    switch (reason) {
+        .malformed_channel => h.fail(h.ctx, error.MalformedChannel),
+        .kind_unreadable => h.fail_account(h.ctx, .kind, whose.slice()),
+        .name_unreadable => h.fail_account(h.ctx, .name, whose.slice()),
+    }
 }
 
 export fn roc_chat_malformed_channel(name: RocBytes) callconv(.c) void {

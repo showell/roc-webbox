@@ -115,29 +115,31 @@ pub const ReadStatus = enum(u8) { failed, found, missing };
 pub const EntryKind = enum(u8) { dir, file, other };
 
 /// Host.roc's `accounts!`: each account's kind (the agent, which the host
-/// alone decides; a member, who has a password; a guest, who has neither).
-pub const AccountKind = enum(u8) { agent, guest, member };
+/// alone decides; a member, who has a password; a guest, who has neither),
+/// or `unreadable` when its password's stat failed (the host keeps the
+/// error; the request fails only when a lookup needs the kind).
+pub const AccountKind = enum(u8) { agent, guest, member, unreadable };
 
-/// Host.roc's `accounts!` answer's `status`: every account read, or a read
-/// that failed (the host has failed the request, and the list is no
-/// answer). An auth root not there is no accounts, as store.list holds it.
+/// Host.roc's `accounts!`: whether each account's `name` file read (its
+/// bytes beside it, "" when it has none) or failed (the host keeps the
+/// error).
+pub const NameRead = enum(u8) { found, unreadable };
+
+/// Host.roc's `accounts!` answer's `status`: every account listed, or a
+/// listing of the auth root that failed (the host has failed the request,
+/// and the list is no answer). An auth root not there is no accounts, as
+/// store.list holds it. One account that will not read is not this.
 pub const AccountsStatus = enum(u8) { failed, found };
 
-/// Host.roc's `fail!` argument: why the Roc fails the request, as the
-/// host's own error for it (the error the Zig it replaced returned).
-pub const FailReason = enum(u8) {
-    malformed_channel,
-
-    pub fn err(r: FailReason) anyerror {
-        return switch (r) {
-            .malformed_channel => error.MalformedChannel,
-        };
-    }
-};
+/// Host.roc's `fail!` argument: why the Roc fails the request. A malformed
+/// channel is error.MalformedChannel, the error the Zig it replaced
+/// returned; an account whose kind or name a lookup needed and which would
+/// not read is that read's own error, as the host kept it.
+pub const FailReason = enum(u8) { kind_unreadable, malformed_channel, name_unreadable };
 
 comptime {
     @setEvalBranchQuota(20_000);
-    for (.{ Family, Part, Tail, Method, Kind, Form, Reacted, Hostility, ReadStatus, EntryKind, AccountKind, AccountsStatus, FailReason }) |E| assertRocOrder(E);
+    for (.{ Family, Part, Tail, Method, Kind, Form, Reacted, Hostility, ReadStatus, EntryKind, AccountKind, NameRead, AccountsStatus, FailReason }) |E| assertRocOrder(E);
 }
 
 /// That `E`'s values are Roc's for the same tags: numbered from 0 in the

@@ -104,9 +104,8 @@ in_conversation! = |req, route|
 			Err(NotYours) => Chat.zig(route, Bool.False)
 			Err(Failed) => Chat.answered
 			Ok((conv, who)) =>
-				# The title before the topics, as findTopic read them: a DM's
-				# accounts are read already (find!), so a partner whose name
-				# will not read has failed every topic route.
+				# The title before the topics, as findTopic read them: a
+				# partner whose name will not read fails every topic route.
 				match title!(conv, who) {
 					Err(Failed) => Chat.answered
 					Ok(t) =>
@@ -199,9 +198,10 @@ find! = |route|
 ## needs them.
 Who : [Known(List(Accounts.Account)), Unasked]
 
-## The accounts: those already asked, or the host's now. `Failed` when one
-## would not read: the request has failed, and no lookup is made on
-## nothing (an account that would not read is never "no such account").
+## The accounts: those already asked, or the host's now. `Failed` when they
+## could not be listed: the request has failed, and no lookup is made on
+## nothing. An account that would not read is among them, and fails the
+## request only when a lookup needs it (`named!`): never "no such account".
 accounts! : Who => Try(List(Accounts.Account), [Failed])
 accounts! = |who|
 	match who {
@@ -216,11 +216,35 @@ accounts! = |who|
 	}
 
 ## The member's name (getUserName of their own id), from the accounts.
+## `Failed` when it would not read (the request has failed with its error).
 viewer! : Who => Try(List(U8), [Failed])
 viewer! = |who|
 	match accounts!(who) {
-		Ok(all) => Ok(Accounts.name(all, Host.me!({})))
+		Ok(all) => named!(Accounts.name(all, Host.me!({})))
 		Err(Failed) => Err(Failed)
+	}
+
+## A lookup's answer, or, when it needed an account's read that failed, the
+## request failed with that read's error (`unreadable!`) and `Failed`.
+named! : Try(a, Accounts.Unreadable) => Try(a, [Failed])
+named! = |looked|
+	match looked {
+		Ok(answer) => Ok(answer)
+		Err(why) => {
+			unreadable!(why)
+			Err(Failed)
+		}
+	}
+
+## **THE REQUEST FAILS WITH THE ACCOUNT'S OWN ERROR**: a lookup needed
+## account `id`'s kind or name, which `accounts!` listed as unreadable, so
+## the host fails the request with the error that read failed with, as the
+## Zig's own read of it did.
+unreadable! : Accounts.Unreadable => {}
+unreadable! = |why|
+	match why {
+		KindUnreadable(id) => Host.fail!(KindUnreadable, id)
+		NameUnreadable(id) => Host.fail!(NameUnreadable, id)
 	}
 
 ## Channel `name`'s members, as its member file lists them (Paths's
@@ -235,7 +259,7 @@ channel_members! = |name|
 			match Paths.channel_members(bytes) {
 				Ok(members) => members
 				Err(Malformed) => {
-					Host.fail!(MalformedChannel)
+					Host.fail!(MalformedChannel, name)
 					[]
 				}
 			}
@@ -293,14 +317,18 @@ list! = |path| {
 }
 
 ## `conv`'s title (convTitle): a DM's partner's name (its accounts known
-## since find!), a channel's own.
+## since find!), a channel's own. `Failed` when the partner's name would not
+## read (the request has failed with its error).
 title! : Chat.Conv, Who => Try(List(U8), [Failed])
 title! = |conv, who|
 	if conv.family == Dm {
 		match accounts!(who) {
 			Ok(all) => {
 				other = Conversation.partner(conv.key, Host.me!({}))
-				Ok(Conversation.dm_title(Accounts.name(all, other), other))
+				match named!(Accounts.name(all, other)) {
+					Ok(name) => Ok(Conversation.dm_title(name, other))
+					Err(Failed) => Err(Failed)
+				}
 			}
 			Err(Failed) => Err(Failed)
 		}
@@ -466,9 +494,13 @@ landing! = |route|
 			if first != [] {
 				Chat.redirect(List.join([conv.base, [47], first]))
 			} else {
-				match (title!(conv, who), viewer!(who)) {
-					(Ok(title), Ok(viewer)) => Chat.respond(200, html, Pages.no_topics(Chrome.src_in(Host.srcs!({})), viewer, conv.base, title))
-					_ => Chat.answered
+				match title!(conv, who) {
+					Err(Failed) => Chat.answered
+					Ok(title) =>
+						match viewer!(who) {
+							Ok(viewer) => Chat.respond(200, html, Pages.no_topics(Chrome.src_in(Host.srcs!({})), viewer, conv.base, title))
+							Err(Failed) => Chat.answered
+						}
 				}
 			}
 		}
@@ -529,12 +561,22 @@ resume_at! = |conv, topics| {
 ## resumes it, and its topics.
 conversations! : {} => Chat.Answer
 conversations! = |{}|
-	match accounts!(Unasked) {
-		Ok(all) => {
+	match roster!({}) {
+		Ok(members) => {
 			me = Host.me!({})
-			Chat.respond(200, json, Topics.conversations_json(me, entries!(me, Accounts.authorized(all), 0, [])))
+			Chat.respond(200, json, Topics.conversations_json(me, entries!(me, members, 0, [])))
 		}
 		Err(Failed) => Chat.answered
+	}
+
+## The authorized roster (listAuthorized), from the accounts. `Failed` when
+## the accounts could not be listed, or one the roster reads would not read
+## (the request has failed with its error).
+roster! : {} => Try(List({ id : List(U8), name : List(U8) }), [Failed])
+roster! = |{}|
+	match accounts!(Unasked) {
+		Ok(all) => named!(Accounts.authorized(all))
+		Err(Failed) => Err(Failed)
 	}
 
 entries! : List(U8), List({ id : List(U8), name : List(U8) }), U64, List(Topics.Entry) => List(Topics.Entry)
@@ -565,10 +607,10 @@ msg! = |id|
 		}
 		me = Host.me!({})
 		at = |base, key| List.join([Str.to_utf8(base), key, [47], sid, Str.to_utf8("#msg-"), id])
-		match accounts!(Unasked) {
+		match roster!({}) {
 			Err(Failed) => Chat.answered
-			Ok(all) =>
-				match find_dm!(me, Accounts.authorized(all), sid, 0) {
+			Ok(members) =>
+				match find_dm!(me, members, sid, 0) {
 					Ok(conv) => Chat.found(at("/chat/c/", conv))
 					Err(None) =>
 						match find_channel!(Paths.member_channels(channel_rosters!({}), me), sid, 0) {
@@ -667,35 +709,42 @@ send! : Chat.Request, Route.R => Chat.Answer
 send! = |req, route|
 	match find!(route) {
 		Err(Failed) => Chat.answered
-		Ok((conv, who)) => {
-			# The Zig's convRoute read the title before any tail, so a
-			# partner whose name will not read failed a send too: a DM's
-			# accounts, names and all, are read already (find!).
-			if route.tail == InvalidSend {
-				Chat.not_found
-			} else if req.method != Post {
-				Chat.not_allowed(Post)
-			} else {
-				# The header before the body: reading the body moves past it.
-				is_async = Host.header!(Str.to_utf8("x-chat-async")) == [[49]]
-				body = Host.body!(Message)
-				if !body.ok {
-					Chat.answered
-				} else {
-					match Form.field(body.bytes, Str.to_utf8("markdown")) {
+		Ok((conv, who)) =>
+			# The title before any tail, unused, as the Zig's convRoute read
+			# it: a partner whose name will not read fails a send too.
+			match title!(conv, who) {
+				Err(Failed) => Chat.answered
+				Ok(_) => sent!(req, route, conv, who)
+			}
+		Err(NotYours) => Chat.zig(route, Bool.False)
+	}
+
+## A send in `conv`, found and titled: the tail, the method, the header,
+## the body, the form.
+sent! : Chat.Request, Route.R, Chat.Conv, Who => Chat.Answer
+sent! = |req, route, conv, who|
+	if route.tail == InvalidSend {
+		Chat.not_found
+	} else if req.method != Post {
+		Chat.not_allowed(Post)
+	} else {
+		# The header before the body: reading the body moves past it.
+		is_async = Host.header!(Str.to_utf8("x-chat-async")) == [[49]]
+		body = Host.body!(Message)
+		if !body.ok {
+			Chat.answered
+		} else {
+			match Form.field(body.bytes, Str.to_utf8("markdown")) {
+				Malformed => Chat.malformed
+				Missing => refuse("not sent: no message (the form has no markdown field)\n")
+				Found(md) =>
+					match Form.field(body.bytes, Str.to_utf8("cid")) {
 						Malformed => Chat.malformed
-						Missing => refuse("not sent: no message (the form has no markdown field)\n")
-						Found(md) =>
-							match Form.field(body.bytes, Str.to_utf8("cid")) {
-								Malformed => Chat.malformed
-								Found(cid) => store!(route, conv, who, is_async, md, cid)
-								Missing => store!(route, conv, who, is_async, md, [])
-							}
+						Found(cid) => store!(route, conv, who, is_async, md, cid)
+						Missing => store!(route, conv, who, is_async, md, [])
 					}
-				}
 			}
 		}
-		Err(NotYours) => Chat.zig(route, Bool.False)
 	}
 
 refuse : Str -> Chat.Answer

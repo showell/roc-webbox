@@ -146,14 +146,22 @@ call = |req| {
 		}
 		59 => [Paths.sessions_dir(Paths.dm_conv_dir(arg(0))), Paths.sessions_dir(Paths.channel_conv_dir(arg(1))), Paths.channel_path(arg(1)), Paths.reactions_path(Paths.dm_conv_dir(arg(0)), arg(2))]
 		60 => {
-			# The ids asked, then the accounts as `id, kind, name` triples (the
-			# kind `a`, `g` or `m`): each id's exists and name, then the
-			# authorized as `id, name` pairs.
+			# The ids asked, then the accounts (`accounts`): each id's exists
+			# and its name (`ok, name`, or the failure `unreadable`), then the
+			# authorized roster (`ok`, then `id, name` pairs; or its failure).
 			n = u64(arg(0))
 			ids = List.sublist(req.args, { start: 1, len: n })
 			all = accounts(req.args, 1 + n, [])
-			asked = List.join(List.map(ids, |id| [bool(Accounts.exists(all, id)), Accounts.name(all, id)]))
-			List.concat(asked, List.join(List.map(Accounts.authorized(all), |a| [a.id, a.name])))
+			asked = List.join(List.map(ids, |id|
+				match Accounts.name(all, id) {
+					Ok(name) => [bool(Accounts.exists(all, id)), Str.to_utf8("ok"), name]
+					Err(why) => List.concat([bool(Accounts.exists(all, id))], unreadable(why))
+				}))
+			roster = match Accounts.authorized(all) {
+				Ok(members) => List.concat([Str.to_utf8("ok")], List.join(List.map(members, |a| [a.id, a.name])))
+				Err(why) => unreadable(why)
+			}
+			List.concat(asked, roster)
 		}
 		_ => crash "twin: no function ${U8.to_str(req.which)}"
 	}
@@ -187,20 +195,32 @@ entries = |args, i, out|
 		_ => out
 	}
 
-## Accounts as the test wrote them: `id, kind, name` triples from argument
-## `i`, the kind `a` (the agent), `m` (a member) or anything else (a guest).
+## Accounts as the test wrote them: `id, kind, name_read, name` from
+## argument `i`, the kind `a` (the agent), `m` (a member), `u` (its
+## password's stat failed) or anything else (a guest); the name read `u`
+## when it failed, anything else when it read.
 accounts : List(List(U8)), U64, List(Accounts.Account) -> List(Accounts.Account)
 accounts = |args, i, out|
-	match (List.get(args, i), List.get(args, i + 1), List.get(args, i + 2)) {
-		(Ok(id), Ok(k), Ok(name)) => {
+	match (List.get(args, i), List.get(args, i + 1), List.get(args, i + 2), List.get(args, i + 3)) {
+		(Ok(id), Ok(k), Ok(r), Ok(name)) => {
 			kind = match k {
 				[97] => Agent
 				[109] => Member
+				[117] => Unreadable
 				_ => Guest
 			}
-			accounts(args, i + 3, List.append(out, { id, kind, name }))
+			name_read = if r == [117] Unreadable else Found
+			accounts(args, i + 4, List.append(out, { id, kind, name, name_read }))
 		}
 		_ => out
+	}
+
+## A lookup's failure, as the test reads it: `kind` or `name`, then whose.
+unreadable : Accounts.Unreadable -> List(List(U8))
+unreadable = |why|
+	match why {
+		KindUnreadable(id) => [Str.to_utf8("kind"), id]
+		NameUnreadable(id) => [Str.to_utf8("name"), id]
 	}
 
 ## Reads as the test says they went (`file`), `how, bytes` pairs from `i`.

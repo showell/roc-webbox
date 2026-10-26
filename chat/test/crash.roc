@@ -4,7 +4,8 @@
 ## the next request served) is seen. It also names any path a test likes
 ## to the file primitives (`/read/<path>`, `/write/<path>`,
 ## `/remove/<path>`, `/list/<path>`), as the chat's own Roc never would, so
-## the seam's check of each is seen, and asks `fail!` (`/fail`),
+## the seam's check of each is seen, and asks `fail!`
+## (`/fail/<reason>/<whose>`),
 ## `malformed_channel!` (`/malformed/<name>`) and `accounts!`
 ## (`/accounts`). Never linked into a server.
 app [handle!] { pf: platform "../platform/main.roc" }
@@ -46,16 +47,30 @@ handle! = |req|
 			Found => "found"
 			Failed => "failed"
 		}
-		# Each account as ` <kind>:<id>=<name>`, so a record laid out wrong
-		# shows.
+		# Each account as ` <kind>:<id>=<name>` (`=?` for a name that would
+		# not read), so a record laid out wrong shows.
 		each = List.join(List.map(got.accounts, |a| List.join([Str.to_utf8(match a.kind {
 			Agent => " a:"
 			Guest => " g:"
 			Member => " m:"
-		}), a.id, [61], a.name])))
+			Unreadable => " u:"
+		}), a.id, Str.to_utf8(match a.name_read {
+			Found => "="
+			Unreadable => "=?"
+		}), a.name])))
 		Chat.respond(200, [], List.concat(Str.to_utf8(said), each))
-	} else if req.sub == Str.to_utf8("/fail") {
-		Host.fail!(MalformedChannel)
+	} else if starts(req.sub, "/fail/") {
+		# `/fail/<reason>/<whose>`, the reason `malformed`, `kind` or `name`.
+		rest = List.drop_first(req.sub, 6)
+		if starts(rest, "malformed/") {
+			Host.fail!(MalformedChannel, List.drop_first(rest, 10))
+		} else if starts(rest, "kind/") {
+			Host.fail!(KindUnreadable, List.drop_first(rest, 5))
+		} else if starts(rest, "name/") {
+			Host.fail!(NameUnreadable, List.drop_first(rest, 5))
+		} else {
+			crash "crash.roc: /fail/ with no reason"
+		}
 		Chat.respond(200, [], Str.to_utf8("failed"))
 	} else if starts(req.sub, "/malformed/") {
 		Host.malformed_channel!(List.drop_first(req.sub, 11))

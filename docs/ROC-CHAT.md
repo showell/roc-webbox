@@ -554,10 +554,14 @@ and CRs, `#` and blank lines skipped, or the channel is malformed), and
 every roster (channelRosters: each entry ending in `.channel`, of any kind,
 read in the listing's order; one gone since the listing skipped). A
 reaction sidecar not there is no events. Two small primitives stay the
-host's: `fail!` fails the request for a reason (a tag, never text: a
-malformed channel on its own route is error.MalformedChannel, the old
-Zig's own answer; one tag crosses as nothing, so `roc_chat_fail` takes no
-argument and refuses to compile once there are two), and
+host's: `fail!` fails the request for a reason, about whom (a tag, never
+text, and the channel's name or the account's id: a malformed channel on
+its own route is error.MalformedChannel, the old Zig's own answer;
+`KindUnreadable` and `NameUnreadable` are an account a lookup needed and
+`accounts!` listed as unreadable, and fail with the error that read of that
+account failed with, as the host kept it; the reason crosses as a byte,
+which `roc_chat_fail` refuses to compile without once FailReason would
+have one tag, as one tag crosses as nothing), and
 `malformed_channel!` counts a channel a listing skipped as malformed, the
 operator's process-lifetime count on /admin/host.
 
@@ -582,11 +586,21 @@ principalExists) is never looked up. **Asked at most once a request**
 (chat/main.roc's `Who`: `Known` once asked, handed down), and only by a
 route that looks one up: a DM's every route, a page that names the
 member, the conversations, /chat/msg; a channel's topic, reactions, react
-and pin never ask. A read that failed fails the request, never "no such
-account" or a name of "". **What that changed**: one account that will
-not read now fails every route that asks, where the old Zig read only the
-names it showed (a DM's landing with a topic, and /chat/links, read no
-other account's).
+and pin never ask. **An account that will not read is listed, never left
+out, and fails only what reads it**: a password whose stat failed is a
+kind of `Unreadable`, a name that would not read a `name_read` of
+`Unreadable` (its `name` empty and never taken for one), and the host
+keeps each error without failing the request. A lookup that needs that
+read answers `KindUnreadable(id)` or `NameUnreadable(id)` and the request
+fails with it (`fail!`), so each route fails exactly when, and with the
+error, the old Zig's own read failed: `name` on the account's name
+(getUserName: a DM's title, read before its topics and a send's tail; the
+member's own name on the pages that name them), `authorized` on the first
+account in the disk's order whose password stat failed, or whose name did
+and which is not a guest (listAuthorized read every password, then the
+names of members and the agent, and stopped at the first failure).
+`exists` never fails: principalExists looked at the folder alone. Only a
+listing of the auth root that failed is `Failed` for the whole call.
 
 **Tag unions cross the ABI fine** (probe 2). The layout is the payload
 first, then a `u8` tag. Discriminants are alphabetical, so adding a tag

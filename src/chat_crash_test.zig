@@ -43,8 +43,19 @@ const Files = struct {
         h.remove = remove;
         h.list = list;
         h.fail = fail;
+        h.fail_account = failAccount;
         h.malformed_channel = malformed;
         return h;
+    }
+    /// An account's kind kept as error.SymLinkLoop, its name as
+    /// error.IsDir: which one the request fails with shows which read the
+    /// seam asked for.
+    fn failAccount(ctx: *anyopaque, which: abi.AccountRead, id: []const u8) void {
+        of(ctx).asked.print(testing.allocator, "fail_account {t} {s};", .{ which, id }) catch @panic("oom");
+        fail(ctx, switch (which) {
+            .kind => error.SymLinkLoop,
+            .name => error.IsDir,
+        });
     }
     fn list(ctx: *anyopaque, path: []const u8) abi.Listing {
         say(ctx, "list", path);
@@ -132,16 +143,18 @@ test "a folder's listing: a path that would leave the root fails the request at 
     try probe("/list/1_2/sessions", "failed", "list 1_2/sessions;", error.NotDir);
 }
 
-test "the Roc fails a request by a reason, as the host's error for it; and a malformed channel is counted by the host" {
+test "the Roc fails a request by a reason, each reason its own byte across: a malformed channel as error.MalformedChannel, an account's kind or name as the error the host kept for that read of that account; and a malformed channel is counted by the host" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     roc.use(arena.allocator());
     defer roc.deinit();
-    try probe("/fail", "failed", "", error.MalformedChannel);
+    try probe("/fail/malformed/Abad", "failed", "", error.MalformedChannel);
+    try probe("/fail/kind/7", "failed", "fail_account kind 7;", error.SymLinkLoop);
+    try probe("/fail/name/12", "failed", "fail_account name 12;", error.IsDir);
     try probe("/malformed/Abad", "counted", "malformed Abad;", null);
 }
 
-test "every account crosses with its id, kind and name, in the host's order; a read that failed is `failed`, never no accounts" {
+test "every account crosses with its id, kind and name, in the host's order, one that will not read as unreadable (its kind, its name, or both); a listing that failed is `failed`, never no accounts" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     roc.use(arena.allocator());
@@ -154,7 +167,14 @@ test "every account crosses with its id, kind and name, in the host's order; a r
                 Files.fail(ctx, error.IsDir);
                 return .failed;
             }
-            return .{ .found = &.{ .{ .id = "10", .name = "Ten\r\n", .kind = .member }, .{ .id = "3", .name = "Claude", .kind = .agent }, .{ .id = "9", .name = "", .kind = .guest } } };
+            return .{ .found = &.{
+                .{ .id = "10", .name = .{ .found = "Ten\r\n" }, .kind = .member },
+                .{ .id = "3", .name = .{ .found = "Claude" }, .kind = .agent },
+                .{ .id = "9", .name = .{ .found = "" }, .kind = .guest },
+                .{ .id = "7", .name = .{ .found = "Sev" }, .kind = .unreadable },
+                .{ .id = "12", .name = .unreadable, .kind = .member },
+                .{ .id = "13", .name = .unreadable, .kind = .unreadable },
+            } };
         }
     };
     for ([_]bool{ false, true }) |fails| {
@@ -164,7 +184,7 @@ test "every account crosses with its id, kind and name, in the host's order; a r
         var h = f.host();
         h.accounts = S.accounts;
         const got = try abi.decide(arena.allocator(), "/accounts", false, .GET, h);
-        try testing.expectEqualStrings(if (fails) "failed" else "found m:10=Ten\r\n a:3=Claude g:9=", got.respond.body);
+        try testing.expectEqualStrings(if (fails) "failed" else "found m:10=Ten\r\n a:3=Claude g:9= u:7=Sev m:12=? u:13=?", got.respond.body);
         try testing.expectEqualStrings("accounts ;", f.asked.items);
         try testing.expectEqual(if (fails) @as(?anyerror, error.IsDir) else null, f.failed);
     }
