@@ -2,7 +2,7 @@
 ## decoder every form on the site reads with): `a=b&c=d`, `+` a space and
 ## `%XX` a byte. A `%` that is not two hex digits, or a field sent twice, is
 ## malformed: the client's mistake, which the site answers 400.
-import Codec
+import Bytes
 
 Form := [].{
 	Field : [Found(List(U8)), Missing, Malformed]
@@ -11,8 +11,8 @@ Form := [].{
 	## over.
 	field : List(U8), List(U8) -> Field
 	field = |body, name| {
-		values = List.keep_oks(Codec.split_byte(body, 38), |pair|
-			match Codec.cut_seq(pair, [61]) {
+		values = List.keep_oks(Bytes.split_byte(body, 38), |pair|
+			match Bytes.cut_seq(pair, [61]) {
 				Ok((k, v)) if k == name => Ok(v)
 				_ => Err(None)
 			})

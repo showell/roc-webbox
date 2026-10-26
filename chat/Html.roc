@@ -1,6 +1,6 @@
 ## HTML'S TWO SAFETIES (zig-webbox html.zig): text escaped for an element or
 ## an attribute, and a blob made safe inside an inline `<script>`.
-import Codec
+import Bytes
 
 Html := [].{
 	## htmlEscape: `&`, `'`, `<`, `>` and `"` as entities.
@@ -23,5 +23,5 @@ Html := [].{
 	## scriptSafe: every `</` as `<\/`, the one sequence that could end the
 	## element early.
 	script_safe : List(U8) -> List(U8)
-	script_safe = |s| List.join(List.intersperse(Codec.split_seq(s, [60, 47]), [60, 92, 47]))
+	script_safe = |s| List.join(List.intersperse(Bytes.split_seq(s, [60, 47]), [60, 92, 47]))
 }

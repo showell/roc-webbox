@@ -63,3 +63,15 @@ export fn roc_dealloc(ptr: *anyopaque, alignment: usize) callconv(.c) void {
 export fn roc_crashed(bytes: [*]const u8, len: usize) callconv(.c) void {
     now().crashed(bytes, len);
 }
+
+// A `dbg` or a failed `expect` is the calling app's crash (roc_abi.zig
+// `roc_dbg`, `roc_expect_failed` say why).
+export fn roc_dbg() callconv(.c) void {
+    const m = "a `dbg` was reached in a served build";
+    now().crashed(m.ptr, m.len);
+}
+
+export fn roc_expect_failed() callconv(.c) void {
+    const m = "an inline `expect` failed in a served build";
+    now().crashed(m.ptr, m.len);
+}

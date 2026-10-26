@@ -8,7 +8,7 @@ app [call] { pf: platform "twin/platform/main.roc" }
 import Time
 import ZigText
 import Paths
-import Codec
+import Transcript
 import Count
 import Frame
 import Form
@@ -46,10 +46,10 @@ call = |req| {
 		13 => [Paths.first_of(req.args)]
 		14 => [Paths.transcript_path(arg(0), arg(1))]
 		15 => {
-			d = Codec.decode_file(arg(0))
+			d = Transcript.decode_file(arg(0))
 			List.fold(d.messages, [Str.to_utf8(U64.to_str(d.refused))], |out, m| List.concat(out, [m.id, m.from, m.at, m.uid, m.markdown]))
 		}
-		16 => [Codec.stored_form(u64(arg(0)), { id: arg(1), from: arg(2), at: arg(3), uid: arg(4), markdown: arg(5) })]
+		16 => [Transcript.stored_form(u64(arg(0)), { id: arg(1), from: arg(2), at: arg(3), uid: arg(4), markdown: arg(5) })]
 		17 => [num(Count.count_blocks(arg(0)))]
 		18 => maybe(Count.number_in(arg(0), arg(1)))
 		19 => maybe(Count.index_of(arg(0), arg(1)))

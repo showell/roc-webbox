@@ -12,40 +12,40 @@ Route := [].{
 	under_chat : List(U8) -> R
 	under_chat = |sub|
 		if sub == [] or sub == slash {
-			family(f_default)
+			family(Default)
 		} else {
 			match family_under(sub) {
 				Ok(r) => r
 				Err(None) =>
 					if starts_with(sub, Str.to_utf8("/search")) {
-						with_rest(f_search, drop(sub, 7))
+						with_rest(Search, drop(sub, 7))
 					} else if sub == Str.to_utf8("/default") {
-						family(f_default)
+						family(Default)
 					} else if sub == Str.to_utf8("/conversations") {
-						family(f_conversations)
+						family(Conversations)
 					} else if starts_with(sub, Str.to_utf8("/msg/")) {
-						with_rest(f_msg, drop(sub, 5))
+						with_rest(Msg, drop(sub, 5))
 					} else if starts_with(sub, Str.to_utf8("/c/")) {
-						conversation(f_dm, segments(drop(sub, 3)))
+						conversation(Dm, segments(drop(sub, 3)))
 					} else if sub == Str.to_utf8("/notifications") {
-						family(f_notifications)
+						family(Notifications)
 					} else if sub == Str.to_utf8("/sidebar/stream") {
-						family(f_sidebar_stream)
+						family(SidebarStream)
 					} else {
-						family(f_not_found)
+						family(NotFound)
 					}
 			}
 		}
 
 	## The route for `sub`, the path under /channel.
 	under_channel : List(U8) -> R
-	under_channel = |sub| conversation(f_channel, segments(sub))
+	under_channel = |sub| conversation(Channel, segments(sub))
 
 	## A static script: `/<name>.js` under /chat, `rest` the name.
 	asset : List(U8) -> Try(R, [None])
 	asset = |sub|
 		if List.len(sub) > 1 and ends_with(sub, Str.to_utf8(".js")) {
-			Ok(with_rest(f_asset, drop(sub, 1)))
+			Ok(with_rest(Asset, drop(sub, 1)))
 		} else {
 			Err(None)
 		}
@@ -56,35 +56,24 @@ Route := [].{
 	## `stream` is a page.
 	is_stream : R -> Bool
 	is_stream = |r|
-		r.tail == 2
-		or r.family == f_notifications
-		or r.family == f_sidebar_stream
-		or ((r.family == f_recent or r.family == f_images or r.family == f_code) and r.rest == Str.to_utf8("/stream"))
+		match r.family {
+			Notifications | SidebarStream => Bool.True
+			Recent | Images | Code => r.rest == Str.to_utf8("/stream")
+			_ => r.tail == Stream
+		}
 
 	## A route, as Chat.roc's `Route` (records are structural: the same
 	## type).
-	R : { family : U8, key : List(U8), rest : List(U8), sid : List(U8), part : U8, tail : U8 }
+	R : { family : Family, key : List(U8), rest : List(U8), sid : List(U8), part : Part, tail : Tail }
+
+	## Chat.roc's, spelled again (aliases are structural: the same types).
+	Family : [NotFound, Asset, Default, Docs, Recent, Images, Code, Links, Search, Conversations, Msg, Dm, Channel, Notifications, SidebarStream]
+	Part : [Landing, New, Invalid, Topic]
+	Tail : [Page, Uploads, Stream, Send, Upload, Pin, Unpin, Raw, Download, Saved, Reactions, React, Invalid, InvalidSend]
 
 	## A route of `family` with nothing else.
-	family : U8 -> R
-	family = |f| { family: f, key: [], rest: [], sid: [], part: 0, tail: 0 }
-
-	## Chat.roc's numbers, which roc-webbox src/chat_route.zig says too.
-	f_not_found = 0
-	f_asset = 1
-	f_default = 2
-	f_docs = 3
-	f_recent = 4
-	f_images = 5
-	f_code = 6
-	f_links = 7
-	f_search = 8
-	f_conversations = 9
-	f_msg = 10
-	f_dm = 11
-	f_channel = 12
-	f_notifications = 13
-	f_sidebar_stream = 14
+	family : Family -> R
+	family = |f| { family: f, key: [], rest: [], sid: [], part: Landing, tail: Page }
 
 	slash = [47]
 
@@ -92,7 +81,7 @@ Route := [].{
 	## boundary (`/docsX` is none of them).
 	family_under : List(U8) -> Try(R, [None])
 	family_under = |sub| {
-		named = [("/docs", f_docs), ("/recent", f_recent), ("/images", f_images), ("/code", f_code), ("/links", f_links)]
+		named = [("/docs", Docs), ("/recent", Recent), ("/images", Images), ("/code", Code), ("/links", Links)]
 		List.fold(named, Err(None), |found, (prefix, f)|
 			match found {
 				Ok(r) => Ok(r)
@@ -113,60 +102,52 @@ Route := [].{
 	}
 
 	## A DM's or a channel's route from its path's segments.
-	conversation : U8, List(List(U8)) -> R
+	conversation : Family, List(List(U8)) -> R
 	conversation = |f, segs| match segs {
-		[] => family(f_not_found)
+		[] => family(NotFound)
 		[key, .. as more] =>
-			if f == f_channel and !valid_channel_name(key) {
-				family(f_not_found)
+			if f == Channel and !valid_channel_name(key) {
+				family(NotFound)
 			} else {
 				base = { ..family(f), key }
 				match more {
 					[] => base
 					[first, .. as after] =>
 						if first == Str.to_utf8("new") {
-							{ ..base, part: 1 }
+							{ ..base, part: New }
 						} else if !valid_topic_id(first) {
-							{ ..base, part: 2 }
+							{ ..base, part: Invalid }
 						} else {
-							tail_of({ ..base, part: 3, sid: first }, after)
+							tail_of({ ..base, part: Topic, sid: first }, after)
 						}
 				}
 			}
 	}
 
-	## A topic's tail (chat.zig `topicRoute`).
+	## A topic's tail (chat.zig `topicRoute`): one segment naming it, or
+	## `uploads/<file>`.
 	tail_of : R, List(List(U8)) -> R
-	tail_of = |r, segs| {
-		tails = ["", "uploads", "stream", "send", "upload", "pin", "unpin", "raw", "download", "saved", "reactions", "react"]
+	tail_of = |r, segs|
 		match segs {
 			[] => r
 			[first, ..] if first == Str.to_utf8("uploads") =>
 				match segs {
-					[_, file] => { ..r, tail: 1, rest: file }
-					_ => { ..r, tail: 12 }
+					[_, file] => { ..r, tail: Uploads, rest: file }
+					_ => { ..r, tail: Invalid }
 				}
-			[first] =>
-				match index_of(tails, first, 1) {
-					Ok(i) => { ..r, tail: i }
-					Err(None) => { ..r, tail: 12 }
-				}
-			[first, ..] => { ..r, tail: if first == Str.to_utf8("send") 13 else 12 }
+			[first] => { ..r, tail: named_tail(first) }
+			[first, ..] => { ..r, tail: if first == Str.to_utf8("send") InvalidSend else Invalid }
 		}
+
+	## The tail one segment names, or `Invalid`.
+	named_tail : List(U8) -> Tail
+	named_tail = |seg| {
+		tails = [("stream", Stream), ("send", Send), ("upload", Upload), ("pin", Pin), ("unpin", Unpin), ("raw", Raw), ("download", Download), ("saved", Saved), ("reactions", Reactions), ("react", React)]
+		List.fold(tails, Invalid, |found, (name, tail)|
+			if found == Invalid and Str.to_utf8(name) == seg tail else found)
 	}
 
-	index_of : List(Str), List(U8), U8 -> Try(U8, [None])
-	index_of = |names, seg, i|
-		if U8.to_u64(i) >= List.len(names) {
-			Err(None)
-		} else {
-			match List.get(names, U8.to_u64(i)) {
-				Ok(n) => if Str.to_utf8(n) == seg Ok(i) else index_of(names, seg, i + 1)
-				Err(_) => Err(None)
-			}
-		}
-
-	with_rest : U8, List(U8) -> R
+	with_rest : Family, List(U8) -> R
 	with_rest = |f, rest| { ..family(f), rest }
 
 	## The path's segments, empty ones skipped (chat.zig's SegIter).

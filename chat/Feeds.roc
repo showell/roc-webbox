@@ -2,7 +2,8 @@
 ## code_store.zig, markdown_fence.zig): each member's images.md and code.md
 ## read as the Zig reads them, and the JSON their pages boot with, byte for
 ## byte. Pure; angry-gopher's chat_twin_test.zig holds each to its Zig.
-import Codec
+import JsonText
+import Bytes
 import ZigText
 
 Feeds := [].{
@@ -16,14 +17,14 @@ Feeds := [].{
 	## ", source MSG_", `conv` after the first " in " after it.
 	header : List(U8) -> Try(Header, [None])
 	header = |line|
-		if !Codec.starts_with(line, Str.to_utf8("Sent by ")) or List.last(line) != Ok(58) {
+		if !Bytes.starts_with(line, Str.to_utf8("Sent by ")) or List.last(line) != Ok(58) {
 			Err(None)
 		} else {
 			inner = List.drop_last(List.drop_first(line, 8), 1)
-			match Codec.cut_seq(inner, Str.to_utf8(", source MSG_")) {
+			match Bytes.cut_seq(inner, Str.to_utf8(", source MSG_")) {
 				Err(None) => Err(None)
 				Ok((left, right)) =>
-					match (last_find(left, Str.to_utf8(" at ")), Codec.cut_seq(right, Str.to_utf8(" in "))) {
+					match (last_find(left, Str.to_utf8(" at ")), Bytes.cut_seq(right, Str.to_utf8(" in "))) {
 						(Ok(a), Ok((source_id, conv))) => Ok({ from: List.take_first(left, a), at: List.drop_first(left, a + 4), source_id, conv })
 						_ => Err(None)
 					}
@@ -57,7 +58,7 @@ Feeds := [].{
 		if ZigText.trim(text) == [] {
 			[]
 		} else {
-			List.keep_if(List.map(Codec.split_seq(text, sep), ZigText.trim), |b| b != [])
+			List.keep_if(List.map(Bytes.split_seq(text, sep), ZigText.trim), |b| b != [])
 		}
 
 	sep : List(U8)
@@ -132,7 +133,7 @@ Feeds := [].{
 	## of its character at least as long, or to the end; a `quote` fence's
 	## lines skipped.
 	code_blocks : List(U8) -> List(Block)
-	code_blocks = |body| blocks_from(Codec.split_byte(body, 10), 0, [])
+	code_blocks = |body| blocks_from(Bytes.split_byte(body, 10), 0, [])
 
 	blocks_from : List(List(U8)), U64, List(Block) -> List(Block)
 	blocks_from = |ls, i, out|
@@ -143,7 +144,7 @@ Feeds := [].{
 					Err(None) => blocks_from(ls, i + 1, out)
 					Ok(fo) => {
 						j = close_at(ls, fo.char, fo.count, i + 1)
-						body = Codec.join_lines(List.sublist(ls, { start: i + 1, len: j - (i + 1) }))
+						body = Bytes.join_lines(List.sublist(ls, { start: i + 1, len: j - (i + 1) }))
 						blocks_from(ls, j + 1, if fo.lang == Str.to_utf8("quote") out else List.append(out, { lang: fo.lang, body }))
 					}
 				}
@@ -160,14 +161,14 @@ Feeds := [].{
 	## backtick fence's).
 	fence_open : List(U8) -> Try({ char : U8, count : U64, lang : List(U8) }, [None])
 	fence_open = |line| {
-		indent = smaller(Codec.leading(line, 32, 0), 4)
+		indent = smaller(Bytes.leading(line, 32, 0), 4)
 		match List.get(line, indent) {
 			Err(_) => Err(None)
 			Ok(f) =>
 				if indent >= 4 or (f != 96 and f != 126) {
 					Err(None)
 				} else {
-					count = Codec.leading(List.drop_first(line, indent), f, 0)
+					count = Bytes.leading(List.drop_first(line, indent), f, 0)
 					info = trim_info(List.drop_first(line, indent + count))
 					if count < 3 or count > 10 or (f == 96 and List.contains(info, 96)) {
 						Err(None)
@@ -183,11 +184,11 @@ Feeds := [].{
 	## `char`, then only whitespace.
 	is_close : List(U8), U8, U64 -> Bool
 	is_close = |line, char, count| {
-		indent = smaller(Codec.leading(line, 32, 0), 4)
+		indent = smaller(Bytes.leading(line, 32, 0), 4)
 		if indent >= 4 {
 			Bool.False
 		} else {
-			n = Codec.leading(List.drop_first(line, indent), char, 0)
+			n = Bytes.leading(List.drop_first(line, indent), char, 0)
 			n >= count and trim_info(List.drop_first(line, indent + n)) == []
 		}
 	}
@@ -234,35 +235,25 @@ Feeds := [].{
 		}
 	}
 
-	head_json : Header -> List(U8)
-	head_json = |h| {
-		j = ZigText.json_string
-		List.join([Str.to_utf8("{\"source_id\":"), j(h.source_id), Str.to_utf8(",\"from\":"), j(h.from), Str.to_utf8(",\"conv\":"), j(h.conv), Str.to_utf8(",\"at\":"), j(h.at)])
-	}
-
-	array : List(List(U8)) -> List(U8)
-	array = |items| List.join([[91], List.join(List.intersperse(items, [44])), [93]])
+	## The fields every feed entry starts with, from its header.
+	head_fields : Header -> List((Str, List(U8)))
+	head_fields = |h| [("source_id", JsonText.str(h.source_id)), ("from", JsonText.str(h.from)), ("conv", JsonText.str(h.conv)), ("at", JsonText.str(h.at))]
 
 	## The Images page's JSON: the newest `most` entries, each as
 	## images_store `encodeImagesEvent` writes it.
 	images_json : List((Header, List(List(U8)))), U64 -> List(U8)
 	images_json = |entries, most| {
 		tail = List.drop_first(entries, List.len(entries) - smaller(most, List.len(entries)))
-		array(List.map(tail, |(h, tags)|
-			List.join([head_json(h), Str.to_utf8(",\"images\":"), array(List.map(tags, ZigText.json_string)), Str.to_utf8(",\"source_url\":"), ZigText.json_string(source_url(h.conv, h.source_id)), [125]])))
+		JsonText.arr(List.map(tail, |(h, tags)|
+			JsonText.obj(List.concat(head_fields(h), [("images", JsonText.arr(List.map(tags, JsonText.str))), ("source_url", JsonText.str(source_url(h.conv, h.source_id)))]))))
 	}
 
 	## The Code page's JSON: every entry, as code_store `encodeCodeEvent`
 	## writes it.
 	code_json : List((Header, List(Block))) -> List(U8)
 	code_json = |entries|
-		array(List.map(entries, |(h, bs)|
-			List.join([
-				head_json(h),
-				Str.to_utf8(",\"blocks\":"),
-				array(List.map(bs, |b| List.join([Str.to_utf8("{\"lang\":"), ZigText.json_string(b.lang), Str.to_utf8(",\"body\":"), ZigText.json_string(b.body), [125]]))),
-				Str.to_utf8(",\"source_url\":"),
-				ZigText.json_string(source_url(h.conv, h.source_id)),
-				[125],
-			])))
+		JsonText.arr(List.map(entries, |(h, bs)| {
+			blocks = JsonText.arr(List.map(bs, |b| JsonText.obj([("lang", JsonText.str(b.lang)), ("body", JsonText.str(b.body))])))
+			JsonText.obj(List.concat(head_fields(h), [("blocks", blocks), ("source_url", JsonText.str(source_url(h.conv, h.source_id)))]))
+		}))
 }

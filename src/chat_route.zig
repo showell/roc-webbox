@@ -4,69 +4,143 @@
 //! decision is read into (chat_abi.zig) and angry-gopher's own Zig parse,
 //! the router's twin, answers (A3), so the two compare with `eql`.
 //!
-//! The numbers are chat/platform/Chat.roc's, and only these two files say
-//! them.
+//! **EVERY ENUM HERE IS A ROC TAG UNION, IN ROC'S ORDER.** A tag union
+//! whose tags carry nothing crosses the seam as one byte, its tags numbered
+//! in the order of their names (Roc's layout; probed with the pinned
+//! nightly). So each enum lists Chat.roc's tags, snake_case for PascalCase,
+//! in that order, with no numbers written: `assertRocOrder` checks it at
+//! compile time. A tag added in Chat.roc is added here, where it sorts.
 
 const std = @import("std");
 
+/// Chat.roc's `Family`: which part of the chat a path names.
 pub const Family = enum(u8) {
-    not_found = 0,
     /// A static script, `rest` its name; served before the gate.
-    asset = 1,
-    /// `/chat`, `/chat/`, `/chat/default`: the last conversation resumed.
-    default = 2,
-    /// `rest` the path under `/docs` (and the four below likewise).
-    docs = 3,
-    recent = 4,
-    images = 5,
-    code = 6,
-    links = 7,
-    /// `rest` the path after `/search`, with no boundary (`/searchX` is "X").
-    search = 8,
-    conversations = 9,
-    /// `rest` the message id after `/msg/`.
-    msg = 10,
-    /// A DM, `key` its pair as written (Zig checks the viewer is in it).
-    dm = 11,
+    asset,
     /// A channel, `key` its name (already a valid one).
-    channel = 12,
-    notifications = 13,
-    sidebar_stream = 14,
+    channel,
+    code,
+    conversations,
+    /// `/chat`, `/chat/`, `/chat/default`: the last conversation resumed.
+    default,
+    /// A DM, `key` its pair as written (Zig checks the viewer is in it).
+    dm,
+    /// `rest` the path under `/docs` (and images, links, recent and code
+    /// likewise).
+    docs,
+    images,
+    links,
+    /// `rest` the message id after `/msg/`.
+    msg,
+    not_found,
+    notifications,
+    recent,
+    /// `rest` the path after `/search`, with no boundary (`/searchX` is "X").
+    search,
+    sidebar_stream,
 };
 
-/// Which part of a conversation.
+/// Chat.roc's `Part`: which part of a conversation.
 pub const Part = enum(u8) {
-    /// No topic named: its first topic, or the page offering one.
-    landing = 0,
-    /// `.../new`: a topic made.
-    new = 1,
     /// A topic id that is not one: refused after the conversation's own
     /// checks, as Zig always refused it.
-    invalid = 2,
+    invalid,
+    /// No topic named: its first topic, or the page offering one.
+    landing,
+    /// `.../new`: a topic made.
+    new,
     /// `sid` a valid topic id, `tail` what of it.
-    topic = 3,
+    topic,
 };
 
+/// Chat.roc's `Tail`: what of a topic.
 pub const Tail = enum(u8) {
-    page = 0,
-    /// `rest` the file.
-    uploads = 1,
-    stream = 2,
-    send = 3,
-    upload = 4,
-    pin = 5,
-    unpin = 6,
-    raw = 7,
-    download = 8,
-    saved = 9,
-    reactions = 10,
-    react = 11,
+    download,
     /// No tail Zig serves: refused once the topic is known to exist.
-    invalid = 12,
+    invalid,
     /// The same, but under `send`, which skips that check (a send makes
     /// its topic).
-    invalid_send = 13,
+    invalid_send,
+    page,
+    pin,
+    raw,
+    react,
+    reactions,
+    saved,
+    send,
+    stream,
+    unpin,
+    upload,
+    /// `rest` the file.
+    uploads,
 };
+
+/// Chat.roc's `Method`: a request's method, as the router tells them apart.
+pub const Method = enum(u8) {
+    get,
+    head,
+    other,
+    post,
+
+    pub fn of(m: std.http.Method) Method {
+        return switch (m) {
+            .GET => .get,
+            .HEAD => .head,
+            .POST => .post,
+            else => .other,
+        };
+    }
+};
+
+/// Chat.roc's `Kind`: what an answer is (Chat.roc says each).
+pub const Kind = enum(u8) { answered, found, held, malformed, not_allowed, not_found, redirect, respond, serve };
+
+/// Host.roc's `body!` argument: whose limit the body is read to.
+pub const Form = enum(u8) { message, reaction };
+
+/// Host.roc's `react!` answer.
+pub const Reacted = enum(u8) { failed, no_such_message, stored };
+
+/// Host.roc's `hostile!` answer: `refused` when the host has answered the
+/// request (webbox's edge counter and its 400), `failed` when the check did.
+pub const Hostility = enum(u8) { failed, fine, refused };
+
+/// Host.roc's `feed!` argument: images.md or code.md.
+pub const Feed = enum(u8) { code, images };
+
+comptime {
+    @setEvalBranchQuota(20_000);
+    for (.{ Family, Part, Tail, Method, Kind, Form, Reacted, Hostility, Feed }) |E| assertRocOrder(E);
+}
+
+/// That `E`'s values are Roc's for the same tags: numbered from 0 in the
+/// order of the tags' PascalCase names, compared byte by byte (`NotFound`
+/// before `Notifications`, `Invalid` before `InvalidSend`).
+pub fn assertRocOrder(comptime E: type) void {
+    const info = @typeInfo(E).@"enum";
+    for (info.field_names, info.field_values, 0..) |name, value, i| {
+        if (value != i) @compileError(@typeName(E) ++ "." ++ name ++ " has a number written: Roc's are its place in name order");
+        if (i > 0 and !std.mem.lessThan(u8, pascal(info.field_names[i - 1]), pascal(name)))
+            @compileError(@typeName(E) ++ ": `" ++ name ++ "` must come before `" ++ info.field_names[i - 1] ++ "`, as Roc numbers its tags by name");
+    }
+}
+
+/// `not_found` as Roc spells the tag: `NotFound`.
+fn pascal(comptime snake: []const u8) []const u8 {
+    comptime {
+        var out: []const u8 = "";
+        var up = true;
+        for (snake) |c| {
+            if (c == '_') {
+                up = true;
+                continue;
+            }
+            out = out ++ &[_]u8{if (up) std.ascii.toUpper(c) else c};
+            up = false;
+        }
+        return out;
+    }
+}
 
 pub const Route = struct {
     family: Family,

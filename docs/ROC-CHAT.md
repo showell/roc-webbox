@@ -574,7 +574,7 @@ the old Zig's cost (12,023,880 bytes asked for at once, the Roc's within
 
 All hosted functions are effectful (`=>`): the nightly refuses a pure one
 (probe 3). So a caller is an effectful function, effects in loops use `for`
-or `List.*_try!`, and pure modules (Page, Codec) take already-rendered HTML
+or `List.*_try!`, and pure modules (Page, Transcript) take already-rendered HTML
 as an argument.
 
 | Module | Functions |
@@ -636,7 +636,9 @@ chat_compose.js `sentHere`).
 chat/                      the Roc app
   main.roc                 handle!: the prelude, then the route's answer (chat.zig handle)
   Route.roc                the path parsed into a route, by Zig's rules     (pure)
-  Codec.roc                transcript blocks: encode, decode, escape (chat_codec.zig) (pure)
+  Transcript.roc           transcript blocks: encode, decode, escape (chat_codec.zig) (pure)
+  Bytes.roc                std.mem's searches and splits, on bytes (pure)
+  JsonText.roc             JSON as the Zig's encoders write it (pure)
   Count.roc                .count: parse, format, both trust rules (chat_count.zig) (pure)
   Paths.roc                keys, validators, path builders, firstOf (chat_paths.zig) (pure)
   ZigText.roc              parseInt, std.json.fmt, trims, byte lines        (pure)

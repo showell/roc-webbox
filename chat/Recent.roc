@@ -2,7 +2,8 @@
 ## rows the host gathered, each named for the viewer, dated, excerpted and
 ## put newest first, as the JSON /chat/recent boots with, byte for byte.
 ## Pure; angry-gopher's chat_twin_test.zig holds it to the Zig.
-import Codec
+import JsonText
+import Bytes
 import Feeds
 import Time
 import ZigText
@@ -36,47 +37,48 @@ Recent := [].{
 	## The page's JSON: every row newest first (a tie by its URL or slug,
 	## else as gathered), each as recent_feed's encoders write it.
 	json : List(U8), List(Row) -> List(U8)
-	json = |me, rs| Feeds.array(List.map(sort(rs), |r| event(me, r)))
+	json = |me, rs| JsonText.arr(List.map(sort(rs), |r| event(me, r)))
 
+	## A row as recent_feed's encoders write it: empty fields left out.
 	event : List(U8), Row -> List(U8)
 	event = |me, r| {
-		at = Str.to_utf8(Time.rfc3339(r.secs))
-		field = |name, v| if v == [] [] else List.join([Str.to_utf8(",\"${name}\":"), ZigText.json_string(v)])
+		at = JsonText.str(Str.to_utf8(Time.rfc3339(r.secs)))
 		if r.doc {
-			List.join([Str.to_utf8("{\"kind\":\"doc\",\"at\":"), ZigText.json_string(at), field("who", Str.to_utf8("You")), field("slug", r.key), field("title", r.label), [125]])
+			JsonText.obj(List.join([[("kind", JsonText.str(Str.to_utf8("doc"))), ("at", at)], JsonText.opt("who", Str.to_utf8("You")), JsonText.opt("slug", r.key), JsonText.opt("title", r.label)]))
 		} else {
 			who = if r.uid == [] [] else if r.uid == me Str.to_utf8("You") else r.name
-			List.join([
-				Str.to_utf8("{\"kind\":\"chat\",\"at\":"),
-				ZigText.json_string(at),
-				field("url", r.key),
-				field("who", who),
-				field("where", r.label),
-				field("topic", r.topic),
-				field("excerpt", excerpt(r.markdown)),
-				if r.dm Str.to_utf8(",\"dm\":true") else [],
-				[125],
-			])
+			dm = if r.dm [("dm", JsonText.bool(Bool.True))] else []
+			JsonText.obj(List.join([
+				[("kind", JsonText.str(Str.to_utf8("chat"))), ("at", at)],
+				JsonText.opt("url", r.key),
+				JsonText.opt("who", who),
+				JsonText.opt("where", r.label),
+				JsonText.opt("topic", r.topic),
+				JsonText.opt("excerpt", excerpt(r.markdown)),
+				dm,
+			]))
 		}
 	}
 
-	## recent.zig `newestFirst`, stably, as std.mem.sort is.
+	## recent.zig `newestFirst`, stably, as std.mem.sort is: newest first, a
+	## tie by the URL or slug, and rows equal in both in the order gathered
+	## (each row's index is its last key, so the sort need not be stable).
 	sort : List(Row) -> List(Row)
 	sort = |rs|
-		if List.len(rs) < 2 {
-			rs
-		} else {
-			half = List.len(rs) // 2
-			merge(sort(List.take_first(rs, half)), sort(List.drop_first(rs, half)), [])
-		}
-
-	merge : List(Row), List(Row), List(Row) -> List(Row)
-	merge = |a, b, out|
-		match (List.first(a), List.first(b)) {
-			(Ok(x), Ok(y)) => if before(y, x) merge(a, List.drop_first(b, 1), List.append(out, y)) else merge(List.drop_first(a, 1), b, List.append(out, x))
-			(Ok(_), Err(_)) => List.concat(out, a)
-			_ => List.concat(out, b)
-		}
+		List.map_with_index(rs, |row, i| { row, i })
+		|> List.sort_with(|a, b|
+			if before(a.row, b.row) {
+				Before
+			} else if before(b.row, a.row) {
+				After
+			} else if a.i < b.i {
+				Before
+			} else if a.i > b.i {
+				After
+			} else {
+				Same
+			})
+		|> List.map(|x| x.row)
 
 	before : Row, Row -> Bool
 	before = |x, y| if x.secs != y.secs x.secs > y.secs else less(x.key, y.key)
@@ -97,7 +99,7 @@ Recent := [].{
 	## `collapseQuotes`: line by line, a quote fence's span to "[quoted
 	## text]", another fence's lines as they are, each line ended.
 	quotes : List(U8) -> List(U8)
-	quotes = |md| quotes_from(Codec.split_byte(md, 10), 0, [])
+	quotes = |md| quotes_from(Bytes.split_byte(md, 10), 0, [])
 
 	quotes_from : List(List(U8)), U64, List(U8) -> List(U8)
 	quotes_from = |ls, i, out|

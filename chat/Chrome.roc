@@ -5,7 +5,7 @@
 ## and chat_page.zig, and angry-gopher's chat_twin_test.zig holds every page
 ## built here to the one the Zig builds, byte for byte, until the Zig's go.
 ## The scripts' srcs are the host's (`src`): their hash is of bytes it holds.
-import Codec
+import Bytes
 import Html
 
 Chrome := [].{
@@ -58,7 +58,7 @@ Chrome := [].{
 	## A template with each `{s}` slot filled in turn.
 	fill : Str, List(List(U8)) -> List(U8)
 	fill = |template, values| {
-		pieces = Codec.split_seq(Str.to_utf8(template), Str.to_utf8("{s}"))
+		pieces = Bytes.split_seq(Str.to_utf8(template), Str.to_utf8("{s}"))
 		(out, _) = List.fold(pieces, ([], 0), |(acc, i), piece|
 			if i == 0 (piece, 1) else (List.join([acc, List.get(values, i - 1) ?? [], piece]), i + 1))
 		out

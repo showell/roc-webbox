@@ -38,86 +38,99 @@ handle! = |req|
 				Chat.redirect(List.concat(Str.to_utf8("/login/full?next=${area}"), req.sub))
 			} else {
 				route = if req.channel Route.under_channel(req.sub) else Route.under_chat(req.sub)
-				if is_action(route) or is_page(route) or is_own(route) act!(req, route) else Chat.zig(route, !Route.is_stream(route))
+				if roc_serves(route) act!(req, route) else Chat.zig(route, !Route.is_stream(route))
 			}
 	}
 
-## A topic's reactions (10), react (11), pin (5) or unpin (6), in a DM (11)
-## or a channel (12).
-is_action : Route.R -> Bool
-is_action = |r|
-	(r.family == 11 or r.family == 12) and r.part == 3 and (r.tail == 5 or r.tail == 6 or r.tail == 10 or r.tail == 11)
+## The routes the Roc serves itself: /chat and /chat/default, the recent,
+## images and code pages (not their streams), /chat/links,
+## /chat/conversations, /chat/msg/<id>; and in a DM or a channel its
+## landing, a new topic, and a topic's page, raw transcript, send,
+## reactions, react, pin and unpin. Every other route is Zig's.
+roc_serves : Route.R -> Bool
+roc_serves = |r|
+	match r.family {
+		Default | Links | Conversations | Msg => Bool.True
+		Recent | Images | Code => r.rest != Str.to_utf8("/stream")
+		Dm | Channel =>
+			match r.part {
+				Landing | New => Bool.True
+				Invalid => Bool.False
+				Topic =>
+					match r.tail {
+						Page | Raw | Send | InvalidSend | Reactions | React | Pin | Unpin => Bool.True
+						_ => Bool.False
+					}
+			}
+		_ => Bool.False
+	}
 
-## A conversation's landing (part 0), a topic's page (part 3, tail 0) or its
-## raw transcript (tail 7), in a DM or a channel (docs/ROC-CHAT.md C3).
-is_page : Route.R -> Bool
-is_page = |r|
-	(r.family == 11 or r.family == 12) and (r.part == 0 or (r.part == 3 and (r.tail == 0 or r.tail == 7)))
-
-## /chat and /chat/default (2), /chat/recent (4), /chat/images (5) and
-## /chat/code (6) but their streams, /chat/links (7), /chat/conversations (9),
-## /chat/msg/<id> (10), and in a DM or a channel a new topic (part 1) or a send (tail 3,
-## or 13 with segments after it).
-is_own : Route.R -> Bool
-is_own = |r|
-	r.family == 2 or ((r.family == 4 or r.family == 5 or r.family == 6) and r.rest != Str.to_utf8("/stream")) or r.family == 7 or r.family == 9 or r.family == 10 or ((r.family == 11 or r.family == 12) and (r.part == 1 or (r.part == 3 and (r.tail == 3 or r.tail == 13))))
-
-## The Roc's own routes, in the Zig's order: presence; the conversation and
-## the topic (a miss is Zig's to answer, the same 404s); the method; then
-## the route's own work.
+## The Roc's own routes: presence, then the route's own work.
 act! : Chat.Request, Route.R => Chat.Answer
 act! = |req, route| {
 	Host.presence!({})
-	if route.family == 2 {
-		resume!({})
-	} else if route.family == 9 {
-		if req.method != Chat.get Chat.not_allowed(Chat.get) else conversations!({})
-	} else if route.family == 10 {
-		msg!(route.rest)
-	} else if route.family == 7 {
-		links!(route.rest)
-	} else if route.family == 4 {
-		recent!(route.rest)
-	} else if route.family == 5 or route.family == 6 {
-		feed!(route.family == 5, route.rest)
-	} else if route.part == 1 {
+	match route.family {
+		Default => resume!({})
+		Conversations => if req.method != Get Chat.not_allowed(Get) else conversations!({})
+		Msg => msg!(route.rest)
+		Links => links!(route.rest)
+		Recent => recent!(route.rest)
+		Images => feed!(Images, route.rest)
+		Code => feed!(Code, route.rest)
+		_ => in_conversation!(req, route)
+	}
+}
+
+## A DM's or a channel's, in the Zig's order: a new topic and a send look
+## their conversation up themselves (a send makes its topic); the landing
+## needs no topic; everything else needs the topic there (a miss is Zig's
+## to answer, the same 404s), then the method, then the work.
+in_conversation! : Chat.Request, Route.R => Chat.Answer
+in_conversation! = |req, route|
+	if route.part == New {
 		new_topic!(req, route)
-	} else if route.tail == 3 or route.tail == 13 {
+	} else if route.tail == Send or route.tail == InvalidSend {
 		send!(req, route)
-	} else if route.part == 0 {
+	} else if route.part == Landing {
 		landing!(route)
 	} else if !Host.topic!(route.family, route.key, route.sid) {
 		Chat.zig(route, Bool.False)
-	} else if route.tail == 0 or route.tail == 7 {
-		if req.method != Chat.get and req.method != Chat.head {
-			Chat.not_allowed(Chat.get)
-		} else if route.tail == 0 {
-			page!(route)
-		} else {
-			if Host.raw!({}) Chat.held_plain else Chat.not_found
-		}
-	} else if route.tail == 10 {
-		if req.method != Chat.get {
-			Chat.not_allowed(Chat.get)
-		} else {
-			got = Host.reactions!({})
-			if got.ok Chat.respond(200, Str.to_utf8("application/x-ndjson; charset=utf-8"), got.bytes) else Chat.answered
-		}
-	} else if req.method != Chat.post {
-		Chat.not_allowed(Chat.post)
-	} else if route.tail == 11 {
-		react!({})
-	} else if Host.pin!(route.tail == 5) {
-		Chat.respond(204, [], [])
 	} else {
-		Chat.answered
+		match route.tail {
+			Page | Raw =>
+				if req.method != Get and req.method != Head {
+					Chat.not_allowed(Get)
+				} else if route.tail == Page {
+					page!(route)
+				} else if Host.raw!({}) {
+					Chat.held_plain
+				} else {
+					Chat.not_found
+				}
+			Reactions =>
+				if req.method != Get {
+					Chat.not_allowed(Get)
+				} else {
+					got = Host.reactions!({})
+					if got.ok Chat.respond(200, Str.to_utf8("application/x-ndjson; charset=utf-8"), got.bytes) else Chat.answered
+				}
+			_ =>
+				if req.method != Post {
+					Chat.not_allowed(Post)
+				} else if route.tail == React {
+					react!({})
+				} else if Host.pin!(route.tail == Pin) {
+					Chat.respond(204, [], [])
+				} else {
+					Chat.answered
+				}
+		}
 	}
-}
 
 ## POST .../react: the form, then the store's answer.
 react! : {} => Chat.Answer
 react! = |{}| {
-	body = Host.body!(0)
+	body = Host.body!(Reaction)
 	if !body.ok {
 		Chat.answered
 	} else {
@@ -126,9 +139,9 @@ react! = |{}| {
 			Bad(why) => Chat.respond(400, [], why)
 			Reacted(r) =>
 				match Host.react!(r.msg, r.emoji, r.on) {
-					0 => Chat.respond(204, [], [])
-					1 => Chat.respond(400, [], Str.to_utf8("react: no such message\n"))
-					_ => Chat.answered
+					Stored => Chat.respond(204, [], [])
+					NoSuchMessage => Chat.respond(400, [], Str.to_utf8("react: no such message\n"))
+					Failed => Chat.answered
 				}
 		}
 	}
@@ -169,18 +182,22 @@ recent! = |rest|
 
 ## /chat/images (the newest 20 entries) or /chat/code (every one), by any
 ## method, as the Zig had them; nothing below them but their streams.
-feed! : Bool, List(U8) => Chat.Answer
-feed! = |images, rest|
+feed! : [Images, Code], List(U8) => Chat.Answer
+feed! = |which, rest|
 	if rest != [] {
 		Chat.not_found
 	} else {
 		viewer = Host.viewer!({})
-		file = match Host.feed!(if images 0 else 1) {
+		file = match Host.feed!(which) {
 			[bytes] => bytes
 			_ => []
 		}
 		src = Chrome.src_in(Host.srcs!({}))
-		Chat.respond(200, html, if images Pages.images(src, viewer, Feeds.images_json(Feeds.images(file), 20)) else Pages.code(src, viewer, Feeds.code_json(Feeds.code(file))))
+		page = match which {
+			Images => Pages.images(src, viewer, Feeds.images_json(Feeds.images(file), 20))
+			Code => Pages.code(src, viewer, Feeds.code_json(Feeds.code(file)))
+		}
+		Chat.respond(200, html, page)
 	}
 
 ## A conversation's landing: its first topic, or, with none, the page that
@@ -216,7 +233,7 @@ resume! = |{}| {
 	conv = Host.last_conv!({})
 	if conv == [] or !Paths.participant(conv, Host.me!({})) {
 		Chat.respond(200, html, Pages.no_conversations(Chrome.src_in(Host.srcs!({})), Host.viewer!({})))
-	} else if Paths.first_of(Host.topics!(11, conv)) == [] {
+	} else if Paths.first_of(Host.topics!(Dm, conv)) == [] {
 		Chat.redirect(List.concat(Str.to_utf8("/chat/c/"), conv))
 	} else {
 		Chat.redirect(List.join([Str.to_utf8("/chat/c/"), conv, [47], Host.resume_topic!(conv)]))
@@ -240,7 +257,7 @@ entries! = |me, members, i, acc|
 			} else {
 				conv = Paths.pair_key(me, id)
 				default = Host.resume_topic!(conv)
-				sessions = Host.topics!(11, conv)
+				sessions = Host.topics!(Dm, conv)
 				entries!(me, members, i + 2, List.append(acc, { conv, id, name, default, sessions }))
 			}
 		_ => acc
@@ -277,7 +294,7 @@ find_dm! = |me, members, sid, i|
 				find_dm!(me, members, sid, i + 2)
 			} else {
 				conv = Paths.pair_key(me, id)
-				if List.contains(Host.topics!(11, conv), sid) Ok(conv) else find_dm!(me, members, sid, i + 2)
+				if List.contains(Host.topics!(Dm, conv), sid) Ok(conv) else find_dm!(me, members, sid, i + 2)
 			}
 		Err(_) => Err(None)
 	}
@@ -285,7 +302,7 @@ find_dm! = |me, members, sid, i|
 find_channel! : List(List(U8)), List(U8), U64 => Try(List(U8), [None])
 find_channel! = |names, sid, i|
 	match List.get(names, i) {
-		Ok(name) => if List.contains(Host.topics!(12, name), sid) Ok(name) else find_channel!(names, sid, i + 1)
+		Ok(name) => if List.contains(Host.topics!(Channel, name), sid) Ok(name) else find_channel!(names, sid, i + 1)
 		Err(_) => Err(None)
 	}
 
@@ -295,10 +312,10 @@ new_topic! : Chat.Request, Route.R => Chat.Answer
 new_topic! = |req, route|
 	match Host.conv!(route.family, route.key) {
 		[base, dm] =>
-			if req.method != Chat.post {
-				Chat.not_allowed(Chat.post)
+			if req.method != Post {
+				Chat.not_allowed(Post)
 			} else {
-				body = Host.body!(1)
+				body = Host.body!(Message)
 				if !body.ok {
 					Chat.answered
 				} else {
@@ -351,14 +368,14 @@ send! : Chat.Request, Route.R => Chat.Answer
 send! = |req, route|
 	match Host.send_conv!(route.family, route.key, route.sid) {
 		[base, dm] =>
-			if route.tail == 13 {
+			if route.tail == InvalidSend {
 				Chat.not_found
-			} else if req.method != Chat.post {
-				Chat.not_allowed(Chat.post)
+			} else if req.method != Post {
+				Chat.not_allowed(Post)
 			} else {
 				# The header before the body: reading the body moves past it.
 				is_async = Host.header!(Str.to_utf8("x-chat-async")) == [[49]]
-				body = Host.body!(1)
+				body = Host.body!(Message)
 				if !body.ok {
 					Chat.answered
 				} else {
@@ -389,7 +406,7 @@ store! = |route, back, dm, is_async, md, cid|
 		refuse("not sent: the message is empty\n")
 	} else if Str.from_utf8(md).is_err() {
 		refuse("not sent: the message is not UTF-8 text\n")
-	} else if Host.hostile!(md) != 0 {
+	} else if Host.hostile!(md) != Fine {
 		Chat.answered
 	} else {
 		name = Host.viewer!({})

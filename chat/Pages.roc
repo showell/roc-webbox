@@ -1,9 +1,10 @@
 ## THE CHAT'S PAGES (angry-gopher chat_page.zig): the conversation page and
 ## the sidebar it boots with, the first-topic shell, a 404 that says why, and
 ## the empty /chat. Each from what the host read; the chrome is Chrome.roc's.
-import Codec
+import Bytes
 import Chrome
 import Html
+import JsonText
 import Paths
 import ZigText
 
@@ -68,7 +69,7 @@ Pages := [].{
 	## (a curated page can be long), and answers before, them, after.
 	links_around : (List(U8) -> List(U8)), List(U8) -> (List(U8), List(U8))
 	links_around = |src, viewer|
-		match Codec.cut_seq(links(src, viewer, [[0]]), [0]) {
+		match Bytes.cut_seq(links(src, viewer, [[0]]), [0]) {
 			Ok(parts) => parts
 			Err(None) => crash "Pages.links_around: the page lost its mark"
 		}
@@ -151,58 +152,22 @@ Pages := [].{
 	## page's `<script>`.
 	sidebar_json : Sidebar -> List(U8)
 	sidebar_json = |sb| {
-		people = List.map(sb.others, |u| {
+		prefixed = |prefix, s| List.concat(Str.to_utf8(prefix), s)
+		person = |u| {
 			pk = Paths.pair_key(sb.uid, u.id)
-			List.join([
-				Str.to_utf8("{\"id\":\"uid:"),
-				u.id,
-				Str.to_utf8("\",\"label\":"),
-				ZigText.json_string(u.name),
-				Str.to_utf8(",\"url\":\"/chat/c/"),
-				pk,
-				Str.to_utf8("\",\"active\":"),
-				bool(sb.dm and pk == sb.key),
-				if u.online Str.to_utf8(",\"online\":true") else [],
-				Str.to_utf8("}"),
-			])
-		})
-		rooms = List.map(sb.channels, |name|
-			List.join([
-				Str.to_utf8("{\"id\":\"ch:"),
-				name,
-				Str.to_utf8("\",\"label\":"),
-				ZigText.json_string(List.concat(Str.to_utf8("# "), name)),
-				Str.to_utf8(",\"url\":\"/channel/"),
-				name,
-				Str.to_utf8("\",\"active\":"),
-				bool(!sb.dm and name == sb.key),
-				Str.to_utf8("}"),
-			]))
-		item = |s| {
-			url = List.join([sb.base, [47], s])
-			List.join([
-				Str.to_utf8("{\"id\":"),
-				ZigText.json_string(s),
-				Str.to_utf8(",\"label\":"),
-				ZigText.json_string(s),
-				Str.to_utf8(",\"url\":"),
-				ZigText.json_string(url),
-				Str.to_utf8(",\"active\":"),
-				bool(s == sb.sid),
-				Str.to_utf8("}"),
-			])
+			online = if u.online [("online", JsonText.bool(Bool.True))] else []
+			JsonText.obj(List.concat([("id", JsonText.str(prefixed("uid:", u.id))), ("label", JsonText.str(u.name)), ("url", JsonText.str(prefixed("/chat/c/", pk))), ("active", JsonText.bool(sb.dm and pk == sb.key))], online))
 		}
+		room = |name|
+			JsonText.obj([("id", JsonText.str(prefixed("ch:", name))), ("label", JsonText.str(prefixed("# ", name))), ("url", JsonText.str(prefixed("/channel/", name))), ("active", JsonText.bool(!sb.dm and name == sb.key))])
+		topic = |s|
+			JsonText.obj([("id", JsonText.str(s)), ("label", JsonText.str(s)), ("url", JsonText.str(List.join([sb.base, [47], s]))), ("active", JsonText.bool(s == sb.sid))])
 		pinned = List.keep_if(sb.topics, |s| List.contains(sb.pins, s))
 		rest = List.drop_if(sb.topics, |s| List.contains(sb.pins, s))
-		comma = |items| List.join(List.intersperse(items, [44]))
-		Html.script_safe(List.join([
-			Str.to_utf8("{\"conversations\":["),
-			comma(List.concat(people, rooms)),
-			Str.to_utf8("],\"pinned_sessions\":["),
-			comma(List.map(pinned, item)),
-			Str.to_utf8("],\"topics\":["),
-			comma(List.map(rest, item)),
-			Str.to_utf8("]}"),
+		Html.script_safe(JsonText.obj([
+			("conversations", JsonText.arr(List.concat(List.map(sb.others, person), List.map(sb.channels, room)))),
+			("pinned_sessions", JsonText.arr(List.map(pinned, topic))),
+			("topics", JsonText.arr(List.map(rest, topic))),
 		]))
 	}
 
@@ -231,7 +196,4 @@ Pages := [].{
 	## A number the host sent as its digits.
 	number : List(U8) -> U64
 	number = |digits| ZigText.parse_u64(digits) ?? 0
-
-	bool : Bool -> List(U8)
-	bool = |b| if b Str.to_utf8("true") else Str.to_utf8("false")
 }

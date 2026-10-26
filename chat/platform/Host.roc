@@ -1,5 +1,7 @@
 ## THE HOST'S ANSWERS, AS EFFECTS: each is asked when the app asks it, inside
 ## the request's call.
+import Chat
+
 Host := [].{
 	## Whether the one asking may use the chat: a member, or the agent
 	## (angry-gopher's `users.principalAuthorized` of who the request's
@@ -16,19 +18,19 @@ Host := [].{
 	## looks them up before serving a topic. When it is, the host holds the
 	## topic for the calls below; when not, the Roc hands the route to Zig,
 	## which answers why.
-	topic! : U8, List(U8), List(U8) => Bool
+	topic! : Chat.Family, List(U8), List(U8) => Bool
 
-	## The request's body, read to a form's limit (`which`: 0 the react
-	## form's, 1 a message's); not `ok` when the host answered instead (too
+	## The request's body, read to a form's limit (`which`: the react
+	## form's or a message's); not `ok` when the host answered instead (too
 	## big) or failed.
-	body! : U8 => { ok : Bool, bytes : List(U8) }
+	body! : [Reaction, Message] => { ok : Bool, bytes : List(U8) }
 
 	## The topic's reaction sidecar, as stored; not `ok` when it failed.
 	reactions! : {} => { ok : Bool, bytes : List(U8) }
 
-	## Store the member's reaction to message `msg` and send it live: 0 when
-	## stored, 1 when there is no such message, 2 when it failed.
-	react! : U64, List(U8), Bool => U8
+	## Store the member's reaction to message `msg` and send it live: `Stored`,
+	## `NoSuchMessage`, or `Failed`.
+	react! : U64, List(U8), Bool => [Stored, NoSuchMessage, Failed]
 
 	## Pin the topic for the member, or unpin it; false when it failed.
 	pin! : Bool => Bool
@@ -37,7 +39,7 @@ Host := [].{
 	## the conversation is not the member's (Zig answers why); else its URL
 	## base and its first topic, and when it has none ("" ), the viewer and
 	## the conversation's title.
-	landing! : U8, List(U8) => List(List(U8))
+	landing! : Chat.Family, List(U8) => List(List(U8))
 
 	## The conversation page's data, for the topic `topic!` found: the
 	## viewer, the title, the four limits (image, video, accept, search),
@@ -65,9 +67,9 @@ Host := [].{
 	## Where the member resumes DM `conv`: its last topic, else a default.
 	resume_topic! : List(U8) => List(U8)
 
-	## The topics of a DM (`family` 11, `key` its pair) or a channel (12, its
+	## The topics of a DM (`Dm`, `key` its pair) or a channel (`Channel`, its
 	## name), as the store lists them.
-	topics! : U8, List(U8) => List(List(U8))
+	topics! : Chat.Family, List(U8) => List(List(U8))
 
 	## The channels the member is in.
 	channels! : {} => List(List(U8))
@@ -78,7 +80,7 @@ Host := [].{
 	## A DM's or channel's conversation, for a new topic in it: none when it
 	## is not the member's (Zig answers why); else its URL base and "1" for a
 	## DM. The host holds it for `bookmark!` and `append!`.
-	conv! : U8, List(U8) => List(List(U8))
+	conv! : Chat.Family, List(U8) => List(List(U8))
 
 	## Record topic `sid` as the member's place to resume the DM `conv!`
 	## found; false when it failed.
@@ -95,7 +97,7 @@ Host := [].{
 	## conversation is not the member's (Zig answers why); else its URL base
 	## and "1" for a DM. Reads the conversation's title, as the Zig did. The
 	## host holds it for `bookmark!` and `append!`.
-	send_conv! : U8, List(U8), List(U8) => List(List(U8))
+	send_conv! : Chat.Family, List(U8), List(U8) => List(List(U8))
 
 	## A request header's value, or none (read before the body).
 	header! : List(U8) => List(List(U8))
@@ -110,16 +112,16 @@ Host := [].{
 	## (Chat.held_html) (false when the read failed, too).
 	links! : {} => Bool
 
-	## The member's feed file as stored (`which`: 0 images.md, 1 code.md):
+	## The member's feed file as stored (images.md or code.md):
 	## none when there is none (or the read failed).
-	feed! : U8 => List(List(U8))
+	feed! : [Images, Code] => List(List(U8))
 
 	## The member's recent feed as gathered (angry-gopher recent.zig
 	## `gatherRows`), nine fields a row: doc, secs, uid, name, key, label,
 	## topic, markdown, dm. None when it failed.
 	recent! : {} => List(List(U8))
 
-	## Whether markdown is hostile: 0 no, 1 yes and the host has refused it
-	## (webbox's edge counter and its 400), 2 the check failed.
-	hostile! : List(U8) => U8
+	## Whether markdown is hostile: `Fine`; `Refused`, the host having refused it
+	## (webbox's edge counter and its 400); or `Failed`, the check itself.
+	hostile! : List(U8) => [Fine, Refused, Failed]
 }

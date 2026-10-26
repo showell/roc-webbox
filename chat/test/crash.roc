@@ -12,12 +12,17 @@ handle! = |req|
 	if req.sub == Str.to_utf8("/crash") {
 		crash "a planted crash"
 	} else if req.sub == Str.to_utf8("/crash-after-asking") {
-		if Host.member!({}) crash "a planted crash, after asking" else Chat.zig(Chat.family(0), Bool.False)
+		if Host.member!({}) crash "a planted crash, after asking" else Chat.zig(Chat.family(NotFound), Bool.False)
 	} else if req.sub == Str.to_utf8("/crash-after-asking-big") {
 		# A list grown a byte at a time, through many allocations, then a
-		# crash: each allocation is one a test can make fail.
+		# crash: each allocation is one a test can make fail. Bytes, said:
+		# an unannotated 7 is a Dec (16 bytes), and the pinned Roc lays a
+		# constant list of those out with only its refcount 16-aligned, then
+		# reads the elements with aligned loads (a fault, where the linker
+		# happens to put it on a 16-byte boundary).
+		big : List(U8)
 		big = List.fold(List.repeat(7, 20000), [], |acc, b| List.append(acc, b))
-		if Host.member!({}) and List.len(big) == 20000 crash "a planted crash, after a big list" else Chat.zig(Chat.family(0), Bool.False)
+		if Host.member!({}) and List.len(big) == 20000 crash "a planted crash, after a big list" else Chat.zig(Chat.family(NotFound), Bool.False)
 	} else {
-		Chat.zig(Chat.family(2), Bool.True)
+		Chat.zig(Chat.family(Default), Bool.True)
 	}

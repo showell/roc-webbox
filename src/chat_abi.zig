@@ -23,12 +23,15 @@ pub const Decision = route_mod.Decision;
 
 pub const RocBytes = roc.RocBytes;
 
-/// Chat.roc's `Request`; `method` is `methodNumber`'s.
-pub const Request = extern struct { sub: RocBytes, channel: bool, method: u8 };
+const Family = route_mod.Family;
+const Method = route_mod.Method;
+
+/// Chat.roc's `Request`.
+pub const Request = extern struct { sub: RocBytes, channel: bool, method: Method };
 /// Chat.roc's `Route`.
-pub const RouteRec = extern struct { key: RocBytes, rest: RocBytes, sid: RocBytes, family: u8, part: u8, tail: u8 };
+pub const RouteRec = extern struct { key: RocBytes, rest: RocBytes, sid: RocBytes, family: Family, part: route_mod.Part, tail: route_mod.Tail };
 /// Chat.roc's `Answer`.
-pub const Answer = extern struct { body: RocBytes, content_type: RocBytes, location: RocBytes, route: RouteRec, status: u16, allow: u8, kind: u8, nosniff: bool, presence: bool };
+pub const Answer = extern struct { body: RocBytes, content_type: RocBytes, location: RocBytes, route: RouteRec, status: u16, allow: Method, kind: route_mod.Kind, nosniff: bool, presence: bool };
 /// Host.roc's `{ ok : Bool, bytes : List(U8) }`.
 pub const Got = extern struct { bytes: RocBytes, ok: bool };
 
@@ -38,16 +41,6 @@ comptime {
 }
 
 extern fn roc_chat_handle(req: Request) callconv(.c) Answer;
-
-/// Chat.roc's numbers for a method: 1 GET, 2 HEAD, 3 POST, 0 any other.
-pub fn methodNumber(m: std.http.Method) u8 {
-    return switch (m) {
-        .GET => 1,
-        .HEAD => 2,
-        .POST => 3,
-        else => 0,
-    };
-}
 
 /// **WHAT ANSWERS THE HOSTED FUNCTIONS** during a call: the host's, with its
 /// own context (the request, its `Io`, the topic it found). Set by `decide`
@@ -59,21 +52,21 @@ pub const Host = struct {
     member: *const fn (ctx: *anyopaque) bool,
     /// Host.presence!.
     presence: *const fn (ctx: *anyopaque) void,
-    /// Host.topic!: `family` a `Family`'s number.
-    topic: *const fn (ctx: *anyopaque, family: u8, key: []const u8, sid: []const u8) bool,
-    /// Host.body!: `which` limit (0 the react form's, 1 a message's); null
+    /// Host.topic!.
+    topic: *const fn (ctx: *anyopaque, family: Family, key: []const u8, sid: []const u8) bool,
+    /// Host.body!: read to `which` form's limit; null
     /// when the host answered (too big) or failed.
-    body: *const fn (ctx: *anyopaque, which: u8) ?[]const u8,
+    body: *const fn (ctx: *anyopaque, which: route_mod.Form) ?[]const u8,
     /// Host.reactions!: null when it failed.
     reactions: *const fn (ctx: *anyopaque) ?[]const u8,
-    /// Host.react!: 0 stored, 1 no such message, 2 failed.
-    react: *const fn (ctx: *anyopaque, msg: u64, emoji: []const u8, on: bool) u8,
+    /// Host.react!.
+    react: *const fn (ctx: *anyopaque, msg: u64, emoji: []const u8, on: bool) route_mod.Reacted,
     /// Host.pin!: false when it failed.
     pin: *const fn (ctx: *anyopaque, pinned: bool) bool,
     /// Host.landing!: none when the conversation is not the member's (or
     /// the lookup failed); else its base and first topic, and when it has
     /// none, the viewer and the conversation's title.
-    landing: *const fn (ctx: *anyopaque, family: u8, key: []const u8) []const []const u8 = noLanding,
+    landing: *const fn (ctx: *anyopaque, family: Family, key: []const u8) []const []const u8 = noLanding,
     /// Host.page!: the conversation page's data (Pages.roc reads it), or
     /// none when it failed.
     page: *const fn (ctx: *anyopaque) []const []const u8 = noPage,
@@ -87,28 +80,28 @@ pub const Host = struct {
     /// Host.resume_topic!: where the member resumes DM `conv`.
     resume_topic: *const fn (ctx: *anyopaque, conv: []const u8) []const u8 = noKeyBytes,
     /// Host.topics!: a DM's or a channel's topics.
-    topics: *const fn (ctx: *anyopaque, family: u8, key: []const u8) []const []const u8 = noLanding,
+    topics: *const fn (ctx: *anyopaque, family: Family, key: []const u8) []const []const u8 = noLanding,
     /// Host.channels!, Host.members!: the member's channels; every member as
     /// `id, name` pairs.
     channels: *const fn (ctx: *anyopaque) []const []const u8 = noPage,
     members: *const fn (ctx: *anyopaque) []const []const u8 = noPage,
     /// Host.conv!: a conversation for a new topic, or none.
-    conv: *const fn (ctx: *anyopaque, family: u8, key: []const u8) []const []const u8 = noLanding,
+    conv: *const fn (ctx: *anyopaque, family: Family, key: []const u8) []const []const u8 = noLanding,
     /// Host.bookmark!, Host.append!: false when they failed.
     bookmark: *const fn (ctx: *anyopaque, sid: []const u8) bool = noBookmark,
     append: *const fn (ctx: *anyopaque, sid: []const u8, name: []const u8, markdown: []const u8, cid: []const u8) bool = noAppend,
     /// Host.send_conv!: a topic to send to, or none.
-    send_conv: *const fn (ctx: *anyopaque, family: u8, key: []const u8, sid: []const u8) []const []const u8 = noSendConv,
+    send_conv: *const fn (ctx: *anyopaque, family: Family, key: []const u8, sid: []const u8) []const []const u8 = noSendConv,
     /// Host.header!: a request header's value, or none.
     header: *const fn (ctx: *anyopaque, name: []const u8) []const []const u8 = noHeader,
-    /// Host.hostile!: 0 no, 1 refused, 2 failed.
-    hostile: *const fn (ctx: *anyopaque, markdown: []const u8) u8 = noHostile,
+    /// Host.hostile!.
+    hostile: *const fn (ctx: *anyopaque, markdown: []const u8) route_mod.Hostility = noHostile,
     /// Host.raw!, Host.links!: whether the host holds the topic's
     /// transcript, the member's links page rendered, for a `held` answer.
     raw: *const fn (ctx: *anyopaque) bool = noHeld,
     links: *const fn (ctx: *anyopaque) bool = noHeld,
-    /// Host.feed!: the member's images.md (0) or code.md (1), or none.
-    feed: *const fn (ctx: *anyopaque, which: u8) []const []const u8 = noFeed,
+    /// Host.feed!: the member's images.md or code.md, or none.
+    feed: *const fn (ctx: *anyopaque, which: route_mod.Feed) []const []const u8 = noFeed,
     /// Host.recent!: the member's recent rows, nine fields each, or none.
     recent: *const fn (ctx: *anyopaque) []const []const u8 = noPage,
 };
@@ -116,17 +109,17 @@ pub const Host = struct {
 fn noHeld(_: *anyopaque) bool {
     @panic("raw or links asked of a host that does not answer it");
 }
-fn noFeed(_: *anyopaque, _: u8) []const []const u8 {
+fn noFeed(_: *anyopaque, _: route_mod.Feed) []const []const u8 {
     @panic("feed asked of a host that does not answer it");
 }
 
-fn noSendConv(_: *anyopaque, _: u8, _: []const u8, _: []const u8) []const []const u8 {
+fn noSendConv(_: *anyopaque, _: Family, _: []const u8, _: []const u8) []const []const u8 {
     @panic("send_conv asked of a host that does not answer it");
 }
 fn noHeader(_: *anyopaque, _: []const u8) []const []const u8 {
     @panic("header asked of a host that does not answer it");
 }
-fn noHostile(_: *anyopaque, _: []const u8) u8 {
+fn noHostile(_: *anyopaque, _: []const u8) route_mod.Hostility {
     @panic("hostile asked of a host that does not answer it");
 }
 
@@ -143,7 +136,7 @@ fn noAppend(_: *anyopaque, _: []const u8, _: []const u8, _: []const u8, _: []con
     @panic("append asked of a host that does not answer it");
 }
 
-fn noLanding(_: *anyopaque, _: u8, _: []const u8) []const []const u8 {
+fn noLanding(_: *anyopaque, _: Family, _: []const u8) []const []const u8 {
     @panic("landing asked of a host that does not answer it");
 }
 fn noPage(_: *anyopaque) []const []const u8 {
@@ -195,13 +188,13 @@ pub const Routing = struct {
     fn mark(ctx: *anyopaque) void {
         of(ctx).marked = true;
     }
-    fn none(_: *anyopaque, _: u8, _: []const u8, _: []const u8) bool {
+    fn none(_: *anyopaque, _: Family, _: []const u8, _: []const u8) bool {
         return false;
     }
-    fn noConv(_: *anyopaque, _: u8, _: []const u8) []const []const u8 {
+    fn noConv(_: *anyopaque, _: Family, _: []const u8) []const []const u8 {
         return &.{};
     }
-    fn noSendTo(_: *anyopaque, _: u8, _: []const u8, _: []const u8) []const []const u8 {
+    fn noSendTo(_: *anyopaque, _: Family, _: []const u8, _: []const u8) []const []const u8 {
         return &.{};
     }
     fn empty(_: *anyopaque) []const u8 {
@@ -213,7 +206,7 @@ pub const Routing = struct {
     fn holdsNone(_: *anyopaque) bool {
         return false;
     }
-    fn noFile(_: *anyopaque, _: u8) []const []const u8 {
+    fn noFile(_: *anyopaque, _: route_mod.Feed) []const []const u8 {
         return &.{};
     }
 };
@@ -225,16 +218,16 @@ pub fn askingOnly(ctx: *anyopaque, ask: *const fn (ctx: *anyopaque) bool) Host {
         fn presence(_: *anyopaque) void {
             @panic("presence asked of a host that only answers who is asking");
         }
-        fn topic(_: *anyopaque, _: u8, _: []const u8, _: []const u8) bool {
+        fn topic(_: *anyopaque, _: Family, _: []const u8, _: []const u8) bool {
             @panic("topic asked of a host that only answers who is asking");
         }
         fn bytes(_: *anyopaque) ?[]const u8 {
             @panic("bytes asked of a host that only answers who is asking");
         }
-        fn body(_: *anyopaque, _: u8) ?[]const u8 {
+        fn body(_: *anyopaque, _: route_mod.Form) ?[]const u8 {
             @panic("body asked of a host that only answers who is asking");
         }
-        fn react(_: *anyopaque, _: u64, _: []const u8, _: bool) u8 {
+        fn react(_: *anyopaque, _: u64, _: []const u8, _: bool) route_mod.Reacted {
             @panic("react asked of a host that only answers who is asking");
         }
         fn pin(_: *anyopaque, _: bool) bool {
@@ -265,12 +258,12 @@ export fn roc_chat_presence() callconv(.c) void {
     h.presence(h.ctx);
 }
 
-export fn roc_chat_topic(family: u8, key: RocBytes, sid: RocBytes) callconv(.c) bool {
+export fn roc_chat_topic(family: Family, key: RocBytes, sid: RocBytes) callconv(.c) bool {
     const h = current("topic");
     return h.topic(h.ctx, family, key.slice(), sid.slice());
 }
 
-export fn roc_chat_body(which: u8) callconv(.c) Got {
+export fn roc_chat_body(which: route_mod.Form) callconv(.c) Got {
     const h = current("body");
     return got(h.body(h.ctx, which));
 }
@@ -280,7 +273,7 @@ export fn roc_chat_reactions() callconv(.c) Got {
     return got(h.reactions(h.ctx));
 }
 
-export fn roc_chat_react(msg: u64, emoji: RocBytes, on: bool) callconv(.c) u8 {
+export fn roc_chat_react(msg: u64, emoji: RocBytes, on: bool) callconv(.c) route_mod.Reacted {
     const h = current("react");
     return h.react(h.ctx, msg, emoji.slice(), on);
 }
@@ -290,7 +283,7 @@ export fn roc_chat_pin(pinned: bool) callconv(.c) bool {
     return h.pin(h.ctx, pinned);
 }
 
-export fn roc_chat_landing(family: u8, key: RocBytes) callconv(.c) roc.RocBytesList {
+export fn roc_chat_landing(family: Family, key: RocBytes) callconv(.c) roc.RocBytesList {
     const h = current("landing");
     return .from(h.landing(h.ctx, family, key.slice()));
 }
@@ -320,7 +313,7 @@ export fn roc_chat_resume_topic(conv: RocBytes) callconv(.c) RocBytes {
     return .from(h.resume_topic(h.ctx, conv.slice()));
 }
 
-export fn roc_chat_topics(family: u8, key: RocBytes) callconv(.c) roc.RocBytesList {
+export fn roc_chat_topics(family: Family, key: RocBytes) callconv(.c) roc.RocBytesList {
     const h = current("topics");
     return .from(h.topics(h.ctx, family, key.slice()));
 }
@@ -335,7 +328,7 @@ export fn roc_chat_members() callconv(.c) roc.RocBytesList {
     return .from(h.members(h.ctx));
 }
 
-export fn roc_chat_conv(family: u8, key: RocBytes) callconv(.c) roc.RocBytesList {
+export fn roc_chat_conv(family: Family, key: RocBytes) callconv(.c) roc.RocBytesList {
     const h = current("conv");
     return .from(h.conv(h.ctx, family, key.slice()));
 }
@@ -350,7 +343,7 @@ export fn roc_chat_append(sid: RocBytes, name: RocBytes, markdown: RocBytes, cid
     return h.append(h.ctx, sid.slice(), name.slice(), markdown.slice(), cid.slice());
 }
 
-export fn roc_chat_send_conv(family: u8, key: RocBytes, sid: RocBytes) callconv(.c) roc.RocBytesList {
+export fn roc_chat_send_conv(family: Family, key: RocBytes, sid: RocBytes) callconv(.c) roc.RocBytesList {
     const h = current("send_conv");
     return .from(h.send_conv(h.ctx, family, key.slice(), sid.slice()));
 }
@@ -360,7 +353,7 @@ export fn roc_chat_header(name: RocBytes) callconv(.c) roc.RocBytesList {
     return .from(h.header(h.ctx, name.slice()));
 }
 
-export fn roc_chat_hostile(markdown: RocBytes) callconv(.c) u8 {
+export fn roc_chat_hostile(markdown: RocBytes) callconv(.c) route_mod.Hostility {
     const h = current("hostile");
     return h.hostile(h.ctx, markdown.slice());
 }
@@ -370,7 +363,7 @@ export fn roc_chat_raw() callconv(.c) bool {
     return h.raw(h.ctx);
 }
 
-export fn roc_chat_feed(which: u8) callconv(.c) roc.RocBytesList {
+export fn roc_chat_feed(which: route_mod.Feed) callconv(.c) roc.RocBytesList {
     const h = current("feed");
     return .from(h.feed(h.ctx, which));
 }
@@ -418,7 +411,7 @@ fn crashed(message: []const u8) noreturn {
 /// request's strings are made here, after `setjmp`: they are the call's
 /// first allocations, and one that fails must jump back to this frame,
 /// not to one already gone.
-noinline fn guarded(sub: []const u8, channel: bool, method: u8, out: *Answer) bool {
+noinline fn guarded(sub: []const u8, channel: bool, method: Method, out: *Answer) bool {
     if (sljmp.setjmp(&jump) != 0) return false;
     out.* = roc_chat_handle(.{ .sub = .from(sub), .channel = channel, .method = method });
     return true;
@@ -438,30 +431,28 @@ pub fn decide(alloc: std.mem.Allocator, sub: []const u8, channel: bool, method: 
     defer roc.crashed = was;
     defer roc.end();
     var a: Answer = undefined;
-    if (!guarded(sub, channel, methodNumber(method), &a)) return error.RocCrashed;
-    switch (a.kind) {
-        0 => {},
-        1 => return .{ .redirect = try alloc.dupe(u8, a.location.slice()) },
-        2 => return .{ .respond = .{ .status = a.status, .content_type = try alloc.dupe(u8, a.content_type.slice()), .body = try alloc.dupe(u8, a.body.slice()), .nosniff = a.nosniff } },
-        3 => return .{ .not_allowed = switch (a.allow) {
-            1 => .GET,
-            2 => .HEAD,
-            3 => .POST,
-            else => std.debug.panic("roc_chat_handle: allow {d}", .{a.allow}),
+    if (!guarded(sub, channel, .of(method), &a)) return error.RocCrashed;
+    return switch (a.kind) {
+        .serve => .{ .serve = .{ .presence = a.presence, .route = .{
+            .family = a.route.family,
+            .part = a.route.part,
+            .tail = a.route.tail,
+            .key = try alloc.dupe(u8, a.route.key.slice()),
+            .rest = try alloc.dupe(u8, a.route.rest.slice()),
+            .sid = try alloc.dupe(u8, a.route.sid.slice()),
+        } } },
+        .redirect => .{ .redirect = try alloc.dupe(u8, a.location.slice()) },
+        .respond => .{ .respond = .{ .status = a.status, .content_type = try alloc.dupe(u8, a.content_type.slice()), .body = try alloc.dupe(u8, a.body.slice()), .nosniff = a.nosniff } },
+        .not_allowed => .{ .not_allowed = switch (a.allow) {
+            .get => .GET,
+            .head => .HEAD,
+            .post => .POST,
+            .other => std.debug.panic("roc_chat_handle: a 405 allowing no method", .{}),
         } },
-        4 => return .answered,
-        5 => return .malformed_form,
-        6 => return .not_found,
-        7 => return .{ .found = try alloc.dupe(u8, a.location.slice()) },
-        8 => return .{ .held = .{ .status = a.status, .content_type = try alloc.dupe(u8, a.content_type.slice()), .nosniff = a.nosniff, .before = try alloc.dupe(u8, a.body.slice()), .after = try alloc.dupe(u8, a.location.slice()) } },
-        else => std.debug.panic("roc_chat_handle answered kind {d}", .{a.kind}),
-    }
-    return .{ .serve = .{ .presence = a.presence, .route = .{
-        .family = std.enums.fromInt(route_mod.Family, a.route.family) orelse std.debug.panic("roc_chat_handle: family {d}", .{a.route.family}),
-        .part = std.enums.fromInt(route_mod.Part, a.route.part) orelse std.debug.panic("roc_chat_handle: part {d}", .{a.route.part}),
-        .tail = std.enums.fromInt(route_mod.Tail, a.route.tail) orelse std.debug.panic("roc_chat_handle: tail {d}", .{a.route.tail}),
-        .key = try alloc.dupe(u8, a.route.key.slice()),
-        .rest = try alloc.dupe(u8, a.route.rest.slice()),
-        .sid = try alloc.dupe(u8, a.route.sid.slice()),
-    } } };
+        .answered => .answered,
+        .malformed => .malformed_form,
+        .not_found => .not_found,
+        .found => .{ .found = try alloc.dupe(u8, a.location.slice()) },
+        .held => .{ .held = .{ .status = a.status, .content_type = try alloc.dupe(u8, a.content_type.slice()), .nosniff = a.nosniff, .before = try alloc.dupe(u8, a.body.slice()), .after = try alloc.dupe(u8, a.location.slice()) } },
+    };
 }

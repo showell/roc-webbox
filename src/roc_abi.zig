@@ -248,6 +248,8 @@ comptime {
         @export(&roc_realloc, .{ .name = "roc_realloc" });
         @export(&roc_dealloc, .{ .name = "roc_dealloc" });
         @export(&roc_crashed, .{ .name = "roc_crashed" });
+        @export(&roc_dbg, .{ .name = "roc_dbg" });
+        @export(&roc_expect_failed, .{ .name = "roc_expect_failed" });
     }
 }
 
@@ -306,6 +308,19 @@ fn stop(message: []const u8) noreturn {
 
 pub fn roc_crashed(bytes: [*]const u8, len: usize) callconv(.c) void {
     crashed(bytes[0..len]);
+}
+
+/// **A `dbg` OR A FAILED `expect` IS A CRASH HERE.** Roc's runtime links
+/// both hooks when an app uses some builtins (`List.sort_with` among them),
+/// though nothing a served app runs should reach either: one that does is
+/// that call's crash, so it is loud and ends only the call. The message is
+/// fixed, so nothing depends on how Roc passes its arguments.
+pub fn roc_dbg() callconv(.c) void {
+    crashed("a `dbg` was reached in a served build");
+}
+
+pub fn roc_expect_failed() callconv(.c) void {
+    crashed("an inline `expect` failed in a served build");
 }
 
 test "a string small and big, there and back" {

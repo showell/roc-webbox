@@ -3,7 +3,8 @@
 ## last message begins and who sent it. The sidecar is a cache and the
 ## transcript the truth: each rule here says when the cache may answer.
 import ZigText
-import Codec
+import Bytes
+import Transcript
 
 Count := [].{
 	## Where the last message begins and who sent it, `uid` empty for nobody.
@@ -14,13 +15,13 @@ Count := [].{
 	## countBlocks: every block that is not blank, refused ones included, so
 	## that no number is given twice.
 	count_blocks : List(U8) -> U64
-	count_blocks = |raw| List.count_if(Codec.split_seq(raw, Codec.sep), |p| ZigText.trim(p) != [])
+	count_blocks = |raw| List.count_if(Bytes.split_seq(raw, Transcript.sep), |p| ZigText.trim(p) != [])
 
 	## numberIn: the N of a `<sid>_<N>` id, or none when the id is not this
 	## topic's.
 	number_in : List(U8), List(U8) -> Try(U64, [None])
 	number_in = |id, sid|
-		if Codec.starts_with(id, sid) {
+		if Bytes.starts_with(id, sid) {
 			match List.drop_first(id, List.len(sid)) {
 				[95, .. as rest] => ZigText.parse_u64(rest)
 				_ => Err(None)
@@ -44,7 +45,7 @@ Count := [].{
 		if List.last(raw) != Ok(10) {
 			Err(None)
 		} else {
-			lines = Codec.split_byte(raw, 10)
+			lines = Bytes.split_byte(raw, 10)
 			match tokens(List.first(lines) ?? []) {
 				[c, s] =>
 					match (ZigText.parse_u64(c), ZigText.parse_u64(s)) {
@@ -67,7 +68,7 @@ Count := [].{
 
 	## std.mem.tokenizeScalar on a space: the runs between, none empty.
 	tokens : List(U8) -> List(List(U8))
-	tokens = |line| List.keep_if(Codec.split_byte(line, 32), |t| t != [])
+	tokens = |line| List.keep_if(Bytes.split_byte(line, 32), |t| t != [])
 
 	## countText: what a send writes, nobody as `-`.
 	text : U64, U64, Last -> List(U8)
@@ -101,12 +102,12 @@ Count := [].{
 	## windowLast: the last block of the window read at the record's offset,
 	## believed when the window was not full and the block is a message of
 	## `sid` numbered at least `count`; `current` when exactly that.
-	window_last : U64, List(U8), Bool, List(U8) -> Try({ msg : Codec.Msg, number : U64, current : Bool }, [None])
+	window_last : U64, List(U8), Bool, List(U8) -> Try({ msg : Transcript.Msg, number : U64, current : Bool }, [None])
 	window_last = |count, window, full, sid|
 		if full {
 			Err(None)
 		} else {
-			match List.last(Codec.decode_file(window).messages) {
+			match List.last(Transcript.decode_file(window).messages) {
 				Ok(msg) =>
 					match number_in(msg.id, sid) {
 						Ok(number) if number >= count => Ok({ msg, number, current: number == count })
