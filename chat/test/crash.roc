@@ -3,8 +3,9 @@
 ## so the host's answer to a Roc crash (a 500, the call's memory dropped,
 ## the next request served) is seen. It also names any path a test likes
 ## to the file primitives (`/read/<path>`, `/write/<path>`,
-## `/remove/<path>`, `/list/<path>`), as the chat's own Roc never would, so
-## the seam's check of each is seen, and asks `fail!`
+## `/remove/<path>`, `/list/<path>`, `/append/<path>`), as the chat's own
+## Roc never would, so the seam's check of each is seen; it publishes
+## (`/publish/<key>`), counts (`/count/<sid>`), and asks `fail!`
 ## (`/fail/<reason>/<whose>`),
 ## `malformed_channel!` (`/malformed/<name>`) and `accounts!`
 ## (`/accounts`). Never linked into a server.
@@ -25,6 +26,19 @@ handle! = |req|
 		Chat.respond(200, [], List.concat(Str.to_utf8(said), got.bytes))
 	} else if starts(req.sub, "/write/") {
 		Chat.respond(200, [], done(Host.write!(List.drop_first(req.sub, 7), Str.to_utf8("bytes"))))
+	} else if starts(req.sub, "/append/") {
+		Chat.respond(200, [], done(Host.append_line!(List.drop_first(req.sub, 8), Str.to_utf8("{\"a\":1}"))))
+	} else if starts(req.sub, "/publish/") {
+		Host.publish!(List.drop_first(req.sub, 9), Str.to_utf8("event: reaction\ndata: x\n\n"))
+		Chat.respond(200, [], Str.to_utf8("published"))
+	} else if starts(req.sub, "/count/") {
+		# DM 1_2's topic `<sid>`: every field of the conversation crosses.
+		got = Host.message_count!({ family: Dm, key: Str.to_utf8("1_2"), base: Str.to_utf8("/chat/c/1_2"), members: [Str.to_utf8("1"), Str.to_utf8("2")] }, List.drop_first(req.sub, 7))
+		said = match got.status {
+			Counted => "counted ${U64.to_str(got.count)}"
+			Failed => "failed"
+		}
+		Chat.respond(200, [], Str.to_utf8(said))
 	} else if starts(req.sub, "/remove/") {
 		Chat.respond(200, [], done(Host.remove!(List.drop_first(req.sub, 8))))
 	} else if starts(req.sub, "/list/") {

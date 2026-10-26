@@ -18,7 +18,8 @@ pub const Family = route.Family;
 pub const Part = route.Part;
 pub const Tail = route.Tail;
 pub const Form = route.Form;
-pub const Reacted = route.Reacted;
+pub const Count = abi.Count;
+pub const CountStatus = route.CountStatus;
 pub const Hostility = route.Hostility;
 pub const ReadStatus = route.ReadStatus;
 pub const Read = abi.Read;
@@ -113,7 +114,10 @@ const Scripted = struct {
     /// `<topic>.md`, a file.
     topics: []const []const u8 = &.{"Plans"},
     body: ?[]const u8 = "",
-    react_answer: route.Reacted = .stored,
+    /// A topic's message count, or a count that failed.
+    count: abi.Count = .{ .counted = 3 },
+    /// Whether an appended line is stored.
+    append_line_ok: bool = true,
     /// The files under the chat root, each as read; any other is missing.
     files: []const File = &.{},
     /// Whether a write or a remove succeeds.
@@ -132,7 +136,7 @@ const Scripted = struct {
     const Channel = struct { name: []const u8, read: abi.Read };
 
     fn host(self: *Scripted) Host {
-        return .{ .ctx = self, .member = member, .presence = presence, .accounts = accountsOf, .me = meId, .now = nowOf, .body = bodyOf, .react = react, .read = readOf, .write = writeOf, .remove = removeOf, .list = listOf, .fail = failOf, .fail_account = failAccountOf, .malformed_channel = malformed, .page = pageOf, .header = header, .hostile = hostile, .append = append, .raw = raw, .links = links, .srcs = srcs };
+        return .{ .ctx = self, .member = member, .presence = presence, .accounts = accountsOf, .me = meId, .now = nowOf, .body = bodyOf, .publish = publish, .append_line = appendLine, .message_count = messageCount, .read = readOf, .write = writeOf, .remove = removeOf, .list = listOf, .fail = failOf, .fail_account = failAccountOf, .malformed_channel = malformed, .page = pageOf, .header = header, .hostile = hostile, .append = append, .raw = raw, .links = links, .srcs = srcs };
     }
     fn me(ctx: *anyopaque) *Scripted {
         return @ptrCast(@alignCast(ctx));
@@ -167,10 +171,18 @@ const Scripted = struct {
         say(ctx, "body", .{});
         return me(ctx).body;
     }
-    fn react(ctx: *anyopaque, conv: Conv, sid: []const u8, msg: u64, emoji: []const u8, on: bool) route.Reacted {
-        sayConv(ctx, "react", conv);
-        say(ctx, " {s} {d} {s} {}", .{ sid, msg, emoji, on });
-        return me(ctx).react_answer;
+    /// The key and the bytes exactly, escaped, so a frame's every byte shows.
+    fn publish(ctx: *anyopaque, key: []const u8, bytes: []const u8) void {
+        say(ctx, "publish {s} {f}", .{ key, std.zig.fmtString(bytes) });
+    }
+    fn appendLine(ctx: *anyopaque, path: []const u8, line: []const u8) bool {
+        say(ctx, "append_line {s} {s}", .{ path, line });
+        return me(ctx).append_line_ok;
+    }
+    fn messageCount(ctx: *anyopaque, conv: Conv, sid: []const u8) abi.Count {
+        sayConv(ctx, "count", conv);
+        say(ctx, " {s}", .{sid});
+        return me(ctx).count;
     }
     fn nowOf(_: *anyopaque) i64 {
         return 1761400000;
@@ -273,22 +285,82 @@ inline fn bookmarked(comptime sid: []const u8) []const u8 {
     return comptime "read users/1/last-sessions/1_2;write users/1/last-sessions/1_2 " ++ sid ++ "\n;read users/1/last-conv;write users/1/last-conv 1_2\n;";
 }
 
+/// A frame as the scripted host says a publish of it: chat_frame
+/// reactionFrame's bytes around the sidecar's `line`, escaped.
+fn frameSaid(comptime line: []const u8) []const u8 {
+    return std.fmt.comptimePrint("{f}", .{std.zig.fmtString("event: reaction\ndata: " ++ line ++ "\n\n")});
+}
+
+/// Steve's 👍 on message 3 taken back, at the scripted host's time.
+const thumbs_line = "{\"msg\":3,\"uid\":\"1\",\"from\":\"Steve\",\"emoji\":\"\u{1F44D}\",\"on\":false,\"at\":\"2025-10-25T13:46:40Z\"}";
+/// What storing it in DM 1_2's topic Plans asks: the count, the line
+/// appended to the sidecar, then its frame on the topic's key.
+const stored_thumbs = "count dm 1_2 /chat/c/1_2 [1,2] Plans;append_line 1_2/sessions/Plans.reactions.jsonl " ++ thumbs_line ++ ";publish 1_2/Plans " ++ frameSaid(thumbs_line) ++ ";";
+
 test "a topic's reactions, react, pin and unpin are the Roc's: presence, the conversation and topic found, the method, then the work" {
     use(testing.allocator);
     defer @import("roc_abi.zig").deinit();
     const a: Scripted = .{ .alloc = undefined };
     const thumbs = "msg=3&emoji=%F0%9F%91%8D&on=0";
+    // Stored: the reactor's name from the accounts the DM was found by, the
+    // count, the line appended to the sidecar, then its frame published on
+    // the topic's key.
     try expectAct("/c/1_2/Plans/react", false, .POST, blk: {
         var s = a;
         s.body = thumbs;
         break :blk s;
-    }, .{ .respond = .{ .status = 204 } }, dm_topic ++ "body;react dm 1_2 /chat/c/1_2 [1,2] Plans 3 \u{1F44D} false;");
+    }, .{ .respond = .{ .status = 204 } }, dm_topic ++ "body;" ++ stored_thumbs);
+    // A channel's reactor is asked for by name; message 4 of 3 is none.
     try expectAct("/ops/Plans/react", true, .POST, blk: {
         var s = a;
-        s.body = "msg=9&emoji=%F0%9F%91%8D";
-        s.react_answer = .no_such_message;
+        s.body = "msg=4&emoji=%F0%9F%91%8D";
         break :blk s;
-    }, .{ .respond = .{ .status = 400, .body = "react: no such message\n" } }, ops_topic ++ "body;react channel ops /channel/ops [1,3] Plans 9 \u{1F44D} true;");
+    }, .{ .respond = .{ .status = 400, .body = "react: no such message\n" } }, ops_topic ++ "body;accounts;count channel ops /channel/ops [1,3] Plans;");
+    try expectAct("/ops/Plans/react", true, .POST, blk: {
+        var s = a;
+        s.body = "msg=0&emoji=%F0%9F%91%8D";
+        break :blk s;
+    }, .{ .respond = .{ .status = 400, .body = "react: no such message\n" } }, ops_topic ++ "body;accounts;count channel ops /channel/ops [1,3] Plans;");
+    // Message 1 is the first; a topic with none has no message 1.
+    try expectAct("/ops/Plans/react", true, .POST, blk: {
+        var s = a;
+        s.body = "msg=1&emoji=%F0%9F%91%8D";
+        break :blk s;
+    }, .{ .respond = .{ .status = 204 } }, ops_topic ++ "body;accounts;count channel ops /channel/ops [1,3] Plans;append_line channels/ops/sessions/Plans.reactions.jsonl {\"msg\":1,\"uid\":\"1\",\"from\":\"Steve\",\"emoji\":\"\u{1F44D}\",\"on\":true,\"at\":\"2025-10-25T13:46:40Z\"};publish ops/Plans " ++ comptime frameSaid("{\"msg\":1,\"uid\":\"1\",\"from\":\"Steve\",\"emoji\":\"\u{1F44D}\",\"on\":true,\"at\":\"2025-10-25T13:46:40Z\"}") ++ ";");
+    try expectAct("/ops/Plans/react", true, .POST, blk: {
+        var s = a;
+        s.body = "msg=1&emoji=%F0%9F%91%8D";
+        s.count = .{ .counted = 0 };
+        break :blk s;
+    }, .{ .respond = .{ .status = 400, .body = "react: no such message\n" } }, ops_topic ++ "body;accounts;count channel ops /channel/ops [1,3] Plans;");
+    // **A COUNT THAT FAILED IS NO ANSWER**: nothing stored, nothing sent.
+    try expectAct("/c/1_2/Plans/react", false, .POST, blk: {
+        var s = a;
+        s.body = thumbs;
+        s.count = .failed;
+        break :blk s;
+    }, .answered, dm_topic ++ "body;count dm 1_2 /chat/c/1_2 [1,2] Plans;");
+    // **A LINE NOT STORED IS NEVER SENT**: no publish after a failed append.
+    try expectAct("/c/1_2/Plans/react", false, .POST, blk: {
+        var s = a;
+        s.body = thumbs;
+        s.append_line_ok = false;
+        break :blk s;
+    }, .answered, dm_topic ++ "body;count dm 1_2 /chat/c/1_2 [1,2] Plans;append_line 1_2/sessions/Plans.reactions.jsonl " ++ thumbs_line ++ ";");
+    // The reactor's name that will not read: the request fails with it, and
+    // nothing is counted, stored or sent.
+    try expectAct("/ops/Plans/react", true, .POST, blk: {
+        var s = a;
+        s.body = thumbs;
+        s.accounts = &.{ .{ .id = "1", .name = .unreadable, .kind = .member }, .{ .id = "2", .name = .{ .found = "Debbie" }, .kind = .member } };
+        break :blk s;
+    }, .answered, ops_topic ++ "body;accounts;fail name 1;");
+    try expectAct("/ops/Plans/react", true, .POST, blk: {
+        var s = a;
+        s.body = thumbs;
+        s.accounts = null;
+        break :blk s;
+    }, .answered, ops_topic ++ "body;accounts;");
     // The form judged before the store is asked.
     try expectAct("/c/1_2/Plans/react", false, .POST, blk: {
         var s = a;
@@ -311,12 +383,6 @@ test "a topic's reactions, react, pin and unpin are the Roc's: presence, the con
         s.body = null;
         break :blk s;
     }, .answered, dm_topic ++ "body;");
-    try expectAct("/c/1_2/Plans/react", false, .POST, blk: {
-        var s = a;
-        s.body = thumbs;
-        s.react_answer = .failed;
-        break :blk s;
-    }, .answered, dm_topic ++ "body;react dm 1_2 /chat/c/1_2 [1,2] Plans 3 \u{1F44D} false;");
     // The method after the topic, before the body.
     try expectAct("/c/1_2/Plans/react", false, .GET, a, .{ .not_allowed = .POST }, dm_topic);
     try expectAct("/c/1_2/Plans/reactions", false, .HEAD, a, .{ .not_allowed = .GET }, dm_topic);
@@ -639,6 +705,10 @@ test "the accounts are asked of the host at most once a request: once by every r
         // A channel: only what names the viewer asks.
         .{ .sub = "/ops/Plans", .channel = true, .times = 0 },
         .{ .sub = "/ops/Plans/pin", .channel = true, .method = .POST, .times = 0 },
+        // A reaction names its reactor: a DM's from the accounts it was
+        // found by, a channel's asked for it.
+        .{ .sub = "/c/1_2/Plans/react", .method = .POST, .script = .{ .alloc = undefined, .body = "msg=1&emoji=%F0%9F%91%8D" }, .times = 1 },
+        .{ .sub = "/ops/Plans/react", .channel = true, .method = .POST, .script = .{ .alloc = undefined, .body = "msg=1&emoji=%F0%9F%91%8D" }, .times = 1 },
         .{ .sub = "/ops", .channel = true, .script = .{ .alloc = undefined, .topics = &.{} }, .times = 1 },
         .{ .sub = "/ops/Plans/send", .channel = true, .method = .POST, .script = send, .times = 1 },
         .{ .sub = "/ops/new", .channel = true, .method = .POST, .script = .{ .alloc = undefined, .body = "topic=Ideas" }, .times = 1 },

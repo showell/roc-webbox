@@ -98,8 +98,11 @@ pub const Kind = enum(u8) { answered, found, held, malformed, not_allowed, not_f
 /// Host.roc's `body!` argument: whose limit the body is read to.
 pub const Form = enum(u8) { message, reaction };
 
-/// Host.roc's `react!` answer.
-pub const Reacted = enum(u8) { failed, no_such_message, stored };
+/// Host.roc's `message_count!` answer's `status`: the topic's messages
+/// counted (the count beside it), or a count that failed (the host has
+/// failed the request). **NEVER 0 FOR A COUNT THAT FAILED**: a reaction
+/// judged against it would be refused as no such message.
+pub const CountStatus = enum(u8) { counted, failed };
 
 /// Host.roc's `hostile!` answer: `refused` when the host has answered the
 /// request (webbox's edge counter and its 400), `failed` when the check did.
@@ -139,7 +142,7 @@ pub const FailReason = enum(u8) { kind_unreadable, malformed_channel, name_unrea
 
 comptime {
     @setEvalBranchQuota(20_000);
-    for (.{ Family, Part, Tail, Method, Kind, Form, Reacted, Hostility, ReadStatus, EntryKind, AccountKind, NameRead, AccountsStatus, FailReason }) |E| assertRocOrder(E);
+    for (.{ Family, Part, Tail, Method, Kind, Form, CountStatus, Hostility, ReadStatus, EntryKind, AccountKind, NameRead, AccountsStatus, FailReason }) |E| assertRocOrder(E);
 }
 
 /// That `E`'s values are Roc's for the same tags: numbered from 0 in the

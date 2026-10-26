@@ -46,6 +46,8 @@ pub const ListRec = extern struct { entries: EntryList, status: route_mod.ReadSt
 pub const AccountRec = extern struct { id: RocBytes, name: RocBytes, kind: route_mod.AccountKind, name_read: route_mod.NameRead };
 /// Host.roc's `accounts!` answer: `{ accounts : List(...), status : [Failed, Found] }`.
 pub const AccountsRec = extern struct { accounts: AccountList, status: route_mod.AccountsStatus };
+/// Host.roc's `message_count!` answer: `{ count : U64, status : [Counted, Failed] }`.
+pub const CountRec = extern struct { count: u64, status: route_mod.CountStatus };
 
 /// A Roc list of `Rec`, each made of an `Item` by `rec`: its elements hold
 /// a refcounted list, so it has the two-word header (count, refcount) a
@@ -86,7 +88,7 @@ pub const AccountList = RecList(AccountRec, Account, struct {
 
 comptime {
     const w = @sizeOf(usize);
-    std.debug.assert(@sizeOf(RocBytes) == 3 * w and @sizeOf(Request) == 4 * w and @sizeOf(RouteRec) == 10 * w and @sizeOf(Answer) == 20 * w and @sizeOf(Got) == 4 * w and @sizeOf(ConvRec) == 10 * w and @sizeOf(ReadRec) == 4 * w and @sizeOf(EntryRec) == 4 * w and @sizeOf(ListRec) == 4 * w and @sizeOf(AccountRec) == 7 * w and @sizeOf(AccountsRec) == 4 * w);
+    std.debug.assert(@sizeOf(RocBytes) == 3 * w and @sizeOf(Request) == 4 * w and @sizeOf(RouteRec) == 10 * w and @sizeOf(Answer) == 20 * w and @sizeOf(Got) == 4 * w and @sizeOf(ConvRec) == 10 * w and @sizeOf(ReadRec) == 4 * w and @sizeOf(EntryRec) == 4 * w and @sizeOf(ListRec) == 4 * w and @sizeOf(AccountRec) == 7 * w and @sizeOf(AccountsRec) == 4 * w and @sizeOf(CountRec) == 16);
 }
 
 /// **A FILE AS THE HOST READ IT**: its bytes, nothing there, or a read that
@@ -119,6 +121,10 @@ pub const Name = union(route_mod.NameRead) { found: []const u8, unreadable };
 /// **EVERY ACCOUNT, OR A LISTING OF THEM THAT FAILED** (the host has failed
 /// the request): never "no accounts" for a listing that failed.
 pub const Accounts = union(route_mod.AccountsStatus) { failed, found: []const Account };
+
+/// **A TOPIC'S MESSAGES AS THE HOST COUNTED THEM**, or a count that failed
+/// (the host has failed the request): never 0 for a count that failed.
+pub const Count = union(route_mod.CountStatus) { counted: u64, failed };
 
 /// Which of an account's reads a lookup needed, and failed on: its kind
 /// (the password's stat) or its name.
@@ -170,8 +176,18 @@ pub const Host = struct {
     /// Host.body!: read to `which` form's limit; null
     /// when the host answered (too big) or failed.
     body: *const fn (ctx: *anyopaque, which: route_mod.Form) ?[]const u8,
-    /// Host.react!.
-    react: *const fn (ctx: *anyopaque, conv: Conv, sid: []const u8, msg: u64, emoji: []const u8, on: bool) route_mod.Reacted,
+    /// Host.publish!: webbox's bus.publish, `bytes` to every subscriber on
+    /// `key` (each its own copy, so the call's bytes may go with it). It
+    /// cannot fail.
+    publish: *const fn (ctx: *anyopaque, key: []const u8, bytes: []const u8) void = noPublish,
+    /// Host.append_line!: `line` and a newline appended to the file at
+    /// `path` under the chat root (checked here first, as the file
+    /// primitives' are), a newline first when the file ends mid-line. False
+    /// when it failed (the host has failed the request).
+    append_line: *const fn (ctx: *anyopaque, path: []const u8, line: []const u8) bool = noAppendLine,
+    /// Host.message_count!: topic `sid` of `conv`'s message count, or
+    /// `.failed` (the host has failed the request).
+    message_count: *const fn (ctx: *anyopaque, conv: Conv, sid: []const u8) Count = noCount,
     /// **THE FILE PRIMITIVES** (Host.read!, Host.write!, Host.remove!): a
     /// file under the chat root, `path` relative to it, its bytes and its
     /// name the Roc's. Every path is checked here first (`inRoot`); the host
@@ -219,6 +235,15 @@ pub const Host = struct {
     recent: *const fn (ctx: *anyopaque) []const []const u8 = noList,
 };
 
+fn noPublish(_: *anyopaque, _: []const u8, _: []const u8) void {
+    @panic("publish asked of a host that does not answer it");
+}
+fn noAppendLine(_: *anyopaque, _: []const u8, _: []const u8) bool {
+    @panic("append_line asked of a host that does not answer it");
+}
+fn noCount(_: *anyopaque, _: Conv, _: []const u8) Count {
+    @panic("message_count asked of a host that does not answer it");
+}
 fn noHeld(_: *anyopaque) bool {
     @panic("links asked of a host that does not answer it");
 }
@@ -342,11 +367,8 @@ pub fn askingOnly(ctx: *anyopaque, ask: *const fn (ctx: *anyopaque) bool) Host {
         fn body(_: *anyopaque, _: route_mod.Form) ?[]const u8 {
             @panic("body asked of a host that only answers who is asking");
         }
-        fn react(_: *anyopaque, _: Conv, _: []const u8, _: u64, _: []const u8, _: bool) route_mod.Reacted {
-            @panic("react asked of a host that only answers who is asking");
-        }
     };
-    return .{ .ctx = ctx, .member = ask, .presence = No.presence, .body = No.body, .react = No.react };
+    return .{ .ctx = ctx, .member = ask, .presence = No.presence, .body = No.body };
 }
 
 /// The call's host, or a panic for a hosted function Roc ran outside one.
@@ -383,9 +405,17 @@ export fn roc_chat_body(which: route_mod.Form) callconv(.c) Got {
     return got(h.body(h.ctx, which));
 }
 
-export fn roc_chat_react(conv: ConvRec, sid: RocBytes, msg: u64, emoji: RocBytes, on: bool) callconv(.c) route_mod.Reacted {
-    const h = current("react");
-    return h.react(h.ctx, .of(conv), sid.slice(), msg, emoji.slice(), on);
+export fn roc_chat_publish(key: RocBytes, bytes: RocBytes) callconv(.c) void {
+    const h = current("publish");
+    h.publish(h.ctx, key.slice(), bytes.slice());
+}
+
+export fn roc_chat_message_count(conv: ConvRec, sid: RocBytes) callconv(.c) CountRec {
+    const h = current("message_count");
+    return switch (h.message_count(h.ctx, .of(conv), sid.slice())) {
+        .counted => |n| .{ .count = n, .status = .counted },
+        .failed => .{ .count = 0, .status = .failed },
+    };
 }
 
 /// **A PATH THAT WOULD LEAVE THE CHAT ROOT IS A ROC BUG, NEVER A MISSING
@@ -419,6 +449,12 @@ export fn roc_chat_remove(path: RocBytes) callconv(.c) bool {
     const h = current("remove");
     if (!underRoot(h, path.slice())) return false;
     return h.remove(h.ctx, path.slice());
+}
+
+export fn roc_chat_append_line(path: RocBytes, line: RocBytes) callconv(.c) bool {
+    const h = current("append_line");
+    if (!underRoot(h, path.slice())) return false;
+    return h.append_line(h.ctx, path.slice(), line.slice());
 }
 
 export fn roc_chat_list(path: RocBytes) callconv(.c) ListRec {

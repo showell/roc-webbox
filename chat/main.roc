@@ -11,8 +11,10 @@
 ##      chat.zig read it from the path's spelling, so `.../stream/` counted).
 ##
 ## A topic's reactions, react, pin and unpin are the Roc's (docs/ROC-CHAT.md
-## C4, `act!`); the store's writes stay Zig's, as hosted functions, until
-## C8. The files and folders it reads by name (the member's own, a
+## C4, `act!`); a reaction is the Roc's whole (its reactor, its bound, its
+## stamp, its line and its frame), stored and sent through the primitives
+## (`append_line!`, `message_count!`, `publish!`); a message's store stays
+## Zig's, a hosted `append!`, until C8. The files and folders it reads by name (the member's own, a
 ## conversation's topics, a channel's members, the rosters, a topic's
 ## reactions) it reads through the file primitives, the names and formats
 ## its own.
@@ -33,6 +35,8 @@ import Recent
 import ChatState
 import Conversation
 import Accounts
+import Frame
+import Time
 
 handle! : Chat.Request => Chat.Answer
 handle! = |req|
@@ -110,7 +114,7 @@ in_conversation! = |req, route|
 					Err(Failed) => Chat.answered
 					Ok(t) =>
 						if Conversation.has_topic(topics!(route.family, route.key), route.sid) {
-							in_topic!(req, route, conv, Conversation.topic_title(t, route.sid))
+							in_topic!(req, route, conv, who, Conversation.topic_title(t, route.sid))
 						} else {
 							Chat.zig(route, Bool.False)
 						}
@@ -120,8 +124,8 @@ in_conversation! = |req, route|
 
 ## A topic that is there, in `conv`, titled `title`: the method, then the
 ## work.
-in_topic! : Chat.Request, Route.R, Chat.Conv, List(U8) => Chat.Answer
-in_topic! = |req, route, conv, title|
+in_topic! : Chat.Request, Route.R, Chat.Conv, Who, List(U8) => Chat.Answer
+in_topic! = |req, route, conv, who, title|
 	match route.tail {
 		Page | Raw =>
 			if req.method != Get and req.method != Head {
@@ -149,7 +153,7 @@ in_topic! = |req, route, conv, title|
 			if req.method != Post {
 				Chat.not_allowed(Post)
 			} else if route.tail == React {
-				react!(conv, route.sid)
+				react!(conv, who, route.sid)
 			} else if pin!(conv, route.sid, route.tail == Pin) {
 				Chat.respond(204, [], [])
 			} else {
@@ -395,9 +399,9 @@ write_if_changed! : List(U8), List(U8) => Bool
 write_if_changed! = |path, value|
 	if ChatState.changed(read!(path), value) Host.write!(path, ChatState.bookmark_line(value)) else Bool.True
 
-## POST .../react: the form, then the store's answer.
-react! : Chat.Conv, List(U8) => Chat.Answer
-react! = |conv, sid| {
+## POST .../react: the form, then the reaction stored and sent live.
+react! : Chat.Conv, Who, List(U8) => Chat.Answer
+react! = |conv, who, sid| {
 	body = Host.body!(Reaction)
 	if !body.ok {
 		Chat.answered
@@ -406,7 +410,7 @@ react! = |conv, sid| {
 			Malformed => Chat.malformed
 			Bad(why) => Chat.respond(400, [], why)
 			Reacted(r) =>
-				match Host.react!(conv, sid, r.msg, r.emoji, r.on) {
+				match reacted!(conv, who, sid, r) {
 					Stored => Chat.respond(204, [], [])
 					NoSuchMessage => Chat.respond(400, [], Str.to_utf8("react: no such message\n"))
 					Failed => Chat.answered
@@ -414,6 +418,44 @@ react! = |conv, sid| {
 		}
 	}
 }
+
+## **A REACTION STORED, THEN SENT LIVE** (storeReaction, appendReaction):
+## the reactor's own name (getUserName, from the accounts), the message
+## judged against the topic's count, the line stamped with the request's
+## time, then its sidecar line appended and its frame published on the
+## topic's key. `Failed` when a step failed (the request has, with its
+## error), and nothing after it is done.
+reacted! : Chat.Conv, Who, List(U8), { msg : U64, emoji : List(U8), on : Bool } => [Stored, NoSuchMessage, Failed]
+reacted! = |conv, who, sid, r|
+	match viewer!(who) {
+		Err(Failed) => Failed
+		Ok(name) => {
+			counted = Host.message_count!(conv, sid)
+			match counted.status {
+				Failed => Failed
+				Counted =>
+					# Message numbers start at 1 (the N of MSG_<sid>_N).
+					if r.msg == 0 or r.msg > counted.count {
+						NoSuchMessage
+					} else {
+						at = Str.to_utf8(Time.rfc3339(Host.now!({})))
+						line = Reaction.line(r.msg, Host.me!({}), name, r.emoji, r.on, at)
+						# **THE ECHO IS MADE BEFORE THE STORE** (metal-vmm QUEUE
+						# 177.1), as a message's: its key and frame, so nothing
+						# can fail between the append and the publish.
+						key = List.join([conv.key, [47], sid])
+						frame = Frame.reaction(line)
+						if Host.append_line!(Paths.reactions_path(conv_dir(conv.family, conv.key), sid), line) {
+							# **STORED IS DONE**: the live publish cannot fail.
+							Host.publish!(key, frame)
+							Stored
+						} else {
+							Failed
+						}
+					}
+			}
+		}
+	}
 
 html : List(U8)
 html = Str.to_utf8("text/html; charset=utf-8")

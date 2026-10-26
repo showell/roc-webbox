@@ -33,9 +33,24 @@ Host := [].{
 	## big) or failed.
 	body! : [Reaction, Message] => { ok : Bool, bytes : List(U8) }
 
-	## Store the member's reaction to message `msg` of topic `sid` in `conv`
-	## and send it live: `Stored`, `NoSuchMessage`, or `Failed`.
-	react! : Chat.Conv, List(U8), U64, List(U8), Bool => [Stored, NoSuchMessage, Failed]
+	## **THE BUS, AS A PRIMITIVE** (webbox's `bus.publish`): `bytes` to every
+	## subscriber on `key`, each its own copy, as the stream writes it. It
+	## cannot fail.
+	publish! : List(U8), List(U8) => {}
+
+	## **ONE LINE APPENDED** to the file at `path` under the chat root
+	## (checked as `read!`'s is), its folders made as needed: `line`, then a
+	## newline. **A TORN LINE STAYS ITS OWN LINE**: a file that does not end
+	## in a newline gets one first, the host reading its last byte before it
+	## stores, so a read that fails stores nothing. False when it failed (the
+	## request has failed).
+	append_line! : List(U8), List(U8) => Bool
+
+	## Topic `sid` of `conv`'s message count (the store's count cache,
+	## believed only while the transcript is the size it was counted at, or
+	## the transcript recounted). `Failed` when it could not be counted (the
+	## request has failed): **NEVER 0 FOR A COUNT THAT FAILED**.
+	message_count! : Chat.Conv, List(U8) => { count : U64, status : [Counted, Failed] }
 
 	## **THE FILES, AS PRIMITIVES**: a file or folder under the chat root,
 	## `path` relative to it (ChatState.roc, Feeds.roc and Paths.roc name

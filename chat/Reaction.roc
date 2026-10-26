@@ -3,8 +3,25 @@
 ## glyph, `on` "1" (or absent) to add it and anything else to take it back.
 import Form
 import ZigText
+import JsonText
 
 Reaction := [].{
+	## **THE ONE PLACE THE SIDECAR'S LINE SHAPE IS WRITTEN** (reactionLine):
+	## `{"msg":N,"uid":…,"from":…,"emoji":…,"on":…,"at":…}`, in that order,
+	## the strings as the Zig's JSON writes them. `on` false is a retraction:
+	## the client folds by last event wins per (msg, uid, emoji), so the file
+	## stays append-only.
+	line : U64, List(U8), List(U8), List(U8), Bool, List(U8) -> List(U8)
+	line = |msg, uid, from, emoji, on, at|
+		JsonText.obj([
+			("msg", Str.to_utf8(U64.to_str(msg))),
+			("uid", JsonText.str(uid)),
+			("from", JsonText.str(from)),
+			("emoji", JsonText.str(emoji)),
+			("on", JsonText.bool(on)),
+			("at", JsonText.str(at)),
+		])
+
 	Answer : [Reacted({ msg : U64, emoji : List(U8), on : Bool }), Bad(List(U8)), Malformed]
 
 	## Every field read before any is judged, as the Zig: a malformed one is

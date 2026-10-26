@@ -163,6 +163,7 @@ call = |req| {
 			}
 			List.concat(asked, roster)
 		}
+		61 => [Reaction.line(u64(arg(0)), arg(1), arg(2), arg(3), arg(4) == [49], arg(5))]
 		_ => crash "twin: no function ${U8.to_str(req.which)}"
 	}
 }

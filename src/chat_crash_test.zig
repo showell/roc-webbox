@@ -45,7 +45,31 @@ const Files = struct {
         h.fail = fail;
         h.fail_account = failAccount;
         h.malformed_channel = malformed;
+        h.append_line = appendLine;
+        h.publish = publish;
+        h.message_count = count;
         return h;
+    }
+    /// `users/1/broken` will not take a line; any other path does.
+    fn appendLine(ctx: *anyopaque, path: []const u8, line: []const u8) bool {
+        of(ctx).asked.print(testing.allocator, "append_line {s} {s};", .{ path, line }) catch @panic("oom");
+        if (std.mem.eql(u8, path, "users/1/broken")) {
+            fail(ctx, error.IsDir);
+            return false;
+        }
+        return true;
+    }
+    fn publish(ctx: *anyopaque, key: []const u8, bytes: []const u8) void {
+        of(ctx).asked.print(testing.allocator, "publish {s} {f};", .{ key, std.zig.fmtString(bytes) }) catch @panic("oom");
+    }
+    /// Topic `Plans` has 7 messages; `Broken` will not count.
+    fn count(ctx: *anyopaque, conv: abi.Conv, sid: []const u8) abi.Count {
+        of(ctx).asked.print(testing.allocator, "count {t} {s} {s} {s},{s} {s};", .{ conv.family, conv.key, conv.base, conv.members[0], conv.members[1], sid }) catch @panic("oom");
+        if (std.mem.eql(u8, sid, "Broken")) {
+            fail(ctx, error.IsDir);
+            return .failed;
+        }
+        return .{ .counted = 7 };
     }
     /// An account's kind kept as error.SymLinkLoop, its name as
     /// error.IsDir: which one the request fails with shows which read the
@@ -128,6 +152,20 @@ test "a path that would leave the chat root fails the request at the seam, the h
     try probe("/read/users/1/broken", "failed", "read users/1/broken;", error.IsDir);
     try probe("/write/users/1/pinned-sessions/1_2", "done", "write users/1/pinned-sessions/1_2;", null);
     try probe("/remove/users/1/last-conv", "done", "remove users/1/last-conv;", null);
+}
+
+test "a line appended: a path that would leave the root fails the request at the seam, the host never asked; under it, stored or failed; a count crosses with its conversation, never 0 for one that failed; a publish crosses key and bytes" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    roc.use(arena.allocator());
+    defer roc.deinit();
+    for ([_][]const u8{ "/append/../x", "/append//etc/passwd", "/append/", "/append/1_2/sessions/../../../x", "/append/.." }) |sub|
+        try probe(sub, "failed", "", error.PathOutsideChatRoot);
+    try probe("/append/1_2/sessions/Plans.reactions.jsonl", "done", "append_line 1_2/sessions/Plans.reactions.jsonl {\"a\":1};", null);
+    try probe("/append/users/1/broken", "failed", "append_line users/1/broken {\"a\":1};", error.IsDir);
+    try probe("/count/Plans", "counted 7", "count dm 1_2 /chat/c/1_2 1,2 Plans;", null);
+    try probe("/count/Broken", "failed", "count dm 1_2 /chat/c/1_2 1,2 Broken;", error.IsDir);
+    try probe("/publish/1_2/Plans", "published", "publish 1_2/Plans event: reaction\\ndata: x\\n\\n;", null);
 }
 
 test "a folder's listing: a path that would leave the root fails the request at the seam; under it, its entries and their kinds, nothing there, and a listing that failed are three answers" {
