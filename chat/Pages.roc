@@ -80,6 +80,20 @@ Pages := [].{
 		]))
 	}
 
+	## recent.zig's /chat/recent: the attention strip, the feed's mount, its
+	## JSON (script-safe) and its two scripts.
+	recent : (List(U8) -> List(U8)), List(U8), List(U8) -> List(U8)
+	recent = |src, viewer, json| {
+		s = { tab: Str.to_utf8("Recent"), title: Str.to_utf8("Recent"), viewer, active: Str.to_utf8("recent"), src }
+		Chrome.page(s, List.join([
+			Str.to_utf8("<div class=\"chat-notify\" id=\"chat-notify\"></div><div id=\"recent-mount\"></div><script id=\"recent-data\" type=\"application/json\">"),
+			Html.script_safe(json),
+			Str.to_utf8("</script>"),
+			Chrome.script(s, "recent.js"),
+			Chrome.script(s, "notify.js"),
+		]))
+	}
+
 	## /chat/images: the newest entries of the member's images.md.
 	images : (List(U8) -> List(U8)), List(U8), List(U8) -> List(U8)
 	images = |src, viewer, json| feed(src, viewer, "images", json, ["styles.js", "chat_image_popup.js", "images.js", "notify.js"])

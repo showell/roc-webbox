@@ -112,6 +112,11 @@ Host := [].{
 	## none when there is none (or the read failed).
 	feed! : U8 => List(List(U8))
 
+	## The member's recent feed as gathered (angry-gopher recent.zig
+	## `gatherRows`), nine fields a row: doc, secs, uid, name, key, label,
+	## topic, markdown, dm. None when it failed.
+	recent! : {} => List(List(U8))
+
 	## Whether markdown is hostile: 0 no, 1 yes and the host has refused it
 	## (webbox's edge counter and its 400), 2 the check failed.
 	hostile! : List(U8) => U8

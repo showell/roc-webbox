@@ -38,6 +38,7 @@ platform ""
 		"roc_chat_raw": Host.raw!,
 		"roc_chat_links": Host.links!,
 		"roc_chat_feed": Host.feed!,
+		"roc_chat_recent": Host.recent!,
 	}
 	targets: {
 		x64musl: {

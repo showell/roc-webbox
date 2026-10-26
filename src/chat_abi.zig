@@ -109,6 +109,8 @@ pub const Host = struct {
     links: *const fn (ctx: *anyopaque) []const []const u8 = noPage,
     /// Host.feed!: the member's images.md (0) or code.md (1), or none.
     feed: *const fn (ctx: *anyopaque, which: u8) []const []const u8 = noFeed,
+    /// Host.recent!: the member's recent rows, nine fields each, or none.
+    recent: *const fn (ctx: *anyopaque) []const []const u8 = noPage,
 };
 
 fn noFeed(_: *anyopaque, _: u8) []const []const u8 {
@@ -177,6 +179,7 @@ pub const Routing = struct {
         h.send_conv = noSendTo;
         h.links = nothing;
         h.feed = noFile;
+        h.recent = nothing;
         return h;
     }
     fn of(ctx: *anyopaque) *Routing {
@@ -364,6 +367,11 @@ export fn roc_chat_raw() callconv(.c) roc.RocBytesList {
 export fn roc_chat_feed(which: u8) callconv(.c) roc.RocBytesList {
     const h = current("feed");
     return .from(h.feed(h.ctx, which));
+}
+
+export fn roc_chat_recent() callconv(.c) roc.RocBytesList {
+    const h = current("recent");
+    return .from(h.recent(h.ctx));
 }
 
 export fn roc_chat_links() callconv(.c) roc.RocBytesList {
