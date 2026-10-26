@@ -38,10 +38,33 @@ pub const Got = extern struct { bytes: RocBytes, ok: bool };
 pub const ConvRec = extern struct { base: RocBytes, key: RocBytes, members: roc.RocBytesList, family: Family };
 /// Host.roc's `read!` answer: `{ bytes : List(U8), status : [Failed, Found, Missing] }`.
 pub const ReadRec = extern struct { bytes: RocBytes, status: route_mod.ReadStatus };
+/// One of Host.roc's `list!` entries: `{ kind : [Dir, File, Other], name : List(U8) }`.
+pub const EntryRec = extern struct { name: RocBytes, kind: route_mod.EntryKind };
+/// Host.roc's `list!` answer: `{ entries : List(...), status : [Failed, Found, Missing] }`.
+pub const ListRec = extern struct { entries: EntryList, status: route_mod.ReadStatus };
+
+/// A Roc list of `EntryRec`: its elements hold a refcounted list, so it has
+/// the two-word header (count, refcount) a `List(List(U8))` has.
+pub const EntryList = extern struct {
+    ptr: ?[*]EntryRec,
+    length: usize,
+    capacity_or_alloc_ptr: usize,
+
+    fn from(items: []const Entry) EntryList {
+        if (items.len == 0) return .{ .ptr = null, .length = 0, .capacity_or_alloc_ptr = 0 };
+        const w = @sizeOf(usize);
+        const base = roc.allocate(2 * w + items.len * @sizeOf(EntryRec), w);
+        std.mem.writeInt(usize, base[0..w], items.len, .little);
+        std.mem.writeInt(usize, base[w..][0..w], 1, .little);
+        const elems: [*]EntryRec = @ptrCast(@alignCast(base + 2 * w));
+        for (items, 0..) |it, k| elems[k] = .{ .name = .from(it.name), .kind = it.kind };
+        return .{ .ptr = elems, .length = items.len, .capacity_or_alloc_ptr = items.len << 1 };
+    }
+};
 
 comptime {
     const w = @sizeOf(usize);
-    std.debug.assert(@sizeOf(RocBytes) == 3 * w and @sizeOf(Request) == 4 * w and @sizeOf(RouteRec) == 10 * w and @sizeOf(Answer) == 20 * w and @sizeOf(Got) == 4 * w and @sizeOf(ConvRec) == 10 * w and @sizeOf(ReadRec) == 4 * w);
+    std.debug.assert(@sizeOf(RocBytes) == 3 * w and @sizeOf(Request) == 4 * w and @sizeOf(RouteRec) == 10 * w and @sizeOf(Answer) == 20 * w and @sizeOf(Got) == 4 * w and @sizeOf(ConvRec) == 10 * w and @sizeOf(ReadRec) == 4 * w and @sizeOf(EntryRec) == 4 * w and @sizeOf(ListRec) == 4 * w);
 }
 
 /// **A FILE AS THE HOST READ IT**: its bytes, nothing there, or a read that
@@ -49,6 +72,14 @@ comptime {
 /// never one answer: a set read as empty because the disk failed would be
 /// written back empty.
 pub const Read = union(route_mod.ReadStatus) { failed, found: []const u8, missing };
+
+/// A folder's entry: its name and its kind.
+pub const Entry = struct { name: []const u8, kind: route_mod.EntryKind };
+
+/// **A FOLDER AS THE HOST LISTED IT**: its entries, in the order the disk
+/// gives them; nothing there; or a listing that failed (the host has failed
+/// the request). Missing and failed are never one answer.
+pub const Listing = union(route_mod.ReadStatus) { failed, found: []const Entry, missing };
 
 /// **A CONVERSATION THE ROC FOUND TO BE THE MEMBER'S** (chat/main.roc
 /// `find!`), handed to each hosted function that works on one: the host
@@ -84,13 +115,9 @@ pub const Host = struct {
     account: *const fn (ctx: *anyopaque, id: []const u8) bool = noAccount,
     /// Host.name!: account `id`'s name, or "".
     name: *const fn (ctx: *anyopaque, id: []const u8) []const u8 = noKeyBytes,
-    /// Host.channel_members!: none when there is no such channel.
-    channel_members: *const fn (ctx: *anyopaque, name: []const u8) []const []const u8 = noKeyList,
     /// Host.body!: read to `which` form's limit; null
     /// when the host answered (too big) or failed.
     body: *const fn (ctx: *anyopaque, which: route_mod.Form) ?[]const u8,
-    /// Host.reactions!: topic `sid`'s sidecar in `conv`; null when it failed.
-    reactions: *const fn (ctx: *anyopaque, conv: Conv, sid: []const u8) ?[]const u8,
     /// Host.react!.
     react: *const fn (ctx: *anyopaque, conv: Conv, sid: []const u8, msg: u64, emoji: []const u8, on: bool) route_mod.Reacted,
     /// **THE FILE PRIMITIVES** (Host.read!, Host.write!, Host.remove!): a
@@ -102,10 +129,18 @@ pub const Host = struct {
     read: *const fn (ctx: *anyopaque, path: []const u8) Read = noRead,
     write: *const fn (ctx: *anyopaque, path: []const u8, bytes: []const u8) bool = noWrite,
     remove: *const fn (ctx: *anyopaque, path: []const u8) bool = noRemove,
+    /// Host.list!: a folder under the chat root, its entries in the disk's
+    /// order (`.missing` when it is not there), its path checked as the
+    /// others'.
+    list: *const fn (ctx: *anyopaque, path: []const u8) Listing = noListing,
     /// Fail the request with `e` (a 500), as a hosted function's own failure
-    /// does: the seam's, for a path the Roc should never have named. A host
-    /// that has failed already keeps its first failure.
+    /// does: the seam's, for a path the Roc should never have named, and the
+    /// Roc's own (Host.fail!, its reason as the error). A host that has
+    /// failed already keeps its first failure.
     fail: *const fn (ctx: *anyopaque, e: anyerror) void = noFail,
+    /// Host.malformed_channel!: channel `name`'s member file skipped by a
+    /// listing as malformed, counted for the operator.
+    malformed_channel: *const fn (ctx: *anyopaque, name: []const u8) void = noMalformed,
     /// Host.page!: topic `sid`'s page's data in `conv` (Pages.roc reads
     /// it), or none when it failed.
     page: *const fn (ctx: *anyopaque, conv: Conv, sid: []const u8) []const []const u8 = noPage,
@@ -116,12 +151,7 @@ pub const Host = struct {
     viewer: *const fn (ctx: *anyopaque) []const u8 = noBytes,
     /// Host.now!: the request's time, Unix seconds.
     now: *const fn (ctx: *anyopaque) i64 = noNow,
-    /// Host.topics!: a DM's or a channel's topics.
-    topics: *const fn (ctx: *anyopaque, family: Family, key: []const u8) []const []const u8 = noTopics,
-    /// Host.channel_rosters!: every channel as `name, count, member...`
-    /// (which are the member's is the Roc's); Host.members!: every member as
-    /// `id, name` pairs.
-    channel_rosters: *const fn (ctx: *anyopaque) []const []const u8 = noList,
+    /// Host.members!: every member as `id, name` pairs.
     members: *const fn (ctx: *anyopaque) []const []const u8 = noList,
     /// Host.append!: a message appended to topic `sid` of `conv`. False
     /// when it failed.
@@ -155,14 +185,17 @@ fn noWrite(_: *anyopaque, _: []const u8, _: []const u8) bool {
 fn noRemove(_: *anyopaque, _: []const u8) bool {
     @panic("remove asked of a host that does not answer it");
 }
+fn noListing(_: *anyopaque, _: []const u8) Listing {
+    @panic("list asked of a host that does not answer it");
+}
 fn noFail(_: *anyopaque, e: anyerror) void {
     std.debug.panic("a host that cannot fail a request was asked to: {t}", .{e});
 }
+fn noMalformed(_: *anyopaque, _: []const u8) void {
+    @panic("malformed_channel asked of a host that does not answer it");
+}
 fn noAccount(_: *anyopaque, _: []const u8) bool {
     @panic("account asked of a host that does not answer it");
-}
-fn noKeyList(_: *anyopaque, _: []const u8) []const []const u8 {
-    @panic("channel_members asked of a host that does not answer it");
 }
 fn noHeader(_: *anyopaque, _: []const u8) []const []const u8 {
     @panic("header asked of a host that does not answer it");
@@ -184,9 +217,6 @@ fn noAppend(_: *anyopaque, _: Conv, _: []const u8, _: []const u8, _: []const u8,
     @panic("append asked of a host that does not answer it");
 }
 
-fn noTopics(_: *anyopaque, _: Family, _: []const u8) []const []const u8 {
-    @panic("topics asked of a host that does not answer it");
-}
 fn noPage(_: *anyopaque, _: Conv, _: []const u8) []const []const u8 {
     @panic("page asked of a host that does not answer it");
 }
@@ -212,16 +242,14 @@ pub const Routing = struct {
         var h = askingOnly(r, ask);
         h.presence = mark;
         // The routes the Roc serves outright meet a member with nothing: no
-        // id (so no DM is theirs), no files (no last DM, no feed), no other
-        // members, no channels, no topics.
+        // id (so no DM is theirs), no files (no last DM, no feed, no
+        // channel), no folders (no topics, no channels), no other members.
         h.me = empty;
         h.viewer = empty;
         h.read = noFile;
-        h.channel_members = noMembers;
+        h.list = noFolder;
         h.srcs = nothing;
         h.members = nothing;
-        h.channel_rosters = nothing;
-        h.topics = noTopicsHere;
         h.links = holdsNone;
         h.recent = nothing;
         return h;
@@ -236,12 +264,6 @@ pub const Routing = struct {
     fn mark(ctx: *anyopaque) void {
         of(ctx).marked = true;
     }
-    fn noMembers(_: *anyopaque, _: []const u8) []const []const u8 {
-        return &.{};
-    }
-    fn noTopicsHere(_: *anyopaque, _: Family, _: []const u8) []const []const u8 {
-        return &.{};
-    }
     fn empty(_: *anyopaque) []const u8 {
         return "";
     }
@@ -252,6 +274,9 @@ pub const Routing = struct {
         return false;
     }
     fn noFile(_: *anyopaque, _: []const u8) Read {
+        return .missing;
+    }
+    fn noFolder(_: *anyopaque, _: []const u8) Listing {
         return .missing;
     }
 };
@@ -266,14 +291,11 @@ pub fn askingOnly(ctx: *anyopaque, ask: *const fn (ctx: *anyopaque) bool) Host {
         fn body(_: *anyopaque, _: route_mod.Form) ?[]const u8 {
             @panic("body asked of a host that only answers who is asking");
         }
-        fn topicBytes(_: *anyopaque, _: Conv, _: []const u8) ?[]const u8 {
-            @panic("reactions asked of a host that only answers who is asking");
-        }
         fn react(_: *anyopaque, _: Conv, _: []const u8, _: u64, _: []const u8, _: bool) route_mod.Reacted {
             @panic("react asked of a host that only answers who is asking");
         }
     };
-    return .{ .ctx = ctx, .member = ask, .presence = No.presence, .body = No.body, .reactions = No.topicBytes, .react = No.react };
+    return .{ .ctx = ctx, .member = ask, .presence = No.presence, .body = No.body, .react = No.react };
 }
 
 /// The call's host, or a panic for a hosted function Roc ran outside one.
@@ -307,19 +329,9 @@ export fn roc_chat_name(id: RocBytes) callconv(.c) RocBytes {
     return .from(h.name(h.ctx, id.slice()));
 }
 
-export fn roc_chat_channel_members(name: RocBytes) callconv(.c) roc.RocBytesList {
-    const h = current("channel_members");
-    return .from(h.channel_members(h.ctx, name.slice()));
-}
-
 export fn roc_chat_body(which: route_mod.Form) callconv(.c) Got {
     const h = current("body");
     return got(h.body(h.ctx, which));
-}
-
-export fn roc_chat_reactions(conv: ConvRec, sid: RocBytes) callconv(.c) Got {
-    const h = current("reactions");
-    return got(h.reactions(h.ctx, .of(conv), sid.slice()));
 }
 
 export fn roc_chat_react(conv: ConvRec, sid: RocBytes, msg: u64, emoji: RocBytes, on: bool) callconv(.c) route_mod.Reacted {
@@ -360,6 +372,38 @@ export fn roc_chat_remove(path: RocBytes) callconv(.c) bool {
     return h.remove(h.ctx, path.slice());
 }
 
+export fn roc_chat_list(path: RocBytes) callconv(.c) ListRec {
+    const h = current("list");
+    if (!underRoot(h, path.slice())) return .{ .entries = .from(&.{}), .status = .failed };
+    return switch (h.list(h.ctx, path.slice())) {
+        .found => |entries| .{ .entries = .from(entries), .status = .found },
+        .missing => .{ .entries = .from(&.{}), .status = .missing },
+        .failed => .{ .entries = .from(&.{}), .status = .failed },
+    };
+}
+
+/// **THE ROC FAILS THE REQUEST BY A REASON, NEVER BY TEXT**: the reason's
+/// error is the one the Zig it replaced returned (a malformed channel on its
+/// own route: error.MalformedChannel), so the answer and the log are the
+/// same. The first failure is kept, as every other.
+///
+/// **A TAG UNION OF ONE TAG CROSSES AS NOTHING**: it is zero-sized, so Roc
+/// passes no argument (a byte read here was garbage: the crash test's
+/// `/fail`). With one reason, the reason is that one; a second makes it a
+/// byte, and this export must then take `FailReason`, which the check below
+/// refuses to forget.
+export fn roc_chat_fail() callconv(.c) void {
+    comptime if (@typeInfo(route_mod.FailReason).@"enum".field_names.len != 1)
+        @compileError("Host.fail!'s reason now crosses as a byte: roc_chat_fail takes `reason: route_mod.FailReason`");
+    const h = current("fail");
+    h.fail(h.ctx, route_mod.FailReason.malformed_channel.err());
+}
+
+export fn roc_chat_malformed_channel(name: RocBytes) callconv(.c) void {
+    const h = current("malformed_channel");
+    h.malformed_channel(h.ctx, name.slice());
+}
+
 export fn roc_chat_page(conv: ConvRec, sid: RocBytes) callconv(.c) roc.RocBytesList {
     const h = current("page");
     return .from(h.page(h.ctx, .of(conv), sid.slice()));
@@ -378,16 +422,6 @@ export fn roc_chat_viewer() callconv(.c) RocBytes {
 export fn roc_chat_now() callconv(.c) i64 {
     const h = current("now");
     return h.now(h.ctx);
-}
-
-export fn roc_chat_topics(family: Family, key: RocBytes) callconv(.c) roc.RocBytesList {
-    const h = current("topics");
-    return .from(h.topics(h.ctx, family, key.slice()));
-}
-
-export fn roc_chat_channel_rosters() callconv(.c) roc.RocBytesList {
-    const h = current("channel_rosters");
-    return .from(h.channel_rosters(h.ctx));
 }
 
 export fn roc_chat_members() callconv(.c) roc.RocBytesList {

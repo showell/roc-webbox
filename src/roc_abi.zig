@@ -257,7 +257,7 @@ comptime {
 /// knows how much to copy. 16 bytes: Roc asks for at most 16's alignment.
 const header = 16;
 
-fn allocate(len: usize, alignment: usize) [*]u8 {
+pub fn allocate(len: usize, alignment: usize) [*]u8 {
     std.debug.assert(alignment <= header);
     // **OUT OF MEMORY IS A CRASH OF THE CALL**: `crashed`, which inside a
     // guarded call (chat_abi.zig) jumps back to its start, so the request is

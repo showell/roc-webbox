@@ -12,7 +12,10 @@
 ##
 ## A topic's reactions, react, pin and unpin are the Roc's (docs/ROC-CHAT.md
 ## C4, `act!`); the store's writes stay Zig's, as hosted functions, until
-## C8.
+## C8. The files and folders it reads by name (the member's own, a
+## conversation's topics, a channel's members, the rosters, a topic's
+## reactions) it reads through the file primitives, the names and formats
+## its own.
 app [handle!] { pf: platform "platform/main.roc" }
 
 import pf.Chat
@@ -102,7 +105,7 @@ in_conversation! = |req, route|
 				# The title before the topics, as findTopic read them: a
 				# partner whose name will not read fails every topic route.
 				title = Conversation.topic_title(title!(conv), route.sid)
-				if Conversation.has_topic(Host.topics!(route.family, route.key), route.sid) {
+				if Conversation.has_topic(topics!(route.family, route.key), route.sid) {
 					in_topic!(req, route, conv, title)
 				} else {
 					Chat.zig(route, Bool.False)
@@ -130,8 +133,13 @@ in_topic! = |req, route, conv, title|
 			if req.method != Get {
 				Chat.not_allowed(Get)
 			} else {
-				got = Host.reactions!(conv, route.sid)
-				if got.ok Chat.respond(200, Str.to_utf8("application/x-ndjson; charset=utf-8"), got.bytes) else Chat.answered
+				# readReactions's: nobody has reacted yet is no events.
+				ndjson = Str.to_utf8("application/x-ndjson; charset=utf-8")
+				match read!(Paths.reactions_path(conv_dir(conv.family, conv.key), route.sid)) {
+					Found(bytes) => Chat.respond(200, ndjson, bytes)
+					Missing => Chat.respond(200, ndjson, [])
+					Failed => Chat.answered
+				}
 			}
 		_ =>
 			if req.method != Post {
@@ -164,7 +172,7 @@ find! = |route|
 				Err(None) => Err(NotYours)
 			}
 		Channel => {
-			members = Host.channel_members!(route.key)
+			members = channel_members!(route.key)
 			if List.contains(members, Host.me!({})) {
 				Ok({ family: Channel, key: route.key, base: Conversation.channel_base(route.key), members })
 			} else {
@@ -173,6 +181,75 @@ find! = |route|
 		}
 		_ => Err(NotYours)
 	}
+
+## Channel `name`'s members, as its member file lists them (Paths's
+## parse); none when there is no such channel. **A MALFORMED ONE FAILS THE
+## REQUEST** on its own route (channelMembers's error.MalformedChannel), never
+## the 404 of a channel that is not the member's; a read that failed has
+## failed it already.
+channel_members! : List(U8) => List(List(U8))
+channel_members! = |name|
+	match read!(Paths.channel_path(name)) {
+		Found(bytes) =>
+			match Paths.channel_members(bytes) {
+				Ok(members) => members
+				Err(Malformed) => {
+					Host.fail!(MalformedChannel)
+					[]
+				}
+			}
+		Missing | Failed => []
+	}
+
+## **EVERY CHANNEL'S ROSTER** (channelRosters): channels/ listed
+## (Paths.channel_names), then each member file read and judged in the
+## listing's order (Paths.roster), a malformed one counted as it is met
+## (Host.malformed_channel!), as the Zig counted it, before any read after
+## it can fail.
+channel_rosters! : {} => List(Paths.Roster)
+channel_rosters! = |{}| rosters!(Paths.channel_names(list!(Str.to_utf8("channels"))), 0, [])
+
+rosters! : List(List(U8)), U64, List(Paths.Roster) => List(Paths.Roster)
+rosters! = |names, i, out|
+	match List.get(names, i) {
+		Err(_) => out
+		Ok(name) =>
+			match Paths.roster(name, read!(Paths.channel_path(name))) {
+				Listed(r) => rosters!(names, i + 1, List.append(out, r))
+				Malformed => {
+					Host.malformed_channel!(name)
+					rosters!(names, i + 1, out)
+				}
+				Gone => rosters!(names, i + 1, out)
+				Failed => out
+			}
+	}
+
+## **A CONVERSATION'S TOPICS** (listTopics): its sessions folder listed,
+## the choice Paths.topics's.
+topics! : Chat.Family, List(U8) => List(List(U8))
+topics! = |family, key| Paths.topics(list!(Paths.sessions_dir(conv_dir(family, key))))
+
+## A DM's or a channel's folder under the chat root.
+conv_dir : Chat.Family, List(U8) -> List(U8)
+conv_dir = |family, key|
+	match family {
+		Dm => Paths.dm_conv_dir(key)
+		Channel => Paths.channel_conv_dir(key)
+		_ => crash "conv_dir: a family with no conversation"
+	}
+
+## Host.list!'s entries. **NOTHING THERE HOLDS NOTHING** (webbox's
+## store.list); a listing that failed has failed the request, and answers
+## nothing too, so what follows writes nothing (the host does nothing more).
+list! : List(U8) => List(Paths.Entry)
+list! = |path| {
+	got = Host.list!(path)
+	match got.status {
+		Found => got.entries
+		Missing | Failed => []
+	}
+}
 
 ## `conv`'s title (convTitle): a DM's partner's name read, a channel's own.
 title! : Chat.Conv => List(U8)
@@ -325,7 +402,7 @@ landing! = |route|
 	match find!(route) {
 		Err(NotYours) => Chat.zig(route, Bool.False)
 		Ok(conv) => {
-			first = Paths.first_of(Host.topics!(route.family, route.key))
+			first = Paths.first_of(topics!(route.family, route.key))
 			if first != [] {
 				Chat.redirect(List.join([conv.base, [47], first]))
 			} else {
@@ -367,7 +444,7 @@ resume! = |{}| {
 	if conv == [] or !Paths.participant(conv, me) {
 		Chat.respond(200, html, Pages.no_conversations(Chrome.src_in(Host.srcs!({})), Host.viewer!({})))
 	} else {
-		topics = Host.topics!(Dm, conv)
+		topics = topics!(Dm, conv)
 		if Paths.first_of(topics) == [] {
 			Chat.redirect(List.concat(Str.to_utf8("/chat/c/"), conv))
 		} else {
@@ -400,7 +477,7 @@ entries! = |me, members, i, acc|
 				entries!(me, members, i + 2, acc)
 			} else {
 				conv = Paths.pair_key(me, id)
-				sessions = Host.topics!(Dm, conv)
+				sessions = topics!(Dm, conv)
 				default = resume_at!(conv, sessions)
 				entries!(me, members, i + 2, List.append(acc, { conv, id, name, default, sessions }))
 			}
@@ -423,7 +500,7 @@ msg! = |id|
 		match find_dm!(me, Host.members!({}), sid, 0) {
 			Ok(conv) => Chat.found(at("/chat/c/", conv))
 			Err(None) =>
-				match find_channel!(Paths.member_channels(Host.channel_rosters!({}), me), sid, 0) {
+				match find_channel!(Paths.member_channels(channel_rosters!({}), me), sid, 0) {
 					Ok(name) => Chat.found(at("/channel/", name))
 					Err(None) => Chat.not_found
 				}
@@ -438,7 +515,7 @@ find_dm! = |me, members, sid, i|
 				find_dm!(me, members, sid, i + 2)
 			} else {
 				conv = Paths.pair_key(me, id)
-				if List.contains(Host.topics!(Dm, conv), sid) Ok(conv) else find_dm!(me, members, sid, i + 2)
+				if List.contains(topics!(Dm, conv), sid) Ok(conv) else find_dm!(me, members, sid, i + 2)
 			}
 		Err(_) => Err(None)
 	}
@@ -446,7 +523,7 @@ find_dm! = |me, members, sid, i|
 find_channel! : List(List(U8)), List(U8), U64 => Try(List(U8), [None])
 find_channel! = |names, sid, i|
 	match List.get(names, i) {
-		Ok(name) => if List.contains(Host.topics!(Channel, name), sid) Ok(name) else find_channel!(names, sid, i + 1)
+		Ok(name) => if List.contains(topics!(Channel, name), sid) Ok(name) else find_channel!(names, sid, i + 1)
 		Err(_) => Err(None)
 	}
 
@@ -479,7 +556,7 @@ make! = |route, conv, topic|
 		Chat.respond(400, [], Str.to_utf8("Topic must be letters, digits, and hyphens only — no spaces, underscores, or punctuation.\n"))
 	} else if Topics.same_name(topic, Str.to_utf8("new")) {
 		Chat.respond(400, [], Str.to_utf8("\"new\" is reserved — pick another topic name.\n"))
-	} else if Conversation.has_topic(Host.topics!(route.family, route.key), topic) {
+	} else if Conversation.has_topic(topics!(route.family, route.key), topic) {
 		Chat.respond(409, [], Str.to_utf8("That topic already exists.\n"))
 	} else {
 		name = Host.viewer!({})
@@ -500,7 +577,7 @@ make! = |route, conv, topic|
 ## general<N>, unless that is the topic made.
 announce! : Route.R, Chat.Conv, List(U8), List(U8) => Bool
 announce! = |route, conv, topic, name|
-	match Topics.highest_general(Host.topics!(route.family, route.key)) {
+	match Topics.highest_general(topics!(route.family, route.key)) {
 		Ok(gen) if gen != topic =>
 			Host.append!(conv, gen, name, List.join([Str.to_utf8("New topic: ["), topic, Str.to_utf8("]("), conv.base, [47], topic, Str.to_utf8(")")]), [])
 		_ => Bool.True

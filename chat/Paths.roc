@@ -90,21 +90,130 @@ Paths := [].{
 		}
 
 	## listUserChannels's decision: the names of the channels `uid` is in,
-	## sorted by bytes, from every roster as Host.channel_rosters! hands them
-	## over (`name, count, member...` each, in the listing's order).
-	member_channels : List(List(U8)), List(U8) -> List(List(U8))
-	member_channels = |rosters, uid| Bytes.sort(members_of(rosters, uid, 0, []))
+	## sorted by bytes, from every roster (`rosters`'s).
+	member_channels : List(Roster), List(U8) -> List(List(U8))
+	member_channels = |all, uid| Bytes.sort(List.map(List.keep_if(all, |r| List.contains(r.members, uid)), |r| r.name))
 
-	members_of : List(List(U8)), List(U8), U64, List(List(U8)) -> List(List(U8))
-	members_of = |rosters, uid, i, out|
-		match List.get(rosters, i) {
-			Err(_) => out
-			Ok(name) => {
-				n = ZigText.parse_u64(List.get(rosters, i + 1) ?? []) ?? 0
-				members = List.sublist(rosters, { start: i + 2, len: n })
-				members_of(rosters, uid, i + 2 + n, if List.contains(members, uid) List.append(out, name) else out)
-			}
+	## A folder's entry, as Host.list! answers it.
+	Entry : { kind : [Dir, File, Other], name : List(U8) }
+
+	## A channel and its members, as its member file lists them.
+	Roster : { name : List(U8), members : List(List(U8)) }
+
+	## A DM's folder under the chat root (dmConvDir): its pair key.
+	dm_conv_dir : List(U8) -> List(U8)
+	dm_conv_dir = |key| join([key])
+
+	## A channel's (channelConvDir): channels/<name>.
+	channel_conv_dir : List(U8) -> List(U8)
+	channel_conv_dir = |name| join([Str.to_utf8("channels"), name])
+
+	## Where a conversation's topics are (listTopics's folder):
+	## {conv_dir}/sessions.
+	sessions_dir : List(U8) -> List(U8)
+	sessions_dir = |conv_dir| join([conv_dir, Str.to_utf8("sessions")])
+
+	## **A CONVERSATION'S TOPICS** (listTopics): of its sessions folder's
+	## entries, every one that is not a folder (a file, or a link: only a
+	## folder is passed over) whose name ends in `.md`, that cut off, sorted
+	## by bytes. A folder named `x.md` is no topic; a file named `.md` is
+	## topic "".
+	topics : List(Entry) -> List(List(U8))
+	topics = |entries|
+		Bytes.sort(List.keep_oks(entries, |e| if e.kind == Dir Err(None) else cut_suffix(e.name, Str.to_utf8(".md"))))
+
+	## A topic's reaction sidecar (reactionsPath):
+	## {conv_dir}/sessions/<sid>.reactions.jsonl.
+	reactions_path : List(U8), List(U8) -> List(U8)
+	reactions_path = |conv_dir, sid| join([conv_dir, Str.to_utf8("sessions"), List.concat(sid, Str.to_utf8(".reactions.jsonl"))])
+
+	## Channel `name`'s member file (channelMembers's): channels/<name>.channel.
+	channel_path : List(U8) -> List(U8)
+	channel_path = |name| join([Str.to_utf8("channels"), List.concat(name, Str.to_utf8(".channel"))])
+
+	## **A CHANNEL'S MEMBERS** (channelMembers): one uid a line, each line
+	## trimmed of spaces, tabs and CRs, blank lines and `#` lines skipped.
+	## **A LINE IS A CANONICAL UID, ONCE, OR THE CHANNEL IS MALFORMED**
+	## (metal-vmm QUEUE 156(d)): each member is a path the fan-out writes
+	## under (`../../x` was one), a comment after a uid (`3 # Claude`)
+	## dropped that member, and a duplicate notified twice. Never a guess at
+	## what a line meant: whoever wrote the file fixes it.
+	channel_members : List(U8) -> Try(List(List(U8)), [Malformed])
+	channel_members = |file|
+		List.fold(Bytes.split_byte(file, 10), Ok([]), |acc, raw|
+			match acc {
+				Err(Malformed) => acc
+				Ok(out) => {
+					line = trim_line(raw)
+					if line == [] or List.first(line) == Ok(35) {
+						acc
+					} else if !canonical_uid(line) or List.contains(out, line) {
+						Err(Malformed)
+					} else {
+						Ok(List.append(out, line))
+					}
+				}
+			})
+
+	## channelMembers's trim: spaces, tabs and CRs (a line split on newlines
+	## has none of those).
+	trim_line : List(U8) -> List(U8)
+	trim_line = |s| {
+		ws = |c| c == 32 or c == 9 or c == 13
+		front = List.drop_first(s, ZigText.count_while(s, ws, 0))
+		List.drop_last(front, ZigText.count_back_while(front, ws, 0))
+	}
+
+	## channelRosters's choice from channels/'s entries: the name of each one
+	## whose name ends in `.channel`, of any kind (one that is a folder will
+	## not read, and fails the listing, as the Zig's did), that cut off, in
+	## the listing's order. A file named `.channel` is channel "".
+	channel_names : List(Entry) -> List(List(U8))
+	channel_names = |entries| List.keep_oks(entries, |e| cut_suffix(e.name, Str.to_utf8(".channel")))
+
+	## **ONE CHANNEL'S PART IN EVERY ROSTER** (channelRosters), from its
+	## member file as read: its roster (`Listed`); `Malformed`, skipped, and
+	## counted by the host (the operator's count), so one bad file is not
+	## every member's chat down; `Gone` since the listing, skipped; or
+	## `Failed`, and nothing past it (the request has failed).
+	roster : List(U8), [Found(List(U8)), Missing, Failed] -> [Listed(Roster), Malformed, Gone, Failed]
+	roster = |name, file|
+		match file {
+			Found(bytes) =>
+				match channel_members(bytes) {
+					Ok(members) => Listed({ name, members })
+					Err(Malformed) => Malformed
+				}
+			Missing => Gone
+			Failed => Failed
 		}
+
+	## Every roster, from the channels `channel_names` chose and their member
+	## files as read, in that order, by `roster`: the rosters, and the
+	## malformed channels' names, up to a read that failed.
+	rosters : List(List(U8)), List([Found(List(U8)), Missing, Failed]) -> { rosters : List(Roster), malformed : List(List(U8)) }
+	rosters = |names, files| rosters_from(names, files, 0, { rosters: [], malformed: [] })
+
+	rosters_from : List(List(U8)), List([Found(List(U8)), Missing, Failed]), U64, { rosters : List(Roster), malformed : List(List(U8)) } -> { rosters : List(Roster), malformed : List(List(U8)) }
+	rosters_from = |names, files, i, got|
+		match (List.get(names, i), List.get(files, i)) {
+			(Ok(name), Ok(file)) =>
+				match roster(name, file) {
+					Listed(r) => rosters_from(names, files, i + 1, { rosters: List.append(got.rosters, r), malformed: got.malformed })
+					Malformed => rosters_from(names, files, i + 1, { rosters: got.rosters, malformed: List.append(got.malformed, name) })
+					Gone => rosters_from(names, files, i + 1, got)
+					Failed => got
+				}
+			_ => got
+		}
+
+	## `name` without `suffix`, when it ends in it.
+	cut_suffix : List(U8), List(U8) -> Try(List(U8), [None])
+	cut_suffix = |name, suffix| {
+		n = List.len(name)
+		k = List.len(suffix)
+		if n >= k and List.drop_first(name, n - k) == suffix Ok(List.take_first(name, n - k)) else Err(None)
+	}
 
 	## `std.fs.path.join` on POSIX: the non-empty parts joined by one `/`,
 	## where a part ending in `/` meeting one starting with it keeps one.

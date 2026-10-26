@@ -21,26 +21,18 @@ Host := [].{
 	## Account `id`'s name, or "" when it has none (`users.getUserName`).
 	name! : List(U8) => List(U8)
 
-	## Channel `name`'s members, as its member file lists them; none when
-	## there is no such channel (one with no members is as little the
-	## member's).
-	channel_members! : List(U8) => List(List(U8))
-
 	## The request's body, read to a form's limit (`which`: the react
 	## form's or a message's); not `ok` when the host answered instead (too
 	## big) or failed.
 	body! : [Reaction, Message] => { ok : Bool, bytes : List(U8) }
 
-	## Topic `sid`'s reaction sidecar in `conv`, as stored; not `ok` when it
-	## failed.
-	reactions! : Chat.Conv, List(U8) => { ok : Bool, bytes : List(U8) }
-
 	## Store the member's reaction to message `msg` of topic `sid` in `conv`
 	## and send it live: `Stored`, `NoSuchMessage`, or `Failed`.
 	react! : Chat.Conv, List(U8), U64, List(U8), Bool => [Stored, NoSuchMessage, Failed]
 
-	## **THE FILES, AS PRIMITIVES**: a file under the chat root, `path`
-	## relative to it (ChatState.roc and Feeds.roc name them), its bytes as
+	## **THE FILES, AS PRIMITIVES**: a file or folder under the chat root,
+	## `path` relative to it (ChatState.roc, Feeds.roc and Paths.roc name
+	## them), its bytes as
 	## the Roc's formats write them. A path that is empty, absolute or
 	## through `..` is the Roc's bug: the request fails (a 500), never a
 	## missing file.
@@ -57,6 +49,23 @@ Host := [].{
 
 	## Remove the file (one not there is gone already); false when it failed.
 	remove! : List(U8) => Bool
+
+	## The folder at `path` (checked as a file's is), each entry's name and
+	## kind in the order the disk gives them (`Found`); nothing there
+	## (`Missing`: webbox's store.list holds it empty); or a listing that
+	## failed (`Failed`: the request has failed; a path that is a file is
+	## one, as store.list fails it).
+	list! : List(U8) => { entries : List({ kind : [Dir, File, Other], name : List(U8) }), status : [Failed, Found, Missing] }
+
+	## Fail the request (a 500), for a reason, as the host fails it with that
+	## reason's error: a channel's member file the Roc found malformed, on
+	## the channel's own route (channelMembers's error.MalformedChannel).
+	## One reason crosses as nothing (chat_abi.zig `roc_chat_fail`).
+	fail! : [MalformedChannel] => {}
+
+	## Count channel `name` as one a listing skipped as malformed: the
+	## operator's count, kept by the host for /admin/host.
+	malformed_channel! : List(U8) => {}
 
 	## Topic `sid`'s page's data, in `conv`: the viewer, the four limits
 	## (image, video, accept, search), then the sidebar's fields
@@ -80,15 +89,6 @@ Host := [].{
 	## The request's time, in Unix seconds: the one time everything it
 	## stamps carries (a new conversation's topic is named for its date).
 	now! : {} => I64
-
-	## The topics of a DM (`Dm`, `key` its pair) or a channel (`Channel`, its
-	## name), as the store lists them.
-	topics! : Chat.Family, List(U8) => List(List(U8))
-
-	## Every channel and its members, flat as `name, count, member...` each,
-	## in the listing's order; a malformed one the host skipped (and counted:
-	## that is the operator's). Which are the member's is Paths.member_channels.
-	channel_rosters! : {} => List(List(U8))
 
 	## Every member and the agent, as `id, name` pairs.
 	members! : {} => List(List(U8))

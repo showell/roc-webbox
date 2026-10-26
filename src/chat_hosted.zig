@@ -22,6 +22,9 @@ pub const Reacted = route.Reacted;
 pub const Hostility = route.Hostility;
 pub const ReadStatus = route.ReadStatus;
 pub const Read = abi.Read;
+pub const Listing = abi.Listing;
+pub const Entry = abi.Entry;
+pub const EntryKind = route.EntryKind;
 pub const Conv = abi.Conv;
 
 /// roc_abi.zig's arena, from `base`, once, as the host starts.
@@ -100,14 +103,13 @@ const Scripted = struct {
     account_ok: bool = true,
     /// The partner's stored name ("" for none).
     partner: []const u8 = "Debbie",
-    /// The channel's members.
-    ops: []const []const u8 = &.{ "1", "3" },
-    /// Every channel as `name, count, member...`, in the listing's order.
-    rosters: []const []const u8 = &.{ "ops", "2", "1", "3" },
-    /// The conversation's topics.
+    /// Every channel, in the listing's order: `channels/` lists each as
+    /// `<name>.channel`, and that file reads as `read`.
+    channels: []const Channel = &.{.{ .name = "ops", .read = .{ .found = "1\n3\n" } }},
+    /// The conversation's topics: every `.../sessions` folder lists each as
+    /// `<topic>.md`, a file.
     topics: []const []const u8 = &.{"Plans"},
     body: ?[]const u8 = "",
-    reactions: ?[]const u8 = "",
     react_answer: route.Reacted = .stored,
     /// The files under the chat root, each as read; any other is missing.
     files: []const File = &.{},
@@ -124,9 +126,10 @@ const Scripted = struct {
     alloc: std.mem.Allocator,
 
     const File = struct { path: []const u8, read: abi.Read };
+    const Channel = struct { name: []const u8, read: abi.Read };
 
     fn host(self: *Scripted) Host {
-        return .{ .ctx = self, .member = member, .presence = presence, .account = account, .name = name, .channel_members = channelMembers, .channel_rosters = rostersOf, .members = membersOf, .topics = topicsOf, .me = meId, .now = nowOf, .body = bodyOf, .reactions = reactionsOf, .react = react, .read = readOf, .write = writeOf, .remove = removeOf, .fail = failOf, .page = pageOf, .header = header, .hostile = hostile, .viewer = viewer, .append = append, .raw = raw, .links = links, .srcs = srcs };
+        return .{ .ctx = self, .member = member, .presence = presence, .account = account, .name = name, .members = membersOf, .me = meId, .now = nowOf, .body = bodyOf, .react = react, .read = readOf, .write = writeOf, .remove = removeOf, .list = listOf, .fail = failOf, .malformed_channel = malformed, .page = pageOf, .header = header, .hostile = hostile, .viewer = viewer, .append = append, .raw = raw, .links = links, .srcs = srcs };
     }
     fn me(ctx: *anyopaque) *Scripted {
         return @ptrCast(@alignCast(ctx));
@@ -161,31 +164,14 @@ const Scripted = struct {
         say(ctx, "name {s}", .{id});
         return me(ctx).partner;
     }
-    fn channelMembers(ctx: *anyopaque, channel: []const u8) []const []const u8 {
-        say(ctx, "channel_members {s}", .{channel});
-        return if (std.mem.eql(u8, channel, "ops")) me(ctx).ops else &.{};
-    }
-    fn rostersOf(ctx: *anyopaque) []const []const u8 {
-        say(ctx, "channel_rosters", .{});
-        return me(ctx).rosters;
-    }
     /// Only the member: no DM to search.
     fn membersOf(ctx: *anyopaque) []const []const u8 {
         say(ctx, "members", .{});
         return &.{ "1", "Steve" };
     }
-    fn topicsOf(ctx: *anyopaque, family: route.Family, key: []const u8) []const []const u8 {
-        say(ctx, "topics {t} {s}", .{ family, key });
-        return me(ctx).topics;
-    }
     fn bodyOf(ctx: *anyopaque, _: route.Form) ?[]const u8 {
         say(ctx, "body", .{});
         return me(ctx).body;
-    }
-    fn reactionsOf(ctx: *anyopaque, conv: Conv, sid: []const u8) ?[]const u8 {
-        sayConv(ctx, "reactions", conv);
-        say(ctx, " {s}", .{sid});
-        return me(ctx).reactions;
     }
     fn react(ctx: *anyopaque, conv: Conv, sid: []const u8, msg: u64, emoji: []const u8, on: bool) route.Reacted {
         sayConv(ctx, "react", conv);
@@ -197,8 +183,27 @@ const Scripted = struct {
     }
     fn readOf(ctx: *anyopaque, path: []const u8) abi.Read {
         say(ctx, "read {s}", .{path});
-        for (me(ctx).files) |f| if (std.mem.eql(u8, f.path, path)) return f.read;
+        const s = me(ctx);
+        for (s.files) |f| if (std.mem.eql(u8, f.path, path)) return f.read;
+        for (s.channels) |c| {
+            const file = std.fmt.allocPrint(s.alloc, "channels/{s}.channel", .{c.name}) catch @panic("oom");
+            if (std.mem.eql(u8, file, path)) return c.read;
+        }
         return .missing;
+    }
+    fn listOf(ctx: *anyopaque, path: []const u8) abi.Listing {
+        say(ctx, "list {s}", .{path});
+        const s = me(ctx);
+        var out: std.ArrayList(abi.Entry) = .empty;
+        if (std.mem.eql(u8, path, "channels")) {
+            for (s.channels) |c| out.append(s.alloc, .{ .name = std.fmt.allocPrint(s.alloc, "{s}.channel", .{c.name}) catch @panic("oom"), .kind = .file }) catch @panic("oom");
+        } else if (std.mem.endsWith(u8, path, "/sessions")) {
+            for (s.topics) |t| out.append(s.alloc, .{ .name = std.fmt.allocPrint(s.alloc, "{s}.md", .{t}) catch @panic("oom"), .kind = .file }) catch @panic("oom");
+        } else return .missing;
+        return .{ .found = out.items };
+    }
+    fn malformed(ctx: *anyopaque, channel: []const u8) void {
+        say(ctx, "malformed {s}", .{channel});
     }
     fn writeOf(ctx: *anyopaque, path: []const u8, bytes: []const u8) bool {
         say(ctx, "write {s} {s}", .{ path, bytes });
@@ -260,10 +265,11 @@ fn expectAct(sub: []const u8, channel: bool, method: std.http.Method, script: Sc
 }
 
 /// What finding DM 1_2's topic Plans asks: whether 2 is an account, 2's
-/// name (the title, before the topics, as findTopic read them), the topics.
-const dm_topic = "member;presence;account 2;name 2;topics dm 1_2;";
-/// And channel ops's: its members, its topics.
-const ops_topic = "member;presence;channel_members ops;topics channel ops;";
+/// name (the title, before the topics, as findTopic read them), the topics
+/// (the DM's sessions folder, listed).
+const dm_topic = "member;presence;account 2;name 2;list 1_2/sessions;";
+/// And channel ops's: its member file, its topics.
+const ops_topic = "member;presence;read channels/ops.channel;list channels/ops/sessions;";
 
 /// What recording topic `sid` as where the member resumes DM 1_2 asks, both
 /// bookmarks missing: the topic last viewed there, then the DM last in,
@@ -319,16 +325,22 @@ test "a topic's reactions, react, pin and unpin are the Roc's: presence, the con
     // The method after the topic, before the body.
     try expectAct("/c/1_2/Plans/react", false, .GET, a, .{ .not_allowed = .POST }, dm_topic);
     try expectAct("/c/1_2/Plans/reactions", false, .HEAD, a, .{ .not_allowed = .GET }, dm_topic);
+    // The sidecar is the Roc's file: as stored, none yet (readReactions's
+    // "": no events), or a read that failed (the host's 500).
+    const sidecar = "1_2/sessions/Plans.reactions.jsonl";
+    const ndjson = "application/x-ndjson; charset=utf-8";
     try expectAct("/c/1_2/Plans/reactions", false, .GET, blk: {
         var s = a;
-        s.reactions = "{\"msg\":1}\n";
+        s.files = &.{.{ .path = sidecar, .read = .{ .found = "{\"msg\":1}\n" } }};
         break :blk s;
-    }, .{ .respond = .{ .status = 200, .content_type = "application/x-ndjson; charset=utf-8", .body = "{\"msg\":1}\n" } }, dm_topic ++ "reactions dm 1_2 /chat/c/1_2 [1,2] Plans;");
+    }, .{ .respond = .{ .status = 200, .content_type = ndjson, .body = "{\"msg\":1}\n" } }, dm_topic ++ "read " ++ sidecar ++ ";");
+    try expectAct("/c/1_2/Plans/reactions", false, .GET, a, .{ .respond = .{ .status = 200, .content_type = ndjson, .body = "" } }, dm_topic ++ "read " ++ sidecar ++ ";");
     try expectAct("/c/1_2/Plans/reactions", false, .GET, blk: {
         var s = a;
-        s.reactions = null;
+        s.files = &.{.{ .path = sidecar, .read = .failed }};
         break :blk s;
-    }, .answered, dm_topic ++ "reactions dm 1_2 /chat/c/1_2 [1,2] Plans;");
+    }, .answered, dm_topic ++ "read " ++ sidecar ++ ";");
+    try expectAct("/ops/Plans/reactions", true, .GET, a, .{ .respond = .{ .status = 200, .content_type = ndjson, .body = "" } }, ops_topic ++ "read channels/ops/sessions/Plans.reactions.jsonl;");
     // The set is the Roc's (ChatState.pinned), and its file's name: read,
     // changed, written back sorted by bytes, or removed when emptied. A
     // missing file is no pins.
@@ -374,7 +386,7 @@ test "a topic's reactions, react, pin and unpin are the Roc's: presence, the con
     // Not one of the pair, a pair not canonical: no account asked.
     try expectAct("/c/2_3/Plans/react", false, .POST, a, .{ .serve = .{ .route = .{ .family = .dm, .key = "2_3", .sid = "Plans", .part = .topic, .tail = .react }, .presence = false } }, "member;presence;");
     try expectAct("/c/2_1/Plans/react", false, .POST, a, .{ .serve = .{ .route = .{ .family = .dm, .key = "2_1", .sid = "Plans", .part = .topic, .tail = .react }, .presence = false } }, "member;presence;");
-    try expectAct("/dev/Plans/pin", true, .POST, a, .{ .serve = .{ .route = .{ .family = .channel, .key = "dev", .sid = "Plans", .part = .topic, .tail = .pin }, .presence = false } }, "member;presence;channel_members dev;");
+    try expectAct("/dev/Plans/pin", true, .POST, a, .{ .serve = .{ .route = .{ .family = .channel, .key = "dev", .sid = "Plans", .part = .topic, .tail = .pin }, .presence = false } }, "member;presence;read channels/dev.channel;");
     // A route still Zig's goes there, asking nothing more.
     try expectAct("/c/1_2/Plans/stream", false, .GET, a, .{ .serve = .{ .route = .{ .family = .dm, .key = "1_2", .sid = "Plans", .part = .topic, .tail = .stream }, .presence = false } }, "member;");
 }
@@ -394,15 +406,15 @@ test "a DM's page and landing, and the DM with yourself: the title the Roc's, a 
     try expectAct("/ops/Plans", true, .GET, a, .answered, ops_topic ++ "page channel ops /channel/ops [1,3] Plans;");
     // The landing: the first topic, or the page offering one, titled by the
     // partner's id when the account has no name.
-    try expectAct("/c/1_2", false, .GET, a, .{ .redirect = "/chat/c/1_2/Plans" }, "member;presence;account 2;topics dm 1_2;");
+    try expectAct("/c/1_2", false, .GET, a, .{ .redirect = "/chat/c/1_2/Plans" }, "member;presence;account 2;list 1_2/sessions;");
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     var s: Scripted = .{ .alloc = arena.allocator(), .topics = &.{}, .partner = "" };
     const got = try decide(arena.allocator(), "/c/1_2", false, .GET, s.host());
-    try testing.expectEqualStrings("member;presence;account 2;topics dm 1_2;name 2;viewer;srcs;", s.asked.items);
+    try testing.expectEqualStrings("member;presence;account 2;list 1_2/sessions;name 2;viewer;srcs;", s.asked.items);
     try testing.expect(std.mem.indexOf(u8, got.respond.body, "Chat w/2") != null);
     // The DM with yourself: one member, its partner yourself.
-    try expectAct("/c/1_1/Plans/reactions", false, .GET, a, .{ .respond = .{ .status = 200, .content_type = "application/x-ndjson; charset=utf-8", .body = "" } }, "member;presence;account 1;name 1;topics dm 1_1;reactions dm 1_1 /chat/c/1_1 [1] Plans;");
+    try expectAct("/c/1_1/Plans/reactions", false, .GET, a, .{ .respond = .{ .status = 200, .content_type = "application/x-ndjson; charset=utf-8", .body = "" } }, "member;presence;account 1;name 1;list 1_1/sessions;read 1_1/sessions/Plans.reactions.jsonl;");
 }
 
 test "a send is the Roc's: the conversation, the method, the header, the body, the message judged, the bookmark, then the store" {
@@ -418,7 +430,7 @@ test "a send is the Roc's: the conversation, the method, the header, the body, t
         var s = a;
         s.is_async = true;
         break :blk s;
-    }, .{ .respond = .{ .status = 204 } }, "member;presence;channel_members ops;header x-chat-async;body;hostile hi;viewer;append channel ops /channel/ops [1,3] Plans Steve hi c-1;");
+    }, .{ .respond = .{ .status = 204 } }, "member;presence;read channels/ops.channel;header x-chat-async;body;hostile hi;viewer;append channel ops /channel/ops [1,3] Plans Steve hi c-1;");
     // Hostile, a bookmark or a store that failed: the host answered, and
     // nothing after it is asked.
     try expectAct("/c/1_2/Plans/send", false, .POST, blk: {
@@ -466,7 +478,7 @@ test "a send is the Roc's: the conversation, the method, the header, the body, t
         s.body = "topic=Ideas";
         s.topics = &.{ "general2", "Plans" };
         break :blk s;
-    }, .{ .respond = .{ .status = 200, .content_type = "application/json; charset=utf-8", .body = "{\"conv\":\"1_2\",\"sid\":\"Ideas\"}" } }, "member;presence;account 2;body;topics dm 1_2;viewer;" ++ bookmarked("Ideas") ++ "append dm 1_2 /chat/c/1_2 [1,2] Ideas Steve hi ;topics dm 1_2;append dm 1_2 /chat/c/1_2 [1,2] general2 Steve New topic: [Ideas](/chat/c/1_2/Ideas) ;");
+    }, .{ .respond = .{ .status = 200, .content_type = "application/json; charset=utf-8", .body = "{\"conv\":\"1_2\",\"sid\":\"Ideas\"}" } }, "member;presence;account 2;body;list 1_2/sessions;viewer;" ++ bookmarked("Ideas") ++ "append dm 1_2 /chat/c/1_2 [1,2] Ideas Steve hi ;list 1_2/sessions;append dm 1_2 /chat/c/1_2 [1,2] general2 Steve New topic: [Ideas](/chat/c/1_2/Ideas) ;");
 }
 
 test "a topic's raw transcript and /chat/links are the Roc's: a transcript the host has not is a plain 404, never handed back" {
@@ -522,7 +534,7 @@ test "the member's bookmarks are the Roc's files: the topic last viewed first, t
         s.topics = &.{ "Other", "Plans" };
         s.files = &.{ .{ .path = ls, .read = .{ .found = "\tPlans \r\n" } }, .{ .path = lc, .read = .{ .found = " 1_2\r\n" } } };
         break :blk s;
-    }, .{ .redirect = "/chat/c/1_2/Plans" }, "member;presence;read " ++ lc ++ ";topics dm 1_2;read " ++ ls ++ ";");
+    }, .{ .redirect = "/chat/c/1_2/Plans" }, "member;presence;read " ++ lc ++ ";list 1_2/sessions;read " ++ ls ++ ";");
     // The feeds are the member's files too, named by the Roc.
     for ([_][2][]const u8{ .{ "/images", "users/1/images.md" }, .{ "/code", "users/1/code.md" } }) |feed| {
         var arena = std.heap.ArenaAllocator.init(testing.allocator);
@@ -533,22 +545,77 @@ test "the member's bookmarks are the Roc's files: the topic last viewed first, t
     }
 }
 
-test "/chat/msg: which channels are the member's, and their order, are the Roc's; the host hands over every roster" {
+test "/chat/msg: every channel's roster, which are the member's, and their order, are the Roc's; a malformed one skipped and counted" {
     use(testing.allocator);
     defer @import("roc_abi.zig").deinit();
     const a: Scripted = .{ .alloc = undefined };
-    // Rosters in the listing's order, not sorted: the member is in ops, Zed
-    // and a name that sorts high, not in zeta. Every topic list has Plans,
-    // so the first of the member's by bytes (`Z` before `o`) is the one.
+    // channels/ listed, each member file read in the listing's order, not
+    // sorted: the member is in ops, Zed and a name that sorts high, not in
+    // zeta. Every topic list has Plans, so the first of the member's by
+    // bytes (`Z` before `o`) is the one.
+    const four = "member;presence;members;list channels;read channels/ops.channel;read channels/zeta.channel;read channels/\xffhigh.channel;read channels/Zed.channel;";
     try expectAct("/msg/Plans_1", false, .GET, blk: {
         var s = a;
-        s.rosters = &.{ "ops", "2", "1", "3", "zeta", "1", "2", "\xffhigh", "1", "1", "Zed", "1", "1" };
+        s.channels = &.{ .{ .name = "ops", .read = .{ .found = "1\n3\n" } }, .{ .name = "zeta", .read = .{ .found = "2" } }, .{ .name = "\xffhigh", .read = .{ .found = "1" } }, .{ .name = "Zed", .read = .{ .found = "# us\r\n 1\t\n" } } };
         break :blk s;
-    }, .{ .found = "/channel/Zed/Plans#msg-Plans_1" }, "member;presence;members;channel_rosters;topics channel Zed;");
+    }, .{ .found = "/channel/Zed/Plans#msg-Plans_1" }, four ++ "list channels/Zed/sessions;");
     // In none: nothing to search.
     try expectAct("/msg/Plans_1", false, .GET, blk: {
         var s = a;
-        s.rosters = &.{ "zeta", "1", "2", "ops", "0" };
+        s.channels = &.{ .{ .name = "zeta", .read = .{ .found = "2" } }, .{ .name = "ops", .read = .{ .found = "" } } };
         break :blk s;
-    }, .not_found, "member;presence;members;channel_rosters;");
+    }, .not_found, "member;presence;members;list channels;read channels/zeta.channel;read channels/ops.channel;");
+    // **A MALFORMED CHANNEL IS SKIPPED AND COUNTED** as it is met (Abad
+    // would be first by bytes); one gone since the listing is skipped,
+    // uncounted.
+    try expectAct("/msg/Plans_1", false, .GET, blk: {
+        var s = a;
+        s.channels = &.{ .{ .name = "Abad", .read = .{ .found = "1\nnot a uid\n" } }, .{ .name = "Agone", .read = .missing }, .{ .name = "ops", .read = .{ .found = "1\n" } }, .{ .name = "Adup", .read = .{ .found = "1\n1\n" } } };
+        break :blk s;
+    }, .{ .found = "/channel/ops/Plans#msg-Plans_1" }, "member;presence;members;list channels;read channels/Abad.channel;malformed Abad;read channels/Agone.channel;read channels/ops.channel;read channels/Adup.channel;malformed Adup;list channels/ops/sessions;");
+    // A member file that will not read: nothing past it is read, and no
+    // channel searched (the host has failed the request); one malformed
+    // before it was counted already, as the Zig counted it.
+    try expectAct("/msg/Plans_1", false, .GET, blk: {
+        var s = a;
+        s.channels = &.{ .{ .name = "Abad", .read = .{ .found = "x\n" } }, .{ .name = "ops", .read = .failed }, .{ .name = "Zed", .read = .{ .found = "1\n" } } };
+        break :blk s;
+    }, .not_found, "member;presence;members;list channels;read channels/Abad.channel;malformed Abad;read channels/ops.channel;");
+}
+
+test "a channel's member file is the Roc's: a malformed one fails its own route by its reason (never the 404 of a channel not the member's); a missing one is no channel" {
+    use(testing.allocator);
+    defer @import("roc_abi.zig").deinit();
+    const a: Scripted = .{ .alloc = undefined };
+    for ([_][]const u8{ "1\n../../x\n", "1\n3 # Claude\n", "1\n2\n1\n", "007\n", "+7\n" }) |bad| {
+        var arena = std.heap.ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        var s = a;
+        s.alloc = arena.allocator();
+        s.channels = &.{.{ .name = "ops", .read = .{ .found = bad } }};
+        _ = try decide(arena.allocator(), "/ops/Plans", true, .GET, s.host());
+        try testing.expectEqualStrings("member;presence;read channels/ops.channel;fail MalformedChannel;", s.asked.items);
+    }
+    const none: Decision = .{ .serve = .{ .route = .{ .family = .channel, .key = "dev", .part = .landing }, .presence = false } };
+    try expectAct("/dev", true, .GET, a, none, "member;presence;read channels/dev.channel;");
+}
+
+test "a conversation's topics are the Roc's: its sessions folder listed, a folder named x.md no topic, and sorted by bytes" {
+    use(testing.allocator);
+    defer @import("roc_abi.zig").deinit();
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const S = struct {
+        fn list(ctx: *anyopaque, path: []const u8) abi.Listing {
+            Scripted.say(ctx, "list {s}", .{path});
+            return .{ .found = &.{ .{ .name = "b.md", .kind = .file }, .{ .name = "x.md", .kind = .dir }, .{ .name = "a.md", .kind = .other }, .{ .name = "notes.txt", .kind = .file } } };
+        }
+    };
+    var s: Scripted = .{ .alloc = arena.allocator() };
+    var h = s.host();
+    h.list = S.list;
+    // The landing goes to the first by bytes: a link counts, a folder not.
+    const got = try decide(arena.allocator(), "/c/1_2", false, .GET, h);
+    try testing.expectEqualStrings("/chat/c/1_2/a", got.redirect);
+    try testing.expectEqualStrings("member;presence;account 2;list 1_2/sessions;", s.asked.items);
 }

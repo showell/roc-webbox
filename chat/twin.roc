@@ -124,10 +124,26 @@ call = |req| {
 		48 => [Conversation.topic_title(arg(0), arg(1))]
 		49 => [bool(Conversation.has_topic(List.drop_first(req.args, 1), arg(0)))]
 		50 => [Conversation.dm_base(arg(0)), Conversation.channel_base(arg(0))]
-		51 => Paths.member_channels(List.drop_first(req.args, 1), arg(0))
+		51 => Paths.member_channels(flat_rosters(req.args, 1, []), arg(0))
 		52 => [ChatState.bookmark(file(arg(0), arg(1)))]
 		53 => [bool(ChatState.changed(file(arg(0), arg(1)), arg(2))), ChatState.bookmark_line(arg(2))]
 		54 => [ChatState.last_conv_path(arg(0)), ChatState.last_session_path(arg(0), arg(1)), ChatState.pinned_path(arg(0), arg(1)), Feeds.path(arg(0), Images), Feeds.path(arg(0), Code)]
+		55 => Paths.topics(entries(req.args, 0, []))
+		56 =>
+			match Paths.channel_members(arg(0)) {
+				Ok(members) => List.prepend(members, [79])
+				Err(Malformed) => [[77]]
+			}
+		57 => Paths.channel_names(entries(req.args, 0, []))
+		58 => {
+			# The names, then as many reads (how, bytes); the malformed
+			# count and names, then each roster as `name, count, member...`.
+			n = u64(arg(0))
+			names = List.sublist(req.args, { start: 1, len: n })
+			got = Paths.rosters(names, reads(req.args, 1 + n, []))
+			List.join([[num(List.len(got.malformed))], got.malformed, List.join(List.map(got.rosters, |r| List.concat([r.name, num(List.len(r.members))], r.members)))])
+		}
+		59 => [Paths.sessions_dir(Paths.dm_conv_dir(arg(0))), Paths.sessions_dir(Paths.channel_conv_dir(arg(1))), Paths.channel_path(arg(1)), Paths.reactions_path(Paths.dm_conv_dir(arg(0)), arg(2))]
 		_ => crash "twin: no function ${U8.to_str(req.which)}"
 	}
 }
@@ -143,6 +159,41 @@ file = |how, bytes| match how {
 	[77] => Missing
 	_ => Failed
 }
+
+## A folder's entries as the test wrote them: `kind, name` pairs from
+## argument `i`, the kind `d`, `f` or `o`.
+entries : List(List(U8)), U64, List(Paths.Entry) -> List(Paths.Entry)
+entries = |args, i, out|
+	match (List.get(args, i), List.get(args, i + 1)) {
+		(Ok(k), Ok(name)) => {
+			kind = match k {
+				[100] => Dir
+				[102] => File
+				_ => Other
+			}
+			entries(args, i + 2, List.append(out, { kind, name }))
+		}
+		_ => out
+	}
+
+## Reads as the test says they went (`file`), `how, bytes` pairs from `i`.
+reads : List(List(U8)), U64, List([Found(List(U8)), Missing, Failed]) -> List([Found(List(U8)), Missing, Failed])
+reads = |args, i, out|
+	match (List.get(args, i), List.get(args, i + 1)) {
+		(Ok(how), Ok(bytes)) => reads(args, i + 2, List.append(out, file(how, bytes)))
+		_ => out
+	}
+
+## Rosters flat, `name, count, member...` each, from argument `i`.
+flat_rosters : List(List(U8)), U64, List(Paths.Roster) -> List(Paths.Roster)
+flat_rosters = |args, i, out|
+	match List.get(args, i) {
+		Err(_) => out
+		Ok(name) => {
+			n = u64(List.get(args, i + 1) ?? [])
+			flat_rosters(args, i + 2 + n, List.append(out, { name, members: List.sublist(args, { start: i + 2, len: n }) }))
+		}
+	}
 
 ## A signed decimal the test wrote.
 int : List(U8) -> I64

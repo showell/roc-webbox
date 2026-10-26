@@ -3,8 +3,9 @@
 ## so the host's answer to a Roc crash (a 500, the call's memory dropped,
 ## the next request served) is seen. It also names any path a test likes
 ## to the file primitives (`/read/<path>`, `/write/<path>`,
-## `/remove/<path>`), as the chat's own Roc never would, so the seam's
-## check of each is seen. Never linked into a server.
+## `/remove/<path>`, `/list/<path>`), as the chat's own Roc never would, so
+## the seam's check of each is seen, and asks `fail!` (`/fail`) and
+## `malformed_channel!` (`/malformed/<name>`). Never linked into a server.
 app [handle!] { pf: platform "../platform/main.roc" }
 
 import pf.Chat
@@ -24,6 +25,26 @@ handle! = |req|
 		Chat.respond(200, [], done(Host.write!(List.drop_first(req.sub, 7), Str.to_utf8("bytes"))))
 	} else if starts(req.sub, "/remove/") {
 		Chat.respond(200, [], done(Host.remove!(List.drop_first(req.sub, 8))))
+	} else if starts(req.sub, "/list/") {
+		got = Host.list!(List.drop_first(req.sub, 6))
+		said = match got.status {
+			Found => "found"
+			Missing => "missing"
+			Failed => "failed"
+		}
+		# Each entry as ` <kind>:<name>`, so a record laid out wrong shows.
+		each = List.join(List.map(got.entries, |e| List.concat(Str.to_utf8(match e.kind {
+			Dir => " d:"
+			File => " f:"
+			Other => " o:"
+		}), e.name)))
+		Chat.respond(200, [], List.concat(Str.to_utf8(said), each))
+	} else if req.sub == Str.to_utf8("/fail") {
+		Host.fail!(MalformedChannel)
+		Chat.respond(200, [], Str.to_utf8("failed"))
+	} else if starts(req.sub, "/malformed/") {
+		Host.malformed_channel!(List.drop_first(req.sub, 11))
+		Chat.respond(200, [], Str.to_utf8("counted"))
 	} else if req.sub == Str.to_utf8("/crash") {
 		crash "a planted crash"
 	} else if req.sub == Str.to_utf8("/crash-after-asking") {

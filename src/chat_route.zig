@@ -110,9 +110,25 @@ pub const Hostility = enum(u8) { failed, fine, refused };
 /// request). **MISSING AND FAILED ARE NEVER ONE ANSWER.**
 pub const ReadStatus = enum(u8) { failed, found, missing };
 
+/// Host.roc's `list!` answer: each entry's `kind`, as webbox's store.list
+/// tells them (`directory` is `dir`; a link, a device or the like `other`).
+pub const EntryKind = enum(u8) { dir, file, other };
+
+/// Host.roc's `fail!` argument: why the Roc fails the request, as the
+/// host's own error for it (the error the Zig it replaced returned).
+pub const FailReason = enum(u8) {
+    malformed_channel,
+
+    pub fn err(r: FailReason) anyerror {
+        return switch (r) {
+            .malformed_channel => error.MalformedChannel,
+        };
+    }
+};
+
 comptime {
     @setEvalBranchQuota(20_000);
-    for (.{ Family, Part, Tail, Method, Kind, Form, Reacted, Hostility, ReadStatus }) |E| assertRocOrder(E);
+    for (.{ Family, Part, Tail, Method, Kind, Form, Reacted, Hostility, ReadStatus, EntryKind, FailReason }) |E| assertRocOrder(E);
 }
 
 /// That `E`'s values are Roc's for the same tags: numbered from 0 in the

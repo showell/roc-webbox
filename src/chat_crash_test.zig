@@ -29,7 +29,9 @@ const Asker = struct {
 };
 
 /// A host whose files are one, `users/1/ok` ("hi"), and one that will not
-/// read, `users/1/broken`; it records what it was asked and how it failed.
+/// read, `users/1/broken`; whose folders are `channels` (three entries, one
+/// of each kind) and `empty`, and one that will not list, `1_2/sessions`;
+/// it records what it was asked and how it failed.
 const Files = struct {
     asked: std.ArrayList(u8) = .empty,
     failed: ?anyerror = null,
@@ -39,8 +41,23 @@ const Files = struct {
         h.read = read;
         h.write = write;
         h.remove = remove;
+        h.list = list;
         h.fail = fail;
+        h.malformed_channel = malformed;
         return h;
+    }
+    fn list(ctx: *anyopaque, path: []const u8) abi.Listing {
+        say(ctx, "list", path);
+        if (std.mem.eql(u8, path, "channels")) return .{ .found = &.{ .{ .name = "ops.channel", .kind = .file }, .{ .name = "x.md", .kind = .dir }, .{ .name = "\xffl", .kind = .other } } };
+        if (std.mem.eql(u8, path, "empty")) return .{ .found = &.{} };
+        if (std.mem.eql(u8, path, "1_2/sessions")) {
+            fail(ctx, error.NotDir);
+            return .failed;
+        }
+        return .missing;
+    }
+    fn malformed(ctx: *anyopaque, name: []const u8) void {
+        say(ctx, "malformed", name);
     }
     fn of(ctx: *anyopaque) *Files {
         return @ptrCast(@alignCast(ctx));
@@ -100,6 +117,28 @@ test "a path that would leave the chat root fails the request at the seam, the h
     try probe("/read/users/1/broken", "failed", "read users/1/broken;", error.IsDir);
     try probe("/write/users/1/pinned-sessions/1_2", "done", "write users/1/pinned-sessions/1_2;", null);
     try probe("/remove/users/1/last-conv", "done", "remove users/1/last-conv;", null);
+}
+
+test "a folder's listing: a path that would leave the root fails the request at the seam; under it, its entries and their kinds, nothing there, and a listing that failed are three answers" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    roc.use(arena.allocator());
+    defer roc.deinit();
+    for ([_][]const u8{ "/list/../x", "/list//etc", "/list/", "/list/channels/../../x", "/list/.." }) |sub|
+        try probe(sub, "failed", "", error.PathOutsideChatRoot);
+    try probe("/list/channels", "found f:ops.channel d:x.md o:\xffl", "list channels;", null);
+    try probe("/list/empty", "found", "list empty;", null);
+    try probe("/list/gone", "missing", "list gone;", null);
+    try probe("/list/1_2/sessions", "failed", "list 1_2/sessions;", error.NotDir);
+}
+
+test "the Roc fails a request by a reason, as the host's error for it; and a malformed channel is counted by the host" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    roc.use(arena.allocator());
+    defer roc.deinit();
+    try probe("/fail", "failed", "", error.MalformedChannel);
+    try probe("/malformed/Abad", "counted", "malformed Abad;", null);
 }
 
 test "a Roc crash is error.RocCrashed, its message kept, and the next call is served; a crash after a hosted call too" {
