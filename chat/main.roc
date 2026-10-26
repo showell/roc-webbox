@@ -28,6 +28,7 @@ import ZigText
 import Feeds
 import Recent
 import ChatState
+import Conversation
 
 handle! : Chat.Request => Chat.Answer
 handle! = |req|
@@ -94,60 +95,115 @@ in_conversation! = |req, route|
 		send!(req, route)
 	} else if route.part == Landing {
 		landing!(route)
-	} else if !Host.topic!(route.family, route.key, route.sid) {
-		Chat.zig(route, Bool.False)
 	} else {
-		match route.tail {
-			Page | Raw =>
-				if req.method != Get and req.method != Head {
-					Chat.not_allowed(Get)
-				} else if route.tail == Page {
-					page!(route)
-				} else if Host.raw!({}) {
-					Chat.held_plain
+		match find!(route) {
+			Err(NotYours) => Chat.zig(route, Bool.False)
+			Ok(conv) => {
+				# The title before the topics, as findTopic read them: a
+				# partner whose name will not read fails every topic route.
+				title = Conversation.topic_title(title!(conv), route.sid)
+				if Conversation.has_topic(Host.topics!(route.family, route.key), route.sid) {
+					in_topic!(req, route, conv, title)
 				} else {
-					Chat.not_found
+					Chat.zig(route, Bool.False)
 				}
-			Reactions =>
-				if req.method != Get {
-					Chat.not_allowed(Get)
-				} else {
-					got = Host.reactions!({})
-					if got.ok Chat.respond(200, Str.to_utf8("application/x-ndjson; charset=utf-8"), got.bytes) else Chat.answered
-				}
-			_ =>
-				if req.method != Post {
-					Chat.not_allowed(Post)
-				} else if route.tail == React {
-					react!({})
-				} else if pin!(route.sid, route.tail == Pin) {
-					Chat.respond(204, [], [])
-				} else {
-					Chat.answered
-				}
+			}
 		}
+	}
+
+## A topic that is there, in `conv`, titled `title`: the method, then the
+## work.
+in_topic! : Chat.Request, Route.R, Chat.Conv, List(U8) => Chat.Answer
+in_topic! = |req, route, conv, title|
+	match route.tail {
+		Page | Raw =>
+			if req.method != Get and req.method != Head {
+				Chat.not_allowed(Get)
+			} else if route.tail == Page {
+				page!(route, conv, title)
+			} else if Host.raw!(conv, route.sid) {
+				Chat.held_plain
+			} else {
+				Chat.not_found
+			}
+		Reactions =>
+			if req.method != Get {
+				Chat.not_allowed(Get)
+			} else {
+				got = Host.reactions!(conv, route.sid)
+				if got.ok Chat.respond(200, Str.to_utf8("application/x-ndjson; charset=utf-8"), got.bytes) else Chat.answered
+			}
+		_ =>
+			if req.method != Post {
+				Chat.not_allowed(Post)
+			} else if route.tail == React {
+				react!(conv, route.sid)
+			} else if pin!(conv, route.sid, route.tail == Pin) {
+				Chat.respond(204, [], [])
+			} else {
+				Chat.answered
+			}
+	}
+
+## **THE CONVERSATION A DM OR CHANNEL ROUTE NAMES, IF IT IS THE MEMBER'S**
+## (angry-gopher chat.zig `findConv`): a DM whose pair holds the member
+## and whose other half is an account; a channel that lists the member.
+## `NotYours` for every 404 the Zig answers (the route handed back to it,
+## whose page says why).
+find! : Route.R => Try(Chat.Conv, [NotYours])
+find! = |route|
+	match route.family {
+		Dm =>
+			match Conversation.dm_other(route.key, Host.me!({})) {
+				Ok(other) =>
+					if Host.account!(other) {
+						Ok({ family: Dm, key: route.key, base: Conversation.dm_base(route.key), members: Conversation.dm_members(route.key) })
+					} else {
+						Err(NotYours)
+					}
+				Err(None) => Err(NotYours)
+			}
+		Channel => {
+			members = Host.channel_members!(route.key)
+			if List.contains(members, Host.me!({})) {
+				Ok({ family: Channel, key: route.key, base: Conversation.channel_base(route.key), members })
+			} else {
+				Err(NotYours)
+			}
+		}
+		_ => Err(NotYours)
+	}
+
+## `conv`'s title (convTitle): a DM's partner's name read, a channel's own.
+title! : Chat.Conv => List(U8)
+title! = |conv|
+	if conv.family == Dm {
+		other = Conversation.partner(conv.key, Host.me!({}))
+		Conversation.dm_title(Host.name!(other), other)
+	} else {
+		Conversation.channel_title(conv.key)
 	}
 
 ## POST .../pin and .../unpin: the member's pins in the conversation read,
 ## `sid` pinned or unpinned (ChatState.pinned), and the file written back or,
 ## emptied, removed. A read that failed stops here: the set is not empty, it
 ## is unknown, and writing it would drop every pin. False when a step failed.
-pin! : List(U8), Bool => Bool
-pin! = |sid, on| {
-	got = Host.pins!({})
+pin! : Chat.Conv, List(U8), Bool => Bool
+pin! = |conv, sid, on| {
+	got = Host.pins!(conv)
 	if !got.ok {
 		Bool.False
 	} else {
 		match ChatState.pinned(got.bytes, sid, on) {
-			Write(bytes) => Host.write_pins!(bytes)
-			Remove => Host.remove_pins!({})
+			Write(bytes) => Host.write_pins!(conv, bytes)
+			Remove => Host.remove_pins!(conv)
 		}
 	}
 }
 
 ## POST .../react: the form, then the store's answer.
-react! : {} => Chat.Answer
-react! = |{}| {
+react! : Chat.Conv, List(U8) => Chat.Answer
+react! = |conv, sid| {
 	body = Host.body!(Reaction)
 	if !body.ok {
 		Chat.answered
@@ -156,7 +212,7 @@ react! = |{}| {
 			Malformed => Chat.malformed
 			Bad(why) => Chat.respond(400, [], why)
 			Reacted(r) =>
-				match Host.react!(r.msg, r.emoji, r.on) {
+				match Host.react!(conv, sid, r.msg, r.emoji, r.on) {
 					Stored => Chat.respond(204, [], [])
 					NoSuchMessage => Chat.respond(400, [], Str.to_utf8("react: no such message\n"))
 					Failed => Chat.answered
@@ -219,26 +275,40 @@ feed! = |which, rest|
 	}
 
 ## A conversation's landing: its first topic, or, with none, the page that
-## offers one.
+## offers one, the title and viewer read in the Zig's order.
 landing! : Route.R => Chat.Answer
 landing! = |route|
-	match Host.landing!(route.family, route.key) {
-		[base, first] => Chat.redirect(List.join([base, [47], first]))
-		[base, _, viewer, title] => Chat.respond(200, html, Pages.no_topics(Chrome.src_in(Host.srcs!({})), viewer, base, title))
-		_ => Chat.zig(route, Bool.False)
+	match find!(route) {
+		Err(NotYours) => Chat.zig(route, Bool.False)
+		Ok(conv) => {
+			first = Paths.first_of(Host.topics!(route.family, route.key))
+			if first != [] {
+				Chat.redirect(List.join([conv.base, [47], first]))
+			} else {
+				title = title!(conv)
+				viewer = Host.viewer!({})
+				Chat.respond(200, html, Pages.no_topics(Chrome.src_in(Host.srcs!({})), viewer, conv.base, title))
+			}
+		}
 	}
 
-## A topic's page, from what the host read.
-page! : Route.R => Chat.Answer
-page! = |route|
-	match Host.page!({}) {
-		[viewer, title, image_max, video_max, accept, search_min, .. as fields] => {
-			sb = Pages.decode_sidebar(fields)
-			limits = { image_max: Pages.number(image_max), video_max: Pages.number(video_max), accept, search_min: Pages.number(search_min) }
-			view = { key: route.key, base: sb.base, sid: route.sid, title, uid: sb.uid, viewer, sidebar_json: Pages.sidebar_json(sb) }
-			Chat.respond(200, html, Pages.conversation(Chrome.src_in(Host.srcs!({})), limits, view))
+## A topic's page, titled `title`: a DM's topic recorded as where the
+## member resumes it first (a bookmark that fails serves no page), then
+## what the host read.
+page! : Route.R, Chat.Conv, List(U8) => Chat.Answer
+page! = |route, conv, title|
+	if conv.family == Dm and !Host.bookmark!(conv, route.sid) {
+		Chat.answered
+	} else {
+		match Host.page!(conv, route.sid) {
+			[viewer, image_max, video_max, accept, search_min, .. as fields] => {
+				sb = Pages.decode_sidebar(fields)
+				limits = { image_max: Pages.number(image_max), video_max: Pages.number(video_max), accept, search_min: Pages.number(search_min) }
+				view = { key: route.key, base: sb.base, sid: route.sid, title, uid: sb.uid, viewer, sidebar_json: Pages.sidebar_json(sb) }
+				Chat.respond(200, html, Pages.conversation(Chrome.src_in(Host.srcs!({})), limits, view))
+			}
+			_ => Chat.answered
 		}
-		_ => Chat.answered
 	}
 
 json : List(U8)
@@ -336,8 +406,8 @@ find_channel! = |names, sid, i|
 ## highest general<N>; the conversation and topic as JSON.
 new_topic! : Chat.Request, Route.R => Chat.Answer
 new_topic! = |req, route|
-	match Host.conv!(route.family, route.key) {
-		[base, dm] =>
+	match find!(route) {
+		Ok(conv) =>
 			if req.method != Post {
 				Chat.not_allowed(Post)
 			} else {
@@ -347,30 +417,31 @@ new_topic! = |req, route|
 				} else {
 					match Form.field(body.bytes, Str.to_utf8("topic")) {
 						Malformed => Chat.malformed
-						Found(raw) => make!(route, base, dm == [49], ZigText.trim(raw))
-						Missing => make!(route, base, dm == [49], [])
+						Found(raw) => make!(route, conv, ZigText.trim(raw))
+						Missing => make!(route, conv, [])
 					}
 				}
 			}
-		_ => Chat.zig(route, Bool.False)
+		Err(NotYours) => Chat.zig(route, Bool.False)
 	}
 
-make! : Route.R, List(U8), Bool, List(U8) => Chat.Answer
-make! = |route, base, dm, topic|
+make! : Route.R, Chat.Conv, List(U8) => Chat.Answer
+make! = |route, conv, topic|
 	if !Paths.valid_topic_id(topic) {
 		Chat.respond(400, [], Str.to_utf8("Topic must be letters, digits, and hyphens only — no spaces, underscores, or punctuation.\n"))
 	} else if Topics.same_name(topic, Str.to_utf8("new")) {
 		Chat.respond(400, [], Str.to_utf8("\"new\" is reserved — pick another topic name.\n"))
-	} else if List.any(Host.topics!(route.family, route.key), |s| Topics.same_name(s, topic)) {
+	} else if Conversation.has_topic(Host.topics!(route.family, route.key), topic) {
 		Chat.respond(409, [], Str.to_utf8("That topic already exists.\n"))
 	} else {
 		name = Host.viewer!({})
+		dm = conv.family == Dm
 		# The bookmark first, as a send's: one that fails makes no topic.
-		if dm and !Host.bookmark!(topic) {
+		if dm and !Host.bookmark!(conv, topic) {
 			Chat.answered
-		} else if !Host.append!(topic, name, Str.to_utf8("hi"), []) {
+		} else if !Host.append!(conv, topic, name, Str.to_utf8("hi"), []) {
 			Chat.answered
-		} else if dm and !announce!(route, base, topic, name) {
+		} else if dm and !announce!(route, conv, topic, name) {
 			Chat.answered
 		} else {
 			Chat.respond(200, json, Topics.made_json(route.key, topic))
@@ -379,11 +450,11 @@ make! = |route, base, dm, topic|
 
 ## A DM's new topic, said where the partner already watches: its highest
 ## general<N>, unless that is the topic made.
-announce! : Route.R, List(U8), List(U8), List(U8) => Bool
-announce! = |route, base, topic, name|
+announce! : Route.R, Chat.Conv, List(U8), List(U8) => Bool
+announce! = |route, conv, topic, name|
 	match Topics.highest_general(Host.topics!(route.family, route.key)) {
 		Ok(gen) if gen != topic =>
-			Host.append!(gen, name, List.join([Str.to_utf8("New topic: ["), topic, Str.to_utf8("]("), base, [47], topic, Str.to_utf8(")")]), [])
+			Host.append!(conv, gen, name, List.join([Str.to_utf8("New topic: ["), topic, Str.to_utf8("]("), conv.base, [47], topic, Str.to_utf8(")")]), [])
 		_ => Bool.True
 	}
 
@@ -392,8 +463,11 @@ announce! = |route, base, topic, name|
 ## conversation must be the member's.
 send! : Chat.Request, Route.R => Chat.Answer
 send! = |req, route|
-	match Host.send_conv!(route.family, route.key, route.sid) {
-		[base, dm] =>
+	match find!(route) {
+		Ok(conv) => {
+			# The title is read, unused, as the Zig's convRoute read it before
+			# any tail: a partner whose name will not read fails a send too.
+			_ = title!(conv)
 			if route.tail == InvalidSend {
 				Chat.not_found
 			} else if req.method != Post {
@@ -411,13 +485,14 @@ send! = |req, route|
 						Found(md) =>
 							match Form.field(body.bytes, Str.to_utf8("cid")) {
 								Malformed => Chat.malformed
-								Found(cid) => store!(route, List.join([base, [47], route.sid]), dm == [49], is_async, md, cid)
-								Missing => store!(route, List.join([base, [47], route.sid]), dm == [49], is_async, md, [])
+								Found(cid) => store!(route, conv, is_async, md, cid)
+								Missing => store!(route, conv, is_async, md, [])
 							}
 					}
 				}
 			}
-		_ => Chat.zig(route, Bool.False)
+		}
+		Err(NotYours) => Chat.zig(route, Bool.False)
 	}
 
 refuse : Str -> Chat.Answer
@@ -426,8 +501,8 @@ refuse = |why| Chat.respond(400, [], Str.to_utf8(why))
 ## The message judged, then stored: empty, not UTF-8 text, or hostile is
 ## refused; the bookmark (a DM's) before the store, so one that fails
 ## stores nothing; then 204 for an async sender, else back to the topic.
-store! : Route.R, List(U8), Bool, Bool, List(U8), List(U8) => Chat.Answer
-store! = |route, back, dm, is_async, md, cid|
+store! : Route.R, Chat.Conv, Bool, List(U8), List(U8) => Chat.Answer
+store! = |route, conv, is_async, md, cid|
 	if ZigText.trim(md) == [] {
 		refuse("not sent: the message is empty\n")
 	} else if Str.from_utf8(md).is_err() {
@@ -436,13 +511,13 @@ store! = |route, back, dm, is_async, md, cid|
 		Chat.answered
 	} else {
 		name = Host.viewer!({})
-		if dm and !Host.bookmark!(route.sid) {
+		if conv.family == Dm and !Host.bookmark!(conv, route.sid) {
 			Chat.answered
-		} else if !Host.append!(route.sid, name, md, cid) {
+		} else if !Host.append!(conv, route.sid, name, md, cid) {
 			Chat.answered
 		} else if is_async {
 			Chat.respond(204, [], [])
 		} else {
-			Chat.redirect(back)
+			Chat.redirect(List.join([conv.base, [47], route.sid]))
 		}
 	}

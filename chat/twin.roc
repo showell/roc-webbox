@@ -19,6 +19,7 @@ import Html
 import Feeds
 import Recent
 import ChatState
+import Conversation
 
 call : { which : U8, args : List(List(U8)) } -> List(List(U8))
 call = |req| {
@@ -112,6 +113,17 @@ call = |req| {
 				Write(bytes) => [bytes]
 				Remove => []
 			}
+		44 =>
+			match Conversation.dm_other(arg(0), arg(1)) {
+				Ok(other) => [other]
+				Err(None) => []
+			}
+		45 => Conversation.dm_members(arg(0))
+		46 => [Conversation.dm_title(arg(0), arg(1))]
+		47 => [Conversation.channel_title(arg(0))]
+		48 => [Conversation.topic_title(arg(0), arg(1))]
+		49 => [bool(Conversation.has_topic(List.drop_first(req.args, 1), arg(0)))]
+		50 => [Conversation.dm_base(arg(0)), Conversation.channel_base(arg(0))]
 		_ => crash "twin: no function ${U8.to_str(req.which)}"
 	}
 }

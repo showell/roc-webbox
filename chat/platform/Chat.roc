@@ -70,6 +70,13 @@ Chat := [].{
 	## two routes are equal exactly when they go the same place.
 	Route : { family : Family, key : List(U8), rest : List(U8), sid : List(U8), part : Part, tail : Tail }
 
+	## A DM or channel the Roc found to be the member's (chat/main.roc
+	## `find!`), as the host takes it for an operation on it: `family` `Dm`
+	## or `Channel`, `key` its pair or name, `base` its URL base, `members`
+	## each member once (whom a message is fanned out to). The host keeps no
+	## conversation between calls: each operation is handed this.
+	Conv : { family : Family, key : List(U8), base : List(U8), members : List(List(U8)) }
+
 	## What the answer is:
 	## - `Serve`: Zig serves `route` (marking presence first when `presence`);
 	## - `Redirect`: a 303 to `location`;

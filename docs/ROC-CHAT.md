@@ -495,20 +495,22 @@ status and body, 3 a 405 (sent by webbox's `methodNotAllowed`, which also
 declines an `Expect`), 4 already answered by the host inside the call (a
 body too big) or failed there, 5 a malformed form (the site's own 400). The
 request carries its `method`. The Roc's routes ask the host through hosted
-functions inside the call: `presence!`, `topic!` (the conversation lookup,
-O2's until then, and whether the topic is there), `body!`, `reactions!`,
+functions inside the call: `presence!`, the reads the conversation lookup
+decides on (O2: `account!`, `name!`, `channel_members!`, `topics!`), `body!`, `reactions!`,
 `react!` and the pins (`pins!`, `write_pins!`, `remove_pins!`: the set is
-ChatState.roc's, the file the host's). A failure in one is kept by the host and returned once
+ChatState.roc's, the file the host's); each that works on a conversation is
+handed it (`Chat.Conv`, a record crossing by value) and the host keeps none
+between calls. A failure in one is kept by the host and returned once
 the call has ended, as `member!`'s already was. The writes inside a call
 are safe on metal for the reason §6.2's send relies on: a pump runs the
 kernel's turn and its fixed Zig render, never a handler, and the busy word
 refuses any Roc call beside this one.
 
 **As built for C3**, more answers and hosted functions: `kind` 6 is
-webbox's plain 404 and 7 a 302 to `location`; the reads are `landing!`,
+webbox's plain 404 and 7 a 302 to `location`; the reads are
 `page!`, `srcs!`, `me!`, `viewer!`, `last_conv!`, `last_viewed!`, `now!`
 (where a DM resumes is ChatState.roc's choice),
-`topics!`, `channels!`, `members!` and `conv!`, the writes `bookmark!` and
+`topics!`, `channels!` and `members!`, the writes `bookmark!` and
 `append!`, and `body!` takes which form's limit. Lists of records (the
 sidebar, the members) cross as flat lists of byte strings, one decoder
 each side, until P8 generates layouts. **After a failure the host does
@@ -646,6 +648,7 @@ chat/                      the Roc app
   ZigText.roc              parseInt, std.json.fmt, trims, byte lines        (pure)
   Time.roc                 RFC3339 UTC, civil dates (timefmt.zig)           (pure)
   ChatState.roc            where a DM resumes; a pin set, parsed and rewritten (chat_state.zig) (pure)
+  Conversation.roc         a route's DM or channel: the pair's other half, members, URL base, titles, a topic found without case (chat.zig findConv) (pure)
   Feeds.roc                images.md / code.md entries, fence scanner       (pure)
   Page.roc                 page, chrome, sidebar JSON, escaping             (pure)
   Store.roc                messageCount, append, reactions, pins, bookmarks (effects)
@@ -698,7 +701,7 @@ stored.
 
 **As O1 landed (2026-10-26).** Steps 1, 2 and 10 are the Roc's (chat/main.roc
 `send!`, `store!`), and so is the order of 3-5: the conversation first
-(`Host.send_conv!`, which is the old `findConv`: the pair's other account,
+(chat/main.roc `find!`, the old `findConv`'s rule: the pair's other account,
 the channel's members), then the method, the `X-Chat-Async` header, the
 body, the empty and non-UTF-8 checks, the hostile check (`Host.hostile!`,
 whose 400 and edge count are the host's), the bookmark for a DM, and the
@@ -877,7 +880,7 @@ the transcript header stays `date:`; and `.count` still has two trust rules
 | C2 | The twin-test kit: a Zig function and its Roc twin run on the same inputs (a fixed `now`, a copy of one tree, seeded randomness), their answers and the files they leave compared; corpora of poison blocks, mixed-case sids and non-UTF-8 names; failure injection | ag, rw | CC | L |
 | O1 | `send` in Roc (§6.2) over U2, with failure injection at every step (**done for steps 1-5 and 10**: chat/main.roc `send!` and `store!` serve every send, a DM's and a channel's, judging the form, the empty and non-UTF-8 message, the async header and the bookmark's order in Roc; the conversation, the hostile check and the store's `appendMessage` are the host's, as hosted functions; a conversation that is not there or not the member's is handed back, so its 404s are the Zig's own; held to the old Zig by angry-gopher `chat_actions_twin_test.zig`, now 129 requests both ways, every answer and file the same, by chat_hosted.zig's scripted host for the order of the calls and the hostile and failed-store paths no request can reach, and by router_failures_test.zig for a store, a bookmark and a member list that fail; every mutant killed) | rw | CC | M |
 | M2 | **Milestone 2** (§7) | rw, ag | CC; box releases | S |
-| O2 | The conversation lookup in Roc: the participant check, the other account, the channel's members, the first topic, whether the topic exists, the titles | rw | CC | M |
+| O2 | The conversation lookup in Roc (**done**: chat/Conversation.roc decides a DM's other half by chatKeyParticipant's rule, its members, the URL bases, the titles and whether a topic is there without case; chat/main.roc `find!` asks the host only `account!`, `name!`, `channel_members!` and `topics!`, and hands the conversation it found (`Chat.Conv`: family, key, base, members) to every hosted function that works on one, so the host holds no conversation between calls (`topic!`, `landing!`, `conv!`, `send_conv!` gone); a DM page's bookmark is the Roc's `bookmark!` before `page!`; held by twins over generated keys, malformed ones too, and hostile names, the scenario (the DM with yourself, keys not canonical, a partner with no name) and failures injected (a malformed channel, a name that will not read); every mutant killed) | rw | CC | M |
 
 ### Streams
 

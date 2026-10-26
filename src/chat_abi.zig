@@ -34,47 +34,67 @@ pub const RouteRec = extern struct { key: RocBytes, rest: RocBytes, sid: RocByte
 pub const Answer = extern struct { body: RocBytes, content_type: RocBytes, location: RocBytes, route: RouteRec, status: u16, allow: Method, kind: route_mod.Kind, nosniff: bool, presence: bool };
 /// Host.roc's `{ ok : Bool, bytes : List(U8) }`.
 pub const Got = extern struct { bytes: RocBytes, ok: bool };
+/// Chat.roc's `Conv`, as Roc hands it to a hosted function.
+pub const ConvRec = extern struct { base: RocBytes, key: RocBytes, members: roc.RocBytesList, family: Family };
 
 comptime {
     const w = @sizeOf(usize);
-    std.debug.assert(@sizeOf(RocBytes) == 3 * w and @sizeOf(Request) == 4 * w and @sizeOf(RouteRec) == 10 * w and @sizeOf(Answer) == 20 * w and @sizeOf(Got) == 4 * w);
+    std.debug.assert(@sizeOf(RocBytes) == 3 * w and @sizeOf(Request) == 4 * w and @sizeOf(RouteRec) == 10 * w and @sizeOf(Answer) == 20 * w and @sizeOf(Got) == 4 * w and @sizeOf(ConvRec) == 10 * w);
 }
+
+/// **A CONVERSATION THE ROC FOUND TO BE THE MEMBER'S** (chat/main.roc
+/// `find!`), handed to each hosted function that works on one: the host
+/// holds no conversation between calls. `family` is `.dm` or `.channel`;
+/// `members` each member once. Its bytes are the call's.
+pub const Conv = struct {
+    family: Family,
+    key: []const u8,
+    base: []const u8,
+    members: []const []const u8,
+
+    fn of(r: ConvRec) Conv {
+        const items = r.members.slice();
+        const members = roc.alloc().alloc([]const u8, items.len) catch @panic("roc_chat: out of memory for a conversation's members");
+        for (items, members) |*it, *m| m.* = it.slice();
+        return .{ .family = r.family, .key = r.key.slice(), .base = r.base.slice(), .members = members };
+    }
+};
 
 extern fn roc_chat_handle(req: Request) callconv(.c) Answer;
 
 /// **WHAT ANSWERS THE HOSTED FUNCTIONS** during a call: the host's, with its
-/// own context (the request, its `Io`, the topic it found). Set by `decide`
-/// for the call alone. Bytes handed in are the call's, good until it ends;
-/// bytes handed back are the host's, copied into the call here.
+/// own context (the request, its `Io`). Set by `decide` for the call alone.
+/// Bytes handed in are the call's, good until it ends; bytes handed back
+/// are the host's, copied into the call here.
 pub const Host = struct {
     ctx: *anyopaque,
     /// Host.member!.
     member: *const fn (ctx: *anyopaque) bool,
     /// Host.presence!.
     presence: *const fn (ctx: *anyopaque) void,
-    /// Host.topic!.
-    topic: *const fn (ctx: *anyopaque, family: Family, key: []const u8, sid: []const u8) bool,
+    /// Host.account!: whether account `id` exists.
+    account: *const fn (ctx: *anyopaque, id: []const u8) bool = noAccount,
+    /// Host.name!: account `id`'s name, or "".
+    name: *const fn (ctx: *anyopaque, id: []const u8) []const u8 = noKeyBytes,
+    /// Host.channel_members!: none when there is no such channel.
+    channel_members: *const fn (ctx: *anyopaque, name: []const u8) []const []const u8 = noKeyList,
     /// Host.body!: read to `which` form's limit; null
     /// when the host answered (too big) or failed.
     body: *const fn (ctx: *anyopaque, which: route_mod.Form) ?[]const u8,
-    /// Host.reactions!: null when it failed.
-    reactions: *const fn (ctx: *anyopaque) ?[]const u8,
+    /// Host.reactions!: topic `sid`'s sidecar in `conv`; null when it failed.
+    reactions: *const fn (ctx: *anyopaque, conv: Conv, sid: []const u8) ?[]const u8,
     /// Host.react!.
-    react: *const fn (ctx: *anyopaque, msg: u64, emoji: []const u8, on: bool) route_mod.Reacted,
-    /// Host.pins!: the member's pinned file for the found topic's
-    /// conversation ("" for none); null when the read failed, never "".
-    pins: *const fn (ctx: *anyopaque) ?[]const u8,
+    react: *const fn (ctx: *anyopaque, conv: Conv, sid: []const u8, msg: u64, emoji: []const u8, on: bool) route_mod.Reacted,
+    /// Host.pins!: the member's pinned file for `conv` ("" for none); null
+    /// when the read failed, never "".
+    pins: *const fn (ctx: *anyopaque, conv: Conv) ?[]const u8,
     /// Host.write_pins!, Host.remove_pins!: that file written as the Roc
     /// made it, or removed; false when it failed.
-    write_pins: *const fn (ctx: *anyopaque, bytes: []const u8) bool,
-    remove_pins: *const fn (ctx: *anyopaque) bool,
-    /// Host.landing!: none when the conversation is not the member's (or
-    /// the lookup failed); else its base and first topic, and when it has
-    /// none, the viewer and the conversation's title.
-    landing: *const fn (ctx: *anyopaque, family: Family, key: []const u8) []const []const u8 = noLanding,
-    /// Host.page!: the conversation page's data (Pages.roc reads it), or
-    /// none when it failed.
-    page: *const fn (ctx: *anyopaque) []const []const u8 = noPage,
+    write_pins: *const fn (ctx: *anyopaque, conv: Conv, bytes: []const u8) bool,
+    remove_pins: *const fn (ctx: *anyopaque, conv: Conv) bool,
+    /// Host.page!: topic `sid`'s page's data in `conv` (Pages.roc reads
+    /// it), or none when it failed.
+    page: *const fn (ctx: *anyopaque, conv: Conv, sid: []const u8) []const []const u8 = noPage,
     /// Host.srcs!: where a page names each script, as `name, src` pairs.
     srcs: *const fn (ctx: *anyopaque) []const []const u8 = noSrcs,
     /// Host.me!, Host.viewer!, Host.last_conv!: the member's id, name, and
@@ -87,41 +107,46 @@ pub const Host = struct {
     /// Host.now!: the request's time, Unix seconds.
     now: *const fn (ctx: *anyopaque) i64 = noNow,
     /// Host.topics!: a DM's or a channel's topics.
-    topics: *const fn (ctx: *anyopaque, family: Family, key: []const u8) []const []const u8 = noLanding,
+    topics: *const fn (ctx: *anyopaque, family: Family, key: []const u8) []const []const u8 = noTopics,
     /// Host.channels!, Host.members!: the member's channels; every member as
     /// `id, name` pairs.
-    channels: *const fn (ctx: *anyopaque) []const []const u8 = noPage,
-    members: *const fn (ctx: *anyopaque) []const []const u8 = noPage,
-    /// Host.conv!: a conversation for a new topic, or none.
-    conv: *const fn (ctx: *anyopaque, family: Family, key: []const u8) []const []const u8 = noLanding,
-    /// Host.bookmark!, Host.append!: false when they failed.
-    bookmark: *const fn (ctx: *anyopaque, sid: []const u8) bool = noBookmark,
-    append: *const fn (ctx: *anyopaque, sid: []const u8, name: []const u8, markdown: []const u8, cid: []const u8) bool = noAppend,
-    /// Host.send_conv!: a topic to send to, or none.
-    send_conv: *const fn (ctx: *anyopaque, family: Family, key: []const u8, sid: []const u8) []const []const u8 = noSendConv,
+    channels: *const fn (ctx: *anyopaque) []const []const u8 = noList,
+    members: *const fn (ctx: *anyopaque) []const []const u8 = noList,
+    /// Host.bookmark!: topic `sid` recorded as where the member resumes DM
+    /// `conv`; Host.append!: a message appended to topic `sid` of `conv`.
+    /// False when they failed.
+    bookmark: *const fn (ctx: *anyopaque, conv: Conv, sid: []const u8) bool = noBookmark,
+    append: *const fn (ctx: *anyopaque, conv: Conv, sid: []const u8, name: []const u8, markdown: []const u8, cid: []const u8) bool = noAppend,
     /// Host.header!: a request header's value, or none.
     header: *const fn (ctx: *anyopaque, name: []const u8) []const []const u8 = noHeader,
     /// Host.hostile!.
     hostile: *const fn (ctx: *anyopaque, markdown: []const u8) route_mod.Hostility = noHostile,
-    /// Host.raw!, Host.links!: whether the host holds the topic's
-    /// transcript, the member's links page rendered, for a `held` answer.
-    raw: *const fn (ctx: *anyopaque) bool = noHeld,
+    /// Host.raw!: whether the host holds topic `sid`'s transcript in
+    /// `conv`, for a `held` answer.
+    raw: *const fn (ctx: *anyopaque, conv: Conv, sid: []const u8) bool = noRaw,
+    /// Host.links!: whether the host holds the member's links page
+    /// rendered, for a `held` answer.
     links: *const fn (ctx: *anyopaque) bool = noHeld,
     /// Host.feed!: the member's images.md or code.md, or none.
     feed: *const fn (ctx: *anyopaque, which: route_mod.Feed) []const []const u8 = noFeed,
     /// Host.recent!: the member's recent rows, nine fields each, or none.
-    recent: *const fn (ctx: *anyopaque) []const []const u8 = noPage,
+    recent: *const fn (ctx: *anyopaque) []const []const u8 = noList,
 };
 
 fn noHeld(_: *anyopaque) bool {
-    @panic("raw or links asked of a host that does not answer it");
+    @panic("links asked of a host that does not answer it");
+}
+fn noRaw(_: *anyopaque, _: Conv, _: []const u8) bool {
+    @panic("raw asked of a host that does not answer it");
 }
 fn noFeed(_: *anyopaque, _: route_mod.Feed) []const []const u8 {
     @panic("feed asked of a host that does not answer it");
 }
-
-fn noSendConv(_: *anyopaque, _: Family, _: []const u8, _: []const u8) []const []const u8 {
-    @panic("send_conv asked of a host that does not answer it");
+fn noAccount(_: *anyopaque, _: []const u8) bool {
+    @panic("account asked of a host that does not answer it");
+}
+fn noKeyList(_: *anyopaque, _: []const u8) []const []const u8 {
+    @panic("channel_members asked of a host that does not answer it");
 }
 fn noHeader(_: *anyopaque, _: []const u8) []const []const u8 {
     @panic("header asked of a host that does not answer it");
@@ -139,18 +164,21 @@ fn noKeyBytes(_: *anyopaque, _: []const u8) []const u8 {
 fn noNow(_: *anyopaque) i64 {
     @panic("now asked of a host that does not answer it");
 }
-fn noBookmark(_: *anyopaque, _: []const u8) bool {
+fn noBookmark(_: *anyopaque, _: Conv, _: []const u8) bool {
     @panic("bookmark asked of a host that does not answer it");
 }
-fn noAppend(_: *anyopaque, _: []const u8, _: []const u8, _: []const u8, _: []const u8) bool {
+fn noAppend(_: *anyopaque, _: Conv, _: []const u8, _: []const u8, _: []const u8, _: []const u8) bool {
     @panic("append asked of a host that does not answer it");
 }
 
-fn noLanding(_: *anyopaque, _: Family, _: []const u8) []const []const u8 {
-    @panic("landing asked of a host that does not answer it");
+fn noTopics(_: *anyopaque, _: Family, _: []const u8) []const []const u8 {
+    @panic("topics asked of a host that does not answer it");
 }
-fn noPage(_: *anyopaque) []const []const u8 {
+fn noPage(_: *anyopaque, _: Conv, _: []const u8) []const []const u8 {
     @panic("page asked of a host that does not answer it");
+}
+fn noList(_: *anyopaque) []const []const u8 {
+    @panic("a hosted list asked of a host that does not answer it");
 }
 fn noSrcs(_: *anyopaque) []const []const u8 {
     @panic("srcs asked of a host that does not answer it");
@@ -159,8 +187,8 @@ var host: ?Host = null;
 
 /// **A HOST FOR THE ROUTER ALONE**, for a test of its decisions: it says
 /// whether the one asking is a member, records whether the Roc counted
-/// presence itself, and finds no topic, so a route the Roc serves goes to
-/// Zig as every other does. Nothing else is asked once no topic is found.
+/// presence itself, and has no conversation for the member (no id, no
+/// channel), so a route the Roc serves goes to Zig as every other does.
 pub const Routing = struct {
     member: bool = true,
     asked: bool = false,
@@ -170,19 +198,17 @@ pub const Routing = struct {
     pub fn host(r: *Routing) Host {
         var h = askingOnly(r, ask);
         h.presence = mark;
-        h.topic = none;
-        h.landing = noConv;
-        h.conv = noConv;
         // The routes the Roc serves outright meet a member with nothing: no
-        // last DM, no other members, no channels, no topics.
+        // id (so no DM is theirs), no last DM, no other members, no
+        // channels, no topics.
         h.me = empty;
         h.viewer = empty;
         h.last_conv = empty;
+        h.channel_members = noMembers;
         h.srcs = nothing;
         h.members = nothing;
         h.channels = nothing;
-        h.topics = noConv;
-        h.send_conv = noSendTo;
+        h.topics = noTopicsHere;
         h.links = holdsNone;
         h.feed = noFile;
         h.recent = nothing;
@@ -198,13 +224,10 @@ pub const Routing = struct {
     fn mark(ctx: *anyopaque) void {
         of(ctx).marked = true;
     }
-    fn none(_: *anyopaque, _: Family, _: []const u8, _: []const u8) bool {
-        return false;
-    }
-    fn noConv(_: *anyopaque, _: Family, _: []const u8) []const []const u8 {
+    fn noMembers(_: *anyopaque, _: []const u8) []const []const u8 {
         return &.{};
     }
-    fn noSendTo(_: *anyopaque, _: Family, _: []const u8, _: []const u8) []const []const u8 {
+    fn noTopicsHere(_: *anyopaque, _: Family, _: []const u8) []const []const u8 {
         return &.{};
     }
     fn empty(_: *anyopaque) []const u8 {
@@ -228,26 +251,26 @@ pub fn askingOnly(ctx: *anyopaque, ask: *const fn (ctx: *anyopaque) bool) Host {
         fn presence(_: *anyopaque) void {
             @panic("presence asked of a host that only answers who is asking");
         }
-        fn topic(_: *anyopaque, _: Family, _: []const u8, _: []const u8) bool {
-            @panic("topic asked of a host that only answers who is asking");
-        }
-        fn bytes(_: *anyopaque) ?[]const u8 {
-            @panic("bytes asked of a host that only answers who is asking");
-        }
         fn body(_: *anyopaque, _: route_mod.Form) ?[]const u8 {
             @panic("body asked of a host that only answers who is asking");
         }
-        fn react(_: *anyopaque, _: u64, _: []const u8, _: bool) route_mod.Reacted {
+        fn topicBytes(_: *anyopaque, _: Conv, _: []const u8) ?[]const u8 {
+            @panic("reactions asked of a host that only answers who is asking");
+        }
+        fn pins(_: *anyopaque, _: Conv) ?[]const u8 {
+            @panic("pins asked of a host that only answers who is asking");
+        }
+        fn react(_: *anyopaque, _: Conv, _: []const u8, _: u64, _: []const u8, _: bool) route_mod.Reacted {
             @panic("react asked of a host that only answers who is asking");
         }
-        fn writePins(_: *anyopaque, _: []const u8) bool {
+        fn writePins(_: *anyopaque, _: Conv, _: []const u8) bool {
             @panic("write_pins asked of a host that only answers who is asking");
         }
-        fn removePins(_: *anyopaque) bool {
+        fn removePins(_: *anyopaque, _: Conv) bool {
             @panic("remove_pins asked of a host that only answers who is asking");
         }
     };
-    return .{ .ctx = ctx, .member = ask, .presence = No.presence, .topic = No.topic, .body = No.body, .reactions = No.bytes, .react = No.react, .pins = No.bytes, .write_pins = No.writePins, .remove_pins = No.removePins };
+    return .{ .ctx = ctx, .member = ask, .presence = No.presence, .body = No.body, .reactions = No.topicBytes, .react = No.react, .pins = No.pins, .write_pins = No.writePins, .remove_pins = No.removePins };
 }
 
 /// The call's host, or a panic for a hosted function Roc ran outside one.
@@ -271,9 +294,19 @@ export fn roc_chat_presence() callconv(.c) void {
     h.presence(h.ctx);
 }
 
-export fn roc_chat_topic(family: Family, key: RocBytes, sid: RocBytes) callconv(.c) bool {
-    const h = current("topic");
-    return h.topic(h.ctx, family, key.slice(), sid.slice());
+export fn roc_chat_account(id: RocBytes) callconv(.c) bool {
+    const h = current("account");
+    return h.account(h.ctx, id.slice());
+}
+
+export fn roc_chat_name(id: RocBytes) callconv(.c) RocBytes {
+    const h = current("name");
+    return .from(h.name(h.ctx, id.slice()));
+}
+
+export fn roc_chat_channel_members(name: RocBytes) callconv(.c) roc.RocBytesList {
+    const h = current("channel_members");
+    return .from(h.channel_members(h.ctx, name.slice()));
 }
 
 export fn roc_chat_body(which: route_mod.Form) callconv(.c) Got {
@@ -281,39 +314,34 @@ export fn roc_chat_body(which: route_mod.Form) callconv(.c) Got {
     return got(h.body(h.ctx, which));
 }
 
-export fn roc_chat_reactions() callconv(.c) Got {
+export fn roc_chat_reactions(conv: ConvRec, sid: RocBytes) callconv(.c) Got {
     const h = current("reactions");
-    return got(h.reactions(h.ctx));
+    return got(h.reactions(h.ctx, .of(conv), sid.slice()));
 }
 
-export fn roc_chat_react(msg: u64, emoji: RocBytes, on: bool) callconv(.c) route_mod.Reacted {
+export fn roc_chat_react(conv: ConvRec, sid: RocBytes, msg: u64, emoji: RocBytes, on: bool) callconv(.c) route_mod.Reacted {
     const h = current("react");
-    return h.react(h.ctx, msg, emoji.slice(), on);
+    return h.react(h.ctx, .of(conv), sid.slice(), msg, emoji.slice(), on);
 }
 
-export fn roc_chat_pins() callconv(.c) Got {
+export fn roc_chat_pins(conv: ConvRec) callconv(.c) Got {
     const h = current("pins");
-    return got(h.pins(h.ctx));
+    return got(h.pins(h.ctx, .of(conv)));
 }
 
-export fn roc_chat_write_pins(bytes: RocBytes) callconv(.c) bool {
+export fn roc_chat_write_pins(conv: ConvRec, bytes: RocBytes) callconv(.c) bool {
     const h = current("write_pins");
-    return h.write_pins(h.ctx, bytes.slice());
+    return h.write_pins(h.ctx, .of(conv), bytes.slice());
 }
 
-export fn roc_chat_remove_pins() callconv(.c) bool {
+export fn roc_chat_remove_pins(conv: ConvRec) callconv(.c) bool {
     const h = current("remove_pins");
-    return h.remove_pins(h.ctx);
+    return h.remove_pins(h.ctx, .of(conv));
 }
 
-export fn roc_chat_landing(family: Family, key: RocBytes) callconv(.c) roc.RocBytesList {
-    const h = current("landing");
-    return .from(h.landing(h.ctx, family, key.slice()));
-}
-
-export fn roc_chat_page() callconv(.c) roc.RocBytesList {
+export fn roc_chat_page(conv: ConvRec, sid: RocBytes) callconv(.c) roc.RocBytesList {
     const h = current("page");
-    return .from(h.page(h.ctx));
+    return .from(h.page(h.ctx, .of(conv), sid.slice()));
 }
 
 export fn roc_chat_me() callconv(.c) RocBytes {
@@ -356,24 +384,14 @@ export fn roc_chat_members() callconv(.c) roc.RocBytesList {
     return .from(h.members(h.ctx));
 }
 
-export fn roc_chat_conv(family: Family, key: RocBytes) callconv(.c) roc.RocBytesList {
-    const h = current("conv");
-    return .from(h.conv(h.ctx, family, key.slice()));
-}
-
-export fn roc_chat_bookmark(sid: RocBytes) callconv(.c) bool {
+export fn roc_chat_bookmark(conv: ConvRec, sid: RocBytes) callconv(.c) bool {
     const h = current("bookmark");
-    return h.bookmark(h.ctx, sid.slice());
+    return h.bookmark(h.ctx, .of(conv), sid.slice());
 }
 
-export fn roc_chat_append(sid: RocBytes, name: RocBytes, markdown: RocBytes, cid: RocBytes) callconv(.c) bool {
+export fn roc_chat_append(conv: ConvRec, sid: RocBytes, name: RocBytes, markdown: RocBytes, cid: RocBytes) callconv(.c) bool {
     const h = current("append");
-    return h.append(h.ctx, sid.slice(), name.slice(), markdown.slice(), cid.slice());
-}
-
-export fn roc_chat_send_conv(family: Family, key: RocBytes, sid: RocBytes) callconv(.c) roc.RocBytesList {
-    const h = current("send_conv");
-    return .from(h.send_conv(h.ctx, family, key.slice(), sid.slice()));
+    return h.append(h.ctx, .of(conv), sid.slice(), name.slice(), markdown.slice(), cid.slice());
 }
 
 export fn roc_chat_header(name: RocBytes) callconv(.c) roc.RocBytesList {
@@ -386,9 +404,9 @@ export fn roc_chat_hostile(markdown: RocBytes) callconv(.c) route_mod.Hostility 
     return h.hostile(h.ctx, markdown.slice());
 }
 
-export fn roc_chat_raw() callconv(.c) bool {
+export fn roc_chat_raw(conv: ConvRec, sid: RocBytes) callconv(.c) bool {
     const h = current("raw");
-    return h.raw(h.ctx);
+    return h.raw(h.ctx, .of(conv), sid.slice());
 }
 
 export fn roc_chat_feed(which: route_mod.Feed) callconv(.c) roc.RocBytesList {
