@@ -108,6 +108,10 @@ Host := [].{
 	## server's own markdown: none when there is none (or the read failed).
 	links! : {} => List(List(U8))
 
+	## The member's feed file as stored (`which`: 0 images.md, 1 code.md):
+	## none when there is none (or the read failed).
+	feed! : U8 => List(List(U8))
+
 	## Whether markdown is hostile: 0 no, 1 yes and the host has refused it
 	## (webbox's edge counter and its 400), 2 the check failed.
 	hostile! : List(U8) => U8

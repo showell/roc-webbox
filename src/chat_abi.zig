@@ -107,7 +107,13 @@ pub const Host = struct {
     /// page rendered, or none.
     raw: *const fn (ctx: *anyopaque) []const []const u8 = noPage,
     links: *const fn (ctx: *anyopaque) []const []const u8 = noPage,
+    /// Host.feed!: the member's images.md (0) or code.md (1), or none.
+    feed: *const fn (ctx: *anyopaque, which: u8) []const []const u8 = noFeed,
 };
+
+fn noFeed(_: *anyopaque, _: u8) []const []const u8 {
+    @panic("feed asked of a host that does not answer it");
+}
 
 fn noSendConv(_: *anyopaque, _: u8, _: []const u8, _: []const u8) []const []const u8 {
     @panic("send_conv asked of a host that does not answer it");
@@ -170,6 +176,7 @@ pub const Routing = struct {
         h.topics = noConv;
         h.send_conv = noSendTo;
         h.links = nothing;
+        h.feed = noFile;
         return h;
     }
     fn of(ctx: *anyopaque) *Routing {
@@ -195,6 +202,9 @@ pub const Routing = struct {
         return "";
     }
     fn nothing(_: *anyopaque) []const []const u8 {
+        return &.{};
+    }
+    fn noFile(_: *anyopaque, _: u8) []const []const u8 {
         return &.{};
     }
 };
@@ -349,6 +359,11 @@ export fn roc_chat_hostile(markdown: RocBytes) callconv(.c) u8 {
 export fn roc_chat_raw() callconv(.c) roc.RocBytesList {
     const h = current("raw");
     return .from(h.raw(h.ctx));
+}
+
+export fn roc_chat_feed(which: u8) callconv(.c) roc.RocBytesList {
+    const h = current("feed");
+    return .from(h.feed(h.ctx, which));
 }
 
 export fn roc_chat_links() callconv(.c) roc.RocBytesList {

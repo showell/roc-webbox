@@ -66,6 +66,28 @@ Pages := [].{
 	links_css : Str
 	links_css = "<style>\n.links-page { max-width: 46rem; margin: 0 auto; line-height: 1.55; }\n.links-page h2 { margin-top: 1.6rem; }\n.links-page li { margin: 3px 0; }\n</style>"
 
+	## images.zig's and code.zig's pages: the attention strip, the feed's
+	## mount, its JSON (`json`, script-safe) and its scripts.
+	feed : (List(U8) -> List(U8)), List(U8), Str, List(U8), List(Str) -> List(U8)
+	feed = |src, viewer, name, json, scripts| {
+		title = Str.to_utf8(if name == "images" "Images" else "Code")
+		s = { tab: title, title, viewer, active: Str.to_utf8(name), src }
+		Chrome.page(s, List.join([
+			Str.to_utf8("<div class=\"chat-notify\" id=\"chat-notify\"></div><div id=\"${name}-mount\"></div><script id=\"${name}-data\" type=\"application/json\">"),
+			Html.script_safe(json),
+			Str.to_utf8("</script>"),
+			List.join(List.map(scripts, |js| Chrome.script(s, js))),
+		]))
+	}
+
+	## /chat/images: the newest entries of the member's images.md.
+	images : (List(U8) -> List(U8)), List(U8), List(U8) -> List(U8)
+	images = |src, viewer, json| feed(src, viewer, "images", json, ["styles.js", "chat_image_popup.js", "images.js", "notify.js"])
+
+	## /chat/code: every entry of the member's code.md.
+	code : (List(U8) -> List(U8)), List(U8), List(U8) -> List(U8)
+	code = |src, viewer, json| feed(src, viewer, "code", json, ["styles.js", "chat_code_popup.js", "code.js", "notify.js"])
+
 	## noConversationsHtml: /chat for a viewer with nothing to resume.
 	no_conversations : (List(U8) -> List(U8)), List(U8) -> List(U8)
 	no_conversations = |src, viewer|

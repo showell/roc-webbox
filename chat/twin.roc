@@ -16,6 +16,7 @@ import Reaction
 import Chrome
 import Pages
 import Html
+import Feeds
 
 call : { which : U8, args : List(List(U8)) } -> List(List(U8))
 call = |req| {
@@ -99,6 +100,8 @@ call = |req| {
 		}
 		36 => [Html.escape(arg(0))]
 		37 => [Html.script_safe(arg(0))]
+		38 => [Feeds.images_json(Feeds.images(arg(0)), u64(arg(1)))]
+		39 => [Feeds.code_json(Feeds.code(arg(0)))]
 		_ => crash "twin: no function ${U8.to_str(req.which)}"
 	}
 }

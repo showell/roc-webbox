@@ -25,6 +25,7 @@ import Paths
 import Topics
 import Form
 import ZigText
+import Feeds
 
 handle! : Chat.Request => Chat.Answer
 handle! = |req|
@@ -52,12 +53,13 @@ is_page : Route.R -> Bool
 is_page = |r|
 	(r.family == 11 or r.family == 12) and (r.part == 0 or (r.part == 3 and (r.tail == 0 or r.tail == 7)))
 
-## /chat and /chat/default (2), /chat/links (7), /chat/conversations (9),
+## /chat and /chat/default (2), /chat/images (5) and /chat/code (6) but
+## their streams, /chat/links (7), /chat/conversations (9),
 ## /chat/msg/<id> (10), and in a DM or a channel a new topic (part 1) or a send (tail 3,
 ## or 13 with segments after it).
 is_own : Route.R -> Bool
 is_own = |r|
-	r.family == 2 or r.family == 7 or r.family == 9 or r.family == 10 or ((r.family == 11 or r.family == 12) and (r.part == 1 or (r.part == 3 and (r.tail == 3 or r.tail == 13))))
+	r.family == 2 or ((r.family == 5 or r.family == 6) and r.rest != Str.to_utf8("/stream")) or r.family == 7 or r.family == 9 or r.family == 10 or ((r.family == 11 or r.family == 12) and (r.part == 1 or (r.part == 3 and (r.tail == 3 or r.tail == 13))))
 
 ## The Roc's own routes, in the Zig's order: presence; the conversation and
 ## the topic (a miss is Zig's to answer, the same 404s); the method; then
@@ -73,6 +75,8 @@ act! = |req, route| {
 		msg!(route.rest)
 	} else if route.family == 7 {
 		links!(route.rest)
+	} else if route.family == 5 or route.family == 6 {
+		feed!(route.family == 5, route.rest)
 	} else if route.part == 1 {
 		new_topic!(req, route)
 	} else if route.tail == 3 or route.tail == 13 {
@@ -142,6 +146,22 @@ links! = |rest|
 	} else {
 		viewer = Host.viewer!({})
 		Chat.respond(200, html, Pages.links(Chrome.src_in(Host.srcs!({})), viewer, Host.links!({})))
+	}
+
+## /chat/images (the newest 20 entries) or /chat/code (every one), by any
+## method, as the Zig had them; nothing below them but their streams.
+feed! : Bool, List(U8) => Chat.Answer
+feed! = |images, rest|
+	if rest != [] {
+		Chat.not_found
+	} else {
+		viewer = Host.viewer!({})
+		file = match Host.feed!(if images 0 else 1) {
+			[bytes] => bytes
+			_ => []
+		}
+		src = Chrome.src_in(Host.srcs!({}))
+		Chat.respond(200, html, if images Pages.images(src, viewer, Feeds.images_json(Feeds.images(file), 20)) else Pages.code(src, viewer, Feeds.code_json(Feeds.code(file))))
 	}
 
 ## A conversation's landing: its first topic, or, with none, the page that
