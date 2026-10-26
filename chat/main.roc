@@ -27,6 +27,7 @@ import Form
 import ZigText
 import Feeds
 import Recent
+import ChatState
 
 handle! : Chat.Request => Chat.Answer
 handle! = |req|
@@ -119,13 +120,30 @@ in_conversation! = |req, route|
 					Chat.not_allowed(Post)
 				} else if route.tail == React {
 					react!({})
-				} else if Host.pin!(route.tail == Pin) {
+				} else if pin!(route.sid, route.tail == Pin) {
 					Chat.respond(204, [], [])
 				} else {
 					Chat.answered
 				}
 		}
 	}
+
+## POST .../pin and .../unpin: the member's pins in the conversation read,
+## `sid` pinned or unpinned (ChatState.pinned), and the file written back or,
+## emptied, removed. A read that failed stops here: the set is not empty, it
+## is unknown, and writing it would drop every pin. False when a step failed.
+pin! : List(U8), Bool => Bool
+pin! = |sid, on| {
+	got = Host.pins!({})
+	if !got.ok {
+		Bool.False
+	} else {
+		match ChatState.pinned(got.bytes, sid, on) {
+			Write(bytes) => Host.write_pins!(bytes)
+			Remove => Host.remove_pins!({})
+		}
+	}
+}
 
 ## POST .../react: the form, then the store's answer.
 react! : {} => Chat.Answer
@@ -233,12 +251,20 @@ resume! = |{}| {
 	conv = Host.last_conv!({})
 	if conv == [] or !Paths.participant(conv, Host.me!({})) {
 		Chat.respond(200, html, Pages.no_conversations(Chrome.src_in(Host.srcs!({})), Host.viewer!({})))
-	} else if Paths.first_of(Host.topics!(Dm, conv)) == [] {
-		Chat.redirect(List.concat(Str.to_utf8("/chat/c/"), conv))
 	} else {
-		Chat.redirect(List.join([Str.to_utf8("/chat/c/"), conv, [47], Host.resume_topic!(conv)]))
+		topics = Host.topics!(Dm, conv)
+		if Paths.first_of(topics) == [] {
+			Chat.redirect(List.concat(Str.to_utf8("/chat/c/"), conv))
+		} else {
+			Chat.redirect(List.join([Str.to_utf8("/chat/c/"), conv, [47], resume_at!(conv, topics)]))
+		}
 	}
 }
+
+## Where the member resumes DM `conv`, whose topics are `topics`: the choice
+## ChatState's, the last-viewed topic and the clock the host's.
+resume_at! : List(U8), List(List(U8)) => List(U8)
+resume_at! = |conv, topics| ChatState.resume_topic(topics, Host.last_viewed!(conv), Host.now!({}))
 
 ## /chat/conversations: a DM with every other member, where the member
 ## resumes it, and its topics.
@@ -256,8 +282,8 @@ entries! = |me, members, i, acc|
 				entries!(me, members, i + 2, acc)
 			} else {
 				conv = Paths.pair_key(me, id)
-				default = Host.resume_topic!(conv)
 				sessions = Host.topics!(Dm, conv)
+				default = resume_at!(conv, sessions)
 				entries!(me, members, i + 2, List.append(acc, { conv, id, name, default, sessions }))
 			}
 		_ => acc

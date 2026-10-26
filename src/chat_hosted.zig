@@ -97,6 +97,9 @@ const Scripted = struct {
     body: ?[]const u8 = "",
     reactions: ?[]const u8 = "",
     react_answer: route.Reacted = .stored,
+    /// The pinned file read, or null when the read failed.
+    pins: ?[]const u8 = "",
+    /// Whether writing or removing it succeeds.
     pin_ok: bool = true,
     send_to: []const []const u8 = &.{ "/chat/c/1_2", "1" },
     is_async: bool = false,
@@ -109,7 +112,7 @@ const Scripted = struct {
     alloc: std.mem.Allocator,
 
     fn host(self: *Scripted) Host {
-        return .{ .ctx = self, .member = member, .presence = presence, .topic = topic, .body = bodyOf, .reactions = reactionsOf, .react = react, .pin = pin, .send_conv = sendConv, .header = header, .hostile = hostile, .viewer = viewer, .bookmark = bookmark, .append = append, .raw = raw, .links = links, .srcs = srcs };
+        return .{ .ctx = self, .member = member, .presence = presence, .topic = topic, .body = bodyOf, .reactions = reactionsOf, .react = react, .pins = pinsOf, .write_pins = writePins, .remove_pins = removePins, .send_conv = sendConv, .header = header, .hostile = hostile, .viewer = viewer, .bookmark = bookmark, .append = append, .raw = raw, .links = links, .srcs = srcs };
     }
     fn me(ctx: *anyopaque) *Scripted {
         return @ptrCast(@alignCast(ctx));
@@ -141,8 +144,16 @@ const Scripted = struct {
         say(ctx, "react {d} {s} {}", .{ msg, emoji, on });
         return me(ctx).react_answer;
     }
-    fn pin(ctx: *anyopaque, pinned: bool) bool {
-        say(ctx, "pin {}", .{pinned});
+    fn pinsOf(ctx: *anyopaque) ?[]const u8 {
+        say(ctx, "pins", .{});
+        return me(ctx).pins;
+    }
+    fn writePins(ctx: *anyopaque, bytes: []const u8) bool {
+        say(ctx, "write_pins {s}", .{bytes});
+        return me(ctx).pin_ok;
+    }
+    fn removePins(ctx: *anyopaque) bool {
+        say(ctx, "remove_pins", .{});
         return me(ctx).pin_ok;
     }
     fn sendConv(ctx: *anyopaque, family: route.Family, key: []const u8, sid: []const u8) []const []const u8 {
@@ -252,13 +263,27 @@ test "a topic's reactions, react, pin and unpin are the Roc's: presence, the top
         s.reactions = null;
         break :blk s;
     }, .answered, "member;presence;topic dm 1_2 Plans;reactions;");
-    try expectAct("/c/1_2/Plans/pin", false, .POST, a, .{ .respond = .{ .status = 204 } }, "member;presence;topic dm 1_2 Plans;pin true;");
-    try expectAct("/ops/Plans/unpin", true, .POST, a, .{ .respond = .{ .status = 204 } }, "member;presence;topic channel ops Plans;pin false;");
+    // The set is the Roc's (ChatState.pinned): read, changed, written back
+    // sorted by bytes, or removed when emptied.
+    try expectAct("/c/1_2/Plans/pin", false, .POST, a, .{ .respond = .{ .status = 204 } }, "member;presence;topic dm 1_2 Plans;pins;write_pins Plans\n;");
+    try expectAct("/c/1_2/Plans/pin", false, .POST, blk: {
+        var s = a;
+        s.pins = "b\r\n  a\n\nPlans\n";
+        break :blk s;
+    }, .{ .respond = .{ .status = 204 } }, "member;presence;topic dm 1_2 Plans;pins;write_pins Plans\na\nb\n;");
+    try expectAct("/ops/Plans/unpin", true, .POST, a, .{ .respond = .{ .status = 204 } }, "member;presence;topic channel ops Plans;pins;remove_pins;");
     try expectAct("/c/1_2/Plans/unpin", false, .POST, blk: {
         var s = a;
+        s.pins = "Other\nPlans\n";
         s.pin_ok = false;
         break :blk s;
-    }, .answered, "member;presence;topic dm 1_2 Plans;pin false;");
+    }, .answered, "member;presence;topic dm 1_2 Plans;pins;write_pins Other\n;");
+    // A set that will not read is not an empty set: nothing is written.
+    try expectAct("/c/1_2/Plans/pin", false, .POST, blk: {
+        var s = a;
+        s.pins = null;
+        break :blk s;
+    }, .answered, "member;presence;topic dm 1_2 Plans;pins;");
     try expectAct("/c/1_2/Plans/pin", false, .PUT, a, .{ .not_allowed = .POST }, "member;presence;topic dm 1_2 Plans;");
     // A topic that is not there, or a conversation that is not the member's:
     // Zig's to answer, presence already counted.

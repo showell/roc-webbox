@@ -32,8 +32,17 @@ Host := [].{
 	## `NoSuchMessage`, or `Failed`.
 	react! : U64, List(U8), Bool => [Stored, NoSuchMessage, Failed]
 
-	## Pin the topic for the member, or unpin it; false when it failed.
-	pin! : Bool => Bool
+	## The member's pinned topics in the conversation `topic!` found, as
+	## the file holds them ("" when there is none); not `ok` when the read
+	## failed. **A SET THAT WILL NOT READ IS NOT AN EMPTY SET**: what is read
+	## is rewritten, so a failure read as "no pins" would drop every pin.
+	pins! : {} => { ok : Bool, bytes : List(U8) }
+
+	## Write that file as `bytes` (ChatState.pinned's); false when it failed.
+	write_pins! : List(U8) => Bool
+
+	## Remove that file, no pin being left; false when it failed.
+	remove_pins! : {} => Bool
 
 	## A DM's or channel's landing (`family`, `key` the route's): none when
 	## the conversation is not the member's (Zig answers why); else its URL
@@ -64,8 +73,13 @@ Host := [].{
 	## The DM the member was last in (their bookmark), or "".
 	last_conv! : {} => List(U8)
 
-	## Where the member resumes DM `conv`: its last topic, else a default.
-	resume_topic! : List(U8) => List(U8)
+	## The topic the member last viewed in DM `conv`, or "" (ChatState.resume_topic
+	## judges whether it is still there).
+	last_viewed! : List(U8) => List(U8)
+
+	## The request's time, in Unix seconds: the one time everything it
+	## stamps carries (a new conversation's topic is named for its date).
+	now! : {} => I64
 
 	## The topics of a DM (`Dm`, `key` its pair) or a channel (`Channel`, its
 	## name), as the store lists them.

@@ -18,6 +18,7 @@ import Pages
 import Html
 import Feeds
 import Recent
+import ChatState
 
 call : { which : U8, args : List(List(U8)) } -> List(List(U8))
 call = |req| {
@@ -105,6 +106,12 @@ call = |req| {
 		39 => [Feeds.code_json(Feeds.code(arg(0)))]
 		40 => [Recent.excerpt(arg(0))]
 		41 => [Recent.json(arg(0), Recent.rows(List.drop_first(req.args, 1)))]
+		42 => [ChatState.resume_topic(List.drop_first(req.args, 2), arg(0), int(arg(1)))]
+		43 =>
+			match ChatState.pinned(arg(0), arg(1), arg(2) == [49]) {
+				Write(bytes) => [bytes]
+				Remove => []
+			}
 		_ => crash "twin: no function ${U8.to_str(req.which)}"
 	}
 }

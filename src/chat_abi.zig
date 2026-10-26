@@ -61,8 +61,13 @@ pub const Host = struct {
     reactions: *const fn (ctx: *anyopaque) ?[]const u8,
     /// Host.react!.
     react: *const fn (ctx: *anyopaque, msg: u64, emoji: []const u8, on: bool) route_mod.Reacted,
-    /// Host.pin!: false when it failed.
-    pin: *const fn (ctx: *anyopaque, pinned: bool) bool,
+    /// Host.pins!: the member's pinned file for the found topic's
+    /// conversation ("" for none); null when the read failed, never "".
+    pins: *const fn (ctx: *anyopaque) ?[]const u8,
+    /// Host.write_pins!, Host.remove_pins!: that file written as the Roc
+    /// made it, or removed; false when it failed.
+    write_pins: *const fn (ctx: *anyopaque, bytes: []const u8) bool,
+    remove_pins: *const fn (ctx: *anyopaque) bool,
     /// Host.landing!: none when the conversation is not the member's (or
     /// the lookup failed); else its base and first topic, and when it has
     /// none, the viewer and the conversation's title.
@@ -77,8 +82,10 @@ pub const Host = struct {
     me: *const fn (ctx: *anyopaque) []const u8 = noBytes,
     viewer: *const fn (ctx: *anyopaque) []const u8 = noBytes,
     last_conv: *const fn (ctx: *anyopaque) []const u8 = noBytes,
-    /// Host.resume_topic!: where the member resumes DM `conv`.
-    resume_topic: *const fn (ctx: *anyopaque, conv: []const u8) []const u8 = noKeyBytes,
+    /// Host.last_viewed!: the topic the member last viewed in DM `conv`, or "".
+    last_viewed: *const fn (ctx: *anyopaque, conv: []const u8) []const u8 = noKeyBytes,
+    /// Host.now!: the request's time, Unix seconds.
+    now: *const fn (ctx: *anyopaque) i64 = noNow,
     /// Host.topics!: a DM's or a channel's topics.
     topics: *const fn (ctx: *anyopaque, family: Family, key: []const u8) []const []const u8 = noLanding,
     /// Host.channels!, Host.members!: the member's channels; every member as
@@ -128,6 +135,9 @@ fn noBytes(_: *anyopaque) []const u8 {
 }
 fn noKeyBytes(_: *anyopaque, _: []const u8) []const u8 {
     @panic("a hosted read asked of a host that does not answer it");
+}
+fn noNow(_: *anyopaque) i64 {
+    @panic("now asked of a host that does not answer it");
 }
 fn noBookmark(_: *anyopaque, _: []const u8) bool {
     @panic("bookmark asked of a host that does not answer it");
@@ -230,11 +240,14 @@ pub fn askingOnly(ctx: *anyopaque, ask: *const fn (ctx: *anyopaque) bool) Host {
         fn react(_: *anyopaque, _: u64, _: []const u8, _: bool) route_mod.Reacted {
             @panic("react asked of a host that only answers who is asking");
         }
-        fn pin(_: *anyopaque, _: bool) bool {
-            @panic("pin asked of a host that only answers who is asking");
+        fn writePins(_: *anyopaque, _: []const u8) bool {
+            @panic("write_pins asked of a host that only answers who is asking");
+        }
+        fn removePins(_: *anyopaque) bool {
+            @panic("remove_pins asked of a host that only answers who is asking");
         }
     };
-    return .{ .ctx = ctx, .member = ask, .presence = No.presence, .topic = No.topic, .body = No.body, .reactions = No.bytes, .react = No.react, .pin = No.pin };
+    return .{ .ctx = ctx, .member = ask, .presence = No.presence, .topic = No.topic, .body = No.body, .reactions = No.bytes, .react = No.react, .pins = No.bytes, .write_pins = No.writePins, .remove_pins = No.removePins };
 }
 
 /// The call's host, or a panic for a hosted function Roc ran outside one.
@@ -278,9 +291,19 @@ export fn roc_chat_react(msg: u64, emoji: RocBytes, on: bool) callconv(.c) route
     return h.react(h.ctx, msg, emoji.slice(), on);
 }
 
-export fn roc_chat_pin(pinned: bool) callconv(.c) bool {
-    const h = current("pin");
-    return h.pin(h.ctx, pinned);
+export fn roc_chat_pins() callconv(.c) Got {
+    const h = current("pins");
+    return got(h.pins(h.ctx));
+}
+
+export fn roc_chat_write_pins(bytes: RocBytes) callconv(.c) bool {
+    const h = current("write_pins");
+    return h.write_pins(h.ctx, bytes.slice());
+}
+
+export fn roc_chat_remove_pins() callconv(.c) bool {
+    const h = current("remove_pins");
+    return h.remove_pins(h.ctx);
 }
 
 export fn roc_chat_landing(family: Family, key: RocBytes) callconv(.c) roc.RocBytesList {
@@ -308,9 +331,14 @@ export fn roc_chat_last_conv() callconv(.c) RocBytes {
     return .from(h.last_conv(h.ctx));
 }
 
-export fn roc_chat_resume_topic(conv: RocBytes) callconv(.c) RocBytes {
-    const h = current("resume_topic");
-    return .from(h.resume_topic(h.ctx, conv.slice()));
+export fn roc_chat_last_viewed(conv: RocBytes) callconv(.c) RocBytes {
+    const h = current("last_viewed");
+    return .from(h.last_viewed(h.ctx, conv.slice()));
+}
+
+export fn roc_chat_now() callconv(.c) i64 {
+    const h = current("now");
+    return h.now(h.ctx);
 }
 
 export fn roc_chat_topics(family: Family, key: RocBytes) callconv(.c) roc.RocBytesList {

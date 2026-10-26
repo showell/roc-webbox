@@ -497,7 +497,8 @@ body too big) or failed there, 5 a malformed form (the site's own 400). The
 request carries its `method`. The Roc's routes ask the host through hosted
 functions inside the call: `presence!`, `topic!` (the conversation lookup,
 O2's until then, and whether the topic is there), `body!`, `reactions!`,
-`react!` and `pin!`. A failure in one is kept by the host and returned once
+`react!` and the pins (`pins!`, `write_pins!`, `remove_pins!`: the set is
+ChatState.roc's, the file the host's). A failure in one is kept by the host and returned once
 the call has ended, as `member!`'s already was. The writes inside a call
 are safe on metal for the reason §6.2's send relies on: a pump runs the
 kernel's turn and its fixed Zig render, never a handler, and the busy word
@@ -505,7 +506,8 @@ refuses any Roc call beside this one.
 
 **As built for C3**, more answers and hosted functions: `kind` 6 is
 webbox's plain 404 and 7 a 302 to `location`; the reads are `landing!`,
-`page!`, `srcs!`, `me!`, `viewer!`, `last_conv!`, `resume_topic!`,
+`page!`, `srcs!`, `me!`, `viewer!`, `last_conv!`, `last_viewed!`, `now!`
+(where a DM resumes is ChatState.roc's choice),
 `topics!`, `channels!`, `members!` and `conv!`, the writes `bookmark!` and
 `append!`, and `body!` takes which form's limit. Lists of records (the
 sidebar, the members) cross as flat lists of byte strings, one decoder
@@ -637,12 +639,13 @@ chat/                      the Roc app
   main.roc                 handle!: the prelude, then the route's answer (chat.zig handle)
   Route.roc                the path parsed into a route, by Zig's rules     (pure)
   Transcript.roc           transcript blocks: encode, decode, escape (chat_codec.zig) (pure)
-  Bytes.roc                std.mem's searches and splits, on bytes (pure)
+  Bytes.roc                std.mem's searches and splits and lessThan, on bytes (pure)
   JsonText.roc             JSON as the Zig's encoders write it (pure)
   Count.roc                .count: parse, format, both trust rules (chat_count.zig) (pure)
   Paths.roc                keys, validators, path builders, firstOf (chat_paths.zig) (pure)
   ZigText.roc              parseInt, std.json.fmt, trims, byte lines        (pure)
   Time.roc                 RFC3339 UTC, civil dates (timefmt.zig)           (pure)
+  ChatState.roc            where a DM resumes; a pin set, parsed and rewritten (chat_state.zig) (pure)
   Feeds.roc                images.md / code.md entries, fence scanner       (pure)
   Page.roc                 page, chrome, sidebar JSON, escaping             (pure)
   Store.roc                messageCount, append, reactions, pins, bookmarks (effects)

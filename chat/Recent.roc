@@ -81,15 +81,7 @@ Recent := [].{
 		|> List.map(|x| x.row)
 
 	before : Row, Row -> Bool
-	before = |x, y| if x.secs != y.secs x.secs > y.secs else less(x.key, y.key)
-
-	## std.mem.lessThan of bytes.
-	less : List(U8), List(U8) -> Bool
-	less = |a, b| match (a, b) {
-		([x, .. as ra], [y, .. as rb]) => if x != y x < y else less(ra, rb)
-		([], [_, ..]) => Bool.True
-		_ => Bool.False
-	}
+	before = |x, y| if x.secs != y.secs x.secs > y.secs else Bytes.less(x.key, y.key)
 
 	## recent_feed `recentExcerpt`: a quote fence becomes "[quoted text]",
 	## an image "[image]", whitespace one space, cut at 350 codepoints.
