@@ -50,8 +50,27 @@ const Files = struct {
         h.message_count = count;
         h.render = render;
         h.store_message = storeMessage;
-        h.fan_out = fanOut;
+        h.message_parts = parts;
+        h.append_entry = appendEntry;
+        h.fanout_failed = fanoutFailed;
         return h;
+    }
+    /// `boom` makes no part, each failing with its own error; anything else
+    /// makes each, every field its own bytes.
+    fn parts(ctx: *anyopaque, md: []const u8) abi.Parts {
+        say(ctx, "parts", md);
+        if (std.mem.eql(u8, md, "boom")) return .{ .excerpt = .{ .failed = error.OutOfMemory }, .images = .{ .failed = error.IsDir }, .code = .{ .failed = error.NoSpaceLeft } };
+        return .{ .excerpt = .{ .made = "the excerpt" }, .images = .{ .made = &.{ "<img a>", "<img b>" } }, .code = .{ .made = &.{ .{ .lang = "zig", .body = "x" }, .{ .lang = "", .body = "y" } } } };
+    }
+    /// `users/2/images.md` will not take an entry; any other path does.
+    /// **NEVER THE REQUEST'S FAILURE**: the error goes back, not to `fail`.
+    fn appendEntry(ctx: *anyopaque, path: []const u8, separator: []const u8, entry: []const u8) abi.Appended {
+        of(ctx).asked.print(testing.allocator, "append_entry {s} {s} {s};", .{ path, separator, entry }) catch @panic("oom");
+        if (std.mem.eql(u8, path, "users/2/images.md")) return .{ .failed = error.IsDir };
+        return .appended;
+    }
+    fn fanoutFailed(ctx: *anyopaque, surface: @import("chat_route.zig").Surface, member: []const u8, key: []const u8, sid: []const u8, e: anyerror) void {
+        of(ctx).asked.print(testing.allocator, "fanout_failed {t} {s} {s} {s} {t};", .{ surface, member, key, sid, e }) catch @panic("oom");
     }
     /// `boom` will not render; anything else is its own HTML, marked.
     fn render(ctx: *anyopaque, md: []const u8) abi.Rendered {
@@ -70,9 +89,6 @@ const Files = struct {
             return false;
         }
         return true;
-    }
-    fn fanOut(ctx: *anyopaque, conv: abi.Conv, sid: []const u8, m: abi.Message, index: u64) void {
-        of(ctx).asked.print(testing.allocator, "fan_out {t} {s} {s} {s},{s} {s} id={s} from={s} at={s} uid={s} md={s} {d};", .{ conv.family, conv.key, conv.base, conv.members[0], conv.members[1], sid, m.id, m.from, m.at, m.uid, m.markdown, index }) catch @panic("oom");
     }
     /// `users/1/broken` will not take a line; any other path does.
     fn appendLine(ctx: *anyopaque, path: []const u8, line: []const u8) bool {
@@ -192,7 +208,25 @@ test "a line appended: a path that would leave the root fails the request at the
     try probe("/publish/1_2/Plans", "published", "publish 1_2/Plans event: reaction\\ndata: x\\n\\n;", null);
 }
 
-test "a message's render, store and fan-out cross the seam: the HTML or a render that failed, never empty; every field of the conversation and the message in its place, the index beside them; a store that failed is no store" {
+test "the fan-out's primitives cross the seam and never fail the request: each part made or failed on its own, its error carried back as the host's; a feed's entry appended or failed, that failure said; a feed's path outside the root the append's failure, the host never asked" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    roc.use(arena.allocator());
+    defer roc.deinit();
+    const fault = struct {
+        fn of(comptime e: anyerror) []const u8 {
+            return std.fmt.comptimePrint("{d}", .{@intFromError(e)});
+        }
+    }.of;
+    try probe("/parts/hi", "made:0:the excerpt made:0:<img a>,<img b> made:0:zig=x,=y,", "parts hi;", null);
+    try probe("/parts/boom", "failed:" ++ comptime fault(error.OutOfMemory) ++ ": failed:" ++ fault(error.IsDir) ++ ": failed:" ++ fault(error.NoSpaceLeft) ++ ":", "parts boom;", null);
+    try probe("/entry/users/1/images.md", "appended", "append_entry users/1/images.md -- the entry;", null);
+    try probe("/entry/users/2/images.md", "said", "append_entry users/2/images.md -- the entry;fanout_failed images 2 1_2 Plans IsDir;", null);
+    for ([_][]const u8{ "/entry/../x", "/entry//etc/passwd", "/entry/users/../../x" }) |sub|
+        try probe(sub, "said", "fanout_failed images 2 1_2 Plans PathOutsideChatRoot;", null);
+}
+
+test "a message's render and store cross the seam: the HTML or a render that failed, never empty; every field of the conversation and the message in its place, the index beside them; a store that failed is no store" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     roc.use(arena.allocator());
@@ -202,7 +236,6 @@ test "a message's render, store and fan-out cross the seam: the HTML or a render
     const fields = "id=Plans_9 from=Steve at=2026-10-26T00:00:00Z uid=1 md=**hi**";
     try probe("/store/Plans", "done", "store dm 1_2 /chat/c/1_2 1,2 Plans the block 8 " ++ fields ++ ";", null);
     try probe("/store/Broken", "failed", "store dm 1_2 /chat/c/1_2 1,2 Broken the block 8 " ++ fields ++ ";", error.IsDir);
-    try probe("/fan/Plans", "fanned", "fan_out dm 1_2 /chat/c/1_2 1,2 Plans " ++ fields ++ " 8;", null);
 }
 
 test "a folder's listing: a path that would leave the root fails the request at the seam; under it, its entries and their kinds, nothing there, and a listing that failed are three answers" {

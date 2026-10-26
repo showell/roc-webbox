@@ -21,6 +21,7 @@ import Recent
 import ChatState
 import Conversation
 import Accounts
+import Fanout
 
 call : { which : U8, args : List(List(U8)) } -> List(List(U8))
 call = |req| {
@@ -164,6 +165,40 @@ call = |req| {
 			List.concat(asked, roster)
 		}
 		61 => [Reaction.line(u64(arg(0)), arg(1), arg(2), arg(3), arg(4) == [49], arg(5))]
+		# The fan-out: member `arg(0)`'s five keys; conversation `arg(0)`'s
+		# URL root, topic `arg(1)`'s page and message `arg(2)`'s link.
+		62 => [Fanout.notify_key(arg(0)), Fanout.sidebar_key(arg(0)), Fanout.recent_key(arg(0)), Fanout.images_key(arg(0)), Fanout.code_key(arg(0))]
+		63 => [Feeds.base_url(arg(0)), Fanout.topic_url(arg(0), arg(1)), Feeds.source_url(arg(0), arg(2))]
+		# A DM's (`d`) or a channel's notify event: from, key, sid.
+		64 => {
+			kind = if arg(0) == [100] Dm else Channel
+			[Fanout.notify_event(arg(2), arg(3), Fanout.notify_text(kind, arg(1), arg(2), arg(3)), Fanout.topic_url(arg(2), arg(3)))]
+		}
+		65 => [Fanout.topic_added(arg(0), arg(1), Fanout.topic_url(arg(0), arg(1)))]
+		66 => [Recent.chat_event({ at: arg(0), url: arg(1), who: arg(2), label: arg(3), topic: arg(4), excerpt: arg(5), dm: if arg(6) == [49] Dm else Channel })]
+		# An entry's header (source_id, from, conv, at), then its tags: the
+		# images.md entry and the live event.
+		67 => {
+			h = { source_id: arg(0), from: arg(1), conv: arg(2), at: arg(3) }
+			tags = List.drop_first(req.args, 4)
+			[Feeds.images_entry(h, tags), Feeds.images_event(h, tags)]
+		}
+		# The same header, then `lang, body` pairs: the code.md entry and the
+		# live event.
+		68 => {
+			h = { source_id: arg(0), from: arg(1), conv: arg(2), at: arg(3) }
+			blocks = pairs(req.args, 4, [])
+			[Feeds.code_entry(h, blocks), Feeds.code_event(h, blocks)]
+		}
+		# recentWhere for viewer `arg(1)` in a DM (`d`) or channel keyed
+		# `arg(2)`: the members counted by `arg(3)`, then the accounts.
+		69 => {
+			n = u64(arg(3))
+			members = List.sublist(req.args, { start: 4, len: n })
+			all = accounts(req.args, 4 + n, [])
+			kind = if arg(0) == [100] Dm else Channel
+			[Fanout.recent_where({ kind, key: arg(2), members, sid: [], index: 0, id: [], from: [], at: [], uid: [], accounts: all }, arg(1))]
+		}
 		_ => crash "twin: no function ${U8.to_str(req.which)}"
 	}
 }
@@ -222,6 +257,14 @@ unreadable = |why|
 	match why {
 		KindUnreadable(id) => [Str.to_utf8("kind"), id]
 		NameUnreadable(id) => [Str.to_utf8("name"), id]
+	}
+
+## Code blocks as the test wrote them, `lang, body` pairs from `i`.
+pairs : List(List(U8)), U64, List(Feeds.Block) -> List(Feeds.Block)
+pairs = |args, i, out|
+	match (List.get(args, i), List.get(args, i + 1)) {
+		(Ok(lang), Ok(body)) => pairs(args, i + 2, List.append(out, { lang, body }))
+		_ => out
 	}
 
 ## Reads as the test says they went (`file`), `how, bytes` pairs from `i`.

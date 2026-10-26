@@ -127,12 +127,33 @@ Host := [].{
 	## the count and the search are best-effort and never fail it.
 	store_message! : Chat.Conv, List(U8), List(U8), U64, Chat.Message => Bool
 
-	## **THE CROSS-PAGE FAN-OUT, STILL ZIG'S** (angry-gopher chat_fanout
-	## `fanoutCrossPage`; docs/ROC-CHAT.md C8b ports it): message `index` of
-	## topic `sid` in `conv`, stored, out to every member's notify, sidebar
-	## (a topic's first message), recent, images and code. Best-effort: a
-	## failure is counted by the host and never fails the send.
-	fan_out! : Chat.Conv, List(U8), Chat.Message, U64 => {}
+	## **THE FAN-OUT'S PRIMITIVES NEVER FAIL THE REQUEST** (metal-vmm QUEUE
+	## 172, 156(c)): the fan-out runs after the store, and **STORED IS DONE**.
+	## Each that can fail answers its `fault`, the host's error as a number
+	## the Roc never reads, carried to `fanout_failed!` to be counted and
+	## said; a member's other surfaces, and every other member's, go on.
+
+	## **A MESSAGE'S PARTS, AS THE ONE MARKDOWN READER FINDS THEM**
+	## (angry-gopher recent_feed `recentExcerpt`, images_store
+	## `extractImageTags`, code_store `extractCodeBlocks`): the Recent feed's
+	## excerpt, every `<img>` tag, every fenced block that is not a quote.
+	## **EACH PART IS MADE OR FAILS ON ITS OWN** (`Failed` with its fault):
+	## never an empty part for one that failed.
+	message_parts! : List(U8) => { code : { blocks : List({ body : List(U8), lang : List(U8) }), fault : U16, status : [Failed, Made] }, excerpt : { bytes : List(U8), fault : U16, status : [Failed, Made] }, images : { fault : U16, status : [Failed, Made], tags : List(List(U8)) } }
+
+	## **A FEED'S ENTRY APPENDED** to the file at `path` under the chat root
+	## (checked as `read!`'s is, but a path outside it is this append's
+	## failure, never the request's), its folders made: `separator` and
+	## `entry` when the file holds anything, else `entry` alone. `Failed`,
+	## with its fault, when it could not be.
+	append_entry! : List(U8), List(U8), List(U8) => { fault : U16, status : [Appended, Failed] }
+
+	## **A SURFACE THAT FAILED FOR ONE MEMBER, COUNTED AND SAID** (angry-gopher
+	## chat_fanout `fanoutFailed`): `surface` for `member`, with `fault` (as a
+	## primitive answered it), on topic `sid` of the conversation keyed `key`.
+	## The operator's count and last failure, kept by the host for
+	## /admin/host.
+	fanout_failed! : [Code, Images, Recent], List(U8), List(U8), List(U8), U16 => {}
 
 	## A request header's value, or none (read before the body).
 	header! : List(U8) => List(List(U8))

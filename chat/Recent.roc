@@ -47,18 +47,27 @@ Recent := [].{
 			JsonText.obj(List.join([[("kind", JsonText.str(Str.to_utf8("doc"))), ("at", at)], JsonText.opt("who", Str.to_utf8("You")), JsonText.opt("slug", r.key), JsonText.opt("title", r.label)]))
 		} else {
 			who = if r.uid == [] [] else if r.uid == me Str.to_utf8("You") else r.name
-			dm = if r.dm [("dm", JsonText.bool(Bool.True))] else []
-			JsonText.obj(List.join([
-				[("kind", JsonText.str(Str.to_utf8("chat"))), ("at", at)],
-				JsonText.opt("url", r.key),
-				JsonText.opt("who", who),
-				JsonText.opt("where", r.label),
-				JsonText.opt("topic", r.topic),
-				JsonText.opt("excerpt", excerpt(r.markdown)),
-				dm,
-			]))
+			chat_event({ at: Str.to_utf8(Time.rfc3339(r.secs)), url: r.key, who, label: r.label, topic: r.topic, excerpt: excerpt(r.markdown), dm: if r.dm Dm else Channel })
 		}
 	}
+
+	## One chat message's row, its fields as written (`at` already a stamp).
+	ChatEvent : { at : List(U8), url : List(U8), who : List(U8), label : List(U8), topic : List(U8), excerpt : List(U8), dm : [Dm, Channel] }
+
+	## recent_feed `encodeChatEvent`: `kind` and `at`, then url, who, where,
+	## topic and excerpt each left out when empty, then `"dm":true` for a
+	## DM. The page's backlog and the live stream (`rec:<uid>`) send it.
+	chat_event : ChatEvent -> List(U8)
+	chat_event = |e|
+		JsonText.obj(List.join([
+			[("kind", JsonText.str(Str.to_utf8("chat"))), ("at", JsonText.str(e.at))],
+			JsonText.opt("url", e.url),
+			JsonText.opt("who", e.who),
+			JsonText.opt("where", e.label),
+			JsonText.opt("topic", e.topic),
+			JsonText.opt("excerpt", e.excerpt),
+			if e.dm == Dm [("dm", JsonText.bool(Bool.True))] else [],
+		]))
 
 	## recent.zig `newestFirst`, stably, as std.mem.sort is: newest first, a
 	## tie by the URL or slug, and rows equal in both in the order gathered

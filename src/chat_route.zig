@@ -146,9 +146,24 @@ pub const FailReason = enum(u8) { kind_unreadable, malformed_channel, name_unrea
 /// never an empty page for one that failed.
 pub const RenderStatus = enum(u8) { failed, rendered };
 
+/// Host.roc's `message_parts!`: each part of a message (its excerpt, its
+/// image tags, its code blocks) made, or failed on its own (its fault
+/// beside it): **A PART THAT FAILED IS NEVER AN EMPTY ONE**, and never the
+/// request's failure.
+pub const PartStatus = enum(u8) { failed, made };
+
+/// Host.roc's `append_entry!`: a feed's entry appended, or failed (its
+/// fault beside it): the fan-out's failure, counted, never the request's.
+pub const AppendStatus = enum(u8) { appended, failed };
+
+/// Host.roc's `fanout_failed!`: the fan-out's surfaces that can fail, a
+/// member at a time (chat_fanout's names for them, as /admin/host says
+/// them). Notify and sidebar are made of the Roc's bytes alone, so never.
+pub const Surface = enum(u8) { code, images, recent };
+
 comptime {
     @setEvalBranchQuota(20_000);
-    for (.{ Family, Part, Tail, Method, Kind, Form, CountStatus, Hostility, ReadStatus, EntryKind, AccountKind, NameRead, AccountsStatus, FailReason, RenderStatus }) |E| assertRocOrder(E);
+    for (.{ Family, Part, Tail, Method, Kind, Form, CountStatus, Hostility, ReadStatus, EntryKind, AccountKind, NameRead, AccountsStatus, FailReason, RenderStatus, PartStatus, AppendStatus, Surface }) |E| assertRocOrder(E);
 }
 
 /// That `E`'s values are Roc's for the same tags: numbered from 0 in the

@@ -23,6 +23,12 @@ pub const CountStatus = route.CountStatus;
 pub const Rendered = abi.Rendered;
 pub const RenderStatus = route.RenderStatus;
 pub const Message = abi.Message;
+pub const Parts = abi.Parts;
+pub const Block = abi.Block;
+pub const Appended = abi.Appended;
+pub const PartStatus = route.PartStatus;
+pub const AppendStatus = route.AppendStatus;
+pub const Surface = route.Surface;
 pub const Hostility = route.Hostility;
 pub const ReadStatus = route.ReadStatus;
 pub const Read = abi.Read;
@@ -133,6 +139,11 @@ const Scripted = struct {
     /// message's block is stored.
     render_ok: bool = true,
     store_ok: bool = true,
+    /// A message's parts, whatever its markdown: an excerpt of `ex` and
+    /// nothing for the feeds, unless a test says otherwise.
+    parts: abi.Parts = .{ .excerpt = .{ .made = "ex" }, .images = .{ .made = &.{} }, .code = .{ .made = &.{} } },
+    /// A feed's path whose entry will not append, and its error.
+    entry_fails: ?struct { path: []const u8, e: anyerror } = null,
     transcript: bool = true,
     linked: bool = false,
     asked: std.ArrayList(u8) = .empty,
@@ -142,7 +153,7 @@ const Scripted = struct {
     const Channel = struct { name: []const u8, read: abi.Read };
 
     fn host(self: *Scripted) Host {
-        return .{ .ctx = self, .member = member, .presence = presence, .accounts = accountsOf, .me = meId, .now = nowOf, .body = bodyOf, .publish = publish, .append_line = appendLine, .message_count = messageCount, .read = readOf, .write = writeOf, .remove = removeOf, .list = listOf, .fail = failOf, .fail_account = failAccountOf, .malformed_channel = malformed, .page = pageOf, .header = header, .hostile = hostile, .render = render, .store_message = storeMessage, .fan_out = fanOut, .raw = raw, .links = links, .srcs = srcs };
+        return .{ .ctx = self, .member = member, .presence = presence, .accounts = accountsOf, .me = meId, .now = nowOf, .body = bodyOf, .publish = publish, .append_line = appendLine, .message_count = messageCount, .read = readOf, .write = writeOf, .remove = removeOf, .list = listOf, .fail = failOf, .fail_account = failAccountOf, .malformed_channel = malformed, .page = pageOf, .header = header, .hostile = hostile, .render = render, .store_message = storeMessage, .message_parts = partsOf, .append_entry = appendEntry, .fanout_failed = fanoutFailed, .raw = raw, .links = links, .srcs = srcs };
     }
     fn me(ctx: *anyopaque) *Scripted {
         return @ptrCast(@alignCast(ctx));
@@ -269,9 +280,18 @@ const Scripted = struct {
         say(ctx, " {s} {f} {d} {s}|{s}|{s}|{s}|{s}", .{ sid, std.zig.fmtString(block), index, m.id, m.from, m.at, m.uid, m.markdown });
         return me(ctx).store_ok;
     }
-    fn fanOut(ctx: *anyopaque, conv: Conv, sid: []const u8, m: abi.Message, index: u64) void {
-        sayConv(ctx, "fan_out", conv);
-        say(ctx, " {s} {s}|{s}|{s}|{s}|{s} {d}", .{ sid, m.id, m.from, m.at, m.uid, m.markdown, index });
+    fn partsOf(ctx: *anyopaque, markdown: []const u8) abi.Parts {
+        say(ctx, "parts {s}", .{markdown});
+        return me(ctx).parts;
+    }
+    /// The separator and the entry escaped, so their every byte shows.
+    fn appendEntry(ctx: *anyopaque, path: []const u8, separator: []const u8, entry: []const u8) abi.Appended {
+        say(ctx, "append_entry {s} {f} {f}", .{ path, std.zig.fmtString(separator), std.zig.fmtString(entry) });
+        const fails = me(ctx).entry_fails orelse return .appended;
+        return if (std.mem.eql(u8, fails.path, path)) .{ .failed = fails.e } else .appended;
+    }
+    fn fanoutFailed(ctx: *anyopaque, surface: route.Surface, member_: []const u8, key: []const u8, sid: []const u8, e: anyerror) void {
+        say(ctx, "fanout_failed {t} {s} {s} {s} {t}", .{ surface, member_, key, sid, e });
     }
 };
 
@@ -499,9 +519,10 @@ test "a DM's page and landing, and the DM with yourself: the title the Roc's, a 
 /// What storing a message asks, step by step: message 4 (index 3, the
 /// scripted count) of topic `sid` in `conv` (as `sayConv` says it), the
 /// conversation's key `key`, by member 1 named `name`, at the scripted
-/// time. The count, the render, the store (the block escaped, then the
-/// message's fields), the frame on the topic's key, then the fan-out.
-const Sent = struct { count: []const u8, render: []const u8, store: []const u8, publish: []const u8, fan_out: []const u8 };
+/// time. The count, the render, the parts, the store (the block escaped, then
+/// the message's fields), the frame on the topic's key, then the fan-out
+/// (`fanned`: DM 1_2's or channel ops's members).
+const Sent = struct { count: []const u8, render: []const u8, parts: []const u8, store: []const u8, publish: []const u8, fan_out: []const u8 };
 
 fn sent(comptime conv: []const u8, comptime key: []const u8, comptime sid: []const u8, comptime name: []const u8, comptime md: []const u8, comptime cid: []const u8) Sent {
     const at = "2025-10-25T13:46:40Z";
@@ -512,15 +533,62 @@ fn sent(comptime conv: []const u8, comptime key: []const u8, comptime sid: []con
     return comptime .{
         .count = "count " ++ conv ++ " " ++ sid ++ ";",
         .render = "render " ++ md ++ ";",
+        .parts = "parts " ++ md ++ ";",
         .store = std.fmt.comptimePrint("store {s} {s} {f} 3 {s};", .{ conv, sid, std.zig.fmtString(block), message }),
         .publish = std.fmt.comptimePrint("publish {s}/{s} {f};", .{ key, sid, std.zig.fmtString(frame) }),
-        .fan_out = "fan_out " ++ conv ++ " " ++ sid ++ " " ++ message ++ " 3;",
+        .fan_out = fanned(key, sid, name),
     };
 }
 
 /// The whole of a message stored and sent.
 fn sentAll(comptime s: Sent) []const u8 {
-    return comptime s.count ++ s.render ++ s.store ++ s.publish ++ s.fan_out;
+    return comptime s.count ++ s.render ++ s.parts ++ s.store ++ s.publish ++ s.fan_out;
+}
+
+const at_said = "2025-10-25T13:46:40Z";
+
+/// A publish as the scripted host says it: the key, the bytes escaped.
+fn published(comptime key: []const u8, comptime bytes: []const u8) []const u8 {
+    @setEvalBranchQuota(200_000);
+    return comptime std.fmt.comptimePrint("publish {s} {f};", .{ key, std.zig.fmtString(bytes) });
+}
+
+/// Member `uid`'s Recent row of topic `sid` (its page `url`), by `who`,
+/// labelled `where`, its excerpt the scripted `ex`.
+fn recentSaid(comptime uid: []const u8, comptime url: []const u8, comptime who: []const u8, comptime where: []const u8, comptime sid: []const u8, comptime dm: bool) []const u8 {
+    return published("rec:" ++ uid, "{\"kind\":\"chat\",\"at\":\"" ++ at_said ++ "\",\"url\":\"" ++ url ++ "\",\"who\":\"" ++ who ++ "\"" ++ (if (where.len == 0) "" else ",\"where\":\"" ++ where ++ "\"") ++ ",\"topic\":\"" ++ sid ++ "\",\"excerpt\":\"ex\"" ++ (if (dm) ",\"dm\":true" else "") ++ "}");
+}
+
+/// The fan-out in DM `key` of member 1 and `partner`, by member 1 named
+/// `name`: 1's row labelled `to_partner`, then the partner's notify and row.
+fn dmFanned(comptime key: []const u8, comptime partner: []const u8, comptime sid: []const u8, comptime name: []const u8, comptime to_partner: []const u8) []const u8 {
+    const url = "/chat/c/" ++ key ++ "/" ++ sid;
+    return comptime recentSaid("1", url, "You", to_partner, sid, true) ++ notifySaid(partner, key, sid, name ++ " sent you a message on " ++ sid ++ ".", url) ++ recentSaid(partner, url, name, "to Steve", sid, true);
+}
+
+/// Member `uid`'s notify of topic `sid` in `key`.
+fn notifySaid(comptime uid: []const u8, comptime key: []const u8, comptime sid: []const u8, comptime text: []const u8, comptime url: []const u8) []const u8 {
+    return published("ntf:" ++ uid, "{\"conv\":\"" ++ key ++ "\",\"session\":\"" ++ sid ++ "\",\"text\":\"" ++ text ++ "\",\"link_url\":\"" ++ url ++ "\"}");
+}
+
+/// Member `uid`'s sidebar told of topic `sid` in `key`, its first message.
+fn addedSaid(comptime uid: []const u8, comptime key: []const u8, comptime sid: []const u8, comptime url: []const u8) []const u8 {
+    return published("sb:" ++ uid, "{\"kind\":\"topic-added\",\"conv\":\"" ++ key ++ "\",\"sid\":\"" ++ sid ++ "\",\"url\":\"" ++ url ++ "\"}");
+}
+
+/// The fan-out of a message (not a topic's first, no feed parts) by member
+/// 1 named `name`: DM 1_2's members (1, then 2, each named for the other:
+/// "to Debbie", "to Steve") or channel ops's (1, then 3, "in ops"). Each
+/// member's notify (never the author's), then their Recent row (the
+/// author's "You").
+fn fanned(comptime key: []const u8, comptime sid: []const u8, comptime name: []const u8) []const u8 {
+    comptime {
+        if (std.mem.eql(u8, key, "1_2")) return dmFanned(key, "2", sid, name, "to Debbie");
+        // The scripted guest 4, named Guest.
+        if (std.mem.eql(u8, key, "1_4")) return dmFanned(key, "4", sid, name, "to Guest");
+        const url = "/channel/ops/" ++ sid;
+        return recentSaid("1", url, "You", "in ops", sid, false) ++ notifySaid("3", key, sid, name ++ " posted to ops > " ++ sid ++ ".", url) ++ recentSaid("3", url, name, "in ops", sid, false);
+    }
 }
 
 const dm_said = "dm 1_2 /chat/c/1_2 [1,2]";
@@ -556,7 +624,7 @@ test "a message is the Roc's: no author, no message; the count, the id, the stam
         var s = a;
         s.store_ok = false;
         break :blk s;
-    }, .answered, before ++ plans.count ++ plans.render ++ plans.store);
+    }, .answered, before ++ plans.count ++ plans.render ++ plans.parts ++ plans.store);
     // A topic's first message is index 0: its id `_1`, its block with no
     // separator before it, its frame `id: 0`.
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
@@ -570,11 +638,68 @@ test "a message is the Roc's: no author, no message; the count, the id, the stam
     for ([_][]const u8{
         "store " ++ dm_said ++ " Plans MSG_Plans_1\\nfrom: Steve\\ndate: " ++ at ++ "\\nuid: 1\\n\\none 0 Plans_1|Steve|" ++ at ++ "|1|one;",
         "publish 1_2/Plans id: 0\\ndata: {\\\"index\\\":0,",
-        "fan_out " ++ dm_said ++ " Plans Plans_1|Steve|" ++ at ++ "|1|one 0;",
     }) |want| if (std.mem.indexOf(u8, first.asked.items, want) == null) {
         std.debug.print("not asked: {s}\nin: {s}\n", .{ want, first.asked.items });
         return error.TestUnexpectedResult;
     };
+}
+
+test "the fan-out is the Roc's: every member in order, each member's notify (never the author's), sidebar (a first message alone), recent (\"You\" for the author), images and code; a feed's entry before its event; a surface that fails is counted and said, and nothing else is lost, nor the send" {
+    use(testing.allocator);
+    defer @import("roc_abi.zig").deinit();
+    const url = "/chat/c/1_2/Plans";
+    const head = "Sent by Steve at " ++ at_said ++ ", source MSG_Plans_1 in 1_2:";
+    const img_entry = comptime std.fmt.comptimePrint("{f} {f}", .{ std.zig.fmtString("\n\n-------------\n\n"), std.zig.fmtString(head ++ "\n<img a> b\n<IMG\tc>") });
+    const code_entry = comptime std.fmt.comptimePrint("{f} {f}", .{ std.zig.fmtString("\n\n-------------\n\n"), std.zig.fmtString(head ++ "\n```zig\nx\n```\n\n```\ny\n```") });
+    const head_json = "{\"source_id\":\"Plans_1\",\"from\":\"Steve\",\"conv\":\"1_2\",\"at\":\"" ++ at_said ++ "\",";
+    const src = ",\"source_url\":\"/chat/c/1_2/Plans#msg-Plans_1\"}";
+    // The entry's tag one line, its event's as found.
+    const img_event = head_json ++ "\"images\":[\"<img a>\\nb\",\"<IMG\\tc>\"]" ++ src;
+    const code_event = head_json ++ "\"blocks\":[{\"lang\":\"zig\",\"body\":\"x\"},{\"lang\":\"\",\"body\":\"y\"}]" ++ src;
+    // A topic's first message, with two image tags (one spanning a line)
+    // and two code blocks: member 2's images.md will not take its entry.
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    var s: Scripted = .{ .alloc = arena.allocator(), .body = "markdown=one", .count = .{ .counted = 0 } };
+    s.parts = .{ .excerpt = .{ .made = "ex" }, .images = .{ .made = &.{ "<img a>\nb", "<IMG\tc>" } }, .code = .{ .made = &.{ .{ .lang = "zig", .body = "x" }, .{ .lang = "", .body = "y" } } } };
+    s.entry_fails = .{ .path = "users/2/images.md", .e = error.IsDir };
+    const got = try decide(arena.allocator(), "/c/1_2/Plans/send", false, .POST, s.host());
+    try testing.expectEqualStrings("/chat/c/1_2/Plans", got.redirect);
+    const member1 = comptime addedSaid("1", "1_2", "Plans", url) ++ recentSaid("1", url, "You", "to Debbie", "Plans", true) ++
+        "append_entry users/1/images.md " ++ img_entry ++ ";" ++ published("img:1", img_event) ++
+        "append_entry users/1/code.md " ++ code_entry ++ ";" ++ published("code:1", code_event);
+    const member2 = comptime notifySaid("2", "1_2", "Plans", "Steve sent you a message on Plans.", url) ++ addedSaid("2", "1_2", "Plans", url) ++ recentSaid("2", url, "Steve", "to Steve", "Plans", true) ++
+        "append_entry users/2/images.md " ++ img_entry ++ ";fanout_failed images 2 1_2 Plans IsDir;" ++
+        "append_entry users/2/code.md " ++ code_entry ++ ";" ++ published("code:2", code_event);
+    const tail = s.asked.items[std.mem.indexOf(u8, s.asked.items, "publish 1_2/Plans ").?..];
+    const fan = tail[std.mem.indexOfScalar(u8, tail, ';').? + 1 ..];
+    if (!std.mem.eql(u8, fan, member1 ++ member2)) {
+        std.debug.print("fan-out:\n  got  {s}\n  want {s}\n", .{ fan, member1 ++ member2 });
+        return error.TestUnexpectedResult;
+    }
+
+    // **EACH PART FAILS ON ITS OWN**: an excerpt, tags and blocks that could
+    // not be made fail recent, images and code for every member, each
+    // counted; notify still goes, and the send is still done.
+    var arena2 = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena2.deinit();
+    var f: Scripted = .{ .alloc = arena2.allocator(), .body = "markdown=one" };
+    f.parts = .{ .excerpt = .{ .failed = error.OutOfMemory }, .images = .{ .failed = error.NoSpaceLeft }, .code = .{ .failed = error.AccessDenied } };
+    const got2 = try decide(arena2.allocator(), "/c/1_2/Plans/send", false, .POST, f.host());
+    try testing.expectEqualStrings("/chat/c/1_2/Plans", got2.redirect);
+    const failed = "fanout_failed recent 1 1_2 Plans OutOfMemory;fanout_failed images 1 1_2 Plans NoSpaceLeft;fanout_failed code 1 1_2 Plans AccessDenied;" ++
+        comptime notifySaid("2", "1_2", "Plans", "Steve sent you a message on Plans.", url) ++
+        "fanout_failed recent 2 1_2 Plans OutOfMemory;fanout_failed images 2 1_2 Plans NoSpaceLeft;fanout_failed code 2 1_2 Plans AccessDenied;";
+    try testing.expect(std.mem.endsWith(u8, f.asked.items, failed));
+
+    // The DM with yourself: one member, the author, never notified; the row
+    // "to " and no one's name (the old Zig's getUserName of "").
+    var arena3 = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena3.deinit();
+    var self: Scripted = .{ .alloc = arena3.allocator(), .body = "markdown=one" };
+    _ = try decide(arena3.allocator(), "/c/1_1/Plans/send", false, .POST, self.host());
+    try testing.expect(std.mem.endsWith(u8, self.asked.items, comptime recentSaid("1", "/chat/c/1_1/Plans", "You", "to ", "Plans", true)));
+    try testing.expectEqual(@as(usize, 0), std.mem.count(u8, self.asked.items, "publish ntf:"));
 }
 
 test "a send is the Roc's: the conversation, the method, the header, the body, the message judged, the bookmark, then the store" {
@@ -615,7 +740,7 @@ test "a send is the Roc's: the conversation, the method, the header, the body, t
         break :blk s;
     }, .answered, asked ++ "hostile hi;" ++ bookmarked("Plans") ++ comptime blk: {
         const s = sent(dm_said, "1_2", "Plans", "Steve", "hi", "c-1");
-        break :blk s.count ++ s.render ++ s.store;
+        break :blk s.count ++ s.render ++ s.parts ++ s.store;
     });
     // Judged by the Roc before the host is asked to: empty, not UTF-8.
     try expectAct("/c/1_2/Plans/send", false, .POST, blk: {
@@ -874,7 +999,13 @@ test "an account that will not read fails only what reads it, with its own read'
         s.body = "topic=Ideas";
         s.topics = &.{"Plans"};
         break :blk s;
-    }, .{ .respond = .{ .status = 200, .content_type = "application/json; charset=utf-8", .body = "{\"conv\":\"1_2\",\"sid\":\"Ideas\"}" } }, "member;presence;accounts;body;list 1_2/sessions;" ++ bookmarked("Ideas") ++ comptime sentAll(sent(dm_said, "1_2", "Ideas", "Steve", "hi", "")) ++ "list 1_2/sessions;");
+    }, .{ .respond = .{ .status = 200, .content_type = "application/json; charset=utf-8", .body = "{\"conv\":\"1_2\",\"sid\":\"Ideas\"}" } }, "member;presence;accounts;body;list 1_2/sessions;" ++ bookmarked("Ideas") ++ comptime blk: {
+        // **A NAME THAT WILL NOT READ LABELS NO ROW** (recentWhere's
+        // absent-ok): member 1's row of the new topic has no `where`, and
+        // is sent all the same.
+        const s = sent(dm_said, "1_2", "Ideas", "Steve", "hi", "");
+        break :blk s.count ++ s.render ++ s.parts ++ s.store ++ s.publish ++ dmFanned("1_2", "2", "Ideas", "Steve", "");
+    } ++ "list 1_2/sessions;");
     for ([_][]const u8{ "/links", "/images", "" }) |sub| {
         var arena = std.heap.ArenaAllocator.init(testing.allocator);
         defer arena.deinit();

@@ -53,6 +53,18 @@ pub const RenderRec = extern struct { html: RocBytes, status: route_mod.RenderSt
 /// Chat.roc's `Message`: `{ id, from, at, uid, markdown }`, every field
 /// `List(U8)`, so laid out by name alone.
 pub const MessageRec = extern struct { at: RocBytes, from: RocBytes, id: RocBytes, markdown: RocBytes, uid: RocBytes };
+/// One of Host.roc's `message_parts!` code blocks: `{ body : List(U8), lang : List(U8) }`.
+pub const BlockRec = extern struct { body: RocBytes, lang: RocBytes };
+/// Host.roc's `message_parts!` answer, each part beside its own fault and
+/// status: `{ code : { blocks, fault, status }, excerpt : { bytes, fault,
+/// status }, images : { fault, status, tags } }`, each laid out by alignment
+/// then name (the list, the U16, the tag).
+pub const CodePartRec = extern struct { blocks: BlockList, fault: u16, status: route_mod.PartStatus };
+pub const ExcerptPartRec = extern struct { bytes: RocBytes, fault: u16, status: route_mod.PartStatus };
+pub const ImagesPartRec = extern struct { tags: roc.RocBytesList, fault: u16, status: route_mod.PartStatus };
+pub const PartsRec = extern struct { code: CodePartRec, excerpt: ExcerptPartRec, images: ImagesPartRec };
+/// Host.roc's `append_entry!` answer: `{ fault : U16, status : [Appended, Failed] }`.
+pub const AppendRec = extern struct { fault: u16, status: route_mod.AppendStatus };
 
 /// A Roc list of `Rec`, each made of an `Item` by `rec`: its elements hold
 /// a refcounted list, so it has the two-word header (count, refcount) a
@@ -91,9 +103,19 @@ pub const AccountList = RecList(AccountRec, Account, struct {
     }
 }.rec);
 
+pub const BlockList = RecList(BlockRec, Block, struct {
+    fn rec(it: Block) BlockRec {
+        return .{ .body = .from(it.body), .lang = .from(it.lang) };
+    }
+}.rec);
+
 comptime {
     const w = @sizeOf(usize);
     std.debug.assert(@sizeOf(RocBytes) == 3 * w and @sizeOf(Request) == 4 * w and @sizeOf(RouteRec) == 10 * w and @sizeOf(Answer) == 20 * w and @sizeOf(Got) == 4 * w and @sizeOf(ConvRec) == 10 * w and @sizeOf(ReadRec) == 4 * w and @sizeOf(EntryRec) == 4 * w and @sizeOf(ListRec) == 4 * w and @sizeOf(AccountRec) == 7 * w and @sizeOf(AccountsRec) == 4 * w and @sizeOf(CountRec) == 16 and @sizeOf(RenderRec) == 4 * w and @sizeOf(MessageRec) == 15 * w);
+    std.debug.assert(@sizeOf(BlockRec) == 6 * w and @sizeOf(CodePartRec) == 4 * w and @sizeOf(ExcerptPartRec) == 4 * w and @sizeOf(ImagesPartRec) == 4 * w and @sizeOf(PartsRec) == 12 * w and @sizeOf(AppendRec) == 4);
+    // **A FAULT IS THE HOST'S ERROR, CARRIED BY THE ROC AS A NUMBER** it
+    // never reads (`@intFromError`), handed back to say it: it fits a U16.
+    std.debug.assert(@bitSizeOf(anyerror) <= 16);
 }
 
 /// **A FILE AS THE HOST READ IT**: its bytes, nothing there, or a read that
@@ -148,6 +170,25 @@ pub const Message = struct {
         return .{ .id = r.id.slice(), .from = r.from.slice(), .at = r.at.slice(), .uid = r.uid.slice(), .markdown = r.markdown.slice() };
     }
 };
+
+/// A fenced block of a message: its info string's first word and its lines.
+pub const Block = struct { lang: []const u8, body: []const u8 };
+
+/// **ONE PART OF A MESSAGE, OR WHY IT COULD NOT BE MADE**: never an empty
+/// part for one that failed. Its failure is the fan-out's (the surfaces
+/// that need it fail, counted, one member at a time), never the request's.
+pub fn Part(comptime T: type) type {
+    return union(route_mod.PartStatus) { failed: anyerror, made: T };
+}
+
+/// **A MESSAGE'S PARTS, AS THE ONE MARKDOWN READER FINDS THEM**
+/// (Host.message_parts!): the Recent feed's excerpt, the `<img>` tags, the
+/// fenced code blocks, each made or failed on its own.
+pub const Parts = struct { excerpt: Part([]const u8), images: Part([]const []const u8), code: Part([]const Block) };
+
+/// A feed's entry appended (Host.append_entry!), or why not: the
+/// fan-out's failure, never the request's.
+pub const Appended = union(route_mod.AppendStatus) { appended, failed: anyerror };
 
 /// Which of an account's reads a lookup needed, and failed on: its kind
 /// (the password's stat) or its name.
@@ -249,10 +290,19 @@ pub const Host = struct {
     /// search index told of `message`. False when the append failed (the
     /// host has failed the request; nothing stored).
     store_message: *const fn (ctx: *anyopaque, conv: Conv, sid: []const u8, block: []const u8, index: u64, message: Message) bool = noStoreMessage,
-    /// Host.fan_out!: the Zig's cross-page fan-out of message `index` of
-    /// topic `sid` in `conv` (C8b ports it). Best-effort: it cannot fail
-    /// the request.
-    fan_out: *const fn (ctx: *anyopaque, conv: Conv, sid: []const u8, message: Message, index: u64) void = noFanOut,
+    /// Host.message_parts!: a message's excerpt, image tags and code
+    /// blocks, each made or failed on its own. **IT NEVER FAILS THE
+    /// REQUEST**: a part that failed is the fan-out's.
+    message_parts: *const fn (ctx: *anyopaque, markdown: []const u8) Parts = noParts,
+    /// Host.append_entry!: `entry` appended to the feed file at `path`
+    /// under the chat root (the seam has checked it), `separator` first
+    /// when the file is not empty. **IT NEVER FAILS THE REQUEST**: a write
+    /// that failed is the fan-out's, its error handed back to be said.
+    append_entry: *const fn (ctx: *anyopaque, path: []const u8, separator: []const u8, entry: []const u8) Appended = noAppendEntry,
+    /// Host.fanout_failed!: `surface` failed for `member` with `e`, on
+    /// topic `sid` of the conversation keyed `key`: counted and said, the
+    /// operator's (/admin/host). **NEVER THE REQUEST'S FAILURE.**
+    fanout_failed: *const fn (ctx: *anyopaque, surface: route_mod.Surface, member: []const u8, key: []const u8, sid: []const u8, e: anyerror) void = noFanoutFailed,
     /// Host.header!: a request header's value, or none.
     header: *const fn (ctx: *anyopaque, name: []const u8) []const []const u8 = noHeader,
     /// Host.hostile!.
@@ -325,8 +375,14 @@ fn noRender(_: *anyopaque, _: []const u8) Rendered {
 fn noStoreMessage(_: *anyopaque, _: Conv, _: []const u8, _: []const u8, _: u64, _: Message) bool {
     @panic("store_message asked of a host that does not answer it");
 }
-fn noFanOut(_: *anyopaque, _: Conv, _: []const u8, _: Message, _: u64) void {
-    @panic("fan_out asked of a host that does not answer it");
+fn noParts(_: *anyopaque, _: []const u8) Parts {
+    @panic("message_parts asked of a host that does not answer it");
+}
+fn noAppendEntry(_: *anyopaque, _: []const u8, _: []const u8, _: []const u8) Appended {
+    @panic("append_entry asked of a host that does not answer it");
+}
+fn noFanoutFailed(_: *anyopaque, _: route_mod.Surface, _: []const u8, _: []const u8, _: []const u8, _: anyerror) void {
+    @panic("fanout_failed asked of a host that does not answer it");
 }
 
 fn noPage(_: *anyopaque, _: Conv, _: []const u8) []const []const u8 {
@@ -562,9 +618,49 @@ export fn roc_chat_store_message(conv: ConvRec, sid: RocBytes, block: RocBytes, 
     return h.store_message(h.ctx, .of(conv), sid.slice(), block.slice(), index, .of(message));
 }
 
-export fn roc_chat_fan_out(conv: ConvRec, sid: RocBytes, message: MessageRec, index: u64) callconv(.c) void {
-    const h = current("fan_out");
-    h.fan_out(h.ctx, .of(conv), sid.slice(), .of(message), index);
+/// An error as the Roc carries it: a number only the host reads.
+fn faultOf(e: anyerror) u16 {
+    return @intFromError(e);
+}
+
+export fn roc_chat_message_parts(markdown: RocBytes) callconv(.c) PartsRec {
+    const h = current("message_parts");
+    const p = h.message_parts(h.ctx, markdown.slice());
+    return .{
+        .excerpt = switch (p.excerpt) {
+            .made => |x| .{ .bytes = .from(x), .fault = 0, .status = .made },
+            .failed => |e| .{ .bytes = .from(""), .fault = faultOf(e), .status = .failed },
+        },
+        .images = switch (p.images) {
+            .made => |tags| .{ .tags = .from(tags), .fault = 0, .status = .made },
+            .failed => |e| .{ .tags = .from(&.{}), .fault = faultOf(e), .status = .failed },
+        },
+        .code = switch (p.code) {
+            .made => |blocks| .{ .blocks = .from(blocks), .fault = 0, .status = .made },
+            .failed => |e| .{ .blocks = .from(&.{}), .fault = faultOf(e), .status = .failed },
+        },
+    };
+}
+
+/// **A FEED'S PATH THAT WOULD LEAVE THE CHAT ROOT IS A ROC BUG, SAID, NEVER
+/// THE SEND'S FAILURE**: the fan-out runs after the store, and **STORED IS
+/// DONE** (metal-vmm QUEUE 172), so the seam refuses it as `underRoot` does
+/// (the host never asked) but hands it back as the append's failure
+/// (error.PathOutsideChatRoot), which the Roc counts and says.
+export fn roc_chat_append_entry(path: RocBytes, separator: RocBytes, entry: RocBytes) callconv(.c) AppendRec {
+    const h = current("append_entry");
+    if (!roc.inRoot(path.slice())) return .{ .fault = faultOf(error.PathOutsideChatRoot), .status = .failed };
+    return switch (h.append_entry(h.ctx, path.slice(), separator.slice(), entry.slice())) {
+        .appended => .{ .fault = 0, .status = .appended },
+        .failed => |e| .{ .fault = faultOf(e), .status = .failed },
+    };
+}
+
+export fn roc_chat_fanout_failed(surface: route_mod.Surface, member: RocBytes, key: RocBytes, sid: RocBytes, fault: u16) callconv(.c) void {
+    comptime if (@typeInfo(route_mod.Surface).@"enum".field_names.len < 2)
+        @compileError("Host.fanout_failed!'s surface of one tag crosses as nothing: roc_chat_fanout_failed must not take it");
+    const h = current("fanout_failed");
+    h.fanout_failed(h.ctx, surface, member.slice(), key.slice(), sid.slice(), @errorFromInt(fault));
 }
 
 export fn roc_chat_header(name: RocBytes) callconv(.c) roc.RocBytesList {

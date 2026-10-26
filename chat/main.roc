@@ -15,8 +15,10 @@
 ## stamp, its line and its frame), stored and sent through the primitives
 ## (`append_line!`, `message_count!`, `publish!`); a message is the Roc's
 ## too (`appended!`: its author, number, stamp, block and frame), stored
-## through `store_message!` (the append, the count cache, the search index)
-## and fanned out by the Zig's `fan_out!` until C8b. The files and folders it reads by name (the member's own, a
+## through `store_message!` (the append, the count cache, the search index),
+## and its fan-out (Fanout.roc: every member's surfaces, their keys, events
+## and feed entries) through `publish!`, `append_entry!` and
+## `fanout_failed!` over the host's `message_parts!`. The files and folders it reads by name (the member's own, a
 ## conversation's topics, a channel's members, the rosters, a topic's
 ## reactions) it reads through the file primitives, the names and formats
 ## its own.
@@ -40,6 +42,7 @@ import Accounts
 import Frame
 import Time
 import Transcript
+import Fanout
 
 handle! : Chat.Request => Chat.Answer
 handle! = |req|
@@ -726,9 +729,9 @@ make! = |route, conv, who, topic|
 				# The bookmark first, as a send's: one that fails makes no topic.
 				if dm and !bookmark!(conv, topic) {
 					Chat.answered
-				} else if !appended!(conv, topic, name, Str.to_utf8("hi"), []) {
+				} else if !appended!(conv, who, topic, name, Str.to_utf8("hi"), []) {
 					Chat.answered
-				} else if dm and !announce!(route, conv, topic, name) {
+				} else if dm and !announce!(route, conv, who, topic, name) {
 					Chat.answered
 				} else {
 					Chat.respond(200, json, Topics.made_json(route.key, topic))
@@ -739,11 +742,11 @@ make! = |route, conv, who, topic|
 
 ## A DM's new topic, said where the partner already watches: its highest
 ## general<N>, unless that is the topic made.
-announce! : Route.R, Chat.Conv, List(U8), List(U8) => Bool
-announce! = |route, conv, topic, name|
+announce! : Route.R, Chat.Conv, Who, List(U8), List(U8) => Bool
+announce! = |route, conv, who, topic, name|
 	match Topics.highest_general(topics!(route.family, route.key)) {
 		Ok(gen) if gen != topic =>
-			appended!(conv, gen, name, List.join([Str.to_utf8("New topic: ["), topic, Str.to_utf8("]("), conv.base, [47], topic, Str.to_utf8(")")]), [])
+			appended!(conv, who, gen, name, List.join([Str.to_utf8("New topic: ["), topic, Str.to_utf8("]("), conv.base, [47], topic, Str.to_utf8(")")]), [])
 		_ => Bool.True
 	}
 
@@ -812,7 +815,7 @@ store! = |route, conv, who, is_async, md, cid|
 			Ok(name) =>
 				if conv.family == Dm and !bookmark!(conv, route.sid) {
 					Chat.answered
-				} else if !appended!(conv, route.sid, name, md, cid) {
+				} else if !appended!(conv, who, route.sid, name, md, cid) {
 					Chat.answered
 				} else if is_async {
 					Chat.respond(204, [], [])
@@ -829,11 +832,12 @@ store! = |route, conv, who, is_async, md, cid|
 ## (`message_count!`), its id `<sid>_<n>`, its stamp the request's time; its
 ## block and its frame are made, then the block stored (`store_message!`:
 ## the append, the count cache, the search index), then the frame published
-## on the topic's key, then the fan-out (`fan_out!`). False when a step
-## before the store failed (the request has, with its error), and nothing
-## was stored.
-appended! : Chat.Conv, List(U8), List(U8), List(U8), List(U8) => Bool
-appended! = |conv, sid, name, md, cid|
+## on the topic's key, then the fan-out (`fanned!`, its steps Fanout.roc's,
+## made before the store too). `who` holds a DM's accounts (the fan-out
+## names the other member). False when a step before the store failed (the
+## request has, with its error), and nothing was stored.
+appended! : Chat.Conv, Who, List(U8), List(U8), List(U8), List(U8) => Bool
+appended! = |conv, who, sid, name, md, cid|
 	# **NO MESSAGE WITHOUT AN AUTHOR** (the review of 156): the decoder
 	# refuses such a block on every read, so it would go out live and be
 	# gone on reload. A nameless member (a release cut short) cannot post.
@@ -864,19 +868,79 @@ appended! = |conv, sid, name, md, cid|
 						# sent the message again: a duplicate.
 						key = List.join([conv.key, [47], sid])
 						frame = Frame.message({ index, from: name, from_uid: uid, at: message.at, html: rendered.html, markdown: md, id, cid })
-						if Host.store_message!(conv, sid, block, index, message) {
-							# **STORED IS DONE** (metal-vmm QUEUE 172): from here
-							# nothing fails the send, which a client would answer
-							# by sending it again. The publish cannot fail; the
-							# fan-out is best-effort, each failure counted.
-							Host.publish!(key, frame)
-							Host.fan_out!(conv, sid, message, index)
-							Bool.True
-						} else {
-							Bool.False
+						# **THE FAN-OUT IS MADE BEFORE THE STORE TOO**: every
+						# member's events and feed entries, so what runs after
+						# the store only sends and appends. A DM's accounts are
+						# the request's already (`find!`); asked here only were
+						# they not, before anything is stored.
+						kind = if conv.family == Dm Dm else Channel
+						named = if kind == Dm accounts!(who) else Ok([])
+						match named {
+							Err(Failed) => Bool.False
+							Ok(all) => {
+								steps = Fanout.steps({ kind, key: conv.key, members: conv.members, sid, index, id, from: name, at: message.at, uid, accounts: all }, parts!(md))
+								if Host.store_message!(conv, sid, block, index, message) {
+									# **STORED IS DONE** (metal-vmm QUEUE 172): from
+									# here nothing fails the send, which a client
+									# would answer by sending it again. The publish
+									# cannot fail; the fan-out is best-effort, each
+									# failure counted and said.
+									Host.publish!(key, frame)
+									fanned!(conv.key, sid, steps)
+									Bool.True
+								} else {
+									Bool.False
+								}
+							}
 						}
 					}
 				}
 			}
+		}
+	}
+
+## The message's parts as the host found them (Host.message_parts!), each
+## made or failed on its own.
+parts! : List(U8) => Fanout.Parts
+parts! = |md| {
+	got = Host.message_parts!(md)
+	{
+		excerpt: match got.excerpt.status {
+			Made => Made(got.excerpt.bytes)
+			Failed => Failed(got.excerpt.fault)
+		},
+		images: match got.images.status {
+			Made => Made(got.images.tags)
+			Failed => Failed(got.images.fault)
+		},
+		code: match got.code.status {
+			Made => Made(got.code.blocks)
+			Failed => Failed(got.code.fault)
+		},
+	}
+}
+
+## **THE FAN-OUT, CARRIED OUT IN ITS ORDER** (Fanout.steps): each publish
+## sent; each feed's entry appended and only then its event sent; each
+## surface that failed for a member counted and said (`fanout_failed!`),
+## on topic `sid` of the conversation keyed `key`. **A FAILURE NEVER STOPS
+## THE STEPS AFTER IT, NOR FAILS THE SEND.**
+fanned! : List(U8), List(U8), List(Fanout.Step) => {}
+fanned! = |key, sid, steps|
+	match steps {
+		[] => {}
+		[step, .. as rest] => {
+			match step {
+				Publish(on, bytes) => Host.publish!(on, bytes)
+				Feed(f) => {
+					got = Host.append_entry!(f.path, Feeds.sep, f.entry)
+					match got.status {
+						Appended => Host.publish!(f.key, f.event)
+						Failed => Host.fanout_failed!(f.surface, f.member, key, sid, got.fault)
+					}
+				}
+				Failed(surface, member, fault) => Host.fanout_failed!(surface, member, key, sid, fault)
+			}
+			fanned!(key, sid, rest)
 		}
 	}

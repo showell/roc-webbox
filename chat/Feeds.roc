@@ -232,12 +232,16 @@ Feeds := [].{
 			}
 		}
 
-	## chat_fanout `convKeyBaseURL` then images_store `imagesSourceURL`: the
-	## source message's link, or its conversation's when its id has no
-	## topic part.
+	## chat_fanout `convKeyBaseURL`: a conversation's URL root from its key.
+	## A DM's key holds `_` and a channel's name never does.
+	base_url : List(U8) -> List(U8)
+	base_url = |conv| List.concat(Str.to_utf8(if List.contains(conv, 95) "/chat/c/" else "/channel/"), conv)
+
+	## `convKeyBaseURL` then images_store `imagesSourceURL`: the source
+	## message's link, or its conversation's when its id has no topic part.
 	source_url : List(U8), List(U8) -> List(U8)
 	source_url = |conv, source_id| {
-		base = List.concat(Str.to_utf8(if List.contains(conv, 95) "/chat/c/" else "/channel/"), conv)
+		base = base_url(conv)
 		cut = List.len(source_id) - count_back(source_id, |c| c != 95, 0)
 		# `cut` is one past the last '_' (0 when there is none).
 		if cut > 1 {
@@ -256,16 +260,42 @@ Feeds := [].{
 	images_json : List((Header, List(List(U8)))), U64 -> List(U8)
 	images_json = |entries, most| {
 		tail = List.drop_first(entries, List.len(entries) - smaller(most, List.len(entries)))
-		JsonText.arr(List.map(tail, |(h, tags)|
-			JsonText.obj(List.concat(head_fields(h), [("images", JsonText.arr(List.map(tags, JsonText.str))), ("source_url", JsonText.str(source_url(h.conv, h.source_id)))]))))
+		JsonText.arr(List.map(tail, |(h, tags)| images_event(h, tags)))
 	}
 
 	## The Code page's JSON: every entry, as code_store `encodeCodeEvent`
 	## writes it.
 	code_json : List((Header, List(Block))) -> List(U8)
-	code_json = |entries|
-		JsonText.arr(List.map(entries, |(h, bs)| {
-			blocks = JsonText.arr(List.map(bs, |b| JsonText.obj([("lang", JsonText.str(b.lang)), ("body", JsonText.str(b.body))])))
-			JsonText.obj(List.concat(head_fields(h), [("blocks", blocks), ("source_url", JsonText.str(source_url(h.conv, h.source_id)))]))
-		}))
+	code_json = |entries| JsonText.arr(List.map(entries, |(h, bs)| code_event(h, bs)))
+
+	## images_store `encodeImagesEvent`: one entry as its page and its live
+	## stream (`img:<uid>`) send it, fields in its order, none left out.
+	images_event : Header, List(List(U8)) -> List(U8)
+	images_event = |h, tags|
+		JsonText.obj(List.concat(head_fields(h), [("images", JsonText.arr(List.map(tags, JsonText.str))), ("source_url", JsonText.str(source_url(h.conv, h.source_id)))]))
+
+	## code_store `encodeCodeEvent`: one entry as its page and its live
+	## stream (`code:<uid>`) send it.
+	code_event : Header, List(Block) -> List(U8)
+	code_event = |h, bs| {
+		blocks = JsonText.arr(List.map(bs, |b| JsonText.obj([("lang", JsonText.str(b.lang)), ("body", JsonText.str(b.body))])))
+		JsonText.obj(List.concat(head_fields(h), [("blocks", blocks), ("source_url", JsonText.str(source_url(h.conv, h.source_id)))]))
+	}
+
+	## The header line every entry starts with, as `header` reads it back.
+	header_line : Header -> List(U8)
+	header_line = |h| List.join([Str.to_utf8("Sent by "), h.from, Str.to_utf8(" at "), h.at, Str.to_utf8(", source MSG_"), h.source_id, Str.to_utf8(" in "), h.conv, [58]])
+
+	## images_store `formatImagesEntry`: the header, then each tag on a line
+	## of its own. **A TAG IS ONE LINE** (metal-vmm QUEUE 185): a CR or LF in
+	## one is a space, so no tag carries the separator and a forged header.
+	images_entry : Header, List(List(U8)) -> List(U8)
+	images_entry = |h, tags|
+		List.fold(tags, header_line(h), |out, tag| List.concat(List.append(out, 10), List.map(tag, |c| if c == 10 or c == 13 32 else c)))
+
+	## code_store `formatCodeEntry`: the header, then each block as a
+	## backtick fence (whatever its opener was), one newline between them.
+	code_entry : Header, List(Block) -> List(U8)
+	code_entry = |h, bs|
+		List.concat(header_line(h), List.join(List.intersperse(List.map(bs, |b| List.join([Str.to_utf8("\n```"), b.lang, [10], b.body, Str.to_utf8("\n```")])), [10])))
 }

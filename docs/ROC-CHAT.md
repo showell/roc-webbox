@@ -511,7 +511,8 @@ refuses any Roc call beside this one.
 webbox's plain 404 and 7 a 302 to `location`; the reads are
 `page!`, `srcs!`, `me!` and `now!`, the write
 `append!` (a message's whole store; since C8a the Roc's `appended!` over
-`render!`, `store_message!` and `fan_out!`, below), and `body!` takes which
+`render!` and `store_message!`, and since C8b its fan-out over
+`message_parts!`, `append_entry!` and `fanout_failed!`, below), and `body!` takes which
 form's limit. Lists of records
 (the sidebar, the members) cross as flat lists of byte strings, one decoder
 each side, until P8 generates layouts; a folder's entries cross as a list
@@ -634,8 +635,8 @@ published (`publish!`). The primitives are the host's:
 The old Zig (reactions.zig `storeReaction`, chat_store.zig
 `appendReaction`, `reactionLine`) stays as the twins' oracle.
 
-**A message is the Roc's (C8a); three primitives store, render and fan
-it out.** chat/main.roc `appended!` does what chat_store `appendMessage`
+**A message is the Roc's (C8a, C8b); primitives store, render and fan it
+out.** chat/main.roc `appended!` does what chat_store `appendMessage`
 did, in its order, for every send, a new topic's "hi" and its
 announcement: **no author, no message** (an empty name fails the request
 with `fail!(NoAuthor)`, appendMessage's error.NoAuthor, a 500); the topic's
@@ -645,7 +646,8 @@ spelled it); the stamp (Time.rfc3339 of `now!`); the block
 the HTML (`render!`) and the frame (Frame.message: messageFrame's field
 order, escapes and `cid`) and its key (`<conv key>/<sid>`), **made before
 the store** (metal-vmm QUEUE 177.1: nothing can fail between the store and
-the publish); then `store_message!`, `publish!`, and `fan_out!`. **Stored is
+the publish), and so is the fan-out's every step (below); then
+`store_message!`, `publish!`, and the fan-out (`fanned!`). **Stored is
 done**: nothing after the store fails the send. The primitives:
 - `render!(markdown)`: markdown.zig `render`, the one markdown processor.
   `Failed` fails the request, never an empty page.
@@ -658,9 +660,46 @@ done**: nothing after the store fails the send. The primitives:
   check is the crash protection**, not the order, and **search sees a
   message as it lands**. An append that failed fails the request, nothing
   stored; the count and the search never fail it.
-- `fan_out!(conv, sid, message, index)`: chat_fanout `fanoutCrossPage`,
-  unchanged, after the publish (**temporary: C8b ports it**). A failure is
-  the fan-out's, counted on /admin/host, never the send's.
+
+**The cross-page fan-out is the Roc's (C8b), the markdown's parts the
+host's.** chat/Fanout.roc `steps` decides what fanoutCrossPage decided:
+**members in the conversation's order, each member's surfaces in one order,
+notify, sidebar, recent, images, code**; notify to every member but the
+author; the sidebar's topic-added on a topic's first message alone; the
+Recent row to everyone, "You" for the author, labelled by recentWhere ("in
+<key>", or "to <the other member's name>" from the accounts the request
+already holds; a name that will not read gives "", as its absent-ok did);
+the images and code feeds only when the message has tags or blocks, each
+entry appended and only then its event sent. The bus keys, convKeyBaseURL,
+the topic and source URLs, the notify text, every event's JSON and the
+feeds' entry format are its (Feeds.roc, Recent.roc). The steps are made
+before the store, so after it the Roc only sends and appends. **No step of
+it fails the send**, and a surface that fails for one member never costs
+that member's others or anyone else's. Three primitives, none failing the
+request: each that can fail hands back a `fault`, the host's error as a
+number the Roc never reads, carried to the one that says it:
+- `message_parts!(markdown)`: recent_feed `recentExcerpt`, images_store
+  `extractImageTags`, code_store `extractCodeBlocks` (Steve: the markdown
+  parsing stays Zig), **each made or failed on its own**; a part that
+  failed fails its surface for every member, counted.
+- `append_entry!(path, separator, entry)`: the entry appended to a feed
+  under the chat root, the separator first when the file holds anything (the
+  read that decides it, and its failure, as appendImagesEntry's). A path
+  outside the root is this append's failure (error.PathOutsideChatRoot,
+  said), never the request's.
+- `fanout_failed!(surface, member, key, sid, fault)`: chat_fanout
+  `fanoutFailed`, the operator's count and last failure on /admin/host,
+  in its words (`<surface> for member <uid>, <error>, on <key>/<sid>`).
+  `fanoutCrossPage`'s "every surface for every member" (a URL it could not
+  allocate) has no Roc counterpart: Roc's allocation failure is the call's
+  crash (R3), and the fan-out's bytes are all made before the store, so one
+  stores nothing.
+
+**`fanoutCrossPage` is a second implementation, for now.** login's welcome
+DM and docs' post still call `appendMessage`, which fans out by the Zig's,
+until they move (C9-C10); the twins hold the two equal (angry-gopher
+`chat_twin_test.zig` encoder by encoder, `chat_actions_twin_test.zig` a
+whole send's frames, feeds and failures both ways).
 
 The message crosses as one record (Chat.Message: id, from, at, uid,
 markdown). appendMessage stays, for the Zig's other writers (login's welcome
@@ -732,7 +771,7 @@ as an argument.
 | Module | Functions |
 |---|---|
 | `File` | `read!`, `read_at!`, `stat!`, `list!`, `append!` (answers the new size), `append_line!` (as built: a line, the torn-line rule the host's), `write!` (truncate), `replace!` (temporary file then rename), `make_dir!`, `remove!`, under the data root. Absent and failed are distinct answers; per-call size limits. **Never the auth root.** |
-| `Store` | as built: `message_count!` (the count cache and its recount, chat_count.zig); `store_message!` (a message's block appended, then its `.count` and the search index, chat_store `storeMessage`); `fan_out!` (chat_fanout `fanoutCrossPage`, until C8b) |
+| `Store` | as built: `message_count!` (the count cache and its recount, chat_count.zig); `store_message!` (a message's block appended, then its `.count` and the search index, chat_store `storeMessage`); the fan-out's (C8b): `message_parts!` (a message's excerpt, image tags and code blocks, each made or failed on its own), `append_entry!` (a feed's entry, the separator first when the file holds anything), `fanout_failed!` (a surface counted and said); none fails the request |
 | `Bus` | `publish! : List(U8), List(U8) => {}` (as built: the key as bytes) |
 | `Random` | `bytes! : U64 => List(U8)` |
 | `Markdown` | `render!` (as built: a message's HTML, `{ html, status : [Failed, Rendered] }`), `render_trusted!`, `hostile!` |
@@ -804,7 +843,8 @@ chat/                      the Roc app
   Feeds.roc                images.md / code.md: their paths, entries, fence scanner (pure)
   Page.roc                 page, chrome, sidebar JSON, escaping             (pure)
   Store.roc                not made: the store's writes are primitives (append_line!, store_message!, message_count!) and main.roc's
-  Fanout.roc               cross-page publishes per member (C8b; the host's fan_out! until then) (effects)
+  Fanout.roc               a stored message's cross-page fan-out: which member gets which surface, the bus keys, the notify text and every event, recentWhere, in fanoutCrossPage's order (chat_fanout.zig) (pure; main.roc `fanned!` carries its steps out)
+  Feeds.roc                (also) the feeds' entries and events as the fan-out writes them, and convKeyBaseURL (images_store.zig, code_store.zig)
   Upload.roc               multipart, sniff, quota                          (mostly pure)
 ```
 
@@ -842,7 +882,7 @@ exits 1 on failure, using fixtures copied from the Zig tests.
    - `File.write!` the `.count`;
    - `Search.note_append!`;
    - `Bus.publish!`;
-   - fan out (Zig's `fanoutCrossPage` until C5; Roc's own after).
+   - fan out (the Roc's own since C8b, chat/Fanout.roc).
    - Each of these is best-effort: a failure bumps a counter, never fails the
      send.
 10. **Answer.** 204 for `X-Chat-Async`, else 303 to the topic.
@@ -860,7 +900,8 @@ whose 400 and edge count are the host's), the bookmark for a DM, and the
 store. **Since C8a steps 6-9 are the Roc's too** (chat/main.roc `appended!`,
 §5.2): the author, the number, the stamp, the block, the render and the
 frame before the store, then `store_message!` (the append, `.count`, search),
-`publish!`, and the Zig's fan-out (`fan_out!`, until C8b). The hostile check cannot be
+`publish!`, and since C8b the Roc's fan-out (Fanout.roc's steps, made before
+the store, carried out by `fanned!`). The hostile check cannot be
 reached by any message a person could send (16 units of work a byte; 200,000
 random messages of the formatting characters found none), so its branch is
 held by the scripted host, not the twin.
@@ -1060,7 +1101,7 @@ Each is a release, with its twin test. A route that moves answers with
 | C9 | Docs and the reading list (`/chat/docs/*`, `…/<sid>/saved`), including docs' post to chat | rw | CC | L |
 | C10 | Login in Roc, with its welcome DM; the secrets behind `Users` hosted functions (§3) | rw, ag | CC → box | L |
 | C11 | Admin retire, through the router behind the admin gate | rw | CC | M |
-| C8 | The store's writers: append, `.count`, bookmarks, pins, once C9-C11 have made every caller Roc (reactions done, over `append_line!`, C4). **C8a done**: a message's own decisions are the Roc's (chat/main.roc `appended!`: no author, the count, the id, the stamp, Transcript.stored_form, Frame.message over `render!`, made before the store; §5.2), over `store_message!` (the append with its `.count` and search note, chat_store `storeMessage`) and `publish!`; `append!` gone, 23 hosted functions to 25 (`render!`, `store_message!`, `fan_out!`); held by angry-gopher `chat_actions_twin_test.zig`'s sends both ways on one hub (the transcripts, `.count` files and feeds, every frame on the topics' keys and every member's ntf/sb/rec/img/code keys, and search after: separator lines bare and escaped, a leading `>`, CRLF, empty lines, a trailing newline, names and cids JSON escapes, a name not UTF-8, first messages in a DM and a channel, a stale `.count`), its failures (an append, a count and a nameless sender: the old Zig's error, nothing stored or sent), the stored form's round trip through decodeChatFile, the scripted host for the order, and the seam's probes; every mutant killed. **C8b owes**: the cross-page fan-out (notify, sidebar, recent, images.md, code.md and their frames) in Roc, replacing `fan_out!`; then the Zig's other writers (login's welcome DM, docs' post) move with C9-C10, and `appendMessage` goes when nothing calls it | rw | CC | L |
+| C8 | The store's writers: append, `.count`, bookmarks, pins, once C9-C11 have made every caller Roc (reactions done, over `append_line!`, C4). **C8a done**: a message's own decisions are the Roc's (chat/main.roc `appended!`: no author, the count, the id, the stamp, Transcript.stored_form, Frame.message over `render!`, made before the store; §5.2), over `store_message!` (the append with its `.count` and search note, chat_store `storeMessage`) and `publish!`; `append!` gone, 23 hosted functions to 25 (`render!`, `store_message!`, `fan_out!`); held by angry-gopher `chat_actions_twin_test.zig`'s sends both ways on one hub (the transcripts, `.count` files and feeds, every frame on the topics' keys and every member's ntf/sb/rec/img/code keys, and search after: separator lines bare and escaped, a leading `>`, CRLF, empty lines, a trailing newline, names and cids JSON escapes, a name not UTF-8, first messages in a DM and a channel, a stale `.count`), its failures (an append, a count and a nameless sender: the old Zig's error, nothing stored or sent), the stored form's round trip through decodeChatFile, the scripted host for the order, and the seam's probes; every mutant killed. **C8b done**: the cross-page fan-out is the Roc's (chat/Fanout.roc: who gets which of notify, sidebar, recent, images and code, members in the conversation's order and surfaces in that order; the five bus keys, convKeyBaseURL, the topic and source URLs, the notify text, every event's JSON, the images.md and code.md entries, recentWhere over the request's accounts), made before the store and carried out after it (main.roc `fanned!`), the markdown's parts the host's (`message_parts!`: Steve, the markdown parsing stays Zig), a feed's append `append_entry!`, each failure counted and said by `fanout_failed!` (chat_fanout's count and `fanout_last`, its words unchanged), **none failing the send**; `fan_out!` gone, 25 hosted functions to 27; held by angry-gopher `chat_twin_test.zig` (every encoder, entry and key against chat_fanout's, recent_feed's, images_store's and code_store's over generated bytes; recentWhere over generated account trees), `chat_actions_twin_test.zig` (the sends both ways grown: image tags and fences of every kind, a DM's new topic, a channel of three, the DM with yourself, a partner whose name will not read; and a member whose images.md is a folder: the same failures counted, the same `fanout_last`, their code and everyone else's surfaces whole, the send done), the scripted host for the order and the failures, the seam's probes; every mutant killed. **Owed**: `fanoutCrossPage` stays as a second implementation for the Zig's own writers (login's welcome DM, docs' post, through `appendMessage`) until they move with C9-C10, held equal by the twins; then it and `appendMessage` go | rw | CC | L |
 
 ### Standalone, after Roc serves everything
 
