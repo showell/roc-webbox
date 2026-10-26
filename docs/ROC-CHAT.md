@@ -548,6 +548,28 @@ What the host does with each:
 Static assets never reach Roc: the host serves `/chat/<name>.js` from its
 table before calling `handle!`.
 
+**Memory, as the box measured it (2026-10-26).** What crosses into the Roc
+and out is copied each way, so bytes whose size a user controls cross only
+when the Roc must read them. Four rules came of a large `/raw` costing 6x
+its transcript and, at 16 MB, panicking the machine:
+- **Bytes the Roc does not read stay the host's**: a hosted function that
+  reads or renders them holds them and answers only whether it has them,
+  and the Roc answers `held` (kind 8: its `body`, the host's bytes, its
+  `location`). `/raw` (nothing around them: the transcript goes out as
+  read) and `/chat/links` (the page cut where the rendered links go).
+- **Out of memory in a call is that call's crash**, a 500, the machine
+  going on (roc_abi.zig `allocate`; the request's strings are made inside
+  the guarded frame, so a failure there jumps to a live one).
+- **No arena over the request's**: angry-gopher hands the Roc the request's
+  own allocator (`useRequest`), freed whole with the request.
+- **No memory kept between calls** (`end` frees all; it kept a node the
+  size of the largest call, and a failure to was silent).
+
+angry-gopher `chat_actions_twin_test.zig` holds `/raw` of an 8 MB topic to
+the old Zig's cost (12,023,880 bytes asked for at once, the Roc's within
+1 KB of it); a topic's page is 44,673 bytes against the old Zig's 18,988
+(58,568 before the arena went).
+
 ### 5.3 Effects
 
 All hosted functions are effectful (`=>`): the nightly refuses a pure one

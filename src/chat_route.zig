@@ -105,6 +105,9 @@ pub const Decision = union(enum) {
     not_found,
     /// A 302 to the location (a lookup, then go).
     found: []const u8,
+    /// As `respond`, its body `before`, the bytes the host holds (read or
+    /// rendered by a hosted function: a transcript, a links page), `after`.
+    held: struct { status: u16, content_type: []const u8 = "", nosniff: bool = false, before: []const u8 = "", after: []const u8 = "" },
 
     pub fn eql(a: Decision, b: Decision) bool {
         if (std.meta.activeTag(a) != std.meta.activeTag(b)) return false;
@@ -115,6 +118,7 @@ pub const Decision = union(enum) {
             .not_allowed => |m| m == b.not_allowed,
             .answered, .malformed_form, .not_found => true,
             .found => |l| std.mem.eql(u8, l, b.found),
+            .held => |h| h.status == b.held.status and h.nosniff == b.held.nosniff and std.mem.eql(u8, h.content_type, b.held.content_type) and std.mem.eql(u8, h.before, b.held.before) and std.mem.eql(u8, h.after, b.held.after),
         };
     }
 
@@ -128,6 +132,7 @@ pub const Decision = union(enum) {
             .malformed_form => try w.writeAll("malformed form"),
             .not_found => try w.writeAll("404"),
             .found => |l| try w.print("302 {s}", .{l}),
+            .held => |h| try w.print("{d} \"{s}\"{s} {d} bytes, the host's, {d} bytes", .{ h.status, h.content_type, if (h.nosniff) " nosniff" else "", h.before.len, h.after.len }),
         }
     }
 };

@@ -94,10 +94,7 @@ act! = |req, route| {
 		} else if route.tail == 0 {
 			page!(route)
 		} else {
-			match Host.raw!({}) {
-				[bytes] => Chat.plain(bytes)
-				_ => Chat.not_found
-			}
+			if Host.raw!({}) Chat.held_plain else Chat.not_found
 		}
 	} else if route.tail == 10 {
 		if req.method != Chat.get {
@@ -148,7 +145,13 @@ links! = |rest|
 		Chat.not_found
 	} else {
 		viewer = Host.viewer!({})
-		Chat.respond(200, html, Pages.links(Chrome.src_in(Host.srcs!({})), viewer, Host.links!({})))
+		src = Chrome.src_in(Host.srcs!({}))
+		if Host.links!({}) {
+			(before, after) = Pages.links_around(src, viewer)
+			Chat.held_html(before, after)
+		} else {
+			Chat.respond(200, html, Pages.links(src, viewer, []))
+		}
 	}
 
 ## /chat/recent by any method, as the Zig had it: what the host gathered,

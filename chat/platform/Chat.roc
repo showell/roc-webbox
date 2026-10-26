@@ -29,7 +29,10 @@ Chat := [].{
 	##   or failed there (the host returns its error);
 	## - 5: a malformed form (the site's own 400);
 	## - 6: webbox's plain 404;
-	## - 7: a 302 to `location` (a lookup, then go).
+	## - 7: a 302 to `location` (a lookup, then go);
+	## - 8: as 2, but the body is `body`, then bytes the host holds (a
+	##   transcript, a rendered page; never copied into Roc and out), then
+	##   `location`.
 	Answer : { kind : U8, location : List(U8), presence : Bool, route : Route, status : U16, content_type : List(U8), body : List(U8), allow : U8, nosniff : Bool }
 
 	## A route of `family` with nothing else.
@@ -63,6 +66,14 @@ Chat := [].{
 	## A 200 of text, as stored: plain UTF-8, never sniffed for another type.
 	plain : List(U8) -> Answer
 	plain = |body| { ..respond(200, Str.to_utf8("text/plain; charset=utf-8"), body), nosniff: Bool.True }
+
+	## A 200 of the host's held bytes as text, as stored, never sniffed.
+	held_plain : Answer
+	held_plain = { ..plain([]), kind: 8 }
+
+	## A 200 page: `before`, the host's held bytes, `after`.
+	held_html : List(U8), List(U8) -> Answer
+	held_html = |before, after| { ..respond(200, Str.to_utf8("text/html; charset=utf-8"), before), kind: 8, location: after }
 
 	## A 405 naming `allow`.
 	not_allowed : U8 -> Answer

@@ -23,6 +23,12 @@ pub fn use(base: std.mem.Allocator) void {
     @import("roc_abi.zig").use(base);
 }
 
+/// Or the request's own allocator, freed with the request, before each
+/// call (roc_abi.zig `useRequest`): no arena over it.
+pub fn useRequest(request: std.mem.Allocator) void {
+    @import("roc_abi.zig").useRequest(request);
+}
+
 // ── tests: a few decisions through the Roc (angry-gopher's tests hold the
 // router to Zig's own parse over a corpus) ────────────────────────────────
 
@@ -93,8 +99,8 @@ const Scripted = struct {
     hostile_answer: u8 = 0,
     bookmark_ok: bool = true,
     append_ok: bool = true,
-    transcript: []const []const u8 = &.{"one\n"},
-    linked: []const []const u8 = &.{},
+    transcript: bool = true,
+    linked: bool = false,
     asked: std.ArrayList(u8) = .empty,
     alloc: std.mem.Allocator,
 
@@ -155,11 +161,11 @@ const Scripted = struct {
         say(ctx, "bookmark {s}", .{sid});
         return me(ctx).bookmark_ok;
     }
-    fn raw(ctx: *anyopaque) []const []const u8 {
+    fn raw(ctx: *anyopaque) bool {
         say(ctx, "raw", .{});
         return me(ctx).transcript;
     }
-    fn links(ctx: *anyopaque) []const []const u8 {
+    fn links(ctx: *anyopaque) bool {
         say(ctx, "links", .{});
         return me(ctx).linked;
     }
@@ -320,11 +326,11 @@ test "a topic's raw transcript and /chat/links are the Roc's: a transcript the h
     use(testing.allocator);
     defer @import("roc_abi.zig").deinit();
     const a: Scripted = .{ .alloc = undefined };
-    try expectAct("/c/1_2/Plans/raw", false, .GET, a, .{ .respond = .{ .status = 200, .content_type = "text/plain; charset=utf-8", .body = "one\n", .nosniff = true } }, "member;presence;topic 11 1_2 Plans;raw;");
+    try expectAct("/c/1_2/Plans/raw", false, .GET, a, .{ .held = .{ .status = 200, .content_type = "text/plain; charset=utf-8", .nosniff = true } }, "member;presence;topic 11 1_2 Plans;raw;");
     // Found as a topic, but the host read no transcript (gone since).
     try expectAct("/c/1_2/Plans/raw", false, .HEAD, blk: {
         var s = a;
-        s.transcript = &.{};
+        s.transcript = false;
         break :blk s;
     }, .not_found, "member;presence;topic 11 1_2 Plans;raw;");
     try expectAct("/c/1_2/Plans/raw", false, .POST, a, .{ .not_allowed = .GET }, "member;presence;topic 11 1_2 Plans;");

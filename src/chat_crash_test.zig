@@ -57,3 +57,34 @@ test "a Roc call inside another is refused, error.RocReentered, and the outer ca
     try testing.expectEqual(@as(?anyerror, error.RocReentered), asking.nested);
     try testing.expect(!roc.inCall());
 }
+
+test "memory that runs out inside a Roc call is error.RocCrashed for that request, at every allocation it could fail on, and the next call is served (metal-vmm FEEDBACK 2026-10-26: it panicked the machine)" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    defer roc.deinit();
+    var asker: Asker = .{};
+    var failed: usize = 0;
+    var k: usize = 0;
+    while (k < 64) : (k += 1) {
+        // The request's own allocator (useRequest, as angry-gopher's router
+        // hands it), failing at its k-th allocation.
+        var failing = std.testing.FailingAllocator.init(arena.allocator(), .{ .fail_index = k });
+        roc.useRequest(failing.allocator());
+        if (abi.decide(arena.allocator(), "/crash-after-asking-big", false, .GET, asker.member_())) |_| {
+            unreachable;
+        } else |e| {
+            try testing.expectEqual(error.RocCrashed, e);
+            if (std.mem.eql(u8, abi.last_crash[0..abi.last_crash_len], "roc_alloc: out of memory")) {
+                failed += 1;
+            } else {
+                // Past every allocation the call makes: its own planted crash.
+                try testing.expectEqualStrings("a planted crash, after a big list", abi.last_crash[0..abi.last_crash_len]);
+                break;
+            }
+        }
+        try testing.expect(!roc.inCall());
+        roc.useRequest(arena.allocator());
+        _ = try abi.decide(arena.allocator(), "/ok", false, .GET, asker.member_());
+    }
+    try testing.expect(failed >= 2 and k < 64);
+}

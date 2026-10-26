@@ -100,13 +100,15 @@ Host := [].{
 	## A request header's value, or none (read before the body).
 	header! : List(U8) => List(List(U8))
 
-	## The transcript of the topic `topic!` found, as stored: none when it
-	## has none (or the read failed).
-	raw! : {} => List(List(U8))
+	## Whether the topic `topic!` found has a transcript: the host reads it
+	## and holds it for the answer (Chat.held_plain), never handing it to
+	## Roc (false when the read failed, too).
+	raw! : {} => Bool
 
-	## The member's links page (users/<uid>/links.md), rendered as the
-	## server's own markdown: none when there is none (or the read failed).
-	links! : {} => List(List(U8))
+	## Whether the member has a links page (users/<uid>/links.md): the host
+	## renders it as the server's own markdown and holds it for the answer
+	## (Chat.held_html) (false when the read failed, too).
+	links! : {} => Bool
 
 	## The member's feed file as stored (`which`: 0 images.md, 1 code.md):
 	## none when there is none (or the read failed).

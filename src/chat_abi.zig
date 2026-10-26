@@ -103,16 +103,19 @@ pub const Host = struct {
     header: *const fn (ctx: *anyopaque, name: []const u8) []const []const u8 = noHeader,
     /// Host.hostile!: 0 no, 1 refused, 2 failed.
     hostile: *const fn (ctx: *anyopaque, markdown: []const u8) u8 = noHostile,
-    /// Host.raw!, Host.links!: the topic's transcript, the member's links
-    /// page rendered, or none.
-    raw: *const fn (ctx: *anyopaque) []const []const u8 = noPage,
-    links: *const fn (ctx: *anyopaque) []const []const u8 = noPage,
+    /// Host.raw!, Host.links!: whether the host holds the topic's
+    /// transcript, the member's links page rendered, for a `held` answer.
+    raw: *const fn (ctx: *anyopaque) bool = noHeld,
+    links: *const fn (ctx: *anyopaque) bool = noHeld,
     /// Host.feed!: the member's images.md (0) or code.md (1), or none.
     feed: *const fn (ctx: *anyopaque, which: u8) []const []const u8 = noFeed,
     /// Host.recent!: the member's recent rows, nine fields each, or none.
     recent: *const fn (ctx: *anyopaque) []const []const u8 = noPage,
 };
 
+fn noHeld(_: *anyopaque) bool {
+    @panic("raw or links asked of a host that does not answer it");
+}
 fn noFeed(_: *anyopaque, _: u8) []const []const u8 {
     @panic("feed asked of a host that does not answer it");
 }
@@ -177,7 +180,7 @@ pub const Routing = struct {
         h.channels = nothing;
         h.topics = noConv;
         h.send_conv = noSendTo;
-        h.links = nothing;
+        h.links = holdsNone;
         h.feed = noFile;
         h.recent = nothing;
         return h;
@@ -206,6 +209,9 @@ pub const Routing = struct {
     }
     fn nothing(_: *anyopaque) []const []const u8 {
         return &.{};
+    }
+    fn holdsNone(_: *anyopaque) bool {
+        return false;
     }
     fn noFile(_: *anyopaque, _: u8) []const []const u8 {
         return &.{};
@@ -359,9 +365,9 @@ export fn roc_chat_hostile(markdown: RocBytes) callconv(.c) u8 {
     return h.hostile(h.ctx, markdown.slice());
 }
 
-export fn roc_chat_raw() callconv(.c) roc.RocBytesList {
+export fn roc_chat_raw() callconv(.c) bool {
     const h = current("raw");
-    return .from(h.raw(h.ctx));
+    return h.raw(h.ctx);
 }
 
 export fn roc_chat_feed(which: u8) callconv(.c) roc.RocBytesList {
@@ -374,9 +380,9 @@ export fn roc_chat_recent() callconv(.c) roc.RocBytesList {
     return .from(h.recent(h.ctx));
 }
 
-export fn roc_chat_links() callconv(.c) roc.RocBytesList {
+export fn roc_chat_links() callconv(.c) bool {
     const h = current("links");
-    return .from(h.links(h.ctx));
+    return h.links(h.ctx);
 }
 
 export fn roc_chat_srcs() callconv(.c) roc.RocBytesList {
@@ -408,10 +414,13 @@ fn crashed(message: []const u8) noreturn {
 
 /// The call, or null when Roc crashed inside it. Nothing of this frame is
 /// read after the jump back but what `setjmp` answers: the answer is
-/// written through `out` only on the way that returns normally.
-noinline fn guarded(req: Request, out: *Answer) bool {
+/// written through `out` only on the way that returns normally. The
+/// request's strings are made here, after `setjmp`: they are the call's
+/// first allocations, and one that fails must jump back to this frame,
+/// not to one already gone.
+noinline fn guarded(sub: []const u8, channel: bool, method: u8, out: *Answer) bool {
     if (sljmp.setjmp(&jump) != 0) return false;
-    out.* = roc_chat_handle(req);
+    out.* = roc_chat_handle(.{ .sub = .from(sub), .channel = channel, .method = method });
     return true;
 }
 
@@ -429,7 +438,7 @@ pub fn decide(alloc: std.mem.Allocator, sub: []const u8, channel: bool, method: 
     defer roc.crashed = was;
     defer roc.end();
     var a: Answer = undefined;
-    if (!guarded(.{ .sub = .from(sub), .channel = channel, .method = methodNumber(method) }, &a)) return error.RocCrashed;
+    if (!guarded(sub, channel, methodNumber(method), &a)) return error.RocCrashed;
     switch (a.kind) {
         0 => {},
         1 => return .{ .redirect = try alloc.dupe(u8, a.location.slice()) },
@@ -444,6 +453,7 @@ pub fn decide(alloc: std.mem.Allocator, sub: []const u8, channel: bool, method: 
         5 => return .malformed_form,
         6 => return .not_found,
         7 => return .{ .found = try alloc.dupe(u8, a.location.slice()) },
+        8 => return .{ .held = .{ .status = a.status, .content_type = try alloc.dupe(u8, a.content_type.slice()), .nosniff = a.nosniff, .before = try alloc.dupe(u8, a.body.slice()), .after = try alloc.dupe(u8, a.location.slice()) } },
         else => std.debug.panic("roc_chat_handle answered kind {d}", .{a.kind}),
     }
     return .{ .serve = .{ .presence = a.presence, .route = .{

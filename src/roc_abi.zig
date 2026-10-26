@@ -138,16 +138,35 @@ comptime {
 /// changes it, never one it frees).
 var arena: ?std.heap.ArenaAllocator = null;
 
+/// **OR NO ARENA OF ITS OWN**: a host whose allocator is already freed as
+/// a whole when the request ends (angry-gopher's: the kernel's request heap
+/// on metal, webbox's arena per request on Linux) hands it to `useRequest`
+/// before each call, and Roc allocates on it directly. An arena over an
+/// arena only costs: Zig's arena grows a node that does not fit by the size
+/// asked as well as what is used (a 2N node for N bytes), and nothing is
+/// handed back before the request ends anyway.
+var direct: ?std.mem.Allocator = null;
+
 /// The arena, from `base`, once, as the host starts: `base` lives as long
 /// as the process.
 pub fn use(base: std.mem.Allocator) void {
+    direct = null;
     arena = .init(base);
+}
+
+/// The request's own allocator, for the calls made while it is answered:
+/// what Roc takes stays the request's, and goes with it.
+pub fn useRequest(request: std.mem.Allocator) void {
+    if (arena) |*a| a.deinit();
+    arena = null;
+    direct = request;
 }
 
 /// The arena's memory back to `base` (a test's, done).
 pub fn deinit() void {
-    arena.?.deinit();
+    if (arena) |*a| a.deinit();
     arena = null;
+    direct = null;
 }
 
 /// The app's answer to one request. Its strings are in the call's arena:
@@ -190,13 +209,17 @@ fn inside(comptime what: []const u8) void {
     if (!inCall()) @panic(what ++ ": Roc ran outside a call (docs/ROC-CHAT.md R1)");
 }
 
-/// The call's memory, all of it, back to the arena (kept for the next call).
+/// The call's memory, all of it, back to the arena's base: none of it is
+/// kept for the next call (keeping it grew one node to the call's whole
+/// size, and a failure to was silent). On the request's own allocator,
+/// nothing: the request's end frees it.
 pub fn end() void {
-    _ = arena.?.reset(.retain_capacity);
+    if (arena) |*a| _ = a.reset(.free_all);
 }
 
 /// The call's allocator: what a hosted function's answer is made in.
 pub fn alloc() std.mem.Allocator {
+    if (direct) |d| return d;
     return arena.?.allocator();
 }
 
@@ -234,7 +257,11 @@ const header = 16;
 
 fn allocate(len: usize, alignment: usize) [*]u8 {
     std.debug.assert(alignment <= header);
-    const got = alloc().alignedAlloc(u8, .fromByteUnits(header), header + len) catch @panic("roc_alloc: out of memory");
+    // **OUT OF MEMORY IS A CRASH OF THE CALL**: `crashed`, which inside a
+    // guarded call (chat_abi.zig) jumps back to its start, so the request is
+    // a 500 and the machine goes on; never a panic that takes every user
+    // down with one request's size.
+    const got = alloc().alignedAlloc(u8, .fromByteUnits(header), header + len) catch crashed("roc_alloc: out of memory");
     std.mem.writeInt(usize, got[0..@sizeOf(usize)], len, .little);
     return got.ptr + header;
 }

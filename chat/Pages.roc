@@ -1,6 +1,7 @@
 ## THE CHAT'S PAGES (angry-gopher chat_page.zig): the conversation page and
 ## the sidebar it boots with, the first-topic shell, a 404 that says why, and
 ## the empty /chat. Each from what the host read; the chrome is Chrome.roc's.
+import Codec
 import Chrome
 import Html
 import Paths
@@ -62,6 +63,15 @@ Pages := [].{
 			},
 			Str.to_utf8("</div>"),
 		]))
+
+	## The links page cut where the rendered links go: the host holds them
+	## (a curated page can be long), and answers before, them, after.
+	links_around : (List(U8) -> List(U8)), List(U8) -> (List(U8), List(U8))
+	links_around = |src, viewer|
+		match Codec.cut_seq(links(src, viewer, [[0]]), [0]) {
+			Ok(parts) => parts
+			Err(None) => crash "Pages.links_around: the page lost its mark"
+		}
 
 	links_css : Str
 	links_css = "<style>\n.links-page { max-width: 46rem; margin: 0 auto; line-height: 1.55; }\n.links-page h2 { margin-top: 1.6rem; }\n.links-page li { margin: 3px 0; }\n</style>"
