@@ -510,9 +510,10 @@ refuses any Roc call beside this one.
 webbox's plain 404 and 7 a 302 to `location`; the reads are
 `page!`, `srcs!`, `me!`, `viewer!`, `last_conv!`, `last_viewed!`, `now!`
 (where a DM resumes is ChatState.roc's choice),
-`topics!`, `channels!` and `members!`, the writes `bookmark!` and
-`append!`, and `body!` takes which form's limit. Lists of records (the
-sidebar, the members) cross as flat lists of byte strings, one decoder
+`topics!`, `channel_rosters!` (every channel's members: which are the
+member's is Paths.roc's choice) and `members!`, the writes `bookmark!`
+and `append!`, and `body!` takes which form's limit. Lists of records
+(the sidebar, the members, the rosters) cross as flat lists of byte strings, one decoder
 each side, until P8 generates layouts. **After a failure the host does
 nothing more** for the call: every hosted function answers its empty or
 "failed" value once one has failed, so a Roc that goes on (a duplicate
@@ -641,10 +642,10 @@ chat/                      the Roc app
   main.roc                 handle!: the prelude, then the route's answer (chat.zig handle)
   Route.roc                the path parsed into a route, by Zig's rules     (pure)
   Transcript.roc           transcript blocks: encode, decode, escape (chat_codec.zig) (pure)
-  Bytes.roc                std.mem's searches and splits and lessThan, on bytes (pure)
+  Bytes.roc                std.mem's searches and splits, lessThan and sort, on bytes (pure)
   JsonText.roc             JSON as the Zig's encoders write it (pure)
   Count.roc                .count: parse, format, both trust rules (chat_count.zig) (pure)
-  Paths.roc                keys, validators, path builders, firstOf (chat_paths.zig) (pure)
+  Paths.roc                keys, validators, path builders, firstOf, a member's channels (chat_paths.zig) (pure)
   ZigText.roc              parseInt, std.json.fmt, trims, byte lines        (pure)
   Time.roc                 RFC3339 UTC, civil dates (timefmt.zig)           (pure)
   ChatState.roc            where a DM resumes; a pin set, parsed and rewritten (chat_state.zig) (pure)

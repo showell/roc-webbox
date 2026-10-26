@@ -31,7 +31,7 @@ platform ""
 		"roc_chat_last_viewed": Host.last_viewed!,
 		"roc_chat_now": Host.now!,
 		"roc_chat_topics": Host.topics!,
-		"roc_chat_channels": Host.channels!,
+		"roc_chat_channel_rosters": Host.channel_rosters!,
 		"roc_chat_members": Host.members!,
 		"roc_chat_bookmark": Host.bookmark!,
 		"roc_chat_append": Host.append!,

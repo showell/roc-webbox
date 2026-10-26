@@ -375,7 +375,7 @@ msg! = |id|
 		match find_dm!(me, Host.members!({}), sid, 0) {
 			Ok(conv) => Chat.found(at("/chat/c/", conv))
 			Err(None) =>
-				match find_channel!(Host.channels!({}), sid, 0) {
+				match find_channel!(Paths.member_channels(Host.channel_rosters!({}), me), sid, 0) {
 					Ok(name) => Chat.found(at("/channel/", name))
 					Err(None) => Chat.not_found
 				}

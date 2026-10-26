@@ -2,6 +2,7 @@
 ## topic ids, channel names and message ids are well formed, the DM pair's
 ## canonical key, and paths joined as Zig's `std.fs.path.join` joins them.
 ## Pure.
+import Bytes
 import ZigText
 
 Paths := [].{
@@ -86,6 +87,23 @@ Paths := [].{
 			Str.to_utf8("ChitChat")
 		} else {
 			List.first(topics) ?? []
+		}
+
+	## listUserChannels's decision: the names of the channels `uid` is in,
+	## sorted by bytes, from every roster as Host.channel_rosters! hands them
+	## over (`name, count, member...` each, in the listing's order).
+	member_channels : List(List(U8)), List(U8) -> List(List(U8))
+	member_channels = |rosters, uid| Bytes.sort(members_of(rosters, uid, 0, []))
+
+	members_of : List(List(U8)), List(U8), U64, List(List(U8)) -> List(List(U8))
+	members_of = |rosters, uid, i, out|
+		match List.get(rosters, i) {
+			Err(_) => out
+			Ok(name) => {
+				n = ZigText.parse_u64(List.get(rosters, i + 1) ?? []) ?? 0
+				members = List.sublist(rosters, { start: i + 2, len: n })
+				members_of(rosters, uid, i + 2 + n, if List.contains(members, uid) List.append(out, name) else out)
+			}
 		}
 
 	## `std.fs.path.join` on POSIX: the non-empty parts joined by one `/`,

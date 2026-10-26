@@ -34,7 +34,7 @@ ChatState := [].{
 		if next == [] {
 			Remove
 		} else {
-			Write(List.join(List.map(sort(next), |s| List.append(s, 10))))
+			Write(List.join(List.map(Bytes.sort(next), |s| List.append(s, 10))))
 		}
 	}
 
@@ -43,17 +43,4 @@ ChatState := [].{
 	## blank ones dropped.
 	parse : List(U8) -> List(List(U8))
 	parse = |b| List.drop_if(List.map(Bytes.split_byte(b, 10), ZigText.trim), |s| s == [])
-
-	## std.mem.sort with lessThanStr: equal lines are the same bytes, so the
-	## order among them cannot show.
-	sort : List(List(U8)) -> List(List(U8))
-	sort = |l|
-		List.sort_with(l, |a, b|
-			if Bytes.less(a, b) {
-				Before
-			} else if Bytes.less(b, a) {
-				After
-			} else {
-				Same
-			})
 }

@@ -85,8 +85,10 @@ Host := [].{
 	## name), as the store lists them.
 	topics! : Chat.Family, List(U8) => List(List(U8))
 
-	## The channels the member is in.
-	channels! : {} => List(List(U8))
+	## Every channel and its members, flat as `name, count, member...` each,
+	## in the listing's order; a malformed one the host skipped (and counted:
+	## that is the operator's). Which are the member's is Paths.member_channels.
+	channel_rosters! : {} => List(List(U8))
 
 	## Every member and the agent, as `id, name` pairs.
 	members! : {} => List(List(U8))

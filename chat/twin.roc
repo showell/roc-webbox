@@ -124,6 +124,7 @@ call = |req| {
 		48 => [Conversation.topic_title(arg(0), arg(1))]
 		49 => [bool(Conversation.has_topic(List.drop_first(req.args, 1), arg(0)))]
 		50 => [Conversation.dm_base(arg(0)), Conversation.channel_base(arg(0))]
+		51 => Paths.member_channels(List.drop_first(req.args, 1), arg(0))
 		_ => crash "twin: no function ${U8.to_str(req.which)}"
 	}
 }

@@ -101,6 +101,8 @@ const Scripted = struct {
     partner: []const u8 = "Debbie",
     /// The channel's members.
     ops: []const []const u8 = &.{ "1", "3" },
+    /// Every channel as `name, count, member...`, in the listing's order.
+    rosters: []const []const u8 = &.{ "ops", "2", "1", "3" },
     /// The conversation's topics.
     topics: []const []const u8 = &.{"Plans"},
     body: ?[]const u8 = "",
@@ -122,7 +124,7 @@ const Scripted = struct {
     alloc: std.mem.Allocator,
 
     fn host(self: *Scripted) Host {
-        return .{ .ctx = self, .member = member, .presence = presence, .account = account, .name = name, .channel_members = channelMembers, .topics = topicsOf, .me = meId, .body = bodyOf, .reactions = reactionsOf, .react = react, .pins = pinsOf, .write_pins = writePins, .remove_pins = removePins, .page = pageOf, .header = header, .hostile = hostile, .viewer = viewer, .bookmark = bookmark, .append = append, .raw = raw, .links = links, .srcs = srcs };
+        return .{ .ctx = self, .member = member, .presence = presence, .account = account, .name = name, .channel_members = channelMembers, .channel_rosters = rostersOf, .members = membersOf, .topics = topicsOf, .me = meId, .body = bodyOf, .reactions = reactionsOf, .react = react, .pins = pinsOf, .write_pins = writePins, .remove_pins = removePins, .page = pageOf, .header = header, .hostile = hostile, .viewer = viewer, .bookmark = bookmark, .append = append, .raw = raw, .links = links, .srcs = srcs };
     }
     fn me(ctx: *anyopaque) *Scripted {
         return @ptrCast(@alignCast(ctx));
@@ -160,6 +162,15 @@ const Scripted = struct {
     fn channelMembers(ctx: *anyopaque, channel: []const u8) []const []const u8 {
         say(ctx, "channel_members {s}", .{channel});
         return if (std.mem.eql(u8, channel, "ops")) me(ctx).ops else &.{};
+    }
+    fn rostersOf(ctx: *anyopaque) []const []const u8 {
+        say(ctx, "channel_rosters", .{});
+        return me(ctx).rosters;
+    }
+    /// Only the member: no DM to search.
+    fn membersOf(ctx: *anyopaque) []const []const u8 {
+        say(ctx, "members", .{});
+        return &.{ "1", "Steve" };
     }
     fn topicsOf(ctx: *anyopaque, family: route.Family, key: []const u8) []const []const u8 {
         say(ctx, "topics {t} {s}", .{ family, key });
@@ -451,4 +462,24 @@ test "a topic's raw transcript and /chat/links are the Roc's: a transcript the h
     try expectAct("/c/1_2/Plans/raw", false, .POST, a, .{ .not_allowed = .GET }, dm_topic);
     // /chat/links asks the viewer, the scripts, then the page; below it, nothing.
     try expectAct("/links/x", false, .GET, a, .not_found, "member;presence;");
+}
+
+test "/chat/msg: which channels are the member's, and their order, are the Roc's; the host hands over every roster" {
+    use(testing.allocator);
+    defer @import("roc_abi.zig").deinit();
+    const a: Scripted = .{ .alloc = undefined };
+    // Rosters in the listing's order, not sorted: the member is in ops, Zed
+    // and a name that sorts high, not in zeta. Every topic list has Plans,
+    // so the first of the member's by bytes (`Z` before `o`) is the one.
+    try expectAct("/msg/Plans_1", false, .GET, blk: {
+        var s = a;
+        s.rosters = &.{ "ops", "2", "1", "3", "zeta", "1", "2", "\xffhigh", "1", "1", "Zed", "1", "1" };
+        break :blk s;
+    }, .{ .found = "/channel/Zed/Plans#msg-Plans_1" }, "member;presence;members;channel_rosters;topics channel Zed;");
+    // In none: nothing to search.
+    try expectAct("/msg/Plans_1", false, .GET, blk: {
+        var s = a;
+        s.rosters = &.{ "zeta", "1", "2", "ops", "0" };
+        break :blk s;
+    }, .not_found, "member;presence;members;channel_rosters;");
 }

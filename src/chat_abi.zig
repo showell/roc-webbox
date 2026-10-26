@@ -108,9 +108,10 @@ pub const Host = struct {
     now: *const fn (ctx: *anyopaque) i64 = noNow,
     /// Host.topics!: a DM's or a channel's topics.
     topics: *const fn (ctx: *anyopaque, family: Family, key: []const u8) []const []const u8 = noTopics,
-    /// Host.channels!, Host.members!: the member's channels; every member as
+    /// Host.channel_rosters!: every channel as `name, count, member...`
+    /// (which are the member's is the Roc's); Host.members!: every member as
     /// `id, name` pairs.
-    channels: *const fn (ctx: *anyopaque) []const []const u8 = noList,
+    channel_rosters: *const fn (ctx: *anyopaque) []const []const u8 = noList,
     members: *const fn (ctx: *anyopaque) []const []const u8 = noList,
     /// Host.bookmark!: topic `sid` recorded as where the member resumes DM
     /// `conv`; Host.append!: a message appended to topic `sid` of `conv`.
@@ -207,7 +208,7 @@ pub const Routing = struct {
         h.channel_members = noMembers;
         h.srcs = nothing;
         h.members = nothing;
-        h.channels = nothing;
+        h.channel_rosters = nothing;
         h.topics = noTopicsHere;
         h.links = holdsNone;
         h.feed = noFile;
@@ -374,9 +375,9 @@ export fn roc_chat_topics(family: Family, key: RocBytes) callconv(.c) roc.RocByt
     return .from(h.topics(h.ctx, family, key.slice()));
 }
 
-export fn roc_chat_channels() callconv(.c) roc.RocBytesList {
-    const h = current("channels");
-    return .from(h.channels(h.ctx));
+export fn roc_chat_channel_rosters() callconv(.c) roc.RocBytesList {
+    const h = current("channel_rosters");
+    return .from(h.channel_rosters(h.ctx));
 }
 
 export fn roc_chat_members() callconv(.c) roc.RocBytesList {
