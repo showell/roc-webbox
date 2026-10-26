@@ -46,18 +46,18 @@ is_action : Route.R -> Bool
 is_action = |r|
 	(r.family == 11 or r.family == 12) and r.part == 3 and (r.tail == 5 or r.tail == 6 or r.tail == 10 or r.tail == 11)
 
-## A conversation's landing (part 0) or a topic's page (part 3, tail 0), in
-## a DM or a channel (docs/ROC-CHAT.md C3).
+## A conversation's landing (part 0), a topic's page (part 3, tail 0) or its
+## raw transcript (tail 7), in a DM or a channel (docs/ROC-CHAT.md C3).
 is_page : Route.R -> Bool
 is_page = |r|
-	(r.family == 11 or r.family == 12) and (r.part == 0 or (r.part == 3 and r.tail == 0))
+	(r.family == 11 or r.family == 12) and (r.part == 0 or (r.part == 3 and (r.tail == 0 or r.tail == 7)))
 
-## /chat and /chat/default (2), /chat/conversations (9), /chat/msg/<id>
-## (10), and in a DM or a channel a new topic (part 1) or a send (tail 3,
+## /chat and /chat/default (2), /chat/links (7), /chat/conversations (9),
+## /chat/msg/<id> (10), and in a DM or a channel a new topic (part 1) or a send (tail 3,
 ## or 13 with segments after it).
 is_own : Route.R -> Bool
 is_own = |r|
-	r.family == 2 or r.family == 9 or r.family == 10 or ((r.family == 11 or r.family == 12) and (r.part == 1 or (r.part == 3 and (r.tail == 3 or r.tail == 13))))
+	r.family == 2 or r.family == 7 or r.family == 9 or r.family == 10 or ((r.family == 11 or r.family == 12) and (r.part == 1 or (r.part == 3 and (r.tail == 3 or r.tail == 13))))
 
 ## The Roc's own routes, in the Zig's order: presence; the conversation and
 ## the topic (a miss is Zig's to answer, the same 404s); the method; then
@@ -71,6 +71,8 @@ act! = |req, route| {
 		if req.method != Chat.get Chat.not_allowed(Chat.get) else conversations!({})
 	} else if route.family == 10 {
 		msg!(route.rest)
+	} else if route.family == 7 {
+		links!(route.rest)
 	} else if route.part == 1 {
 		new_topic!(req, route)
 	} else if route.tail == 3 or route.tail == 13 {
@@ -79,8 +81,17 @@ act! = |req, route| {
 		landing!(route)
 	} else if !Host.topic!(route.family, route.key, route.sid) {
 		Chat.zig(route, Bool.False)
-	} else if route.tail == 0 {
-		if req.method != Chat.get and req.method != Chat.head Chat.not_allowed(Chat.get) else page!(route)
+	} else if route.tail == 0 or route.tail == 7 {
+		if req.method != Chat.get and req.method != Chat.head {
+			Chat.not_allowed(Chat.get)
+		} else if route.tail == 0 {
+			page!(route)
+		} else {
+			match Host.raw!({}) {
+				[bytes] => Chat.plain(bytes)
+				_ => Chat.not_found
+			}
+		}
 	} else if route.tail == 10 {
 		if req.method != Chat.get {
 			Chat.not_allowed(Chat.get)
@@ -121,6 +132,17 @@ react! = |{}| {
 
 html : List(U8)
 html = Str.to_utf8("text/html; charset=utf-8")
+
+## /chat/links, by any method, as the Zig had it: the member's own, or the
+## stub; nothing below it.
+links! : List(U8) => Chat.Answer
+links! = |rest|
+	if rest != [] {
+		Chat.not_found
+	} else {
+		viewer = Host.viewer!({})
+		Chat.respond(200, html, Pages.links(Chrome.src_in(Host.srcs!({})), viewer, Host.links!({})))
+	}
 
 ## A conversation's landing: its first topic, or, with none, the page that
 ## offers one.

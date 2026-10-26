@@ -48,6 +48,24 @@ Pages := [].{
 			Str.to_utf8("\">Go back</a></p>"),
 		]))
 
+	## chat_links.zig's /chat/links: the member's curated links, `rendered`
+	## (none when they have none: a stub that says who curates them), in a
+	## readable column of its own.
+	links : (List(U8) -> List(U8)), List(U8), List(List(U8)) -> List(U8)
+	links = |src, viewer, rendered|
+		Chrome.page({ tab: Str.to_utf8("Links"), title: Str.to_utf8("Links"), viewer, active: Str.to_utf8("links"), src }, List.join([
+			Str.to_utf8(links_css),
+			Str.to_utf8("<div class=\"links-page\">"),
+			match rendered {
+				[html] => html
+				_ => Str.to_utf8("<p>No links yet — ask Steve to curate links.</p>")
+			},
+			Str.to_utf8("</div>"),
+		]))
+
+	links_css : Str
+	links_css = "<style>\n.links-page { max-width: 46rem; margin: 0 auto; line-height: 1.55; }\n.links-page h2 { margin-top: 1.6rem; }\n.links-page li { margin: 3px 0; }\n</style>"
+
 	## noConversationsHtml: /chat for a viewer with nothing to resume.
 	no_conversations : (List(U8) -> List(U8)), List(U8) -> List(U8)
 	no_conversations = |src, viewer|

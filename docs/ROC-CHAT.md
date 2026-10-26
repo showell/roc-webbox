@@ -874,7 +874,7 @@ Each is a release, with its twin test. A route that moves answers with
 | C3 | Page, chrome (matches Zig's settings page byte for byte; a twin test), sidebar JSON, 404 and empty pages, conversations, msg (302), default/resume, new topic (with the `general<N>` announcement) (**done**: chat/Chrome.roc, Pages.roc and Html.roc build the chrome and the pages byte for byte to the Zig's, by twins; the Roc serves a conversation's landing, a topic's page, /chat and /chat/default, /chat/conversations, /chat/msg/<id> and a new topic, chat/Topics.roc judging names without case and the `general<N>` an announcement goes to; the reads and writes are the host's, as hosted functions; held to the old Zig by angry-gopher `chat_actions_twin_test.zig`, 97 requests both ways, every answer and file the same; every mutant killed but two equivalent) | rw | CC | XL |
 | C5 | Fan-out (notify, sidebar, recent, `users/<member>/images.md`, `users/<member>/code.md` with the fence scanner and its quirk), replacing angry-gopher's | rw | CC | L |
 | C6 | Uploads (multipart, sniff, quota as `write`, lossy filename) and download | rw | CC | L |
-| C7 | Recent (including doc rows from docs_store), images, code and links pages | rw | CC | L |
+| C7 | Recent (including doc rows from docs_store), images, code and links pages (**links done**, with a topic's raw transcript: chat/main.roc `links!` serves /chat/links by any method, as the Zig did, and Pages.roc builds the page byte for byte; `links.md`'s trusted render is the host's, `Host.links!`; a topic's `/raw` is `act!`'s, GET or HEAD after the topic, its bytes `Host.raw!`'s and answered as text with `nosniff`, a new flag on the Answer; held by angry-gopher `chat_actions_twin_test.zig`, now 149 requests both ways (one a transcript that is not UTF-8), by the scripted host for a transcript gone since its topic was found, and by a links.md that cannot be read; every mutant killed) | rw | CC | L |
 | C9 | Docs and the reading list (`/chat/docs/*`, `…/<sid>/saved`), including docs' post to chat | rw | CC | L |
 | C10 | Login in Roc, with its welcome DM; the secrets behind `Users` hosted functions (§3) | rw, ag | CC → box | L |
 | C11 | Admin retire, through the router behind the admin gate | rw | CC | M |
@@ -892,7 +892,7 @@ Each is a release, with its twin test. A route that moves answers with
 2. P2, P3, P7, P9, U1 and A1-A4, each booting on metal. C1's pure modules
    start in parallel; they reach production only when a gut uses them.
 3. M1, judged by the box (not released: Steve ships once, mostly Roc).
-4. C1, C4, C3, O1 (done on the branch), then raw, links and C7's pages,
+4. C1, C4, C3, O1, raw and links (done on the branch), then C7's pages,
    each a milestone the box judges.
 5. **v1, one release**: the chat as mostly Roc, its scope the QUEUE line
    naming what is still Zig (proposed there by CC, taken by the box).

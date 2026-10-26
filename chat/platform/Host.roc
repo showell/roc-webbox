@@ -100,6 +100,14 @@ Host := [].{
 	## A request header's value, or none (read before the body).
 	header! : List(U8) => List(List(U8))
 
+	## The transcript of the topic `topic!` found, as stored: none when it
+	## has none (or the read failed).
+	raw! : {} => List(List(U8))
+
+	## The member's links page (users/<uid>/links.md), rendered as the
+	## server's own markdown: none when there is none (or the read failed).
+	links! : {} => List(List(U8))
+
 	## Whether markdown is hostile: 0 no, 1 yes and the host has refused it
 	## (webbox's edge counter and its 400), 2 the check failed.
 	hostile! : List(U8) => U8

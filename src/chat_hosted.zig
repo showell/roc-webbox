@@ -93,11 +93,13 @@ const Scripted = struct {
     hostile_answer: u8 = 0,
     bookmark_ok: bool = true,
     append_ok: bool = true,
+    transcript: []const []const u8 = &.{"one\n"},
+    linked: []const []const u8 = &.{},
     asked: std.ArrayList(u8) = .empty,
     alloc: std.mem.Allocator,
 
     fn host(self: *Scripted) Host {
-        return .{ .ctx = self, .member = member, .presence = presence, .topic = topic, .body = bodyOf, .reactions = reactionsOf, .react = react, .pin = pin, .send_conv = sendConv, .header = header, .hostile = hostile, .viewer = viewer, .bookmark = bookmark, .append = append };
+        return .{ .ctx = self, .member = member, .presence = presence, .topic = topic, .body = bodyOf, .reactions = reactionsOf, .react = react, .pin = pin, .send_conv = sendConv, .header = header, .hostile = hostile, .viewer = viewer, .bookmark = bookmark, .append = append, .raw = raw, .links = links, .srcs = srcs };
     }
     fn me(ctx: *anyopaque) *Scripted {
         return @ptrCast(@alignCast(ctx));
@@ -152,6 +154,18 @@ const Scripted = struct {
     fn bookmark(ctx: *anyopaque, sid: []const u8) bool {
         say(ctx, "bookmark {s}", .{sid});
         return me(ctx).bookmark_ok;
+    }
+    fn raw(ctx: *anyopaque) []const []const u8 {
+        say(ctx, "raw", .{});
+        return me(ctx).transcript;
+    }
+    fn links(ctx: *anyopaque) []const []const u8 {
+        say(ctx, "links", .{});
+        return me(ctx).linked;
+    }
+    fn srcs(ctx: *anyopaque) []const []const u8 {
+        say(ctx, "srcs", .{});
+        return &.{};
     }
     fn append(ctx: *anyopaque, sid: []const u8, name: []const u8, markdown: []const u8, cid: []const u8) bool {
         say(ctx, "append {s} {s} {s} {s}", .{ sid, name, markdown, cid });
@@ -300,4 +314,20 @@ test "a send is the Roc's: the conversation, the method, the header, the body, t
         break :blk s;
     }, .{ .serve = .{ .route = .{ .family = .dm, .key = "1_2", .sid = "Plans", .part = .topic, .tail = .send }, .presence = false } }, "member;presence;send_conv 11 1_2 Plans;");
     try expectAct("/c/1_2/Plans/send", false, .GET, a, .{ .not_allowed = .POST }, "member;presence;send_conv 11 1_2 Plans;");
+}
+
+test "a topic's raw transcript and /chat/links are the Roc's: a transcript the host has not is a plain 404, never handed back" {
+    use(testing.allocator);
+    defer @import("roc_abi.zig").deinit();
+    const a: Scripted = .{ .alloc = undefined };
+    try expectAct("/c/1_2/Plans/raw", false, .GET, a, .{ .respond = .{ .status = 200, .content_type = "text/plain; charset=utf-8", .body = "one\n", .nosniff = true } }, "member;presence;topic 11 1_2 Plans;raw;");
+    // Found as a topic, but the host read no transcript (gone since).
+    try expectAct("/c/1_2/Plans/raw", false, .HEAD, blk: {
+        var s = a;
+        s.transcript = &.{};
+        break :blk s;
+    }, .not_found, "member;presence;topic 11 1_2 Plans;raw;");
+    try expectAct("/c/1_2/Plans/raw", false, .POST, a, .{ .not_allowed = .GET }, "member;presence;topic 11 1_2 Plans;");
+    // /chat/links asks the viewer, the scripts, then the page; below it, nothing.
+    try expectAct("/links/x", false, .GET, a, .not_found, "member;presence;");
 }

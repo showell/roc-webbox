@@ -22,14 +22,15 @@ Chat := [].{
 	## `kind`:
 	## - 0: serve `route` with Zig (marking presence first when `presence`);
 	## - 1: a 303 to `location`;
-	## - 2: `status` with `body`, and a content-type when `content_type`;
+	## - 2: `status` with `body`, and a content-type when `content_type`
+	##   (with `nosniff`, the browser told not to guess another);
 	## - 3: a 405 naming `allow`, a method's number;
 	## - 4: answered already, by the host inside the call (a body too big),
 	##   or failed there (the host returns its error);
 	## - 5: a malformed form (the site's own 400);
 	## - 6: webbox's plain 404;
 	## - 7: a 302 to `location` (a lookup, then go).
-	Answer : { kind : U8, location : List(U8), presence : Bool, route : Route, status : U16, content_type : List(U8), body : List(U8), allow : U8 }
+	Answer : { kind : U8, location : List(U8), presence : Bool, route : Route, status : U16, content_type : List(U8), body : List(U8), allow : U8, nosniff : Bool }
 
 	## A route of `family` with nothing else.
 	family : U8 -> Route
@@ -45,7 +46,7 @@ Chat := [].{
 	post = 3
 
 	none : Answer
-	none = { kind: 0, location: [], presence: Bool.False, route: family(0), status: 0, content_type: [], body: [], allow: 0 }
+	none = { kind: 0, location: [], presence: Bool.False, route: family(0), status: 0, content_type: [], body: [], allow: 0, nosniff: Bool.False }
 
 	## Zig serves it.
 	zig : Route, Bool -> Answer
@@ -58,6 +59,10 @@ Chat := [].{
 	## `status` with `body`, typed `content_type` when it is not empty.
 	respond : U16, List(U8), List(U8) -> Answer
 	respond = |status, content_type, body| { ..none, kind: 2, status, content_type, body }
+
+	## A 200 of text, as stored: plain UTF-8, never sniffed for another type.
+	plain : List(U8) -> Answer
+	plain = |body| { ..respond(200, Str.to_utf8("text/plain; charset=utf-8"), body), nosniff: Bool.True }
 
 	## A 405 naming `allow`.
 	not_allowed : U8 -> Answer

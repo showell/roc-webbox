@@ -28,7 +28,7 @@ pub const Request = extern struct { sub: RocBytes, channel: bool, method: u8 };
 /// Chat.roc's `Route`.
 pub const RouteRec = extern struct { key: RocBytes, rest: RocBytes, sid: RocBytes, family: u8, part: u8, tail: u8 };
 /// Chat.roc's `Answer`.
-pub const Answer = extern struct { body: RocBytes, content_type: RocBytes, location: RocBytes, route: RouteRec, status: u16, allow: u8, kind: u8, presence: bool };
+pub const Answer = extern struct { body: RocBytes, content_type: RocBytes, location: RocBytes, route: RouteRec, status: u16, allow: u8, kind: u8, nosniff: bool, presence: bool };
 /// Host.roc's `{ ok : Bool, bytes : List(U8) }`.
 pub const Got = extern struct { bytes: RocBytes, ok: bool };
 
@@ -103,6 +103,10 @@ pub const Host = struct {
     header: *const fn (ctx: *anyopaque, name: []const u8) []const []const u8 = noHeader,
     /// Host.hostile!: 0 no, 1 refused, 2 failed.
     hostile: *const fn (ctx: *anyopaque, markdown: []const u8) u8 = noHostile,
+    /// Host.raw!, Host.links!: the topic's transcript, the member's links
+    /// page rendered, or none.
+    raw: *const fn (ctx: *anyopaque) []const []const u8 = noPage,
+    links: *const fn (ctx: *anyopaque) []const []const u8 = noPage,
 };
 
 fn noSendConv(_: *anyopaque, _: u8, _: []const u8, _: []const u8) []const []const u8 {
@@ -165,6 +169,7 @@ pub const Routing = struct {
         h.channels = nothing;
         h.topics = noConv;
         h.send_conv = noSendTo;
+        h.links = nothing;
         return h;
     }
     fn of(ctx: *anyopaque) *Routing {
@@ -341,6 +346,16 @@ export fn roc_chat_hostile(markdown: RocBytes) callconv(.c) u8 {
     return h.hostile(h.ctx, markdown.slice());
 }
 
+export fn roc_chat_raw() callconv(.c) roc.RocBytesList {
+    const h = current("raw");
+    return .from(h.raw(h.ctx));
+}
+
+export fn roc_chat_links() callconv(.c) roc.RocBytesList {
+    const h = current("links");
+    return .from(h.links(h.ctx));
+}
+
 export fn roc_chat_srcs() callconv(.c) roc.RocBytesList {
     const h = current("srcs");
     return .from(h.srcs(h.ctx));
@@ -395,7 +410,7 @@ pub fn decide(alloc: std.mem.Allocator, sub: []const u8, channel: bool, method: 
     switch (a.kind) {
         0 => {},
         1 => return .{ .redirect = try alloc.dupe(u8, a.location.slice()) },
-        2 => return .{ .respond = .{ .status = a.status, .content_type = try alloc.dupe(u8, a.content_type.slice()), .body = try alloc.dupe(u8, a.body.slice()) } },
+        2 => return .{ .respond = .{ .status = a.status, .content_type = try alloc.dupe(u8, a.content_type.slice()), .body = try alloc.dupe(u8, a.body.slice()), .nosniff = a.nosniff } },
         3 => return .{ .not_allowed = switch (a.allow) {
             1 => .GET,
             2 => .HEAD,
