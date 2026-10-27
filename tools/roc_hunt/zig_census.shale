@@ -1,0 +1,499 @@
+-- **HOW MUCH OF THE CHAT IS STILL ZIG**, read from the code: Roc's own
+-- parser (roc-ast) for the Roc, Zig's (zig_decls, zig_imports, zig_tokens)
+-- for angry-gopher's Zig. Four reports, then one number to watch:
+--
+--   - **routes**: every route chat/main.roc's `roc_serves` decides, the
+--     families, parts and tails from chat/Route.roc, each Roc's or handed to
+--     Zig, and for Zig's the arm of chat.zig's `serve` or `topicRoute`
+--     that takes it;
+--   - **hosted functions**: each of chat/platform/Host.roc's, the
+--     chat_router.zig `Call` member that answers it, its own lines plus
+--     what it calls one level deep (a Call member or a chat file's
+--     declaration), and the chat Zig it reaches in all; classed `primitive`
+--     (reaches no chat Zig), `whole feature` (reaches over `feature_lines`)
+--     or `primitive + decisions` (between);
+--   - **the old chat from outside**: each call into the chat's Zig from a
+--     file that is not the chat's, a test's, a twin's or a bench's, by
+--     caller (login.zig's welcome DM, docs, the router);
+--   - **dead**: chat declarations no live root reaches, by file.
+--
+-- **THE CHAT'S ZIG** is chat*.zig and `chat_set` below (its features behind
+-- chat.serve); twins, tests and benches are never counted. **LIVE** is what
+-- the roots reach, a top-level declaration a node: chat_router.zig's
+-- `handle` and every declaration a call from outside names, then each
+-- declaration's bare names in its file and `alias.name` through an import.
+-- A container (`Call`) is reached whole. Lines are code lines: not blank,
+-- not a comment, tests left out; the Roc's the same, of chat/*.roc and
+-- chat/platform/*.roc, less twin.roc.
+--
+-- Run from roc-webbox, angry-gopher's zig-server given as a mount path (a
+-- script's path may hold no `..`):
+--   shale tools/roc_hunt/zig_census.shale [gopher=build:roc-clean/angry-gopher/zig-server]
+-- budget: steps=400000000 arena_bytes=4000000000
+
+const roc_ast = real("tools:roc-ast/bin/roc-ast")
+const gopher = arg("gopher", "build:roc-clean/angry-gopher/zig-server")
+const src = gopher .. "/src/"
+const feature_lines = 300
+const chat_set = " chat.zig presence.zig recent.zig recent_feed.zig reactions.zig images.zig images_store.zig code.zig code_store.zig docs.zig docs_store.zig search_index.zig search_tokens.zig "
+
+function is_aside(name)
+  return ends_with(name, "_test.zig") or contains(name, "twin") or contains(name, "_bench") or contains(name, "probe") or name == "router_harness.zig"
+end
+
+function is_chat(name)
+  return (starts_with(name, "chat") or contains(chat_set, " " .. name .. " ")) and not is_aside(name)
+end
+
+-- A line that is code: not blank, not a comment.
+function is_code(line)
+  local t = trim(line)
+  return t ~= "" and not starts_with(t, "//") and not starts_with(t, "#")
+end
+
+function code_lines(text, first, last)
+  local n = 0
+  local i = first
+  while i <= last do
+    if is_code(text[i]) then n = n + 1 end
+    i = i + 1
+  end
+  return n
+end
+
+-- ── the Zig, read once ───────────────────────────────────────────────────
+
+-- Each file: its lines, its top-level declarations by name, and its import
+-- aliases (`alias` -> {file, member}; member "" for a whole file).
+function read_zig(names)
+  local files = {}
+  for name in names do
+    local path = src .. name
+    local text = lines(read(path))
+    local decls = {}
+    local order = {}
+    for d in zig_decls(path) do
+      if d.kind ~= "test" and d.kind ~= "comptime" and d.name ~= nil and d.name ~= "" then
+        decls[d.name] = {first = d.first, last = d.last, lines = code_lines(text, d.first, d.last)}
+        push(order, d.name)
+      end
+    end
+    local aliases = {}
+    for im in zig_imports(path) do
+      if ends_with(im.target, ".zig") then
+        local alias = im.name
+        local member = ""
+        local m = re_find(text[im.line], "\\)\\.([A-Za-z_]+)")
+        if m ~= nil then member = m.group end
+        if alias == "" or alias == nil then
+          local c = re_find(text[im.line], "const ([A-Za-z_]+) =")
+          if c ~= nil then alias = c.group end
+        end
+        if alias ~= nil and alias ~= "" then aliases[alias] = {file = im.target, member = member} end
+      end
+    end
+    local tokens = zig_tokens(path)
+    -- The first token on or after each line, so a declaration's tokens are
+    -- found without walking the file's.
+    local at_line = {}
+    local j = 1
+    local ln = 1
+    while ln <= #text + 1 do
+      while j <= #tokens and tokens[j].line < ln do j = j + 1 end
+      push(at_line, j)
+      ln = ln + 1
+    end
+    files[name] = {text = text, decls = decls, order = order, aliases = aliases, tokens = tokens, at_line = at_line}
+  end
+  return files
+end
+
+-- What lines `first`..`last` of file `name` name: {file, decl} pairs, a
+-- bare name of the file's own or `alias.name` through an import of a file
+-- in `files`.
+function refs(files, name, first, last)
+  local f = files[name]
+  local out = {}
+  local seen = {}
+  local toks = f.tokens
+  local i = f.at_line[first]
+  while i <= #toks and toks[i].line <= last do
+    local t = toks[i]
+    if t.tag == "identifier" then
+      local after_dot = i > 1 and toks[i - 1].tag == "period"
+      local target = nil
+      local al = get(f.aliases, t.text)
+      if not after_dot and al ~= nil and has_key(files, al.file) then
+        if al.member ~= "" then
+          target = {al.file, al.member}
+        elseif i + 2 <= #toks and toks[i + 1].tag == "period" and toks[i + 2].tag == "identifier" then
+          target = {al.file, toks[i + 2].text}
+        end
+      elseif not after_dot and has_key(f.decls, t.text) then
+        target = {name, t.text}
+      end
+      if target ~= nil and has_key(files[target[1]].decls, target[2]) then
+        local key = target[1] .. ":" .. target[2]
+        if not has_key(seen, key) then
+          seen[key] = true
+          push(out, target)
+        end
+      end
+    end
+    i = i + 1
+  end
+  return out
+end
+
+-- Every declaration reached from `roots` ({file, decl} pairs), over the
+-- chat files: a set of `file:decl`.
+function reach(files, roots)
+  local seen = {}
+  local work = {}
+  for r in roots do push(work, r) end
+  while #work > 0 do
+    local r = work[#work]
+    work = take(work, #work - 1)
+    local key = r[1] .. ":" .. r[2]
+    if not has_key(seen, key) then
+      seen[key] = true
+      local d = files[r[1]].decls[r[2]]
+      for n in refs(files, r[1], d.first, d.last) do push(work, n) end
+    end
+  end
+  return seen
+end
+
+function reached_lines(files, seen, chat_only)
+  local n = 0
+  for key in keys(seen) do
+    local parts = split(key, ":")
+    if not chat_only or parts[1] ~= "chat_router.zig" then n = n + files[parts[1]].decls[parts[2]].lines end
+  end
+  return n
+end
+
+-- ── the Roc ──────────────────────────────────────────────────────────────
+
+-- roc-ast's dump of `path`: its lines and their depths.
+function roc_tree(path)
+  local dump = run({roc_ast}, {timeout_ms = 300000, stdin = path, whole = 64000000})
+  local text = lines(dump.out)
+  local depth = {}
+  for line in text do
+    local d = 0
+    while sub(line, d + 1, d + 1) == "\t" do d = d + 1 end
+    push(depth, d)
+  end
+  return {text = text, depth = depth}
+end
+
+function kids(tree, at)
+  local out = {}
+  local i = at + 1
+  while i <= #tree.text and tree.depth[i] > tree.depth[at] do
+    if tree.depth[i] == tree.depth[at] + 1 then push(out, i) end
+    i = i + 1
+  end
+  return out
+end
+
+function hd(tree, at)
+  return trim(tree.text[at])
+end
+
+-- `roc_serves`'s answer for route `r` ({family, part, tail, rest}),
+-- evaluated over its tree from the node at `at`: a `match` on a field, its
+-- branches' tags, `_`, `Bool.True`/`Bool.False`, and `r.rest != "<lit>"`.
+-- Anything else stops the census: the rule grew a shape it cannot read.
+function evaluate(tree, at, r)
+  local t = hd(tree, at)
+  if starts_with(t, "(e-tag ") then
+    local raw = between(t, "(raw \"", "\")")
+    if raw == "Bool.True" then return "Roc" end
+    if raw == "Bool.False" then return "Zig" end
+  end
+  if starts_with(t, "(e-binop ") and contains(t, "(op \"!=\")") then
+    local k = kids(tree, at)
+    local field = between(hd(tree, k[1] + 3), "(field \"", "\")")
+    local lit = between(hd(tree, k[2] + 1), "(raw \"", "\")")
+    if field == "rest" and lit ~= nil then
+      if r.rest ~= lit then return "Roc" end
+      return "Zig"
+    end
+  end
+  if starts_with(t, "(e-match") then
+    local k = kids(tree, at)
+    local field = between(hd(tree, k[1] + 3), "(field \"", "\")")
+    local value = get(r, field)
+    for b in kids(tree, k[2]) do
+      local bk = kids(tree, b)
+      local p = hd(tree, bk[1])
+      local hit = false
+      if starts_with(p, "(p-underscore") then hit = true end
+      if starts_with(p, "(p-tag ") and between(p, "(raw \"", "\")") == value then hit = true end
+      if starts_with(p, "(p-alternatives") then
+        for a in kids(tree, bk[1]) do if between(hd(tree, a), "(raw \"", "\")") == value then hit = true end end
+      end
+      if hit then return evaluate(tree, bk[2], r) end
+    end
+  end
+  fail("roc_serves: a node the census cannot read: " .. t)
+end
+
+-- A type's tags, as chat/Route.roc spells them: `Family : [A, B, ...]`.
+function tags(text, name)
+  local m = re_find(text, "\n\t" .. name .. " : \\[([^\\]]*)\\]")
+  if m == nil then fail("chat/Route.roc: no `" .. name .. " : [...]`") end
+  local out = {}
+  for s in split(m.group, ",") do push(out, trim(s)) end
+  return out
+end
+
+-- CamelCase to Zig's snake_case: `SidebarStream` -> `sidebar_stream`.
+function snake(s)
+  local out = ""
+  local i = 1
+  while i <= #s do
+    local c = sub(s, i, i)
+    if c ~= lower(c) then
+      if i > 1 then out = out .. "_" end
+      out = out .. lower(c)
+    else
+      out = out .. c
+    end
+    i = i + 1
+  end
+  return out
+end
+
+-- The arms of the Zig `switch` inside declaration `fn` of chat.zig: tag ->
+-- what the arm does (its first call, or `panic` for one that says it is the
+-- Roc's).
+function arms(file, fn)
+  local d = file.decls[fn]
+  local out = {}
+  local i = d.first
+  while i <= d.last do
+    local line = file.text[i]
+    local m = re_find(line, "^\\s+(\\.[a-z_, .]+) =>")
+    if m ~= nil and not starts_with(trim(line), "//") then
+      local does = "?"
+      if contains(line, "panic") then
+        does = "panic (the Roc's)"
+      else
+        -- The arm's first call; in a block, its first line's that is not
+        -- the method's check (`isRead`).
+        local c = re_find(split(line, "=>")[2], "([a-zA-Z_][a-zA-Z_.]*)\\(")
+        if c ~= nil then does = c.group end
+        local j = i + 1
+        while c == nil and j <= d.last and not starts_with(trim(file.text[j]), "}") do
+          if not contains(file.text[j], "isRead") then
+            c = re_find(file.text[j], "([a-zA-Z_][a-zA-Z_.]*)\\(")
+            if c ~= nil then does = c.group end
+          end
+          j = j + 1
+        end
+      end
+      for tag in split(m.group, ",") do
+        local tg = trim(tag)
+        if starts_with(tg, ".") then out[sub(tg, 2)] = does end
+      end
+    end
+    i = i + 1
+  end
+  return out
+end
+
+-- ── the census ───────────────────────────────────────────────────────────
+
+local names = {}
+for p in glob(src .. "*.zig") do
+  local base = split(p, "/")
+  local name = base[#base]
+  if not is_aside(name) then push(names, name) end
+end
+local all = read_zig(sort(names))
+local chat = {}
+for name in names do if is_chat(name) then chat[name] = all[name] end end
+local live_files = {}
+for name in names do live_files[name] = all[name] end
+
+-- The roots: chat_router.handle, and each call from a live file outside
+-- the chat into it.
+local roots = {{"chat_router.zig", "handle"}}
+local outside = {}
+for name in sort(names) do
+  if not is_chat(name) then
+    local f = all[name]
+    for dn in f.order do
+      local d = f.decls[dn]
+      for r in refs(all, name, d.first, d.last) do
+        if is_chat(r[1]) then
+          push(roots, r)
+          push(outside, name .. " " .. dn .. " -> " .. r[1] .. " " .. r[2])
+        end
+      end
+    end
+  end
+end
+local live = reach(chat, roots)
+
+-- Routes.
+local route_text = read("chat/Route.roc")
+local main = roc_tree("chat/main.roc")
+local serves_at = nil
+local i = 1
+while i < #main.text do
+  if starts_with(hd(main, i), "(s-decl ") and starts_with(hd(main, i + 1), "(p-ident ") and contains(hd(main, i + 1), "(raw \"roc_serves\")") then
+    serves_at = kids(main, i + 2)[2]
+  end
+  i = i + 1
+end
+if serves_at == nil then fail("chat/main.roc: no roc_serves") end
+local serve_arms = arms(all["chat.zig"], "serve")
+local tail_arms = arms(all["chat.zig"], "topicRoute")
+local roc_routes = 0
+local zig_routes = 0
+print("== routes (chat/main.roc roc_serves; Zig's arm in chat.zig)")
+for fam in tags(route_text, "Family") do
+  local variants = {}
+  if fam == "Dm" or fam == "Channel" then
+    for part in tags(route_text, "Part") do
+      if part == "Topic" then
+        for tail in tags(route_text, "Tail") do push(variants, {family = fam, part = part, tail = tail, rest = ""}) end
+      else
+        push(variants, {family = fam, part = part, tail = "Page", rest = ""})
+      end
+    end
+  elseif fam == "Recent" or fam == "Images" or fam == "Code" then
+    push(variants, {family = fam, part = "Landing", tail = "Page", rest = ""})
+    push(variants, {family = fam, part = "Landing", tail = "Page", rest = "/stream"})
+  else
+    push(variants, {family = fam, part = "Landing", tail = "Page", rest = ""})
+  end
+  for r in variants do
+    local side = evaluate(main, serves_at, r)
+    local label = fam
+    if fam == "Dm" or fam == "Channel" then
+      label = fam .. " " .. r.part
+      if r.part == "Topic" then label = label .. " " .. r.tail end
+    end
+    if r.rest ~= "" then label = label .. " " .. r.rest end
+    if side == "Roc" then
+      roc_routes = roc_routes + 1
+      print("  Roc  " .. label)
+    else
+      zig_routes = zig_routes + 1
+      local does = get(serve_arms, snake(fam), "?")
+      if r.part == "Topic" then does = get(tail_arms, snake(r.tail), "?") end
+      if r.part == "Invalid" then does = "http.notFound" end
+      print("  Zig  " .. label .. "  -> " .. does)
+    end
+  end
+end
+print("  " .. tostring(roc_routes) .. " Roc's, " .. tostring(zig_routes) .. " Zig's")
+
+-- Hosted functions.
+print("")
+print("== hosted functions (Host.roc; chat_router.zig Call; own+one level / chat Zig reached)")
+local router = all["chat_router.zig"]
+local members = {}
+for d in zig_decls(src .. "chat_router.zig", {container = "Call"}) do
+  if d.kind ~= "field" and d.kind ~= "test" then members[d.name] = {first = d.first, last = d.last, lines = code_lines(router.text, d.first, d.last)} end
+end
+local wiring = {}
+local h = members["host"]
+local k = h.first
+while k <= h.last do
+  local m = re_find(router.text[k], "^\\s+\\.([a-z_]+) = [a-zA-Z_]+,")
+  if m ~= nil and m.group ~= "ctx" then
+    local fn = trim(split(split(router.text[k], "=")[2], ",")[1])
+    wiring[m.group] = fn
+  end
+  k = k + 1
+end
+local hosted = {}
+for line in lines(read("chat/platform/Host.roc")) do
+  local m = re_find(line, "^\\t([a-z_]+)! :")
+  if m ~= nil then push(hosted, m.group) end
+end
+local classes = {}
+for name in hosted do
+  local fn = get(wiring, name)
+  if fn == nil then
+    print("  " .. name .. "!  (no Call member wired)")
+  else
+    local mem = members[fn]
+    local one = mem.lines
+    local reached_roots = {}
+    local callees = {}
+    -- One level: Call's own members it names, and chat declarations.
+    local seen = {}
+    for t in router.tokens do
+      if t.line >= mem.first and t.line <= mem.last and t.tag == "identifier" and t.text ~= fn and has_key(members, t.text) and not has_key(seen, t.text) and t.text ~= "of" then
+        seen[t.text] = true
+        one = one + members[t.text].lines
+        push(callees, t.text)
+        for r in refs(chat, "chat_router.zig", members[t.text].first, members[t.text].last) do if r[1] ~= "chat_router.zig" then push(reached_roots, r) end end
+      end
+    end
+    for r in refs(chat, "chat_router.zig", mem.first, mem.last) do
+      if r[1] ~= "chat_router.zig" then
+        one = one + chat[r[1]].decls[r[2]].lines
+        push(callees, sub(r[1], 1, #r[1] - 4) .. "." .. r[2])
+        push(reached_roots, r)
+      end
+    end
+    local deep = reached_lines(chat, reach(chat, reached_roots), true)
+    local class = "primitive + decisions"
+    if deep == 0 then class = "primitive" end
+    if deep > feature_lines then class = "whole feature" end
+    classes[class] = get(classes, class, 0) + 1
+    print("  " .. name .. "!  " .. fn .. "  " .. tostring(one) .. " / " .. tostring(deep) .. "  " .. class .. "  [" .. join(callees, ", ") .. "]")
+  end
+end
+for c in sort(keys(classes)) do print("  " .. c .. ": " .. tostring(classes[c])) end
+
+-- The old chat from outside.
+print("")
+print("== the chat's Zig called from outside it (caller -> callee)")
+for o in sort(outside) do print("  " .. o) end
+
+-- Dead and live, by file.
+print("")
+print("== the chat's Zig by file: live / dead code lines (dead: no root reaches it)")
+local live_total = 0
+local dead_total = 0
+for name in sort(keys(chat)) do
+  local f = chat[name]
+  local l = 0
+  local d = 0
+  local dead_names = {}
+  for dn in f.order do
+    local n = f.decls[dn].lines
+    if has_key(live, name .. ":" .. dn) then l = l + n else
+      d = d + n
+      if n >= 5 then push(dead_names, dn .. "(" .. tostring(n) .. ")") end
+    end
+  end
+  live_total = live_total + l
+  dead_total = dead_total + d
+  local line = "  " .. name .. "  " .. tostring(l) .. " / " .. tostring(d)
+  if #dead_names > 0 and #dead_names <= 12 then line = line .. "  dead: " .. join(dead_names, " ") end
+  if #dead_names > 12 then line = line .. "  dead: " .. tostring(#dead_names) .. " declarations" end
+  print(line)
+end
+
+-- The Roc.
+local roc_total = 0
+local roc_files = {}
+for p in glob("chat/*.roc") do if p ~= "chat/twin.roc" then push(roc_files, p) end end
+for p in glob("chat/platform/*.roc") do push(roc_files, p) end
+for p in roc_files do
+  local text = lines(read(p))
+  roc_total = roc_total + code_lines(text, 1, #text)
+end
+
+print("")
+print("== the number to watch: the chat's Zig on live paths " .. tostring(live_total) .. " code lines (" .. tostring(dead_total) .. " unreached), its Roc " .. tostring(roc_total))
