@@ -857,8 +857,8 @@ sent! = |req, route, conv, who|
 				Found(md) =>
 					match Form.field(body.bytes, Str.to_utf8("cid")) {
 						Malformed => Chat.malformed
-						Found(cid) => store!(route, conv, who, send, md, cid)
-						Missing => store!(route, conv, who, send, md, [])
+						Found(cid) => store!(route, conv, who, send, { markdown: md, cid })
+						Missing => store!(route, conv, who, send, { markdown: md, cid: [] })
 					}
 			}
 		}
@@ -867,11 +867,16 @@ sent! = |req, route, conv, who|
 refuse : Str -> Chat.Answer
 refuse = |why| Chat.respond(400, [], Str.to_utf8(why))
 
+## What the send form carried: the message's `markdown` and the sender's
+## client id `cid`. Named fields because both are byte lists. It becomes
+## a Draft once the message is judged and its author's name read.
+Posted : { markdown : List(U8), cid : List(U8) }
+
 ## The message judged, then stored: empty, not UTF-8 text, or hostile is
 ## refused; the bookmark (a DM's) before the store, so one that fails
 ## stores nothing; then 204 for an async sender, else back to the topic.
-store! : Route.R, Chat.Conv, Who, [Async, Sync], List(U8), List(U8) => Chat.Answer
-store! = |route, conv, who, send, md, cid|
+store! : Route.R, Chat.Conv, Who, [Async, Sync], Posted => Chat.Answer
+store! = |route, conv, who, send, { markdown: md, cid }|
 	if ZigText.trim(md) == [] {
 		refuse("not sent: the message is empty\n")
 	} else if Str.from_utf8(md).is_err() {
