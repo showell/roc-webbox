@@ -121,7 +121,11 @@ call = |req| {
 		31 => [Html.bytes(Pages.not_found(srcs(req.args, 3), { viewer: arg(0), what: arg(1), back: arg(2) }))]
 		32 => [Html.bytes(Pages.no_topics(srcs(req.args, 3), { viewer: arg(0), base: arg(1), title: arg(2) }))]
 		33 => [Html.bytes(Pages.no_conversations(srcs(req.args, 1), arg(0)))]
-		34 => [Html.script_json_bytes(Pages.sidebar_json(Pages.decode_sidebar(req.args)))]
+		34 =>
+			match Pages.decode_sidebar(req.args) {
+				Ok(sb) => [Html.script_json_bytes(Pages.sidebar_json(sb))]
+				Err(NotAUid) => []
+			}
 		35 => {
 			limits = { image_max: u64(arg(7)), video_max: u64(arg(8)), accept: arg(9), search_min: u64(arg(10)) }
 			view = { key: arg(0), base: arg(1), topic: arg(2), title: arg(3), uid: arg(4), viewer: arg(5), sidebar_json: Html.twin_script_json(arg(6)) }

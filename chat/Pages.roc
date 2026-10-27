@@ -22,7 +22,7 @@ Pages := [].{
 	## What the sidebar shows: the viewer, the conversation (its kind), the
 	## topic, every other member (each online or not), the viewer's channels,
 	## their pins in this conversation, and its topics.
-	Sidebar : { uid : List(U8), kind : [Dm, Channel], key : List(U8), base : List(U8), topic : List(U8), others : List({ id : List(U8), name : List(U8), presence : [Online, Offline] }), channels : List(List(U8)), pins : List(List(U8)), topics : List(List(U8)) }
+	Sidebar : { uid : Uid, kind : [Dm, Channel], key : List(U8), base : List(U8), topic : List(U8), others : List({ id : Uid, name : List(U8), presence : [Online, Offline] }), channels : List(List(U8)), pins : List(List(U8)), topics : List(List(U8)) }
 
 	## A chat page's heading: its `title`, the `viewer`, and the nav item
 	## `active`. Named fields because all three are byte lists.
@@ -193,12 +193,10 @@ Pages := [].{
 	sidebar_json : Sidebar -> Html.ScriptJson
 	sidebar_json = |sb| {
 		prefixed = |prefix, s| JsonText.str_at_door(List.concat(Str.to_utf8(prefix), s))
-		# A member whose id is no uid has no DM key, so no DM to list.
 		person = |u| {
-			uid = |b| Uid.from_str(Str.from_utf8(b) ?? "")
-			pk = Paths.pair_key_bytes(Paths.pair_key(uid(sb.uid)?, uid(u.id)?))
+			pk = Paths.pair_key_bytes(Paths.pair_key(sb.uid, u.id))
 			online = if u.presence == Online [("online", JsonText.bool(Bool.True))] else []
-			Ok(JsonText.obj(List.concat([("id", prefixed("uid:", u.id)), ("label", JsonText.str_at_door(u.name)), ("url", prefixed("/chat/c/", pk)), ("active", JsonText.bool(sb.kind == Dm and pk == sb.key))], online)))
+			JsonText.obj(List.concat([("id", JsonText.str("uid:${u.id.to_str()}")), ("label", JsonText.str_at_door(u.name)), ("url", prefixed("/chat/c/", pk)), ("active", JsonText.bool(sb.kind == Dm and pk == sb.key))], online))
 		}
 		room = |name|
 			JsonText.obj([("id", prefixed("ch:", name)), ("label", prefixed("# ", name)), ("url", prefixed("/channel/", name)), ("active", JsonText.bool(sb.kind == Channel and name == sb.key))])
@@ -208,7 +206,7 @@ Pages := [].{
 		rest = List.drop_if(sb.topics, |s| List.contains(sb.pins, s))
 		Html.script_safe(
 			JsonText.obj([
-				("conversations", JsonText.arr(List.concat(List.keep_oks(sb.others, person), List.map(sb.channels, room)))),
+				("conversations", JsonText.arr(List.concat(List.map(sb.others, person), List.map(sb.channels, room)))),
 				("pinned_sessions", JsonText.arr(List.map(pinned, topic))),
 				("topics", JsonText.arr(List.map(rest, topic))),
 			]),
@@ -219,16 +217,22 @@ Pages := [].{
 	## chat/twin.roc): the viewer, "1" for a DM, the key, base and topic,
 	## then each list counted: the others (id, name, "1" when online), the
 	## channels, the pins, the topics. The chat's own page reads its sidebar
-	## itself (chat/main.roc `sidebar!`).
-	decode_sidebar : List(List(U8)) -> Sidebar
+	## itself (chat/main.roc `sidebar!`). **ITS UIDS ARE DECODED HERE, AT
+	## THE DOOR**: one that is no uid is `NotAUid`.
+	decode_sidebar : List(List(U8)) -> Try(Sidebar, [NotAUid])
 	decode_sidebar = |fields| {
 		at = |i| List.get(fields, i) ?? []
+		uid_at = |i| Uid.from_str(Str.from_utf8(at(i)) ?? "")
 		n_others = ZigText.parse_u64(at(5)) ?? 0
-		others = List.sublist(fields, { start: 6, len: n_others }) |> List.map_with_index(|_, k| { id: at(6 + 3 * k), name: at(7 + 3 * k), presence: if at(8 + 3 * k) == ['1'] Online else Offline })
+		others = List.sublist(fields, { start: 6, len: n_others }) |> List.map_with_index(|_, k| uid_at(6 + 3 * k).map_ok(|id| { id, name: at(7 + 3 * k), presence: if at(8 + 3 * k) == ['1'] Online else Offline }))
 		(channels, after_channels) = counted(fields, 6 + 3 * n_others)
 		(pins, after_pins) = counted(fields, after_channels)
 		(topics, _) = counted(fields, after_pins)
-		{ uid: at(0), kind: if at(1) == ['1'] Dm else Channel, key: at(2), base: at(3), topic: at(4), others, channels, pins, topics }
+		if List.any(others, |o| o.is_err()) {
+			Err(NotAUid)
+		} else {
+			Ok({ uid: uid_at(0)?, kind: if at(1) == ['1'] Dm else Channel, key: at(2), base: at(3), topic: at(4), others: List.keep_oks(others, |o| o), channels, pins, topics })
+		}
 	}
 
 	## A count at `i`, then that many: the items, and where the next begins.

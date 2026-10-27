@@ -642,7 +642,7 @@ page! = |route, at|
 		match sidebar!(route.topic.to_utf8(), at) {
 			Err(Failed) => Chat.answered
 			Ok((viewer, sb)) => {
-				view = { key: route.key.to_utf8(), base: sb.base, topic: route.topic.to_utf8(), title: at.title, uid: sb.uid, viewer, sidebar_json: Pages.sidebar_json(sb) }
+				view = { key: route.key.to_utf8(), base: sb.base, topic: route.topic.to_utf8(), title: at.title, uid: sb.uid.to_str().to_utf8(), viewer, sidebar_json: Pages.sidebar_json(sb) }
 				Chat.respond(200, html, Html.bytes(Pages.conversation(Chrome.src_in(Host.srcs!({})), Host.limits!({}), view)))
 			}
 		}
@@ -670,15 +670,15 @@ sidebar! = |topic, at| {
 					match named!(Accounts.authorized(all)) {
 						Err(Failed) => Err(Failed)
 						Ok(roster) => {
-							others = List.map(List.drop_if(roster, |u| u.id == uid), |u| { id: u.id.to_str().to_utf8(), name: u.name })
-							flags = Host.online!(List.map(others, |u| u.id))
+							others = List.drop_if(roster, |u| u.id == uid)
+							flags = Host.online!(List.map(others, |u| u.id.to_str().to_utf8()))
 							match channel_rosters!({}) {
 								Err(Failed) => Err(Failed)
 								Ok(rosters) =>
 									match text_bytes!(Paths.pinned_path(uid, at.key)) {
 										Err(Failed) => Err(Failed)
-										Ok(stored) => Ok((viewer, sidebar_of(me, topic, at, with_online(others, flags), Paths.member_channels(rosters, me), ChatState.pins(stored))))
-										Err(Missing) => Ok((viewer, sidebar_of(me, topic, at, with_online(others, flags), Paths.member_channels(rosters, me), [])))
+										Ok(stored) => Ok((viewer, sidebar_of(uid, topic, at, with_online(others, flags), Paths.member_channels(rosters, me), ChatState.pins(stored))))
+										Err(Missing) => Ok((viewer, sidebar_of(uid, topic, at, with_online(others, flags), Paths.member_channels(rosters, me), [])))
 									}
 							}
 						}
@@ -689,12 +689,12 @@ sidebar! = |topic, at| {
 
 ## The other members, each beside its own flag (Host.online! answers one
 ## per id, in their order).
-with_online : List({ id : List(U8), name : List(U8) }), List([Offline, Online]) -> List({ id : List(U8), name : List(U8), presence : [Online, Offline] })
+with_online : List({ id : Uid, name : List(U8) }), List([Offline, Online]) -> List({ id : Uid, name : List(U8), presence : [Online, Offline] })
 with_online = |others, flags|
 	List.map_with_index(others, |u, i|
 		{ id: u.id, name: u.name, presence: if List.get(flags, i) == Ok(Online) Online else Offline })
 
-sidebar_of : List(U8), List(U8), AtTopic, List({ id : List(U8), name : List(U8), presence : [Online, Offline] }), List(Str), List(List(U8)) -> Pages.Sidebar
+sidebar_of : Uid, List(U8), AtTopic, List({ id : Uid, name : List(U8), presence : [Online, Offline] }), List(Str), List(List(U8)) -> Pages.Sidebar
 sidebar_of = |me, topic, at, others, channels, pins|
 	{ uid: me, kind: if at.conv.family == Dm Dm else Channel, key: at.conv.key, base: at.conv.base, topic, others, channels: List.map(channels, Str.to_utf8), pins, topics: List.map(at.topics, Str.to_utf8) }
 
