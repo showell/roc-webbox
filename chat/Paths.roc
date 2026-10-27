@@ -136,10 +136,19 @@ Paths := [].{
 	channel_conv_dir : List(U8) -> List(U8)
 	channel_conv_dir = |name| join([Str.to_utf8("channels"), name])
 
+	## A DM's or a channel's folder under the chat root: dm_conv_dir or
+	## channel_conv_dir of its key.
+	conv_dir : [Dm, Channel], List(U8) -> List(U8)
+	conv_dir = |kind, key|
+		match kind {
+			Dm => dm_conv_dir(key)
+			Channel => channel_conv_dir(key)
+		}
+
 	## Where a conversation's topics are (listTopics's folder):
 	## {conv_dir}/sessions.
 	sessions_dir : List(U8) -> List(U8)
-	sessions_dir = |conv_dir| join([conv_dir, Str.to_utf8("sessions")])
+	sessions_dir = |dir| join([dir, Str.to_utf8("sessions")])
 
 	## **A CONVERSATION'S TOPICS** (listTopics): of its sessions folder's
 	## entries, every one that is not a folder (a file, or a link: only a
@@ -160,9 +169,9 @@ Paths := [].{
 	bytes = |ChatPath.(b)| b
 
 	## A topic's reaction sidecar (reactionsPath):
-	## {conv_dir}/sessions/<sid>.reactions.jsonl.
-	reactions_path : List(U8), List(U8) -> ChatPath
-	reactions_path = |conv_dir, sid| ChatPath.(join([conv_dir, Str.to_utf8("sessions"), List.concat(sid, Str.to_utf8(".reactions.jsonl"))]))
+	## {conv_dir}/sessions/<topic>.reactions.jsonl.
+	reactions_path : [Dm, Channel], TopicAt -> ChatPath
+	reactions_path = |kind, at| ChatPath.(join([conv_dir(kind, at.key), Str.to_utf8("sessions"), List.concat(at.topic, Str.to_utf8(".reactions.jsonl"))]))
 
 	## Channel `name`'s member file (channelMembers's): channels/<name>.channel.
 	channel_path : List(U8) -> ChatPath
@@ -175,8 +184,8 @@ Paths := [].{
 
 	## A conversation's topics folder (listTopics's listing): sessions_dir
 	## of its folder.
-	topics_folder : List(U8) -> ChatPath
-	topics_folder = |conv_dir| ChatPath.(sessions_dir(conv_dir))
+	topics_folder : [Dm, Channel], List(U8) -> ChatPath
+	topics_folder = |kind, key| ChatPath.(sessions_dir(conv_dir(kind, key)))
 
 	## The member's DM last in (lastUserConv's file): users/<uid>/last-conv.
 	last_conv_path : List(U8) -> ChatPath
@@ -314,9 +323,9 @@ Paths := [].{
 				},
 		)
 
-	## A topic's transcript: {conv_dir}/sessions/<sid>.md.
-	transcript_path : List(U8), List(U8) -> List(U8)
-	transcript_path = |conv_dir, sid| join([conv_dir, Str.to_utf8("sessions"), List.concat(sid, Str.to_utf8(".md"))])
+	## A topic's transcript: {conv_dir}/sessions/<topic>.md.
+	transcript_path : [Dm, Channel], TopicAt -> List(U8)
+	transcript_path = |kind, at| join([conv_dir(kind, at.key), Str.to_utf8("sessions"), List.concat(at.topic, Str.to_utf8(".md"))])
 
 	is_alpha : U8 -> Bool
 	is_alpha = |c| (c >= 'A' and c <= 'Z') or (c >= 'a' and c <= 'z')

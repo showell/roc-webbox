@@ -158,7 +158,7 @@ in_topic! = |req, route, found| {
 			} else {
 				# readReactions's: nobody has reacted yet is no events.
 				ndjson = Str.to_utf8("application/x-ndjson; charset=utf-8")
-				match Files.read!(Paths.reactions_path(conv_dir(conv.family, conv.key), route.sid)) {
+				match Files.read!(Paths.reactions_path(conv_kind(conv.family), { key: conv.key, topic: route.sid })) {
 					Found(bytes) => Chat.respond(200, ndjson, bytes)
 					Missing => Chat.respond(200, ndjson, [])
 					Failed => Chat.answered
@@ -321,15 +321,15 @@ rosters! = |names, i, out|
 ## **A CONVERSATION'S TOPICS** (listTopics): its sessions folder listed,
 ## the choice Paths.topics's.
 topics! : Chat.Family, List(U8) => List(List(U8))
-topics! = |family, key| Paths.topics(list!(Paths.topics_folder(conv_dir(family, key))))
+topics! = |family, key| Paths.topics(list!(Paths.topics_folder(conv_kind(family), key)))
 
-## A DM's or a channel's folder under the chat root.
-conv_dir : Chat.Family, List(U8) -> List(U8)
-conv_dir = |family, key|
+## A conversation's family as Paths takes it: a DM or a channel.
+conv_kind : Chat.Family -> [Dm, Channel]
+conv_kind = |family|
 	match family {
-		Dm => Paths.dm_conv_dir(key)
-		Channel => Paths.channel_conv_dir(key)
-		_ => crash "conv_dir: a family with no conversation"
+		Dm => Dm
+		Channel => Channel
+		_ => crash "conv_kind: a family with no conversation"
 	}
 
 ## Files.list!'s entries. **NOTHING THERE HOLDS NOTHING** (webbox's
@@ -455,7 +455,7 @@ reacted! = |conv, who, sid, r|
 						# can fail between the append and the publish.
 						key = List.join([conv.key, ['/'], sid])
 						frame = Frame.reaction(line)
-						if Files.append_line!(Paths.reactions_path(conv_dir(conv.family, conv.key), sid), line) {
+						if Files.append_line!(Paths.reactions_path(conv_kind(conv.family), { key: conv.key, topic: sid }), line) {
 							# **STORED IS DONE**: the live publish cannot fail.
 							Host.publish!(key, frame)
 							Stored

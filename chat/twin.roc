@@ -49,7 +49,8 @@ call = |req| {
 		11 => [bool(Paths.valid_msg_ref_id(arg(0)))]
 		12 => [Paths.join(req.args)]
 		13 => [Paths.first_of(req.args)]
-		14 => [Paths.transcript_path(arg(0), arg(1))]
+		# A DM's folder is its key as joined, so any `arg(0)` stands for a folder.
+		14 => [Paths.transcript_path(Dm, { key: arg(0), topic: arg(1) })]
 		15 => {
 			d = Transcript.decode_file(arg(0))
 			List.fold(d.messages, [Str.to_utf8(U64.to_str(d.refused))], |out, m| List.concat(out, [m.id, m.from, m.at, m.uid, m.markdown]))
@@ -146,7 +147,7 @@ call = |req| {
 			got = Paths.rosters(names, reads(req.args, 1 + n, []))
 			List.join([[num(List.len(got.malformed))], got.malformed, List.join(List.map(got.rosters, |r| List.concat([r.name, num(List.len(r.members))], r.members)))])
 		}
-		59 => [Paths.sessions_dir(Paths.dm_conv_dir(arg(0))), Paths.sessions_dir(Paths.channel_conv_dir(arg(1))), Paths.bytes(Paths.channel_path(arg(1))), Paths.bytes(Paths.reactions_path(Paths.dm_conv_dir(arg(0)), arg(2)))]
+		59 => [Paths.sessions_dir(Paths.dm_conv_dir(arg(0))), Paths.sessions_dir(Paths.channel_conv_dir(arg(1))), Paths.bytes(Paths.channel_path(arg(1))), Paths.bytes(Paths.reactions_path(Dm, { key: arg(0), topic: arg(2) }))]
 		60 => {
 			# The ids asked, then the accounts (`accounts`): each id's exists
 			# and its name (`ok, name`, or the failure `unreadable`), then the
