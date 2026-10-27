@@ -9,7 +9,7 @@
 ## listAuthorized and listUserIDs keep them. principalExists and getUserName
 ## took any id and looked for its folder, so a `007` folder answered for
 ## `007`; every id here is a Uid (canonical by its type), decoded where the
-## host hands it (main's accounts! and me!).
+## host hands it (main's load_accounts! and load_uid!).
 import Paths
 import Uid
 import ZigText

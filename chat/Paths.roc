@@ -539,7 +539,7 @@ expect Paths.channel_name_from_str("").is_err()
 # which only pair_key_from_str (or pair_key), channel_name_from_str and
 # Uid.from_str make, so no path leaves the chat root. The topic is
 # upstream's: Route.conversation passes one only through is_topic_id, and
-# make! checks a new topic's id.
+# make_topic! checks a new topic's id.
 
 # conv_base: the host's Conv.base (Conversation.dm_base, channel_base).
 expect match (Paths.pair_key_from_str("3_7"), Paths.channel_name_from_str("general")) {

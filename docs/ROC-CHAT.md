@@ -324,10 +324,10 @@ visitor.
   modules, C2 the twin kit, C3 the pages, C4 a topic's actions, C7 the
   feeds' pages, O1 the send, P7 the busy word, P9 a crash as a 500.
 - **On the box's `box/roc-cleanup`, not yet merged:** C5's fan-out and the
-  message's store (C8a/C8b: `appended!` over `render!` and
+  message's store (C8a/C8b: `append_message!` over `render!` and
   `store_message!`; a fan-out failure counted, never failing the send), the
   member's files, channels and topics, identity (`accounts!`) and the page's
-  data (`page!`) are the Roc's. `git log` there says what each did; the
+  data (`serve_topic_page!`) are the Roc's. `git log` there says what each did; the
   table below is as of `72d235c`.
 
 | # | item | repo | owner | size |

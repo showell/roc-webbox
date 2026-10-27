@@ -279,7 +279,7 @@ call = |req| {
 			# An id that is no Uid is asked nothing: the door refuses it.
 			ids = List.keep_oks(List.sublist(req.args, { start: 1, len: n }), Uid.from_utf8)
 			# Accounts that will not decode (a name not UTF-8) are refused
-			# whole, as main's accounts! door fails the request.
+			# whole, as main's load_accounts! door fails the request.
 			match List.map_try(accounts(req.args, 1 + n, []), Accounts.from_host) {
 				Ok(all) => account_answers(ids, all)
 				Err(_) => []

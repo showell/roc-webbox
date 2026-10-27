@@ -183,7 +183,7 @@ Pages := [].{
 	## chat/twin.roc): the viewer, "1" for a DM, the key, base and topic,
 	## then each list counted: the others (id, name, "1" when online), the
 	## channels, the pins, the topics. The chat's own page reads its sidebar
-	## itself (chat/main.roc `sidebar!`). **ITS UIDS AND TEXT ARE DECODED
+	## itself (chat/main.roc `load_sidebar!`). **ITS UIDS AND TEXT ARE DECODED
 	## HERE, AT THE DOOR**: one that is no uid is `NotAUid`, text that is not
 	## UTF-8 `NotUtf8`, a count that is no number `NotACount`.
 	decode_sidebar : List(List(U8)) -> Try(Sidebar, [NotAUid, NotUtf8, NotACount])
