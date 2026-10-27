@@ -787,6 +787,7 @@ pub fn decide(alloc: std.mem.Allocator, sub: []const u8, channel: bool, method: 
         .malformed => .malformed_form,
         .not_found => .not_found,
         .found => .{ .found = try alloc.dupe(u8, a.location.slice()) },
+        .to_login => .{ .to_login = try alloc.dupe(u8, a.location.slice()) },
         .held => .{ .held = .{ .status = a.status, .content_type = try alloc.dupe(u8, a.content_type.slice()), .nosniff = a.sniff == .forbid, .before = try alloc.dupe(u8, a.body.slice()), .after = try alloc.dupe(u8, a.location.slice()) } },
     };
 }

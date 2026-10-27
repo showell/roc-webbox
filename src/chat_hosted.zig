@@ -115,7 +115,7 @@ test "the router: a topic's tails, a channel, an asset before the gate, the gate
         try testing.expect(bad == .malformed_form and !routing.marked);
     }
     const away = try decide(arena.allocator(), "/c/1_2/general", false, .GET, answer(false));
-    try testing.expectEqualStrings("/login/full?next=/chat/c/1_2/general", away.redirect);
+    try testing.expectEqualStrings("/chat/c/1_2/general", away.to_login);
     const asset = try decide(arena.allocator(), "/chat.js", false, .GET, answer(false));
     try testing.expectEqual(Family.asset, asset.serve.route.family);
 }

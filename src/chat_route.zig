@@ -103,7 +103,7 @@ pub const Counting = enum(u8) { counted, uncounted };
 pub const Sniff = enum(u8) { allow, forbid };
 
 /// Chat.roc's `Kind`: what an answer is (Chat.roc says each).
-pub const Kind = enum(u8) { answered, found, held, malformed, not_allowed, not_found, redirect, respond, serve };
+pub const Kind = enum(u8) { answered, found, held, malformed, not_allowed, not_found, redirect, respond, serve, to_login };
 
 /// Host.roc's `read_body!` argument: whose limit the body is read to.
 pub const Form = enum(u8) { message, reaction };
@@ -247,10 +247,12 @@ pub const Route = struct {
     }
 };
 
-/// What the router decided: a 303 (the gate's), or a route for Zig, with
-/// whether the request counts as presence (it is not a stream); or, for a
-/// route the Roc served itself, what to send.
+/// What the router decided: the gate's 303 to the login page, or a route for
+/// Zig, with whether the request counts as presence (it is not a stream);
+/// or, for a route the Roc served itself, what to send.
 pub const Decision = union(enum) {
+    /// A 303 to a path the Roc built from a conversation's base and a
+    /// topic, which the store's names keep on the site.
     redirect: []const u8,
     serve: struct { route: Route, presence: bool },
     /// A status and its body, typed `content_type` when it is not empty.
@@ -269,6 +271,9 @@ pub const Decision = union(enum) {
     /// As `respond`, its body `before`, the bytes the host holds (read or
     /// rendered by a hosted function: a transcript, a links page), `after`.
     held: struct { status: u16, content_type: []const u8 = "", nosniff: bool = false, before: []const u8 = "", after: []const u8 = "" },
+    /// A 303 to the login page, to come back to this path after: the
+    /// request's own, which the host checks is on the site (a 400 if not).
+    to_login: []const u8,
 
     pub fn eql(a: Decision, b: Decision) bool {
         if (std.meta.activeTag(a) != std.meta.activeTag(b)) return false;
@@ -279,6 +284,7 @@ pub const Decision = union(enum) {
             .not_allowed => |m| m == b.not_allowed,
             .answered, .malformed_form, .not_found => true,
             .found => |l| std.mem.eql(u8, l, b.found),
+            .to_login => |l| std.mem.eql(u8, l, b.to_login),
             .held => |h| h.status == b.held.status and h.nosniff == b.held.nosniff and std.mem.eql(u8, h.content_type, b.held.content_type) and std.mem.eql(u8, h.before, b.held.before) and std.mem.eql(u8, h.after, b.held.after),
         };
     }
@@ -293,6 +299,7 @@ pub const Decision = union(enum) {
             .malformed_form => try w.writeAll("malformed form"),
             .not_found => try w.writeAll("404"),
             .found => |l| try w.print("302 {s}", .{l}),
+            .to_login => |l| try w.print("303 to login, then {s}", .{l}),
             .held => |h| try w.print("{d} \"{s}\"{s} {d} bytes, the host's, {d} bytes", .{ h.status, h.content_type, if (h.nosniff) " nosniff" else "", h.before.len, h.after.len }),
         }
     }

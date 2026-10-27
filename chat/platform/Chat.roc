@@ -109,7 +109,9 @@ Chat := [].{
 	## - `Held`: as `Respond`, but the body is `body`, then bytes the host
 	##   holds (a transcript, a rendered page; never copied into Roc and
 	##   out), then `location`.
-	Kind : [Serve, Redirect, Respond, NotAllowed, Answered, Malformed, NotFound, Found, Held]
+	## - `ToLogin`: a 303 to the login page, to come back to `location` after
+	##   (the request's own path, so the host checks that it is on the site).
+	Kind : [Serve, Redirect, Respond, NotAllowed, Answered, Malformed, NotFound, Found, Held, ToLogin]
 
 	## Whether a request Zig serves counts as the member's presence.
 	Counting : [Counted, Uncounted]
@@ -172,4 +174,8 @@ Chat := [].{
 	## A 302 to `location`.
 	found : List(U8) -> Answer
 	found = |location| { ..none, kind: Found, location }
+
+	## To the login page, to come back to `next` after.
+	to_login : List(U8) -> Answer
+	to_login = |next| { ..none, kind: ToLogin, location: next }
 }

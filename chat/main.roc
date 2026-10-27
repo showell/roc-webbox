@@ -64,7 +64,7 @@ dispatch! = |req, sub|
 		Err(NotAnAsset) =>
 			if Host.check_member!({}) == Outsider {
 				area = if req.area == Channel "/channel" else "/chat"
-				Chat.redirect(List.concat(Str.to_utf8("/login/full?next=${area}"), req.sub))
+				Chat.to_login(List.concat(Str.to_utf8(area), req.sub))
 			} else {
 				route = if req.area == Channel Route.under_channel(sub) else Route.under_chat(sub)
 				match served_by(route) {
