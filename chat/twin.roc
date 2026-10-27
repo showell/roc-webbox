@@ -175,7 +175,7 @@ call = |req| {
 				_ => []
 			}
 		# The topics are a listing's, text (Files.list!'s door skips the rest).
-		42 => [ChatState.resume_topic(List.keep_oks(List.drop_first(req.args, 2), Str.from_utf8), arg(0), int(arg(1)))]
+		42 => [ChatState.resume_topic(List.keep_oks(List.drop_first(req.args, 2), Str.from_utf8), arg(0), int(arg(1))).to_utf8()]
 		43 =>
 			match ChatState.pinned(arg(0), arg(1), if arg(2) == [49] Pinned else Unpinned) {
 				Write(bytes) => [bytes]

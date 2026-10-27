@@ -726,7 +726,7 @@ resume! = |{}|
 					if Paths.first_of(topics).is_empty() {
 						Chat.redirect(List.concat(Str.to_utf8("/chat/c/"), conv))
 					} else {
-						Chat.redirect(List.join([Str.to_utf8("/chat/c/"), conv, ['/'], resume_at!(me, pair, topics)]))
+						Chat.redirect(List.join([Str.to_utf8("/chat/c/"), conv, ['/'], resume_at!(me, pair, topics).to_utf8()]))
 					}
 				}
 				_ =>
@@ -740,7 +740,7 @@ resume! = |{}|
 
 ## Where member `me` resumes DM `conv`, whose topics are `topics`: the
 ## choice ChatState's, the last-viewed topic and the clock the host's.
-resume_at! : Uid, Paths.PairKey, List(Str) => List(U8)
+resume_at! : Uid, Paths.PairKey, List(Str) => Str
 resume_at! = |me, pair, topics| {
 	last = ChatState.bookmark(text_bytes!(Paths.last_session_path(me, Dm(pair))))
 	ChatState.resume_topic(topics, last, Host.now!({}))

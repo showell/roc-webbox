@@ -20,14 +20,17 @@ ChatState := [].{
 	## resumeTopic: the topic the member last viewed (`last`, "" for none)
 	## while the conversation still has it; else its first topic
 	## (Paths.first_of); else the date of `now_secs`, so a conversation's
-	## first post makes today's topic.
-	resume_topic : List(Str), List(U8), I64 -> List(U8)
+	## first post makes today's topic. **ALWAYS TEXT**: the bookmark's
+	## bytes are taken only when a topic (text) spells them, and then the
+	## topic is the answer.
+	resume_topic : List(Str), List(U8), I64 -> Str
 	resume_topic = |topics, last, now_secs|
-		if last != [] and List.any(topics, |t| t.to_utf8() == last) {
-			last
-		} else {
-			first = Paths.first_of(topics)
-			if !first.is_empty() first.to_utf8() else Str.to_utf8(Time.date(now_secs))
+		match List.keep_if(topics, |t| last != [] and t.to_utf8() == last) {
+			[t, ..] => t
+			[] => {
+				first = Paths.first_of(topics)
+				if !first.is_empty() first else Time.date(now_secs)
+			}
 		}
 
 	## Whether the member wants a topic pinned or unpinned.
