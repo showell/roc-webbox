@@ -427,6 +427,10 @@ expect !Paths.valid_topic_id(Str.to_utf8("a.md"))
 
 # valid_channel_name: a letter, then letters, digits and hyphens, 1 to 40.
 expect Paths.valid_channel_name(Str.to_utf8("general"))
+# Production's two channels, made by hand (Steve, 2026-10-27): a stricter
+# rule must still take them, or they vanish from the chat.
+expect Paths.valid_channel_name(Str.to_utf8("Cobblestone"))
+expect Paths.valid_channel_name(Str.to_utf8("General"))
 expect Paths.valid_channel_name(Str.to_utf8("a-1-"))
 expect Paths.valid_channel_name(List.repeat('a', 40))
 expect !Paths.valid_channel_name(List.repeat('a', 41))
