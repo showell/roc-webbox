@@ -59,5 +59,21 @@ Conversation := [].{
 	## topicExists: a topic named `topic` without case is among `topics` (case
 	## does not tell topics apart, on FAT or on Linux).
 	has_topic : List(List(U8)), List(U8) -> Bool
-	has_topic = |topics, topic| List.any(topics, |s| Topics.same_name(s, topic))
+	has_topic = |topics, topic|
+		# TEMPORARY DOOR: moves out in a later run. A name that isn't UTF-8
+		# never matches (the one caller's topic passed valid_topic_id, ASCII).
+		match Str.from_utf8(topic) {
+			Ok(t) => List.any(topics, |s| Str.from_utf8(s).map_ok(|n| Topics.same_name(n, t)) == Ok(Bool.True))
+			Err(_) => Bool.False
+		}
 }
+
+# has_topic's door: bytes that are not UTF-8 are refused, never matched, even
+# against the same bytes; UTF-8 decodes, a character past ASCII included.
+expect !Conversation.has_topic([[0xc3]], [0xc3])
+expect !Conversation.has_topic([[0xff], Str.to_utf8("Plans")], [0xff])
+expect !Conversation.has_topic([[0xff], Str.to_utf8("Plans")], [0xc3, 0xa9, 0xff])
+expect Conversation.has_topic([[0xff], Str.to_utf8("Plans")], Str.to_utf8("pLANS"))
+expect Conversation.has_topic([Str.to_utf8("Caf\u(e9)")], Str.to_utf8("cAF\u(e9)"))
+expect Conversation.has_topic([Str.to_utf8("ok 👍")], Str.to_utf8("OK 👍"))
+expect !Conversation.has_topic([Str.to_utf8("caf\u(e9)")], Str.to_utf8("caf\u(c9)"))

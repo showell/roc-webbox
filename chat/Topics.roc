@@ -3,33 +3,31 @@
 ## announced in, the conversations JSON and the new topic's answer.
 import JsonText
 import Paths
-import Bytes
 import ZigText
 
 Topics := [].{
 
-	## std.ascii.eqlIgnoreCase: the same bytes, A-Z as a-z.
-	same_name : List(U8), List(U8) -> Bool
-	same_name = |a, b| List.map(a, lower) == List.map(b, lower)
-
-	lower : U8 -> U8
-	lower = |c| if c >= 'A' and c <= 'Z' c - 'A' + 'a' else c
+	## std.ascii.eqlIgnoreCase: the same text, A-Z as a-z (anything past
+	## ASCII must match exactly).
+	same_name : Str, Str -> Bool
+	same_name = |a, b| a.caseless_ascii_equals(b)
 
 	## highestGeneralTopic: the `general<N>` with the largest N (an i64, as
 	## the Zig reads it), the first of equals; none when there is none.
-	highest_general : List(List(U8)) -> Try(List(U8), [NoGeneral])
+	highest_general : List(Str) -> Try(Str, [NoGeneral])
 	highest_general = |topics| {
 		(best, _) = List.fold(
 			topics,
 			(Err(NoGeneral), -1),
 			|(b, n), s|
-				match Bytes.strip_prefix(s, Str.to_utf8("general")) {
-					Ok(digits) =>
-						match ZigText.parse_u64(digits) {
-							Ok(k) if k <= 9223372036854775807 and U64.to_i128(k) > n => (Ok(s), U64.to_i128(k))
-							_ => (b, n)
-						}
-					Err(NoMatch) => (b, n)
+				if s.starts_with("general") {
+					# std.fmt.parseInt's grammar is ZigText's, a byte parser.
+					match ZigText.parse_u64(Str.to_utf8(s.drop_prefix("general"))) {
+						Ok(k) if k <= 9223372036854775807 and U64.to_i128(k) > n => (Ok(s), U64.to_i128(k))
+						_ => (b, n)
+					}
+				} else {
+					(b, n)
 				},
 		)
 		best
@@ -56,3 +54,15 @@ Topics := [].{
 	made_json : Paths.TopicAt -> List(U8)
 	made_json = |{ key, topic }| JsonText.obj([("conv", JsonText.str(Paths.conv_key_bytes(key))), ("sid", JsonText.str(topic))])
 }
+
+# same_name: ASCII case folds, nothing past ASCII does.
+expect Topics.same_name("New", "nEW")
+expect Topics.same_name("caf\u(e9)", "CAF\u(e9)")
+expect !Topics.same_name("caf\u(e9)", "caf\u(c9)")
+expect !Topics.same_name("new", "new ")
+
+# highest_general: the largest N by the Zig's grammar, the first of equals.
+expect Topics.highest_general(["general2", "general10", "General99", "general+5", "general1_0", "general"]) == Ok("general10")
+expect Topics.highest_general(["general\u(e9)", "Plans"]) == Err(NoGeneral)
+expect Topics.highest_general(["general007", "general7"]) == Ok("general007")
+expect Topics.highest_general(["general9223372036854775808", "general1"]) == Ok("general1")

@@ -796,11 +796,16 @@ new_topic! = |req, route, key|
 		Err(Failed) => Chat.answered
 	}
 
+## TEMPORARY DOOR: moves out in a later run. The topic passed
+## valid_topic_id, so it is ASCII and always decodes.
+is_new : List(U8) -> Bool
+is_new = |topic| Str.from_utf8(topic).map_ok(|t| Topics.same_name(t, "new")) == Ok(Bool.True)
+
 make! : Paths.ConvKey, Chat.Conv, Who, List(U8) => Chat.Answer
 make! = |key, conv, who, topic|
 	if !Paths.valid_topic_id(topic) {
 		Chat.respond(400, [], Str.to_utf8("Topic must be letters, digits, and hyphens only — no spaces, underscores, or punctuation.\n"))
-	} else if Topics.same_name(topic, Str.to_utf8("new")) {
+	} else if is_new(topic) {
 		Chat.respond(400, [], Str.to_utf8("\"new\" is reserved — pick another topic name.\n"))
 	} else if Conversation.has_topic(topics!(key), topic) {
 		Chat.respond(409, [], Str.to_utf8("That topic already exists.\n"))
@@ -827,7 +832,10 @@ make! = |key, conv, who, topic|
 ## general<N>, unless that is the topic made.
 announce! : Paths.ConvKey, Chat.Conv, Who, List(U8), List(U8) => Bool
 announce! = |key, conv, who, topic, name|
-	match Topics.highest_general(topics!(key)) {
+	# TEMPORARY DOOR: moves out in a later run. A listed name that isn't UTF-8
+	# is never `general<N>` (its digits would not parse), so dropping it
+	# keeps the Zig's answer.
+	match Topics.highest_general(List.keep_oks(topics!(key), Str.from_utf8)).map_ok(Str.to_utf8) {
 		Ok(gen) if gen != topic =>
 			appended!(conv, who, { at: { key, topic: gen }, name, markdown: List.join([Str.to_utf8("New topic: ["), topic, Str.to_utf8("]("), conv.base, ['/'], topic, Str.to_utf8(")")]), cid: [] })
 		_ => Bool.True
