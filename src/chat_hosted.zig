@@ -757,12 +757,14 @@ test "the fan-out is the Roc's: every member in order, each member's notify (nev
     defer @import("roc_abi.zig").deinit();
     const url = "/chat/c/1_2/Plans";
     const head = "Sent by Steve at " ++ at_said ++ ", source MSG_Plans_1 in 1_2:";
-    const img_entry = comptime std.fmt.comptimePrint("{f} {f}", .{ std.zig.fmtString("\n\n-------------\n\n"), std.zig.fmtString(head ++ "\n<img a b>\n<IMG\tc>") });
+    const img_entry = comptime std.fmt.comptimePrint("{f} {f}", .{ std.zig.fmtString("\n\n-------------\n\n"), std.zig.fmtString(head ++ "\n<img a b>\n<IMG\tsrc=/x.png onerror=c>") });
     const code_entry = comptime std.fmt.comptimePrint("{f} {f}", .{ std.zig.fmtString("\n\n-------------\n\n"), std.zig.fmtString(head ++ "\n```zig\nx\n```\n\n```\ny\n```") });
     const head_json = "{\"source_id\":\"Plans_1\",\"from\":\"Steve\",\"conv\":\"1_2\",\"at\":\"" ++ at_said ++ "\",";
     const src = ",\"source_url\":\"/chat/c/1_2/Plans#msg-Plans_1\"}";
-    // The entry's tag one line, its event's as found.
-    const img_event = head_json ++ "\"images\":[\"<img a\\nb>\",\"<IMG\\tc>\"]" ++ src;
+    // The entry's tag one line, as found; its event's rebuilt by the
+    // renderer's rule (SafeImg, metal-vmm QUEUE 266): the one with no
+    // same-origin src dropped, the other's onerror gone.
+    const img_event = head_json ++ "\"images\":[\"<img src=\\\"/x.png\\\">\"]" ++ src;
     const code_event = head_json ++ "\"blocks\":[{\"lang\":\"zig\",\"body\":\"x\"},{\"lang\":\"\",\"body\":\"y\"}]" ++ src;
     // A topic's first message, with two image tags (one spanning a line)
     // and two code blocks, as the Roc finds them: member 2's images.md will
@@ -770,7 +772,7 @@ test "the fan-out is the Roc's: every member in order, each member's notify (nev
     const ex = "[image] [image] ```zig x ``` ``` y ```";
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
-    var s: Scripted = .{ .alloc = arena.allocator(), .body = "markdown=<img%20a%0Ab>%20<IMG%09c>%0A```zig%0Ax%0A```%0A```%0Ay%0A```", .count = .{ .counted = 0 } };
+    var s: Scripted = .{ .alloc = arena.allocator(), .body = "markdown=<img%20a%0Ab>%20<IMG%09src=/x.png%20onerror=c>%0A```zig%0Ax%0A```%0A```%0Ay%0A```", .count = .{ .counted = 0 } };
     s.entry_fails = .{ .path = "users/2/images.md", .e = error.IsDir };
     const got = try decide(arena.allocator(), "/c/1_2/Plans/send", false, .POST, s.host());
     try testing.expectEqualStrings("/chat/c/1_2/Plans", got.redirect);

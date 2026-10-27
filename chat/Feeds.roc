@@ -6,6 +6,7 @@
 import JsonText
 import Bytes
 import ZigText
+import SafeImg
 
 Feeds := [].{
 
@@ -175,9 +176,17 @@ Feeds := [].{
 
 	## images_store `encodeImagesEvent`: one entry as its page and its live
 	## stream (`img:<uid>`) send it, fields in its order, none left out.
+	## **NO STORED TAG REACHES THE PAGE AS WRITTEN** (metal-vmm QUEUE 266):
+	## the tags are spans of a member's raw markdown, and images.js parses
+	## them as HTML into the live page, so each is rebuilt by the renderer's
+	## rule (SafeImg) and one it refuses is dropped. Here, where the page's
+	## backlog and the live event both pass, so the entries already on disk
+	## are rebuilt too.
 	images_event : Header, List(Str) -> List(U8)
-	images_event = |h, tags|
-		JsonText.obj(List.concat(head_fields(h), [("images", JsonText.arr(List.map(tags, JsonText.str))), ("source_url", JsonText.str(source_url(h.conv, h.source_id)))]))
+	images_event = |h, tags| {
+		safe = List.keep_oks(tags, SafeImg.rebuild)
+		JsonText.obj(List.concat(head_fields(h), [("images", JsonText.arr(List.map(safe, JsonText.str))), ("source_url", JsonText.str(source_url(h.conv, h.source_id)))]))
+	}
 
 	## code_store `encodeCodeEvent`: one entry as its page and its live
 	## stream (`code:<uid>`) send it.
@@ -296,4 +305,9 @@ expect Feeds.header("Sent by ann at t, source MSG_x_1 in 1_2") == Err(NotAHeader
 # source_url: the message's link when its id has a topic part.
 expect Feeds.source_url("1_2", "Plans_3") == "/chat/c/1_2/Plans#msg-Plans_3"
 expect Feeds.source_url("ops", "_1") == "/channel/ops"
+# images_event: a stored tag rebuilt by the renderer's rule, a hostile one dropped (images_store's plants).
+expect {
+	json = Str.from_utf8(Feeds.images_event({ from: "ann", at: "2026-10-27T00:00:00Z", source_id: "t_1", conv: "1_2" }, ["<img src=x onerror=\"alert(1)\">", "<img src=\"/up/a.png\" width=\"40\" onload=\"alert(2)\">", "<img src=\"https://evil.example/t.png\">"]))
+	json == Ok("{\"source_id\":\"t_1\",\"from\":\"ann\",\"conv\":\"1_2\",\"at\":\"2026-10-27T00:00:00Z\",\"images\":[\"<img src=\\\"/up/a.png\\\" width=\\\"40\\\">\"],\"source_url\":\"/chat/c/1_2/t#msg-t_1\"}")
+}
 expect Feeds.images_entry({ from: "Zo\u(eb)", at: "t", source_id: "x_1", conv: "ops" }, ["<img\r\na>"]) == Str.to_utf8("Sent by Zo\u(eb) at t, source MSG_x_1 in ops:\n<img  a>")
