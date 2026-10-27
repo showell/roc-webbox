@@ -239,8 +239,8 @@ find! = |key| {
 			}
 		Channel(name) => {
 			members = channel_members!(name)
-			if List.contains(members, me.to_str().to_utf8()) {
-				Ok(({ family: Channel, key: bytes, base: Conversation.channel_base(bytes), members }, Unasked))
+			if List.contains(members, me) {
+				Ok(({ family: Channel, key: bytes, base: Conversation.channel_base(bytes), members: List.map(members, |u| u.to_str().to_utf8()) }, Unasked))
 			} else {
 				Err(NotYours)
 			}
@@ -335,7 +335,7 @@ unreadable! = |why|
 ## REQUEST** on its own route (channelMembers's error.MalformedChannel), never
 ## the 404 of a channel that is not the member's; a read that failed has
 ## failed it already.
-channel_members! : Paths.ChannelName => List(List(U8))
+channel_members! : Paths.ChannelName => List(Uid)
 channel_members! = |name|
 	match Files.read!(Paths.channel_path(name)) {
 		Ok(text) =>
@@ -660,7 +660,6 @@ page! = |route, at|
 sidebar! : Str, AtTopic => Try((Str, Pages.Sidebar), [Failed])
 sidebar! = |topic, at| {
 	uid = me!({})?
-	me = uid.to_str().to_utf8()
 	match accounts!(at.who) {
 		Err(Failed) => Err(Failed)
 		Ok(all) =>
@@ -677,8 +676,8 @@ sidebar! = |topic, at| {
 								Ok(rosters) =>
 									match Files.read!(Paths.pinned_path(uid, at.key)) {
 										Err(Failed) => Err(Failed)
-										Ok(stored) => Ok((viewer, sidebar_of(uid, topic, at, with_online(others, flags), Paths.member_channels(rosters, me), ChatState.pins(stored))))
-										Err(Missing) => Ok((viewer, sidebar_of(uid, topic, at, with_online(others, flags), Paths.member_channels(rosters, me), [])))
+										Ok(stored) => Ok((viewer, sidebar_of(uid, topic, at, with_online(others, flags), Paths.member_channels(rosters, uid), ChatState.pins(stored))))
+										Err(Missing) => Ok((viewer, sidebar_of(uid, topic, at, with_online(others, flags), Paths.member_channels(rosters, uid), [])))
 									}
 							}
 						}
@@ -803,7 +802,7 @@ msg! = |id|
 						match channel_rosters!({}) {
 							Err(Failed) => Chat.answered
 							Ok(rosters) =>
-								match find_channel!(Paths.member_channels(rosters, me.to_str().to_utf8()), topic, 0) {
+								match find_channel!(Paths.member_channels(rosters, me), topic, 0) {
 									Ok(name) => Chat.found(at("/channel/", name))
 									Err(NoSuchTopic) => Chat.not_found
 								}

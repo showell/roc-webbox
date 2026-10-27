@@ -233,7 +233,12 @@ call = |req| {
 				Err(_) => [bool(Bool.False)]
 			}
 		50 => [Conversation.dm_base(arg(0)), Conversation.channel_base(arg(0))]
-		51 => List.map(Paths.member_channels(flat_rosters(req.args, 1, []), arg(0)), Str.to_utf8)
+		# A uid that is no Uid is in no roster: the door refuses it.
+		51 =>
+			match Uid.from_utf8(arg(0)) {
+				Ok(uid) => List.map(Paths.member_channels(flat_rosters(req.args, 1, []), uid), Str.to_utf8)
+				Err(NotAUid) => []
+			}
 		52 => [ChatState.bookmark(file(arg(0), arg(1))).to_utf8()]
 		53 => [bool(ChatState.changed(file(arg(0), arg(1)), valid_text(arg(2)))), ChatState.bookmark_line(valid_text(arg(2)))]
 		# A uid that is no Uid has no paths: the door refuses it.
@@ -245,7 +250,7 @@ call = |req| {
 		55 => List.map(Paths.topics(entries(req.args, 0, [])), Str.to_utf8)
 		56 =>
 			match Paths.channel_members(valid_text(arg(0))) {
-				Ok(members) => List.prepend(members, [79])
+				Ok(members) => List.prepend(List.map(members, |u| u.to_str().to_utf8()), [79])
 				Err(Malformed) => [[77]]
 			}
 		57 => List.map(Paths.channel_names(entries(req.args, 0, [])), Str.to_utf8)
@@ -256,7 +261,7 @@ call = |req| {
 			n = u64(arg(0))
 			names = List.keep_oks(List.sublist(req.args, { start: 1, len: n }), Str.from_utf8)
 			got = Paths.rosters(names, reads(req.args, 1 + n, []))
-			List.join([[num(List.len(got.malformed))], List.map(got.malformed, Str.to_utf8), List.join(List.map(got.rosters, |r| List.concat([r.name.to_utf8(), num(List.len(r.members))], r.members)))])
+			List.join([[num(List.len(got.malformed))], List.map(got.malformed, Str.to_utf8), List.join(List.map(got.rosters, |r| List.concat([r.name.to_utf8(), num(List.len(r.members))], List.map(r.members, |u| u.to_str().to_utf8()))))])
 		}
 		59 => {
 			dm = Dm(valid_pair(arg(0)))
@@ -501,7 +506,7 @@ flat_rosters = |args, i, out|
 		Ok(name) => {
 			n = u64(List.get(args, i + 1) ?? [])
 			# A roster's name is a listing's, text at Files.list!'s door.
-			roster = Str.from_utf8(name).map_ok(|text_name| { name: text_name, members: List.sublist(args, { start: i + 2, len: n }) })
+			roster = Str.from_utf8(name).map_ok(|text_name| { name: text_name, members: List.map(List.sublist(args, { start: i + 2, len: n }), valid_uid) })
 			flat_rosters(args, i + 2 + n, List.concat(out, List.keep_oks([roster], |r| r)))
 		}
 	}
@@ -580,3 +585,11 @@ author_bytes = |author| match author {
 ## The test's author bytes: empty is nobody, else a canonical uid or none.
 author_of : List(U8) -> Try(Transcript.Author, [NotAUid])
 author_of = |bytes| if bytes == [] Ok(Unattributed) else Uid.from_utf8(bytes).map_ok(|u| By(u))
+
+## A roster member the test hands as a canonical uid; one that is not
+## stops the twin.
+valid_uid : List(U8) -> Uid
+valid_uid = |bytes| match Uid.from_utf8(bytes) {
+	Ok(uid) => uid
+	Err(NotAUid) => crash "twin: an invalid uid"
+}

@@ -98,13 +98,6 @@ Paths := [].{
 			Channel(_) => Channel
 		}
 
-	## A uid as allocateUser writes one: digits, the first not zero.
-	canonical_uid : List(U8) -> Bool
-	canonical_uid = |s| match s {
-		[first, ..] => first != '0' and List.all(s, |c| c >= '0' and c <= '9')
-		[] => Bool.False
-	}
-
 	## decimal.parseInt at i64, or 0.
 	atoi_or0 : List(U8) -> U64
 	atoi_or0 = |s| match ZigText.parse_u64(s) {
@@ -204,7 +197,7 @@ Paths := [].{
 
 	## listUserChannels's decision: the names of the channels `uid` is in,
 	## sorted by bytes, from every roster (`rosters`'s).
-	member_channels : List(Roster), List(U8) -> List(Str)
+	member_channels : List(Roster), Uid -> List(Str)
 	member_channels = |all, uid| sort_by_bytes(List.map(List.keep_if(all, |r| List.contains(r.members, uid)), |r| r.name))
 
 	## Texts sorted by their bytes, as the Zig's sorts compare.
@@ -226,7 +219,7 @@ Paths := [].{
 	Entry : { kind : [Dir, File, Other], name : Str }
 
 	## A channel and its members, as its member file lists them.
-	Roster : { name : Str, members : List(List(U8)) }
+	Roster : { name : Str, members : List(Uid) }
 
 	## A DM's or a channel's folder under the chat root: a DM's pair key
 	## (dmConvDir), a channel's channels/<name> (channelConvDir).
@@ -311,7 +304,7 @@ Paths := [].{
 	## under (`../../x` was one), a comment after a uid (`3 # Claude`)
 	## dropped that member, and a duplicate notified twice. Never a guess at
 	## what a line meant: whoever wrote the file fixes it.
-	channel_members : Str -> Try(List(List(U8)), [Malformed])
+	channel_members : Str -> Try(List(Uid), [Malformed])
 	channel_members = |file|
 		List.fold(
 			Bytes.split_byte(file.to_utf8(), '\n'),
@@ -323,10 +316,11 @@ Paths := [].{
 						line = trim_line(raw)
 						if line == [] or List.first(line) == Ok('#') {
 							acc
-						} else if !canonical_uid(line) or List.contains(out, line) {
-							Err(Malformed)
 						} else {
-							Ok(List.append(out, line))
+							match Uid.from_utf8(line) {
+								Ok(uid) if !List.contains(out, uid) => Ok(List.append(out, uid))
+								_ => Err(Malformed)
+							}
 						}
 					}
 				},
