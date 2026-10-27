@@ -689,7 +689,7 @@ test "the fan-out is the Roc's: every member in order, each member's notify (nev
     try testing.expectEqualStrings("/chat/c/1_2/Plans", got2.redirect);
     const failed = "fanout_failed recent 1 1_2 Plans OutOfMemory;fanout_failed images 1 1_2 Plans NoSpaceLeft;fanout_failed code 1 1_2 Plans AccessDenied;" ++
         comptime notifySaid("2", "1_2", "Plans", "Steve sent you a message on Plans.", url) ++
-        "fanout_failed recent 2 1_2 Plans OutOfMemory;fanout_failed images 2 1_2 Plans NoSpaceLeft;fanout_failed code 2 1_2 Plans AccessDenied;";
+            "fanout_failed recent 2 1_2 Plans OutOfMemory;fanout_failed images 2 1_2 Plans NoSpaceLeft;fanout_failed code 2 1_2 Plans AccessDenied;";
     try testing.expect(std.mem.endsWith(u8, f.asked.items, failed));
 
     // The DM with yourself: one member, the author, never notified; the row
