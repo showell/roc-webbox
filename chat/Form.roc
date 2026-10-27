@@ -52,13 +52,10 @@ Form := [].{
 
 	hex : U8 -> Try(U8, [None])
 	hex = |c|
-		if c >= '0' and c <= '9' {
-			Ok(c - '0')
-		} else if c >= 'a' and c <= 'f' {
-			Ok(c - 'a' + 10)
-		} else if c >= 'A' and c <= 'F' {
-			Ok(c - 'A' + 10)
-		} else {
-			Err(None)
+		match c {
+			_ if c >= '0' and c <= '9' => Ok(c - '0')
+			_ if c >= 'a' and c <= 'f' => Ok(c - 'a' + 10)
+			_ if c >= 'A' and c <= 'F' => Ok(c - 'A' + 10)
+			_ => Err(None)
 		}
 }
