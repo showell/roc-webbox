@@ -179,9 +179,15 @@ pub const Surface = enum(u8) { code, images, recent };
 /// the request's time, or not (never seen is `offline`).
 pub const Presence = enum(u8) { offline, online };
 
+/// Host.roc's `recent!`: each row's `kind`, a doc or a chat message.
+pub const RowKind = enum(u8) { doc, message };
+
+/// Host.roc's `recent!`: each row's `dm`, a DM's or a channel's.
+pub const RowConv = enum(u8) { channel, dm };
+
 comptime {
     @setEvalBranchQuota(20_000);
-    for (.{ Family, Part, Tail, Method, Area, Counting, Sniff, Kind, Form, BodyStatus, CountStatus, Hostility, ReadStatus, EntryKind, AccountKind, NameRead, AccountsStatus, FailReason, RenderStatus, PartStatus, AppendStatus, Surface, Presence }) |E| assertRocOrder(E);
+    for (.{ Family, Part, Tail, Method, Area, Counting, Sniff, Kind, Form, BodyStatus, CountStatus, Hostility, ReadStatus, EntryKind, AccountKind, NameRead, AccountsStatus, FailReason, RenderStatus, PartStatus, AppendStatus, Surface, Presence, RowKind, RowConv }) |E| assertRocOrder(E);
 }
 
 /// That `E`'s values are Roc's for the same tags: numbered from 0 in the

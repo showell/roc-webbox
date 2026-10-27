@@ -322,12 +322,13 @@ scripts = |args, i, out|
 	}
 
 ## The recent rows as the host writes them, nine arguments each from `i` on:
-## doc, secs, uid, name, key, label, topic, markdown, dm.
+## doc, secs, uid, name, key, label, topic, markdown, dm (doc and dm "1"
+## or "0").
 written : List(List(U8)), U64, List(Recent.Written) -> List(Recent.Written)
 written = |args, i, out|
 	if i + 9 > List.len(args) {
 		out
 	} else {
 		at = |k| List.get(args, i + k) ?? []
-		written(args, i + 9, List.append(out, { doc: at(0), secs: at(1), uid: at(2), name: at(3), key: at(4), label: at(5), topic: at(6), markdown: at(7), dm: at(8) }))
+		written(args, i + 9, List.append(out, { kind: if at(0) == ['1'] Doc else Message, secs: at(1), uid: at(2), name: at(3), key: at(4), label: at(5), topic: at(6), markdown: at(7), dm: if at(8) == ['1'] Dm else Channel }))
 	}

@@ -44,9 +44,9 @@ pub const EntryRec = extern struct { name: RocBytes, kind: route_mod.EntryKind }
 pub const ListRec = extern struct { entries: EntryList, status: route_mod.ReadStatus };
 /// One of Host.roc's `srcs!` scripts: `{ name : List(U8), src : List(U8) }`.
 pub const SrcRec = extern struct { name: RocBytes, src: RocBytes };
-/// One of Host.roc's `recent!` rows: nine `List(U8)` fields, so laid out by
-/// name alone.
-pub const RecentRec = extern struct { dm: RocBytes, doc: RocBytes, key: RocBytes, label: RocBytes, markdown: RocBytes, name: RocBytes, secs: RocBytes, topic: RocBytes, uid: RocBytes };
+/// One of Host.roc's `recent!` rows: seven `List(U8)` fields by name, then
+/// its two tags, `dm : [Channel, Dm]` and `kind : [Doc, Message]`, by name.
+pub const RecentRec = extern struct { key: RocBytes, label: RocBytes, markdown: RocBytes, name: RocBytes, secs: RocBytes, topic: RocBytes, uid: RocBytes, dm: route_mod.RowConv, kind: route_mod.RowKind };
 /// One of Host.roc's `accounts!` accounts: `{ id : List(U8), kind : [Agent, Guest, Member, Unreadable], name : List(U8), name_read : [Found, Unreadable] }`.
 pub const AccountRec = extern struct { id: RocBytes, name: RocBytes, kind: route_mod.AccountKind, name_read: route_mod.NameRead };
 /// Host.roc's `accounts!` answer: `{ accounts : List(...), status : [Failed, Found] }`.
@@ -115,7 +115,7 @@ pub const SrcList = RecList(SrcRec, Src, struct {
 
 pub const RecentList = RecList(RecentRec, RecentRow, struct {
     fn rec(it: RecentRow) RecentRec {
-        return .{ .dm = .from(it.dm), .doc = .from(it.doc), .key = .from(it.key), .label = .from(it.label), .markdown = .from(it.markdown), .name = .from(it.name), .secs = .from(it.secs), .topic = .from(it.topic), .uid = .from(it.uid) };
+        return .{ .dm = it.dm, .kind = it.kind, .key = .from(it.key), .label = .from(it.label), .markdown = .from(it.markdown), .name = .from(it.name), .secs = .from(it.secs), .topic = .from(it.topic), .uid = .from(it.uid) };
     }
 }.rec);
 
@@ -136,7 +136,7 @@ pub const BlockList = RecList(BlockRec, Block, struct {
 
 comptime {
     const w = @sizeOf(usize);
-    std.debug.assert(@sizeOf(RocBytes) == 3 * w and @sizeOf(Request) == 4 * w and @sizeOf(RouteRec) == 10 * w and @sizeOf(Answer) == 20 * w and @sizeOf(Got) == 4 * w and @sizeOf(ConvRec) == 10 * w and @sizeOf(ReadRec) == 4 * w and @sizeOf(EntryRec) == 4 * w and @sizeOf(SrcRec) == 6 * w and @sizeOf(RecentRec) == 27 * w and @sizeOf(ListRec) == 4 * w and @sizeOf(AccountRec) == 7 * w and @sizeOf(AccountsRec) == 4 * w and @sizeOf(CountRec) == 16 and @sizeOf(RenderRec) == 4 * w and @sizeOf(MessageRec) == 15 * w);
+    std.debug.assert(@sizeOf(RocBytes) == 3 * w and @sizeOf(Request) == 4 * w and @sizeOf(RouteRec) == 10 * w and @sizeOf(Answer) == 20 * w and @sizeOf(Got) == 4 * w and @sizeOf(ConvRec) == 10 * w and @sizeOf(ReadRec) == 4 * w and @sizeOf(EntryRec) == 4 * w and @sizeOf(SrcRec) == 6 * w and @sizeOf(RecentRec) == 22 * w and @sizeOf(ListRec) == 4 * w and @sizeOf(AccountRec) == 7 * w and @sizeOf(AccountsRec) == 4 * w and @sizeOf(CountRec) == 16 and @sizeOf(RenderRec) == 4 * w and @sizeOf(MessageRec) == 15 * w);
     std.debug.assert(@sizeOf(BlockRec) == 6 * w and @sizeOf(CodePartRec) == 4 * w and @sizeOf(ExcerptPartRec) == 4 * w and @sizeOf(ImagesPartRec) == 4 * w and @sizeOf(PartsRec) == 12 * w and @sizeOf(AppendRec) == 4);
     std.debug.assert(@sizeOf(LimitsRec) == 3 * w + 24 and @sizeOf(route_mod.Presence) == 1);
     // **A FAULT IS THE HOST'S ERROR, CARRIED BY THE ROC AS A NUMBER** it
@@ -162,8 +162,8 @@ pub const Listing = union(route_mod.ReadStatus) { failed, found: []const Entry, 
 pub const Src = struct { name: []const u8, src: []const u8 };
 
 /// A recent row as the host writes it (angry-gopher recent.zig `Row`):
-/// `doc` and `dm` "1" or "0", `secs` a signed decimal.
-pub const RecentRow = struct { doc: []const u8, secs: []const u8, uid: []const u8, name: []const u8, key: []const u8, label: []const u8, topic: []const u8, markdown: []const u8, dm: []const u8 };
+/// `secs` a signed decimal.
+pub const RecentRow = struct { kind: route_mod.RowKind, secs: []const u8, uid: []const u8, name: []const u8, key: []const u8, label: []const u8, topic: []const u8, markdown: []const u8, dm: route_mod.RowConv };
 
 /// An account as the host read it: its id (a canonical folder's name), its
 /// kind (`.unreadable` when its password's stat failed), its `name` file's

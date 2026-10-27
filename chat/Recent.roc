@@ -15,13 +15,12 @@ Recent := [].{
 	## ChatEvent's.
 	Row : { kind : [Doc, Message], secs : I64, uid : List(U8), name : List(U8), key : List(U8), label : List(U8), topic : List(U8), markdown : List(U8), dm : [Dm, Channel] }
 
-	## A row as the host writes it (Host.recent!): `doc` and `dm` "1" or "0",
-	## `secs` a signed decimal.
-	Written : { doc : List(U8), secs : List(U8), uid : List(U8), name : List(U8), key : List(U8), label : List(U8), topic : List(U8), markdown : List(U8), dm : List(U8) }
+	## A row as the host writes it (Host.recent!): `secs` a signed decimal.
+	Written : { kind : [Doc, Message], secs : List(U8), uid : List(U8), name : List(U8), key : List(U8), label : List(U8), topic : List(U8), markdown : List(U8), dm : [Dm, Channel] }
 
 	## The host's rows, read.
 	rows : List(Written) -> List(Row)
-	rows = |ws| List.map(ws, |w| { kind: if w.doc == ['1'] Doc else Message, secs: signed(w.secs), uid: w.uid, name: w.name, key: w.key, label: w.label, topic: w.topic, markdown: w.markdown, dm: if w.dm == ['1'] Dm else Channel })
+	rows = |ws| List.map(ws, |w| { kind: w.kind, secs: signed(w.secs), uid: w.uid, name: w.name, key: w.key, label: w.label, topic: w.topic, markdown: w.markdown, dm: w.dm })
 
 	## A signed decimal, as the host writes one.
 	signed : List(U8) -> I64
