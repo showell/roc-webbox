@@ -1,0 +1,347 @@
+-- **THE CHAT'S ROC, HUNTED WITH ROC'S OWN PARSER** (roc-ast,
+-- tools/roc_ast/install.shale): constructs Steve's Roc style replaces
+-- (memory: Roc idioms), one function a kind, each with plants
+-- (plants/<hunt>.roc) that must fire before its findings count. The trees
+-- are read once; a finding names its file, line and the definition it is in.
+-- Run from roc-webbox:
+--   shale --budget steps=200000000 tools/roc_hunt/hunt.shale               every hunt over chat/'s production modules
+--   shale --budget steps=200000000 tools/roc_hunt/hunt.shale self_test=1   every hunt's plants first
+-- (The trees are some 20,000 lines, read a line at a time: the default
+-- 5,000,000 steps do not reach the end of them.)
+-- The production modules are chat/*.roc and chat/platform/*.roc, less
+-- twin.roc: tests may hold literal data.
+
+const roc_ast = "/home/steve/tools/roc-ast/bin/roc-ast"
+const long_lines = 40
+
+-- ── the trees ────────────────────────────────────────────────────────────
+
+-- roc-ast's output for `files`, read once: each line, its depth (leading
+-- tabs), its file, and the definition it is in (`name`, or "").
+function read_trees(files)
+  local dump = run({roc_ast}, {timeout_ms = 300000, stdin = join(files, "\n"), whole = 64000000})
+  local text = lines(dump.out)
+  local depth = {}
+  local file = {}
+  local within = {}
+  local current = ""
+  local stack = {}
+  local i = 1
+  while i <= #text do
+    local line = text[i]
+    local d = 0
+    while sub(line, d + 1, d + 1) == "\t" do d = d + 1 end
+    push(depth, d)
+    if starts_with(line, "== ") then
+      current = sub(line, 4)
+      stack = {}
+    end
+    while #stack > 0 and stack[#stack][1] >= d do stack = take(stack, #stack - 1) end
+    local t = trim(line)
+    if (starts_with(t, "(s-decl ") or starts_with(t, "(s-type-anno ")) and i < #text then
+      local name = between(t, "(name \"", "\")")
+      if name == nil or name == "" then name = between(trim(text[i + 1]), "(raw \"", "\")") end
+      -- A destructure (`(a, b) = ...`) names nothing: it is its
+      -- definition's.
+      if (name == nil or name == "") and #stack > 0 then name = stack[#stack][2] end
+      push(stack, {d, name or ""})
+    end
+    push(file, current)
+    if #stack > 0 then push(within, stack[#stack][2]) else push(within, "") end
+    i = i + 1
+  end
+  return {text = text, depth = depth, file = file, within = within}
+end
+
+-- The line after the last line of the node at `at`.
+function past(tree, at)
+  local i = at + 1
+  while i <= #tree.text and tree.depth[i] > tree.depth[at] do i = i + 1 end
+  return i
+end
+
+-- The lines of the node at `at`'s children.
+function children(tree, at)
+  local out = {}
+  local stop = past(tree, at)
+  local i = at + 1
+  while i < stop do
+    if tree.depth[i] == tree.depth[at] + 1 then push(out, i) end
+    i = i + 1
+  end
+  return out
+end
+
+-- The node at `at`'s first line, trimmed.
+function head(tree, at)
+  return trim(tree.text[at])
+end
+
+-- Where a finding is: `<file>:<line> <definition>`.
+function where(tree, at)
+  return tree.file[at] .. ":" .. between(head(tree, at), "@", ".") .. " " .. tree.within[at]
+end
+
+-- The type at `at`, as Roc writes it: `List(U8)`, `{ id : U8 }`, `[A, B]`.
+function render(tree, at)
+  local t = head(tree, at)
+  local kids = children(tree, at)
+  local name = between(t, "(name \"", "\")")
+  if starts_with(t, "(ty-apply ") then
+    local args = {}
+    local k = 2
+    while k <= #kids do push(args, render(tree, kids[k])) k = k + 1 end
+    return render(tree, kids[1]) .. "(" .. join(args, ", ") .. ")"
+  end
+  if starts_with(t, "(ty-record ") or starts_with(t, "(ty-tuple ") or starts_with(t, "(tags") then
+    local parts = {}
+    for k in kids do push(parts, render(tree, k)) end
+    if starts_with(t, "(ty-record ") then return "{ " .. join(parts, ", ") .. " }" end
+    if starts_with(t, "(ty-tuple ") then return "(" .. join(parts, ", ") .. ")" end
+    return join(parts, ", ")
+  end
+  if starts_with(t, "(ty-tag-union ") then return "[" .. render(tree, kids[1]) .. "]" end
+  if starts_with(t, "(anno-record-field ") then return name .. " : " .. render(tree, kids[1]) end
+  if name ~= nil and name ~= "" then return name end
+  return split(t, " ")[1] .. ")"
+end
+
+-- Each annotated function's argument types: {at, args} where args are the
+-- lines of its `ty-fn`'s children but the last (the return type).
+function annotated_functions(tree)
+  local out = {}
+  local i = 1
+  while i < #tree.text do
+    if starts_with(head(tree, i), "(s-type-anno ") and starts_with(head(tree, i + 1), "(ty-fn ") then
+      local kids = children(tree, i + 1)
+      push(out, {at = i, args = take(kids, #kids - 1)})
+    end
+    i = i + 1
+  end
+  return out
+end
+
+-- ── the hunts ────────────────────────────────────────────────────────────
+
+-- **NEIGHBOURING ARGUMENTS OF ONE TYPE**: swapped, they still type-check.
+-- A record names them; a nominal type tells them apart. Type variables
+-- (`a, a`, a comparator's two sides) are not counted.
+function same_typed_args(tree)
+  local found = {}
+  for f in annotated_functions(tree) do
+    local types = {}
+    for a in f.args do push(types, render(tree, a)) end
+    local a = 1
+    while a < #types do
+      local b = a
+      while b < #types and types[b + 1] == types[a] do b = b + 1 end
+      if b > a and not contains(head(tree, f.args[a]), "ty-var") then
+        push(found, where(tree, f.at) .. ": arguments " .. tostring(a) .. "-" .. tostring(b) .. " are " .. types[a])
+      end
+      a = b + 1
+    end
+  end
+  return found
+end
+
+-- **A NUMBER THAT MEANS SOMETHING IT DOES NOT SAY**: an integer literal
+-- other than 0 and 1, in an expression or a pattern. One between 32 and 126
+-- is most likely a byte, which a character literal ('_') says, and is
+-- marked `'?`. A line a definition: where its first one is, then each.
+function magic_numbers(tree)
+  local order = {}
+  local first = {}
+  local numbers = {}
+  local i = 1
+  while i <= #tree.text do
+    local t = head(tree, i)
+    if starts_with(t, "(e-int ") or starts_with(t, "(p-int ") then
+      local raw = between(t, "(raw \"", "\")")
+      if raw ~= "0" and raw ~= "1" then
+        local n = parse_int(raw)
+        if n ~= nil and n >= 32 and n <= 126 then raw = raw .. "'?" end
+        local key = tree.file[i] .. " " .. tree.within[i]
+        if get(first, key) == nil then
+          push(order, key)
+          first[key] = where(tree, i)
+          numbers[key] = {}
+        end
+        push(numbers[key], raw)
+      end
+    end
+    i = i + 1
+  end
+  local found = {}
+  for key in order do push(found, first[key] .. ": " .. join(numbers[key], ", ")) end
+  return found
+end
+
+-- **A BOOL WHERE A TAG WOULD SAY WHICH**: a `Bool` argument, or a record
+-- field of type `Bool`. A return of `Bool` (a question) is fine.
+function bools(tree)
+  local found = {}
+  for f in annotated_functions(tree) do
+    local n = 1
+    while n <= #f.args do
+      if render(tree, f.args[n]) == "Bool" then push(found, where(tree, f.at) .. ": argument " .. tostring(n) .. " is a Bool") end
+      n = n + 1
+    end
+  end
+  local i = 1
+  while i <= #tree.text do
+    local t = head(tree, i)
+    if starts_with(t, "(anno-record-field ") then
+      local kids = children(tree, i)
+      if #kids > 0 and render(tree, kids[1]) == "Bool" then
+        push(found, where(tree, i) .. ": field " .. between(t, "(name \"", "\")") .. " is a Bool")
+      end
+    end
+    i = i + 1
+  end
+  return found
+end
+
+-- **A LIST READ BY POSITION**: a function taking a `List(List(U8))` and
+-- reading it with `List.get`, whose parts are known only by where they sit
+-- (`doc, secs, uid, name...`, nine a row). A record, or a tag with a
+-- payload, names them. A list of like things (lines, names) walked whole is
+-- not one. The host seam keeps some on purpose; inside Roc none should
+-- survive.
+function positional_lists(tree)
+  local found = {}
+  for f in annotated_functions(tree) do
+    local flat = false
+    for a in f.args do if render(tree, a) == "List(List(U8))" then flat = true end end
+    if flat then
+      -- The definition is the annotation's next sibling; a `get` anywhere
+      -- in it counts, inside a helper it defines too (`at = |k| ...`).
+      local decl = past(tree, f.at)
+      local gets = 0
+      if decl <= #tree.text and starts_with(head(tree, decl), "(s-decl ") then
+        local i = decl
+        local stop = past(tree, decl)
+        while i < stop do
+          local t = head(tree, i)
+          if contains(t, "(raw \"List.get\")") or contains(t, "(method \".get\")") then gets = gets + 1 end
+          i = i + 1
+        end
+      end
+      if gets > 0 then push(found, where(tree, f.at) .. ": a List(List(U8)) read by position (" .. tostring(gets) .. " gets)") end
+    end
+  end
+  return found
+end
+
+-- **AN IF CHAIN THAT A MATCH WOULD SAY**: an `if` whose `else` is another
+-- `if`, three or more deep. Often a closed set of cases told apart by
+-- comparing, where a tag and a `match` would be exhaustive.
+function if_chains(tree)
+  local found = {}
+  local inner = {}
+  local i = 1
+  while i <= #tree.text do
+    if starts_with(head(tree, i), "(e-if-then-else ") then
+      local kids = children(tree, i)
+      local last = kids[#kids]
+      if last ~= nil and starts_with(head(tree, last), "(e-if-then-else ") then inner[tostring(last)] = true end
+    end
+    i = i + 1
+  end
+  i = 1
+  while i <= #tree.text do
+    if starts_with(head(tree, i), "(e-if-then-else ") and get(inner, tostring(i)) == nil then
+      local n = 1
+      local at = i
+      while true do
+        local kids = children(tree, at)
+        local last = kids[#kids]
+        if last == nil or not starts_with(head(tree, last), "(e-if-then-else ") then break end
+        n = n + 1
+        at = last
+      end
+      if n >= 3 then push(found, where(tree, i) .. ": " .. tostring(n) .. " ifs in a chain") end
+    end
+    i = i + 1
+  end
+  return found
+end
+
+-- **A LONG DEFINITION**: one spanning more than `long_lines` lines, longest
+-- first. Not wrong by itself; the place to look for a function to name.
+function long_definitions(tree)
+  local found = {}
+  local i = 1
+  while i <= #tree.text do
+    local t = head(tree, i)
+    if starts_with(t, "(s-decl ") then
+      local span = sub(split(t, " ")[2], 2)
+      local first = parse_int(split(span, ".")[1])
+      local last = parse_int(split(split(span, "-")[2], ".")[1])
+      if first ~= nil and last ~= nil and last - first + 1 > long_lines then
+        -- Keyed by the length, zero-padded, so a sort of the strings is a
+        -- sort by length.
+        local key = tostring(last - first + 1)
+        while #key < 6 do key = "0" .. key end
+        push(found, key .. "|" .. where(tree, i) .. ": " .. tostring(last - first + 1) .. " lines")
+      end
+    end
+    i = i + 1
+  end
+  local out = {}
+  local sorted = sort(found)
+  local k = #sorted
+  while k >= 1 do
+    push(out, sub(sorted[k], 8))
+    k = k - 1
+  end
+  return out
+end
+
+const hunts = {"same_typed_args", "magic_numbers", "bools", "positional_lists", "if_chains", "long_definitions"}
+
+-- The hunt named `name`, over `tree`.
+function hunt(name, tree)
+  if name == "same_typed_args" then return same_typed_args(tree) end
+  if name == "magic_numbers" then return magic_numbers(tree) end
+  if name == "bools" then return bools(tree) end
+  if name == "positional_lists" then return positional_lists(tree) end
+  if name == "if_chains" then return if_chains(tree) end
+  if name == "long_definitions" then return long_definitions(tree) end
+  fail("no hunt named " .. name)
+end
+
+-- ── the plants, or the tree ──────────────────────────────────────────────
+
+if arg("self_test", "") ~= "" then
+  for name in hunts do
+    local plants = "tools/roc_hunt/plants/" .. name .. ".roc"
+    local found = hunt(name, read_trees({plants}))
+    local text = join(found, "\n")
+    local fires = 0
+    local counted = {}
+    for line in lines(read(plants)) do
+      local name = trim(split(line, ":")[1])
+      local named = trim(split(trim(line), " ")[1])
+      if starts_with(named, "fires_") and get(counted, named) == nil then
+        counted[named] = true
+        fires = fires + 1
+        if not contains(text, " " .. named .. ":") then fail(name .. ": a plant did not fire: " .. named .. "\n" .. text) end
+      end
+    end
+    if fires == 0 then fail(name .. ": its plants hold no fires_ definition") end
+    for f in found do
+      if contains(f, " quiet_") then fail(name .. ": a quiet plant fired: " .. f) end
+    end
+    print(name .. ": its " .. tostring(fires) .. " plants fire, and the quiet ones stay quiet")
+  end
+else
+  local files = {}
+  for p in glob("chat/*.roc") do if p ~= "chat/twin.roc" then push(files, p) end end
+  for p in glob("chat/platform/*.roc") do push(files, p) end
+  local tree = read_trees(sort(files))
+  for name in hunts do
+    local found = hunt(name, tree)
+    print("== " .. name .. ": " .. tostring(#found))
+    for f in found do print("  " .. f) end
+  end
+end
