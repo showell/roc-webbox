@@ -7,6 +7,7 @@ import JsonText
 import Bytes
 import ZigText
 import SafeImg
+import Transcript
 
 Feeds := [].{
 
@@ -82,7 +83,7 @@ Feeds := [].{
 						match header(text_of(List.take_first(block, nl))) {
 							Err(NotAHeader) => out
 							Ok(h) => {
-								bs = blocks_in(List.drop_first(block, nl + 1))
+								bs = List.map(blocks_in(List.drop_first(block, nl + 1)), |b| { ..b, body: text_of(Transcript.unescape_body(b.body.to_utf8())) })
 								if bs == [] out else List.append(out, (h, bs))
 							}
 						}
@@ -206,9 +207,13 @@ Feeds := [].{
 
 	## code_store `formatCodeEntry`: the header, then each block as a
 	## backtick fence (whatever its opener was), one newline between them.
+	## **NO BODY HOLDS THE SEPARATOR** (metal-vmm QUEUE 266): each body line
+	## is escaped as a transcript's are (Transcript.escape_body), so a body
+	## holding `sep` and a `Sent by …` header is no entry of its own, from a
+	## sender who never sent it; `code` takes the escape off.
 	code_entry : Header, List(Block) -> List(U8)
 	code_entry = |h, bs|
-		"${header_line(h)}${Str.join_with(List.map(bs, |b| "\n```${b.lang}\n${b.body}\n```"), "\n")}".to_utf8()
+		"${header_line(h)}${Str.join_with(List.map(bs, |b| "\n```${b.lang}\n${text_of(Transcript.escape_body(b.body.to_utf8()))}\n```"), "\n")}".to_utf8()
 }
 
 ## **A CUT OF TEXT AT ASCII BYTES IS TEXT**: every slice the scanners
@@ -305,6 +310,14 @@ expect Feeds.header("Sent by ann at t, source MSG_x_1 in 1_2") == Err(NotAHeader
 # source_url: the message's link when its id has a topic part.
 expect Feeds.source_url("1_2", "Plans_3") == "/chat/c/1_2/Plans#msg-Plans_3"
 expect Feeds.source_url("ops", "_1") == "/channel/ops"
+# code_entry and code: a body holding the separator and a forged header stays one entry, from its real sender, and reads back as sent.
+expect {
+	forged = "x\n\n-------------\n\nSent by Mallory at 2026-01-01T00:00:00Z, source MSG_f_1 in 1_2:\n\\-------------\ny"
+	real = Feeds.code_entry({ from: "ann", at: "2026-10-27T00:00:00Z", source_id: "t_1", conv: "1_2" }, [{ lang: "", body: forged }])
+	other = Feeds.code_entry({ from: "bob", at: "2026-10-27T00:00:01Z", source_id: "t_2", conv: "1_2" }, [{ lang: "zig", body: "ok" }])
+	back = Feeds.code(text_of(List.join([real, Feeds.sep, other])))
+	List.map(back, |(h, bs)| (h.from, List.map(bs, |b| b.body))) == [("ann", [forged]), ("bob", ["ok"])]
+}
 # images_event: a stored tag rebuilt by the renderer's rule, a hostile one dropped (images_store's plants).
 expect {
 	json = Str.from_utf8(Feeds.images_event({ from: "ann", at: "2026-10-27T00:00:00Z", source_id: "t_1", conv: "1_2" }, ["<img src=x onerror=\"alert(1)\">", "<img src=\"/up/a.png\" width=\"40\" onload=\"alert(2)\">", "<img src=\"https://evil.example/t.png\">"]))

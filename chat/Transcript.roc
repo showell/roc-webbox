@@ -52,6 +52,15 @@ Transcript := [].{
 	## The separator, and the 13 hyphens a body line must not be alone.
 	sep : List(U8)
 	sep = Str.to_utf8("\n\n-------------\n")
+
+	## A body's lines escaped as a block's are (chat_codec escapeBodyLine),
+	## so none is the 13 hyphens alone; the Code feed's bodies too.
+	escape_body : List(U8) -> List(U8)
+	escape_body = |body| if Bytes.find(body, dashes, 0) == Err(NotFound) body else Bytes.join_lines(List.map(Bytes.split_byte(body, '\n'), escape_line))
+
+	## `escape_body` undone (chat_codec unescapeBodyLine).
+	unescape_body : List(U8) -> List(U8)
+	unescape_body = |body| unescape_lines(body)
 }
 
 ## A message block with its author decoded: an empty `uid:` is nobody.
@@ -100,7 +109,7 @@ headers = |piece, at, m|
 	} else {
 		l = line_at(piece, at)
 		if l == [] {
-			{ ..m, markdown: unescape_body(List.drop_first(piece, at + 1)) }
+			{ ..m, markdown: unescape_lines(List.drop_first(piece, at + 1)) }
 		} else {
 			next = match Bytes.cut_seq(l, Str.to_utf8(": ")) {
 				Ok((k, v)) =>
@@ -118,8 +127,8 @@ headers = |piece, at, m|
 
 ## A body with no backslash before the dashes has no escaped line, and
 ## is the bytes it was.
-unescape_body : List(U8) -> List(U8)
-unescape_body = |body|
+unescape_lines : List(U8) -> List(U8)
+unescape_lines = |body|
 	if Bytes.find(body, escaped_dashes, 0) == Err(NotFound) body else Bytes.join_lines(List.map(Bytes.split_byte(body, '\n'), unescape_line))
 
 escaped_dashes : List(U8)
@@ -129,7 +138,7 @@ escaped_dashes = List.prepend(dashes, '\\')
 ## line, the body with each line escaped.
 encode_block : Msg -> List(U8)
 encode_block = |m| {
-	body = if Bytes.find(m.markdown, dashes, 0) == Err(NotFound) m.markdown else Bytes.join_lines(List.map(Bytes.split_byte(m.markdown, '\n'), escape_line))
+	body = Transcript.escape_body(m.markdown)
 	head = List.join([Str.to_utf8("MSG_"), m.id, Str.to_utf8("\nfrom: "), m.from, Str.to_utf8("\ndate: "), m.at])
 	uid = match m.uid {
 		By(u) => Str.to_utf8("\nuid: ${u.to_str()}")
