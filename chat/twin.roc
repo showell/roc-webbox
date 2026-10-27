@@ -94,8 +94,8 @@ call = |req| {
 			}
 		29 => [bool(Reaction.valid_emoji(arg(0)))]
 		30 => [Chrome.page({ tab: arg(0), title: arg(1), viewer: arg(2), active: arg(3), src: srcs(req.args, 5) }, arg(4))]
-		31 => [Pages.not_found(srcs(req.args, 3), arg(0), arg(1), arg(2))]
-		32 => [Pages.no_topics(srcs(req.args, 3), arg(0), arg(1), arg(2))]
+		31 => [Pages.not_found(srcs(req.args, 3), { viewer: arg(0), what: arg(1), back: arg(2) })]
+		32 => [Pages.no_topics(srcs(req.args, 3), { viewer: arg(0), base: arg(1), title: arg(2) })]
 		33 => [Pages.no_conversations(srcs(req.args, 1), arg(0))]
 		34 => [Pages.sidebar_json(Pages.decode_sidebar(req.args))]
 		35 => {

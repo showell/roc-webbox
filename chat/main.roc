@@ -516,7 +516,7 @@ recent! = |rest|
 			Ok(viewer) => {
 				rows = Recent.rows(Host.recent!({}))
 				me = Host.me!({})
-				Chat.respond(200, html, Pages.recent(Chrome.src_in(Host.srcs!({})), viewer, Recent.json(me, rows)))
+				Chat.respond(200, html, Pages.recent(Chrome.src_in(Host.srcs!({})), { viewer, json: Recent.json(me, rows) }))
 			}
 		}
 	}
@@ -539,8 +539,8 @@ feed! = |which, rest|
 				}
 				src = Chrome.src_in(Host.srcs!({}))
 				page = match which {
-					Images => Pages.images(src, viewer, Feeds.images_json(Feeds.images(file), 20))
-					Code => Pages.code(src, viewer, Feeds.code_json(Feeds.code(file)))
+					Images => Pages.images(src, { viewer, json: Feeds.images_json(Feeds.images(file), 20) })
+					Code => Pages.code(src, { viewer, json: Feeds.code_json(Feeds.code(file)) })
 				}
 				Chat.respond(200, html, page)
 			}
@@ -563,7 +563,7 @@ landing! = |route|
 					Err(Failed) => Chat.answered
 					Ok(title) =>
 						match viewer!(who) {
-							Ok(viewer) => Chat.respond(200, html, Pages.no_topics(Chrome.src_in(Host.srcs!({})), viewer, conv.base, title))
+							Ok(viewer) => Chat.respond(200, html, Pages.no_topics(Chrome.src_in(Host.srcs!({})), { viewer, base: conv.base, title }))
 							Err(Failed) => Chat.answered
 						}
 				}

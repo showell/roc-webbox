@@ -23,14 +23,22 @@ Pages := [].{
 	## their pins in this conversation, and its topics.
 	Sidebar : { uid : List(U8), kind : [Dm, Channel], key : List(U8), base : List(U8), sid : List(U8), others : List({ id : List(U8), name : List(U8), presence : [Online, Offline] }), channels : List(List(U8)), pins : List(List(U8)), topics : List(List(U8)) }
 
-	shell : (List(U8) -> List(U8)), List(U8), List(U8), List(U8) -> Chrome.Shell
-	shell = |src, title, viewer, active| { tab: Str.to_utf8("Chat"), title, viewer, active, src }
+	## A chat page's heading: its `title`, the `viewer`, and the nav item
+	## `active`. Named fields because all three are byte lists.
+	Heading : { title : List(U8), viewer : List(U8), active : List(U8) }
+
+	shell : (List(U8) -> List(U8)), Heading -> Chrome.Shell
+	shell = |src, { title, viewer, active }| { tab: Str.to_utf8("Chat"), title, viewer, active, src }
+
+	## A conversation with no topics yet: the `viewer`, its URL `base`, and
+	## its `title`.
+	Topicless : { viewer : List(U8), base : List(U8), title : List(U8) }
 
 	## noTopicsHtml: an addressable conversation with no topics, its
 	## first-topic widget mounted on `base`.
-	no_topics : (List(U8) -> List(U8)), List(U8), List(U8), List(U8) -> List(U8)
-	no_topics = |src, viewer, base, title| {
-		s = shell(src, title, viewer, Str.to_utf8("chat"))
+	no_topics : (List(U8) -> List(U8)), Topicless -> List(U8)
+	no_topics = |src, { viewer, base, title }| {
+		s = shell(src, { title, viewer, active: Str.to_utf8("chat") })
 		Chrome.page(
 			s,
 			List.join([
@@ -43,11 +51,15 @@ Pages := [].{
 		)
 	}
 
+	## What a 404 tells the `viewer`: `what` is not here, and `back` is where
+	## to go.
+	NotHere : { viewer : List(U8), what : List(U8), back : List(U8) }
+
 	## notFoundHtml: `what` is not here, and `back` is where to go.
-	not_found : (List(U8) -> List(U8)), List(U8), List(U8), List(U8) -> List(U8)
-	not_found = |src, viewer, what, back|
+	not_found : (List(U8) -> List(U8)), NotHere -> List(U8)
+	not_found = |src, { viewer, what, back }|
 		Chrome.page(
-			shell(src, Str.to_utf8("Not here"), viewer, Str.to_utf8("chat")),
+			shell(src, { title: Str.to_utf8("Not here"), viewer, active: Str.to_utf8("chat") }),
 			List.join([
 				Str.to_utf8("<p>"),
 				Html.escape(what),
@@ -104,10 +116,13 @@ Pages := [].{
 		)
 	}
 
+	## A feed page's `viewer` and its feed's `json`.
+	FeedView : { viewer : List(U8), json : List(U8) }
+
 	## recent.zig's /chat/recent: the attention strip, the feed's mount, its
 	## JSON (script-safe) and its two scripts.
-	recent : (List(U8) -> List(U8)), List(U8), List(U8) -> List(U8)
-	recent = |src, viewer, json| {
+	recent : (List(U8) -> List(U8)), FeedView -> List(U8)
+	recent = |src, { viewer, json }| {
 		s = { tab: Str.to_utf8("Recent"), title: Str.to_utf8("Recent"), viewer, active: Str.to_utf8("recent"), src }
 		Chrome.page(
 			s,
@@ -122,22 +137,22 @@ Pages := [].{
 	}
 
 	## /chat/images: the newest entries of the member's images.md.
-	images : (List(U8) -> List(U8)), List(U8), List(U8) -> List(U8)
-	images = |src, viewer, json| feed(src, viewer, "images", json, ["styles.js", "chat_image_popup.js", "images.js", "notify.js"])
+	images : (List(U8) -> List(U8)), FeedView -> List(U8)
+	images = |src, { viewer, json }| feed(src, viewer, "images", json, ["styles.js", "chat_image_popup.js", "images.js", "notify.js"])
 
 	## /chat/code: every entry of the member's code.md.
-	code : (List(U8) -> List(U8)), List(U8), List(U8) -> List(U8)
-	code = |src, viewer, json| feed(src, viewer, "code", json, ["styles.js", "chat_code_popup.js", "code.js", "notify.js"])
+	code : (List(U8) -> List(U8)), FeedView -> List(U8)
+	code = |src, { viewer, json }| feed(src, viewer, "code", json, ["styles.js", "chat_code_popup.js", "code.js", "notify.js"])
 
 	## noConversationsHtml: /chat for a viewer with nothing to resume.
 	no_conversations : (List(U8) -> List(U8)), List(U8) -> List(U8)
 	no_conversations = |src, viewer|
-		Chrome.page(shell(src, Str.to_utf8("Chat"), viewer, Str.to_utf8("chat")), Str.to_utf8("<p>You do not have any conversations.</p>"))
+		Chrome.page(shell(src, { title: Str.to_utf8("Chat"), viewer, active: Str.to_utf8("chat") }), Str.to_utf8("<p>You do not have any conversations.</p>"))
 
 	## conversationHtml: the page that boots the chat's client.
 	conversation : (List(U8) -> List(U8)), Limits, View -> List(U8)
 	conversation = |src, limits, v| {
-		s = shell(src, v.title, v.viewer, [])
+		s = shell(src, { title: v.title, viewer: v.viewer, active: [] })
 		attr = |name, value| List.join([Str.to_utf8(" ${name}=\""), value, ['"']])
 		num = |n| Str.to_utf8(U64.to_str(n))
 		Chrome.page(
