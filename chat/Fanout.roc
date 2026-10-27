@@ -144,10 +144,14 @@ Fanout := [].{
 		match m.key {
 			Channel(name) => List.concat(Str.to_utf8("in "), Paths.channel_name_bytes(name))
 			Dm(_) => {
-				other = List.fold(m.members, [], |found, member| if member != viewer member.to_str().to_utf8() else found)
-				match Accounts.name(m.accounts, other) {
-					Ok(name) => List.concat(Str.to_utf8("to "), name)
-					Err(_) => []
+				# The DM with yourself has no other member, so no name.
+				match List.keep_if(m.members, |member| member != viewer).last() {
+					Ok(other) =>
+						match Accounts.name(m.accounts, other) {
+							Ok(name) => List.concat(Str.to_utf8("to "), name)
+							Err(_) => []
+						}
+					Err(_) => Str.to_utf8("to ")
 				}
 			}
 		}

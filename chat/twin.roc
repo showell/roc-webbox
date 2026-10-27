@@ -144,13 +144,18 @@ call = |req| {
 			match (pair_of(arg(0)), decode_uid(arg(1))) {
 				(Ok(pair), Ok(me)) =>
 					match Conversation.dm_other(pair, me) {
-						Ok(other) => [other]
+						Ok(other) => [other.to_str().to_utf8()]
 						Err(NotAParticipant) => []
 					}
 				_ => []
 			}
 		45 => Conversation.dm_members(arg(0))
-		46 => [Conversation.dm_title(arg(0), arg(1))]
+		# The partner is a Uid; the door refuses any other.
+		46 =>
+			match decode_uid(arg(1)) {
+				Ok(other) => [Conversation.dm_title(arg(0), other)]
+				Err(NotAUid) => []
+			}
 		47 => [Conversation.channel_title(arg(0))]
 		# The topic is text (a TopicAt's); a topic that is not has no title.
 		48 =>
@@ -203,7 +208,8 @@ call = |req| {
 			# and its name (`ok, name`, or the failure `unreadable`), then the
 			# authorized roster (`ok`, then `id, name` pairs; or its failure).
 			n = u64(arg(0))
-			ids = List.sublist(req.args, { start: 1, len: n })
+			# An id that is no Uid is asked nothing: the door refuses it.
+			ids = List.keep_oks(List.sublist(req.args, { start: 1, len: n }), decode_uid)
 			all = accounts(req.args, 1 + n, [])
 			asked = List.join(
 				List.map(
@@ -216,7 +222,7 @@ call = |req| {
 				),
 			)
 			roster = match Accounts.authorized(all) {
-				Ok(members) => List.concat([Str.to_utf8("ok")], List.join(List.map(members, |a| [a.id, a.name])))
+				Ok(members) => List.concat([Str.to_utf8("ok")], List.join(List.map(members, |a| [a.id.to_str().to_utf8(), a.name])))
 				Err(why) => unreadable(why)
 			}
 			List.concat(asked, roster)
@@ -302,6 +308,13 @@ valid_pair = |key| match pair_of(key) {
 text : List(U8) -> Try(Str, [Invalid])
 text = |bytes| Str.from_utf8(bytes).map_err(|_| Invalid)
 
+## A uid the test hands as valid; one that is not stops the twin.
+valid_uid : List(U8) -> Uid
+valid_uid = |bytes| match decode_uid(bytes) {
+	Ok(uid) => uid
+	Err(NotAUid) => crash "twin: an invalid uid"
+}
+
 ## A uid's bytes as a Uid: digits, the first not zero, or none.
 decode_uid : List(U8) -> Try(Uid, [NotAUid])
 decode_uid = |bytes| Uid.from_str(Str.from_utf8(bytes) ?? "")
@@ -365,10 +378,12 @@ entries = |args, i, out|
 ## Accounts as the test wrote them: `id, kind, name_read, name` from
 ## argument `i`, the kind `a` (the agent), `m` (a member), `u` (its
 ## password's stat failed) or anything else (a guest); the name read `u`
-## when it failed, anything else when it read.
+## when it failed, anything else when it read. An id that is no Uid stops
+## the twin: the host lists only canonical ids, and main's accounts! door
+## fails any other.
 accounts : List(List(U8)), U64, List(Accounts.Account) -> List(Accounts.Account)
 accounts = |args, i, out|
-	match (List.get(args, i), List.get(args, i + 1), List.get(args, i + 2), List.get(args, i + 3)) {
+	match (List.get(args, i).map_ok(valid_uid), List.get(args, i + 1), List.get(args, i + 2), List.get(args, i + 3)) {
 		(Ok(id), Ok(k), Ok(r), Ok(name)) => {
 			kind = match k {
 				[97] => Agent
@@ -386,8 +401,8 @@ accounts = |args, i, out|
 unreadable : Accounts.Unreadable -> List(List(U8))
 unreadable = |why|
 	match why {
-		KindUnreadable(id) => [Str.to_utf8("kind"), id]
-		NameUnreadable(id) => [Str.to_utf8("name"), id]
+		KindUnreadable(id) => [Str.to_utf8("kind"), id.to_str().to_utf8()]
+		NameUnreadable(id) => [Str.to_utf8("name"), id.to_str().to_utf8()]
 	}
 
 ## Code blocks as the test wrote them, `lang, body` pairs from `i`.

@@ -138,7 +138,7 @@ in_conversation! = |req, route|
 					Ok((conv, who)) =>
 					# The title before the topics, as findTopic read them: a
 					# partner whose name will not read fails every topic route.
-						match title!(conv, who) {
+						match title!(conv, key, who) {
 							Err(Failed) => Chat.answered
 							Ok(t) => {
 								topics = topics!(key)
@@ -265,7 +265,17 @@ accounts! = |who|
 		Unasked => {
 			got = Host.accounts!({})
 			match got.status {
-				Found => Ok(got.accounts)
+				# **EACH ID DECODED HERE, AT THE DOOR**: the host lists only the
+				# folders a counter named, so one that is no uid fails the
+				# request (NotUtf8, about it).
+				Found =>
+					match List.keep_if(got.accounts, |a| uid_of(a.id).is_err()) {
+						[bad, ..] => {
+							Host.fail!(NotUtf8, bad.id)
+							Err(Failed)
+						}
+						[] => Ok(List.keep_oks(got.accounts, |a| uid_of(a.id).map_ok(|id| { id, kind: a.kind, name: a.name, name_read: a.name_read })))
+					}
 				Failed => Err(Failed)
 			}
 		}
@@ -277,7 +287,7 @@ viewer! : Who => Try(List(U8), [Failed])
 viewer! = |who| {
 	me = me!({})?
 	match accounts!(who) {
-		Ok(all) => named!(Accounts.name(all, me.to_str().to_utf8()))
+		Ok(all) => named!(Accounts.name(all, me))
 		Err(Failed) => Err(Failed)
 	}
 }
@@ -316,8 +326,8 @@ named! = |looked|
 unreadable! : Accounts.Unreadable => {}
 unreadable! = |why|
 	match why {
-		KindUnreadable(id) => Host.fail!(KindUnreadable, id)
-		NameUnreadable(id) => Host.fail!(NameUnreadable, id)
+		KindUnreadable(id) => Host.fail!(KindUnreadable, id.to_str().to_utf8())
+		NameUnreadable(id) => Host.fail!(NameUnreadable, id.to_str().to_utf8())
 	}
 
 ## Channel `name`'s members, as its member file lists them (Paths's
@@ -402,21 +412,21 @@ list! = |path|
 ## `conv`'s title (convTitle): a DM's partner's name (its accounts known
 ## since find!), a channel's own. `Failed` when the partner's name would not
 ## read (the request has failed with its error).
-title! : Chat.Conv, Who => Try(List(U8), [Failed])
-title! = |conv, who|
-	if conv.family == Dm {
-		match accounts!(who) {
-			Ok(all) => {
-				other = Conversation.partner(conv.key, me!({})?)
-				match named!(Accounts.name(all, other)) {
-					Ok(name) => Ok(Conversation.dm_title(name, other))
-					Err(Failed) => Err(Failed)
+title! : Chat.Conv, Paths.ConvKey, Who => Try(List(U8), [Failed])
+title! = |conv, key, who|
+	match key {
+		Dm(pair) =>
+			match accounts!(who) {
+				Ok(all) => {
+					other = Paths.partner(pair, me!({})?)
+					match named!(Accounts.name(all, other)) {
+						Ok(name) => Ok(Conversation.dm_title(name, other))
+						Err(Failed) => Err(Failed)
+					}
 				}
+				Err(Failed) => Err(Failed)
 			}
-			Err(Failed) => Err(Failed)
-		}
-	} else {
-		Ok(Conversation.channel_title(conv.key))
+		Channel(_) => Ok(Conversation.channel_title(conv.key))
 	}
 
 ## POST .../pin and .../unpin: the member's pins in the conversation read,
@@ -608,7 +618,7 @@ landing! = |route, key|
 			if !first.is_empty() {
 				Chat.redirect(List.join([conv.base, ['/'], first.to_utf8()]))
 			} else {
-				match title!(conv, who) {
+				match title!(conv, key, who) {
 					Err(Failed) => Chat.answered
 					Ok(title) =>
 						match viewer!(who) {
@@ -654,13 +664,13 @@ sidebar! = |topic, at| {
 	match accounts!(at.who) {
 		Err(Failed) => Err(Failed)
 		Ok(all) =>
-			match named!(Accounts.name(all, me)) {
+			match named!(Accounts.name(all, uid)) {
 				Err(Failed) => Err(Failed)
 				Ok(viewer) =>
 					match named!(Accounts.authorized(all)) {
 						Err(Failed) => Err(Failed)
 						Ok(roster) => {
-							others = List.drop_if(roster, |u| u.id == me)
+							others = List.map(List.drop_if(roster, |u| u.id == uid), |u| { id: u.id.to_str().to_utf8(), name: u.name })
 							flags = Host.online!(List.map(others, |u| u.id))
 							match channel_rosters!({}) {
 								Err(Failed) => Err(Failed)
@@ -742,38 +752,31 @@ conversations! = |{}|
 ## The authorized roster (listAuthorized), from the accounts. `Failed` when
 ## the accounts could not be listed, or one the roster reads would not read
 ## (the request has failed with its error).
-roster! : {} => Try(List({ id : List(U8), name : List(U8) }), [Failed])
+roster! : {} => Try(List({ id : Uid, name : List(U8) }), [Failed])
 roster! = |{}|
 	match accounts!(Unasked) {
 		Ok(all) => named!(Accounts.authorized(all))
 		Err(Failed) => Err(Failed)
 	}
 
-entries! : Uid, List({ id : List(U8), name : List(U8) }), U64, List(Topics.Entry) => List(Topics.Entry)
+entries! : Uid, List({ id : Uid, name : List(U8) }), U64, List(Topics.Entry) => List(Topics.Entry)
 entries! = |me, members, i, acc|
 	match List.get(members, i) {
 		Ok({ id, name }) =>
-			if id == me.to_str().to_utf8() {
+			if id == me {
 				entries!(me, members, i + 1, acc)
 			} else {
-				match uid_of(id) {
-					Ok(other) => {
-						pair = Paths.pair_key(me, other)
-						conv = Paths.pair_key_bytes(pair)
-						listed = topics!(Dm(pair))
-						sessions = List.map(listed, Str.to_utf8)
-						default = resume_at!(me, pair, listed)
-						entries!(me, members, i + 1, List.append(acc, { conv, id, name, default, sessions }))
-					}
-					# A member whose id is no uid has no DM.
-					Err(NotAUid) => entries!(me, members, i + 1, acc)
-				}
+				pair = Paths.pair_key(me, id)
+				conv = Paths.pair_key_bytes(pair)
+				listed = topics!(Dm(pair))
+				sessions = List.map(listed, Str.to_utf8)
+				default = resume_at!(me, pair, listed)
+				entries!(me, members, i + 1, List.append(acc, { conv, id: id.to_str().to_utf8(), name, default, sessions }))
 			}
 		Err(_) => acc
 	}
 
-## TEMPORARY DOOR: moves out in a later run. An account's id, which the
-## accounts still hand as bytes, as a Uid.
+## An id the host hands as bytes, as a Uid.
 uid_of : List(U8) -> Try(Uid, [NotAUid])
 uid_of = |bytes| Uid.from_str(Str.from_utf8(bytes) ?? "")
 
@@ -820,17 +823,15 @@ msg! = |id|
 		}
 	}
 
-find_dm! : Uid, List({ id : List(U8), name : List(U8) }), List(U8), U64 => Try(List(U8), [NoSuchTopic])
+find_dm! : Uid, List({ id : Uid, name : List(U8) }), List(U8), U64 => Try(List(U8), [NoSuchTopic])
 find_dm! = |me, members, topic, i|
 	match List.get(members, i) {
 		Ok({ id, name: _ }) =>
-			if id == me.to_str().to_utf8() {
+			if id == me {
 				find_dm!(me, members, topic, i + 1)
 			} else {
-				match uid_of(id).map_ok(|other| Paths.pair_key(me, other)) {
-					Ok(pair) if List.contains(List.map(topics!(Dm(pair)), Str.to_utf8), topic) => Ok(Paths.pair_key_bytes(pair))
-					_ => find_dm!(me, members, topic, i + 1)
-				}
+				pair = Paths.pair_key(me, id)
+				if List.contains(List.map(topics!(Dm(pair)), Str.to_utf8), topic) Ok(Paths.pair_key_bytes(pair)) else find_dm!(me, members, topic, i + 1)
 			}
 		Err(_) => Err(NoSuchTopic)
 	}
@@ -920,7 +921,7 @@ send! = |req, route, key|
 		Ok((conv, who)) =>
 		# The title before any tail, unused, as the Zig's convRoute read
 		# it: a partner whose name will not read fails a send too.
-			match title!(conv, who) {
+			match title!(conv, key, who) {
 				Err(Failed) => Chat.answered
 				Ok(_) => sent!(req, route, { key, topic: route.topic }, conv, who)
 			}

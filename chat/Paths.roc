@@ -11,26 +11,28 @@ Paths := [].{
 	## chatKeyParticipant: `user` is one of the pair's two uids (the key is
 	## canonical: only pair_key and pair_key_from_str make one).
 	is_participant : PairKey, Uid -> Bool
-	is_participant = |PairKey.(key), user|
-		match key.split_first("_") {
-			Err(_) => Bool.False
-			Ok({ before, after }) => user.to_str() == before or user.to_str() == after
-		}
+	is_participant = |PairKey.(pair), user| pair.small == user or pair.large == user
 
-	## **A DM'S KEY**: opaque (`::`), so only `pair_key` (from two uids) and
-	## `pair_key_from_str` (from text, validated) make one.
-	PairKey :: Str
+	## partnerName's half: the pair's first uid, unless it is `me` (then the
+	## second, so `1_1`'s partner is `1`).
+	partner : PairKey, Uid -> Uid
+	partner = |PairKey.(pair), me| if pair.small == me pair.large else pair.small
+
+	## **A DM'S KEY**: its two uids, the smaller first. Opaque (`::`), so
+	## only `pair_key` (from two uids) and `pair_key_from_str` (from text,
+	## validated) make one.
+	PairKey :: { small : Uid, large : Uid }
 
 	## chatPairKey: the smaller numeric id first, joined by `_` (a number
 	## past i64's counts as 0, as Zig's `atoiOr0`). A Uid is canonical by
 	## its type (Uid.from_str), so every two make a key.
 	pair_key : Uid, Uid -> PairKey
-	pair_key = |ua, ub| {
-		a = ua.to_str()
-		b = ub.to_str()
-		(small, large) = if atoi_or0(a.to_utf8()) <= atoi_or0(b.to_utf8()) (a, b) else (b, a)
-		PairKey.("${small}_${large}")
-	}
+	pair_key = |a, b|
+		if atoi_or0(a.to_str().to_utf8()) <= atoi_or0(b.to_str().to_utf8()) {
+			PairKey.({ small: a, large: b })
+		} else {
+			PairKey.({ small: b, large: a })
+		}
 
 	## The key, when it is exactly the canonical `<small>_<large>` of two
 	## valid uids, or `<uid>_<uid>`: the DM with yourself (`1_1`) is one.
@@ -40,21 +42,21 @@ Paths := [].{
 			Ok({ before, after }) =>
 				match (Uid.from_str(before), Uid.from_str(after)) {
 					(Ok(a), Ok(b)) => {
-						PairKey.(made) = pair_key(a, b)
-						if made == key Ok(PairKey.(key)) else Err(Invalid)
+						made = pair_key(a, b)
+						if pair_key_to_str(made) == key Ok(made) else Err(Invalid)
 					}
 					_ => Err(Invalid)
 				}
 			Err(_) => Err(Invalid)
 		}
 
-	## The key's text.
+	## The key's text: `<small>_<large>`.
 	pair_key_to_str : PairKey -> Str
-	pair_key_to_str = |PairKey.(s)| s
+	pair_key_to_str = |PairKey.(pair)| "${pair.small.to_str()}_${pair.large.to_str()}"
 
 	## The key's bytes, where they go back out.
 	pair_key_bytes : PairKey -> List(U8)
-	pair_key_bytes = |PairKey.(s)| s.to_utf8()
+	pair_key_bytes = |pair| pair_key_to_str(pair).to_utf8()
 
 	## **WHICH CONVERSATION**: a DM, by its canonical pair key, two uids
 	## joined by `_`, the smaller first (`3_7`; pair_key); or a channel, by
@@ -222,7 +224,7 @@ Paths := [].{
 	conv_dir : ConvKey -> Str
 	conv_dir = |key|
 		match key {
-			Dm(PairKey.(pair)) => pair
+			Dm(pair) => pair_key_to_str(pair)
 			Channel(ChannelName.(name)) => "channels/${name}"
 		}
 

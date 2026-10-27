@@ -8,10 +8,10 @@
 ## named as a counter names one (digits, the first not zero), as
 ## listAuthorized and listUserIDs keep them. principalExists and getUserName
 ## took any id and looked for its folder, so a `007` folder answered for
-## `007`; every id the Roc looks up has passed Paths.canonical_uid first
-## (a DM's other half and its partner: Paths.participant), or is the
-## member's own (the session's, signed only for an id a counter made).
+## `007`; every id here is a Uid (canonical by its type), decoded where the
+## host hands it (main's accounts! and me!).
 import Paths
+import Uid
 import ZigText
 
 Accounts := [].{
@@ -22,21 +22,20 @@ Accounts := [].{
 	## `Unreadable` is a password whose stat failed; a `name_read` of
 	## `Unreadable` a name that would not read (its `name` empty, and never
 	## taken for one).
-	Account : { id : List(U8), kind : [Agent, Guest, Member, Unreadable], name : List(U8), name_read : [Found, Unreadable] }
+	Account : { id : Uid, kind : [Agent, Guest, Member, Unreadable], name : List(U8), name_read : [Found, Unreadable] }
 
 	## **A LOOKUP THAT NEEDED A READ THAT FAILED HAS NO ANSWER**: account
 	## `id`'s kind or name would not read, so the request fails with that
 	## read's own error (Host.fail!), as the Zig failed it. Never "no such
 	## account", never a name of "".
-	Unreadable : [KindUnreadable(List(U8)), NameUnreadable(List(U8))]
+	Unreadable : [KindUnreadable(Uid), NameUnreadable(Uid)]
 
-	## principalExists (userExists): an id empty once trimmed of " \t\r\n"
-	## is none; any other is one when it is among `accounts`, whatever its
-	## kind (a guest's DM is opened on purpose). **AN ACCOUNT THAT WILL NOT
-	## READ EXISTS**: principalExists looks at the folder alone, and the host
-	## listed it.
-	exists : List(Account), List(U8) -> Bool
-	exists = |accounts, id| ZigText.trim(id) != [] and List.any(accounts, |a| a.id == id)
+	## principalExists (userExists): `id` is one when it is among
+	## `accounts`, whatever its kind (a guest's DM is opened on purpose).
+	## **AN ACCOUNT THAT WILL NOT READ EXISTS**: principalExists looks at the
+	## folder alone, and the host listed it.
+	exists : List(Account), Uid -> Bool
+	exists = |accounts, id| List.any(accounts, |a| a.id == id)
 
 	## getUserName: account `id`'s name, its trailing CRs and LFs cut, or ""
 	## when it has no name file or there is no such account; `NameUnreadable`
@@ -46,7 +45,7 @@ Accounts := [].{
 	## and no name is a release cut short, and that member must still sign in
 	## by cookie to release again. What must not take "" for a name refuses
 	## it.
-	name : List(Account), List(U8) -> Try(List(U8), Unreadable)
+	name : List(Account), Uid -> Try(List(U8), Unreadable)
 	name = |accounts, id|
 		match List.keep_if(accounts, |a| a.id == id) {
 			[a, ..] =>
@@ -74,17 +73,17 @@ Accounts := [].{
 	## failed on the first read that failed. So the first account, in the
 	## host's order, whose kind is unreadable, or whose name is and which is
 	## not a guest, is the roster's failure; a guest's name is never read.
-	authorized : List(Account) -> Try(List({ id : List(U8), name : List(U8) }), Unreadable)
+	authorized : List(Account) -> Try(List({ id : Uid, name : List(U8) }), Unreadable)
 	authorized = |accounts|
 		match List.keep_if(accounts, |a| a.kind == Unreadable or (a.kind != Guest and a.name_read == Unreadable)) {
 			[a, ..] => Err(if a.kind == Unreadable KindUnreadable(a.id) else NameUnreadable(a.id))
 			[] => Ok(roster(accounts))
 		}
 
-	roster : List(Account) -> List({ id : List(U8), name : List(U8) })
+	roster : List(Account) -> List({ id : Uid, name : List(U8) })
 	roster = |accounts|
 		List.keep_if(accounts, |a| a.kind != Guest)
-			|> List.map_with_index(|a, i| { a, i, n: Paths.atoi_or0(a.id) })
+			|> List.map_with_index(|a, i| { a, i, n: Paths.atoi_or0(a.id.to_str().to_utf8()) })
 			|> List.sort_with(
 				|x, y|
 					if x.n < y.n {

@@ -13,19 +13,8 @@ Conversation := [].{
 	## dmOther: the other of DM pair `key` when `me` is one of the pair, by
 	## chatKeyParticipant's rule (Paths.is_participant; the pair is canonical
 	## by its type); `NotAParticipant` otherwise.
-	## The other's id is the accounts' bytes, as Accounts looks it up.
-	dm_other : Paths.PairKey, Uid -> Try(List(U8), [NotAParticipant])
-	dm_other = |key, me| if Paths.is_participant(key, me) Ok(partner(Paths.pair_key_bytes(key), me)) else Err(NotAParticipant)
-
-	## partnerName's half: the side of `key`'s first `_` that is not `me`
-	## (the second when the first is `me`, so `1_1`'s partner is `1`); the
-	## whole key when it has no `_`.
-	partner : List(U8), Uid -> List(U8)
-	partner = |key, me|
-		match Paths.cut_first(key, '_') {
-			Ok((a, b)) => if a == me.to_str().to_utf8() b else a
-			Err(NoSeparator) => key
-		}
+	dm_other : Paths.PairKey, Uid -> Try(Uid, [NotAParticipant])
+	dm_other = |key, me| if Paths.is_participant(key, me) Ok(Paths.partner(key, me)) else Err(NotAParticipant)
 
 	## ConvMeta.dm's members: the pair's two uids, or one in the DM with
 	## yourself, so no one is sent a notice twice.
@@ -46,8 +35,8 @@ Conversation := [].{
 
 	## A DM's title: "Chat w/" and the partner's name, or their id when the
 	## account has no name (getUserName's "").
-	dm_title : List(U8), List(U8) -> List(U8)
-	dm_title = |name, other| List.concat(Str.to_utf8("Chat w/"), if name == [] other else name)
+	dm_title : List(U8), Uid -> List(U8)
+	dm_title = |name, other| List.concat(Str.to_utf8("Chat w/"), if name == [] other.to_str().to_utf8() else name)
 
 	## A channel's title: "#" and its name.
 	channel_title : List(U8) -> List(U8)
