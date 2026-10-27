@@ -63,7 +63,7 @@ call = |req| {
 		# Bytes that are not UTF-8 are no text, so neither a topic nor a name.
 		9 => [bool(text(arg(0)).map_ok(Paths.is_topic_id) == Ok(Bool.True))]
 		10 => [bool(text(arg(0)).map_ok(Paths.is_channel_name) == Ok(Bool.True))]
-		11 => [bool(Paths.valid_msg_ref_id(arg(0)))]
+		11 => [bool(Paths.is_valid_msg_ref_id(arg(0)))]
 		# A topic is text: a listing's names (Files.list!'s door skips one
 		# that is not UTF-8).
 		13 => [Paths.first_of(List.keep_oks(req.args, Str.from_utf8)).to_utf8()]
@@ -131,7 +131,7 @@ call = |req| {
 				Malformed => [[77]]
 			}
 		# Bytes that are not UTF-8 are no glyph: the form refuses them first.
-		29 => [bool(text(arg(0)).map_ok(Reaction.valid_emoji) == Ok(Bool.True))]
+		29 => [bool(text(arg(0)).map_ok(Reaction.is_valid_emoji) == Ok(Bool.True))]
 		# A heading's title, viewer and active item are text.
 		30 =>
 			match texts([arg(1), arg(2), arg(3)]) {
@@ -240,7 +240,7 @@ call = |req| {
 				Err(NotAUid) => []
 			}
 		52 => [ChatState.bookmark(file(arg(0), arg(1))).to_utf8()]
-		53 => [bool(ChatState.changed(file(arg(0), arg(1)), valid_text(arg(2)))), ChatState.bookmark_line(valid_text(arg(2)))]
+		53 => [bool(ChatState.is_changed(file(arg(0), arg(1)), valid_text(arg(2)))), ChatState.bookmark_line(valid_text(arg(2)))]
 		# A uid that is no Uid has no paths: the door refuses it.
 		54 =>
 			match (Uid.from_utf8(arg(0)), conv_of(arg(1))) {
@@ -563,8 +563,8 @@ account_answers = |ids, all| {
 			ids,
 			|id|
 				match Accounts.name(all, id) {
-					Ok(name) => [bool(Accounts.exists(all, id)), Str.to_utf8("ok"), name.to_utf8()]
-					Err(why) => List.concat([bool(Accounts.exists(all, id))], unreadable(why))
+					Ok(name) => [bool(Accounts.has_account(all, id)), Str.to_utf8("ok"), name.to_utf8()]
+					Err(why) => List.concat([bool(Accounts.has_account(all, id))], unreadable(why))
 				},
 		),
 	)

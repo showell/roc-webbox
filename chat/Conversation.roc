@@ -49,7 +49,7 @@ Conversation := [].{
 	## topicExists: a topic named `topic` without case is among `topics` (case
 	## does not tell topics apart, on FAT or on Linux).
 	has_topic : List(Str), Str -> Bool
-	has_topic = |topics, topic| List.any(topics, |s| Topics.same_name(s, topic))
+	has_topic = |topics, topic| List.any(topics, |s| Topics.is_same_name(s, topic))
 }
 
 # has_topic: case is ASCII's, a character past ASCII matched as it is.

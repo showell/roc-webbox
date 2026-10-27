@@ -61,7 +61,7 @@ Reaction := [].{
 				match ZigText.parse_u64(msg_s.to_utf8()) {
 					Err(NotANumber) | Err(TooBig) => Bad(Str.to_utf8("react: msg must be a message number\n"))
 					Ok(msg) =>
-						if valid_emoji(emoji) {
+						if is_valid_emoji(emoji) {
 							Reacted({ msg, emoji, change: if on_s == "1" Added else Removed })
 						} else {
 							Bad(Str.to_utf8("react: emoji must be one glyph\n"))
@@ -79,8 +79,8 @@ Reaction := [].{
 	## validEmoji: the SHAPE of one glyph, 1 to 16 bytes (a limit on bytes)
 	## with no ASCII byte at all (every emoji, its variation selector and ZWJ are
 	## above U+2000), so a name, a digit or a quote is never one.
-	valid_emoji : Str -> Bool
-	valid_emoji = |text| {
+	is_valid_emoji : Str -> Bool
+	is_valid_emoji = |text| {
 		s = text.to_utf8()
 		List.len(s) >= 1 and List.len(s) <= 16 and List.all(s, |c| c >= 128)
 	}

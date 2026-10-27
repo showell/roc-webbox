@@ -10,8 +10,8 @@ Topics := [].{
 
 	## std.ascii.eqlIgnoreCase: the same text, A-Z as a-z (anything past
 	## ASCII must match exactly).
-	same_name : Str, Str -> Bool
-	same_name = |a, b| a.caseless_ascii_equals(b)
+	is_same_name : Str, Str -> Bool
+	is_same_name = |a, b| a.caseless_ascii_equals(b)
 
 	## highestGeneralTopic: the `general<N>` with the largest N (an i64, as
 	## the Zig reads it), the first of equals; none when there is none.
@@ -56,11 +56,11 @@ Topics := [].{
 	made_json = |{ key, topic }| JsonText.obj([("conv", JsonText.str(Paths.conv_key_to_str(key))), ("sid", JsonText.str(topic))])
 }
 
-# same_name: ASCII case folds, nothing past ASCII does.
-expect Topics.same_name("New", "nEW")
-expect Topics.same_name("caf\u(e9)", "CAF\u(e9)")
-expect !Topics.same_name("caf\u(e9)", "caf\u(c9)")
-expect !Topics.same_name("new", "new ")
+# is_same_name: ASCII case folds, nothing past ASCII does.
+expect Topics.is_same_name("New", "nEW")
+expect Topics.is_same_name("caf\u(e9)", "CAF\u(e9)")
+expect !Topics.is_same_name("caf\u(e9)", "caf\u(c9)")
+expect !Topics.is_same_name("new", "new ")
 
 # highest_general: the largest N by the Zig's grammar, the first of equals.
 expect Topics.highest_general(["general2", "general10", "General99", "general+5", "general1_0", "general"]) == Ok("general10")

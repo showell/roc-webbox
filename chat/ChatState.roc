@@ -77,8 +77,8 @@ ChatState := [].{
 	## as `value` once trimmed. **A BOOKMARK THAT CANNOT BE READ IS WRITTEN
 	## AGAIN; THE WRITE SAYS WHETHER IT CAN BE**: a failed read, and one past
 	## the bound (which the Zig's bounded read refused), is changed.
-	changed : Try(Str, [Missing, Failed]), Str -> Bool
-	changed = |file, value|
+	is_changed : Try(Str, [Missing, Failed]), Str -> Bool
+	is_changed = |file, value|
 		match file {
 			Ok(text) => text.count_utf8_bytes() > bookmark_most or ZigText.trim_str(text) != value
 			Err(Missing) | Err(Failed) => Bool.True

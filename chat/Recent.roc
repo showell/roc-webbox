@@ -83,22 +83,17 @@ Recent := [].{
 		List.map_with_index(rs, |row, i| { row, i })
 			|> List.sort_with(
 				|a, b|
-					if before(a.row, b.row) {
-						Before
-					} else if before(b.row, a.row) {
-						After
-					} else if a.i < b.i {
-						Before
-					} else if a.i > b.i {
-						After
-					} else {
-						Same
+					match order(a.row, b.row) {
+						Same => if a.i < b.i Before else if a.i > b.i After else Same
+						other => other
 					},
 			)
 			|> List.map(|x| x.row)
 
-	before : Row, Row -> Bool
-	before = |x, y| if x.secs != y.secs x.secs > y.secs else Bytes.less(x.key.to_utf8(), y.key.to_utf8())
+	## `newestFirst`'s order of two rows: the newer first, a tie by the key's
+	## bytes.
+	order : Row, Row -> [Before, Same, After]
+	order = |x, y| if x.secs > y.secs Before else if x.secs < y.secs After else Bytes.compare(x.key.to_utf8(), y.key.to_utf8())
 
 	## recent_feed `recentExcerpt`: a quote fence becomes "[quoted text]",
 	## an image "[image]", whitespace one space, cut at 350 codepoints.
@@ -150,7 +145,7 @@ Recent := [].{
 		match List.get(s, i) {
 			Err(_) => out
 			Ok(c) => {
-				opens = i + 4 <= List.len(s) and Feeds.lower(List.sublist(s, { start: i, len: 4 })) == Str.to_utf8("<img") and !word(List.get(s, i + 4) ?? ' ')
+				opens = i + 4 <= List.len(s) and Feeds.lower(List.sublist(s, { start: i, len: 4 })) == Str.to_utf8("<img") and !is_word_byte(List.get(s, i + 4) ?? ' ')
 				match (if opens Feeds.find_byte(s, '>', i + 4) else Err(NotFound)) {
 					Ok(gt) => html_from(s, gt + 1, List.concat(out, Str.to_utf8("[image]")))
 					Err(NotFound) => html_from(s, i + 1, List.append(out, c))
@@ -158,8 +153,8 @@ Recent := [].{
 			}
 		}
 
-	word : U8 -> Bool
-	word = |c| (c >= 'A' and c <= 'Z') or (c >= 'a' and c <= 'z') or (c >= '0' and c <= '9') or c == '_'
+	is_word_byte : U8 -> Bool
+	is_word_byte = |c| (c >= 'A' and c <= 'Z') or (c >= 'a' and c <= 'z') or (c >= '0' and c <= '9') or c == '_'
 
 	## `replaceImgMarkdown`: `![…](…)`.
 	md_images : List(U8) -> List(U8)

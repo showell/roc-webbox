@@ -177,8 +177,8 @@ Paths := [].{
 
 	## validMsgRefID: a topic slug (letters, digits, hyphens), `_`, and a
 	## message's decimal number, cut at the last `_`.
-	valid_msg_ref_id : List(U8) -> Bool
-	valid_msg_ref_id = |id|
+	is_valid_msg_ref_id : List(U8) -> Bool
+	is_valid_msg_ref_id = |id|
 		match cut_last(id, '_') {
 			Err(NoSeparator) => Bool.False
 			Ok((left, right)) =>
@@ -202,18 +202,7 @@ Paths := [].{
 
 	## Texts sorted by their bytes, as the Zig's sorts compare.
 	sort_by_bytes : List(Str) -> List(Str)
-	sort_by_bytes = |texts|
-		List.sort_with(
-			texts,
-			|a, b|
-				if Bytes.less(a.to_utf8(), b.to_utf8()) {
-					Before
-				} else if Bytes.less(b.to_utf8(), a.to_utf8()) {
-					After
-				} else {
-					Same
-				},
-		)
+	sort_by_bytes = |texts| List.sort_with(texts, |a, b| Bytes.compare(a.to_utf8(), b.to_utf8()))
 
 	## A folder's entry, as Files.list! answers it: its name is text.
 	Entry : { kind : [Dir, File, Other], name : Str }

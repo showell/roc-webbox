@@ -228,7 +228,7 @@ find! = |key| {
 				Ok(other) =>
 					match accounts!(Unasked) {
 						Ok(all) =>
-							if Accounts.exists(all, other) {
+							if Accounts.has_account(all, other) {
 								Ok(({ family: Dm, key: bytes, base: Conversation.dm_base(bytes), members: Conversation.dm_members(bytes) }, Known(all)))
 							} else {
 								Err(NotYours)
@@ -454,7 +454,7 @@ repin! = |path, stored, topic, pin|
 
 ## **WHERE THE MEMBER RESUMES DM `conv`: TOPIC `topic`** (setLastViewedTopic):
 ## the topic last viewed there first, then the DM last in, each written
-## only when it changed (ChatState.changed); `Failed` when a step failed,
+## only when it changed (ChatState.is_changed); `Failed` when a step failed,
 ## and nothing after it is written. A topic with no name records nothing.
 bookmark! : Paths.ConvKey, Str => Try({}, [Failed])
 bookmark! = |key, topic| {
@@ -472,7 +472,7 @@ bookmark! = |key, topic| {
 ## disk requests each time.
 write_if_changed! : Paths.ChatPath, Str => Try({}, [Failed])
 write_if_changed! = |path, value|
-	if ChatState.changed(Files.read!(path), value) Files.write!(path, ChatState.bookmark_line(value)) else Ok({})
+	if ChatState.is_changed(Files.read!(path), value) Files.write!(path, ChatState.bookmark_line(value)) else Ok({})
 
 ## POST .../react: the form, then the reaction stored and sent live.
 react! : Chat.Conv, Who, Paths.TopicAt => Chat.Answer
@@ -785,7 +785,7 @@ members! = |all|
 ## their channels; a 302 there.
 msg! : List(U8) => Chat.Answer
 msg! = |id|
-	if !Paths.valid_msg_ref_id(id) {
+	if !Paths.is_valid_msg_ref_id(id) {
 		Chat.not_found
 	} else {
 		topic = match Paths.cut_last(id, '_') {
@@ -865,7 +865,7 @@ make! : Paths.ConvKey, Chat.Conv, Who, Str => Chat.Answer
 make! = |key, conv, who, topic| {
 	if !Paths.is_topic_id(topic) {
 		Chat.respond(400, [], Str.to_utf8("Topic must be letters, digits, and hyphens only — no spaces, underscores, or punctuation.\n"))
-	} else if Topics.same_name(topic, "new") {
+	} else if Topics.is_same_name(topic, "new") {
 		Chat.respond(400, [], Str.to_utf8("\"new\" is reserved — pick another topic name.\n"))
 	} else if Conversation.has_topic(topics!(key), topic) {
 		Chat.respond(409, [], Str.to_utf8("That topic already exists.\n"))

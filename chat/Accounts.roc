@@ -35,8 +35,8 @@ Accounts := [].{
 	## `accounts`, whatever its kind (a guest's DM is opened on purpose).
 	## **AN ACCOUNT THAT WILL NOT READ EXISTS**: principalExists looks at the
 	## folder alone, and the host listed it.
-	exists : List(Account), Uid -> Bool
-	exists = |accounts, id| List.any(accounts, |a| a.id == id)
+	has_account : List(Account), Uid -> Bool
+	has_account = |accounts, id| List.any(accounts, |a| a.id == id)
 
 	## getUserName: account `id`'s name, its trailing CRs and LFs cut, or ""
 	## when it has no name file or there is no such account; `NameUnreadable`
