@@ -124,7 +124,7 @@ Paths := [].{
 		## digits joined by single hyphens (`ChitChat`, `road-trip`;
 		## valid_topic_id). On disk it is the transcript's stem,
 		## `<conv folder>/sessions/<topic>.md`.
-		topic : List(U8),
+		topic : Str,
 	}
 
 	## validTopicID: letters and digits joined by single hyphens, none at
@@ -270,7 +270,7 @@ Paths := [].{
 	## A topic's reaction sidecar (reactionsPath):
 	## {conv_dir}/sessions/<topic>.reactions.jsonl.
 	reactions_path : TopicAt -> ChatPath
-	reactions_path = |at| reactions_path_bytes({ dir: conv_dir(at.key), topic: at.topic })
+	reactions_path = |at| reactions_path_bytes({ dir: conv_dir(at.key), topic: at.topic.to_utf8() })
 
 	## reactions_path's core, from the conversation's folder as bytes: the
 	## twins feed it any (production: reactions_path).
@@ -445,7 +445,7 @@ Paths := [].{
 
 	## A topic's transcript: {conv_dir}/sessions/<topic>.md.
 	transcript_path : TopicAt -> ChatPath
-	transcript_path = |at| ChatPath.(transcript_path_bytes({ dir: conv_dir(at.key), topic: at.topic }))
+	transcript_path = |at| ChatPath.(transcript_path_bytes({ dir: conv_dir(at.key), topic: at.topic.to_utf8() }))
 
 	## The member's links page (the links route's file): users/<uid>/links.md.
 	links_path : List(U8) -> ChatPath
@@ -491,10 +491,10 @@ expect match (Paths.pair_key_from_str("3_7"), Paths.channel_name_from_str("gener
 		channel = Channel(name)
 		(Paths.bytes(Paths.topics_folder(dm)) == Str.to_utf8("3_7/sessions"))
 			and (Paths.bytes(Paths.topics_folder(channel)) == Str.to_utf8("channels/general/sessions"))
-				and (Paths.bytes(Paths.reactions_path({ key: dm, topic: Str.to_utf8("ChitChat") })) == Str.to_utf8("3_7/sessions/ChitChat.reactions.jsonl"))
-					and (Paths.bytes(Paths.reactions_path({ key: channel, topic: Str.to_utf8("road-trip") })) == Str.to_utf8("channels/general/sessions/road-trip.reactions.jsonl"))
-						and (Paths.bytes(Paths.transcript_path({ key: dm, topic: Str.to_utf8("ChitChat") })) == Str.to_utf8("3_7/sessions/ChitChat.md"))
-							and (Paths.bytes(Paths.transcript_path({ key: channel, topic: Str.to_utf8("road-trip") })) == Str.to_utf8("channels/general/sessions/road-trip.md"))
+				and (Paths.bytes(Paths.reactions_path({ key: dm, topic: "ChitChat" })) == Str.to_utf8("3_7/sessions/ChitChat.reactions.jsonl"))
+					and (Paths.bytes(Paths.reactions_path({ key: channel, topic: "road-trip" })) == Str.to_utf8("channels/general/sessions/road-trip.reactions.jsonl"))
+						and (Paths.bytes(Paths.transcript_path({ key: dm, topic: "ChitChat" })) == Str.to_utf8("3_7/sessions/ChitChat.md"))
+							and (Paths.bytes(Paths.transcript_path({ key: channel, topic: "road-trip" })) == Str.to_utf8("channels/general/sessions/road-trip.md"))
 								and (Paths.conv_dir(dm) == Str.to_utf8("3_7"))
 									and (Paths.conv_dir(channel) == Str.to_utf8("channels/general"))
 	}

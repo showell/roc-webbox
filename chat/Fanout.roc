@@ -42,7 +42,7 @@ Fanout := [].{
 	## spelled it), its number `index` (0 is the topic's first), its fields,
 	## its author's account `uid`, and the accounts the request holds (a
 	## DM's; a channel names none).
-	Sent : { key : Paths.ConvKey, members : List(List(U8)), topic : List(U8), index : U64, id : List(U8), from : List(U8), at : List(U8), uid : List(U8), accounts : List(Accounts.Account) }
+	Sent : { key : Paths.ConvKey, members : List(List(U8)), topic : Str, index : U64, id : List(U8), from : List(U8), at : List(U8), uid : List(U8), accounts : List(Accounts.Account) }
 
 	## **EVERY MEMBER IN THE CONVERSATION'S ORDER, EACH MEMBER'S SURFACES IN
 	## ONE ORDER: NOTIFY, SIDEBAR, RECENT, IMAGES, CODE** (fanoutCrossPage).
@@ -69,7 +69,7 @@ Fanout := [].{
 						# **EVERY MEMBER SEES THE ROW, THE AUTHOR AS "YOU"**.
 						{
 							who = if uid == m.uid Str.to_utf8("You") else m.from
-							[Publish(recent_key(uid), Recent.chat_event({ at: m.at, url, who, label: recent_where(m, uid), topic: m.topic, excerpt: parts.excerpt, dm: Paths.conv_kind(m.key) }))]
+							[Publish(recent_key(uid), Recent.chat_event({ at: m.at, url, who, label: recent_where(m, uid), topic: m.topic.to_utf8(), excerpt: parts.excerpt, dm: Paths.conv_kind(m.key) }))]
 						},
 						# The feeds only when the message has what they keep.
 						match parts.images {
@@ -107,7 +107,7 @@ Fanout := [].{
 	## The topic's live bus key, where its messages and reactions are
 	## published: `<key>/<topic>`.
 	topic_key : Paths.TopicAt -> List(U8)
-	topic_key = |{ key, topic }| List.join([Paths.conv_key_bytes(key), ['/'], topic])
+	topic_key = |{ key, topic }| "${Paths.conv_key_to_str(key)}/${topic}".to_utf8()
 
 	## **THE TYPED LAYER AND ITS BYTES CORES**: production calls topic_url,
 	## notify_text, notify_event and topic_added on a TopicAt; each unwraps
@@ -117,7 +117,7 @@ Fanout := [].{
 	TopicBytes : { key : List(U8), topic : List(U8) }
 
 	unwrapped : Paths.TopicAt -> TopicBytes
-	unwrapped = |at| { key: Paths.conv_key_bytes(at.key), topic: at.topic }
+	unwrapped = |at| { key: Paths.conv_key_bytes(at.key), topic: at.topic.to_utf8() }
 
 	## The topic's page: the conversation's URL root (Feeds.base_url,
 	## convKeyBaseURL), then the topic.

@@ -149,7 +149,12 @@ call = |req| {
 		45 => Conversation.dm_members(arg(0))
 		46 => [Conversation.dm_title(arg(0), arg(1))]
 		47 => [Conversation.channel_title(arg(0))]
-		48 => [Conversation.topic_title(arg(0), arg(1))]
+		# The topic is text (a TopicAt's); a topic that is not has no title.
+		48 =>
+			match Str.from_utf8(arg(1)) {
+				Ok(topic) => [Conversation.topic_title(arg(0), topic)]
+				Err(_) => []
+			}
 		# The topics and the topic are text; a topic that is not is none.
 		49 =>
 			match Str.from_utf8(arg(0)) {
@@ -235,7 +240,7 @@ call = |req| {
 			members = List.sublist(req.args, { start: 4, len: n })
 			all = accounts(req.args, 4 + n, [])
 			key = if arg(0) == [100] Dm(valid_pair(arg(2))) else Channel(valid_channel(arg(2)))
-			[Fanout.recent_where({ key, members, topic: [], index: 0, id: [], from: [], at: [], uid: [], accounts: all }, arg(1))]
+			[Fanout.recent_where({ key, members, topic: "", index: 0, id: [], from: [], at: [], uid: [], accounts: all }, arg(1))]
 		}
 		_ => crash "twin: no function ${U8.to_str(req.which)}"
 	}

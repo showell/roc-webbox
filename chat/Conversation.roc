@@ -53,8 +53,8 @@ Conversation := [].{
 	channel_title = |name| List.concat(['#'], name)
 
 	## A topic's title: its conversation's, ": ", its id.
-	topic_title : List(U8), List(U8) -> List(U8)
-	topic_title = |title, topic| List.join([title, Str.to_utf8(": "), topic])
+	topic_title : List(U8), Str -> List(U8)
+	topic_title = |title, topic| List.concat(title, ": ${topic}".to_utf8())
 
 	## topicExists: a topic named `topic` without case is among `topics` (case
 	## does not tell topics apart, on FAT or on Linux).

@@ -143,7 +143,7 @@ in_conversation! = |req, route|
 							Ok(t) => {
 								topics = topics!(key)
 								if Conversation.has_topic(topics, route.topic) {
-									in_topic!(req, route, { key, conv, who, title: Conversation.topic_title(t, route.topic.to_utf8()), topics })
+									in_topic!(req, route, { key, conv, who, title: Conversation.topic_title(t, route.topic), topics })
 								} else {
 									zig(route, Uncounted)
 								}
@@ -180,7 +180,7 @@ in_topic! = |req, route, found| {
 				Chat.not_allowed(Get)
 			} else if route.tail == Page {
 				page!(route, found)
-			} else if Files.held_raw!(Paths.transcript_path({ key: found.key, topic: route.topic.to_utf8() })) {
+			} else if Files.held_raw!(Paths.transcript_path({ key: found.key, topic: route.topic })) {
 				Chat.held_plain
 			} else {
 				Chat.not_found
@@ -191,7 +191,7 @@ in_topic! = |req, route, found| {
 			} else {
 				# readReactions's: nobody has reacted yet is no events.
 				ndjson = Str.to_utf8("application/x-ndjson; charset=utf-8")
-				match Files.read!(Paths.reactions_path({ key: found.key, topic: route.topic.to_utf8() })) {
+				match Files.read!(Paths.reactions_path({ key: found.key, topic: route.topic })) {
 					Ok(text) => Chat.respond(200, ndjson, Str.to_utf8(text))
 					Err(Missing) => Chat.respond(200, ndjson, [])
 					Err(Failed) => Chat.answered
@@ -201,9 +201,9 @@ in_topic! = |req, route, found| {
 			if req.method != Post {
 				Chat.not_allowed(Post)
 			} else if route.tail == React {
-				react!(conv, who, { key: found.key, topic: route.topic.to_utf8() })
+				react!(conv, who, { key: found.key, topic: route.topic })
 			} else {
-				match pin!(found.key, route.topic.to_utf8(), if route.tail == Pin Pinned else Unpinned) {
+				match pin!(found.key, route.topic, if route.tail == Pin Pinned else Unpinned) {
 					Ok({}) => Chat.respond(204, [], [])
 					Err(Failed) => Chat.answered
 				}
@@ -405,7 +405,7 @@ title! = |conv, who|
 ## `topic` pinned or unpinned (ChatState.pinned), and the file written back or,
 ## emptied, removed. A read that failed stops here: the set is not empty, it
 ## is unknown, and writing it would drop every pin. `Failed` when a step failed.
-pin! : Paths.ConvKey, List(U8), ChatState.Pin => Try({}, [Failed])
+pin! : Paths.ConvKey, Str, ChatState.Pin => Try({}, [Failed])
 pin! = |key, topic, pin| {
 	path = Paths.pinned_path(Uid.from_bytes(Host.me!({})), key)
 	match text_bytes!(path) {
@@ -417,9 +417,9 @@ pin! = |key, topic, pin| {
 
 ## The pinned file at `path`, read as `stored`, with `topic` pinned or
 ## unpinned: written back, or, emptied, removed.
-repin! : Paths.ChatPath, List(U8), List(U8), ChatState.Pin => Try({}, [Failed])
+repin! : Paths.ChatPath, List(U8), Str, ChatState.Pin => Try({}, [Failed])
 repin! = |path, stored, topic, pin|
-	match ChatState.pinned(stored, topic, pin) {
+	match ChatState.pinned(stored, topic.to_utf8(), pin) {
 		Write(bytes) => Files.write!(path, bytes)
 		Remove => Files.remove!(path)
 	}
@@ -429,13 +429,13 @@ repin! = |path, stored, topic, pin|
 ## only when it changed (ChatState.changed); `Failed` when a step failed,
 ## and nothing after it is written. A member or topic with no name records
 ## nothing.
-bookmark! : Paths.ConvKey, List(U8) => Try({}, [Failed])
+bookmark! : Paths.ConvKey, Str => Try({}, [Failed])
 bookmark! = |key, topic| {
 	me = Host.me!({})
-	if me == [] or topic == [] {
+	if me == [] or topic.is_empty() {
 		Ok({})
 	} else {
-		write_if_changed!(Paths.last_session_path(Uid.from_bytes(me), key), topic)?
+		write_if_changed!(Paths.last_session_path(Uid.from_bytes(me), key), topic.to_utf8())?
 		write_if_changed!(Paths.last_conv_path(me), Paths.conv_key_bytes(key))
 	}
 }
@@ -484,7 +484,7 @@ reacted! = |conv, who, topic_at, r|
 	match viewer!(who) {
 		Err(Failed) => Failed
 		Ok(name) => {
-			counted = Host.message_count!(conv, topic_at.topic)
+			counted = Host.message_count!(conv, topic_at.topic.to_utf8())
 			match counted.status {
 				Failed => Failed
 				Counted =>
@@ -609,7 +609,7 @@ landing! = |route, key|
 ## the limits the server enforces (Host.limits!).
 page! : Route.R, AtTopic => Chat.Answer
 page! = |route, at|
-	if at.conv.family == Dm and bookmark!(at.key, route.topic.to_utf8()).is_err() {
+	if at.conv.family == Dm and bookmark!(at.key, route.topic).is_err() {
 		Chat.answered
 	} else {
 		match sidebar!(route.topic.to_utf8(), at) {
@@ -837,13 +837,12 @@ new_topic! = |req, route, key|
 	}
 
 make! : Paths.ConvKey, Chat.Conv, Who, Str => Chat.Answer
-make! = |key, conv, who, text| {
-	topic = text.to_utf8()
-	if !Paths.is_topic_id(text) {
+make! = |key, conv, who, topic| {
+	if !Paths.is_topic_id(topic) {
 		Chat.respond(400, [], Str.to_utf8("Topic must be letters, digits, and hyphens only — no spaces, underscores, or punctuation.\n"))
-	} else if Topics.same_name(text, "new") {
+	} else if Topics.same_name(topic, "new") {
 		Chat.respond(400, [], Str.to_utf8("\"new\" is reserved — pick another topic name.\n"))
-	} else if Conversation.has_topic(topics!(key), text) {
+	} else if Conversation.has_topic(topics!(key), topic) {
 		Chat.respond(409, [], Str.to_utf8("That topic already exists.\n"))
 	} else {
 		match viewer!(who) {
@@ -858,7 +857,7 @@ make! = |key, conv, who, text| {
 				} else if dm and !announce!(key, conv, who, topic, name) {
 					Chat.answered
 				} else {
-					Chat.respond(200, json, Topics.made_json({ key, topic: text }))
+					Chat.respond(200, json, Topics.made_json({ key, topic }))
 				}
 			}
 		}
@@ -867,11 +866,11 @@ make! = |key, conv, who, text| {
 
 ## A DM's new topic, said where the partner already watches: its highest
 ## general<N>, unless that is the topic made.
-announce! : Paths.ConvKey, Chat.Conv, Who, List(U8), List(U8) => Bool
+announce! : Paths.ConvKey, Chat.Conv, Who, Str, List(U8) => Bool
 announce! = |key, conv, who, topic, name|
-	match Topics.highest_general(topics!(key)).map_ok(Str.to_utf8) {
+	match Topics.highest_general(topics!(key)) {
 		Ok(gen) if gen != topic =>
-			appended!(conv, who, { at: { key, topic: gen }, name, markdown: List.join([Str.to_utf8("New topic: ["), topic, Str.to_utf8("]("), conv.base, ['/'], topic, Str.to_utf8(")")]), cid: [] })
+			appended!(conv, who, { at: { key, topic: gen }, name, markdown: List.join([Str.to_utf8("New topic: [${topic}]("), conv.base, Str.to_utf8("/${topic})")]), cid: [] })
 		_ => Bool.True
 	}
 
@@ -887,7 +886,7 @@ send! = |req, route, key|
 		# it: a partner whose name will not read fails a send too.
 			match title!(conv, who) {
 				Err(Failed) => Chat.answered
-				Ok(_) => sent!(req, route, { key, topic: route.topic.to_utf8() }, conv, who)
+				Ok(_) => sent!(req, route, { key, topic: route.topic }, conv, who)
 			}
 		Err(NotYours) => zig(route, Uncounted)
 	}
@@ -949,7 +948,7 @@ store! = |at, conv, who, send, { markdown: md, cid }|
 				} else if send == Async {
 					Chat.respond(204, [], [])
 				} else {
-					Chat.redirect(List.join([conv.base, ['/'], at.topic]))
+					Chat.redirect(List.concat(conv.base, "/${at.topic}".to_utf8()))
 				}
 		}
 	}
@@ -981,7 +980,7 @@ appended! = |conv, who, { at: topic_at, name, markdown: md, cid }|
 		Bool.False
 	} else {
 		topic = topic_at.topic
-		counted = Host.message_count!(conv, topic)
+		counted = Host.message_count!(conv, topic.to_utf8())
 		match counted.status {
 			Failed => Bool.False
 			Counted => {
@@ -989,7 +988,7 @@ appended! = |conv, who, { at: topic_at, name, markdown: md, cid }|
 				uid = Host.me!({})
 				# A count of the largest U64 has no next number: the call
 				# crashes into a 500, storing nothing.
-				id = List.join([topic, ['_'], Str.to_utf8(U64.to_str(index + 1))])
+				id = "${topic}_${U64.to_str(index + 1)}".to_utf8()
 				message = { id, from: name, at: Str.to_utf8(Time.rfc3339(Host.now!({}))), uid, markdown: md }
 				block = Transcript.stored_form(index, message)
 				rendered = Host.render!(md)
@@ -1014,7 +1013,7 @@ appended! = |conv, who, { at: topic_at, name, markdown: md, cid }|
 							Err(Failed) => Bool.False
 							Ok(all) => {
 								steps = Fanout.steps({ key: topic_at.key, members: conv.members, topic, index, id, from: name, at: message.at, uid, accounts: all }, Fanout.parts_of(md))
-								if Host.store_message!(conv, topic, block, index, message) {
+								if Host.store_message!(conv, topic.to_utf8(), block, index, message) {
 									# **STORED IS DONE** (metal-vmm QUEUE 172): from
 									# here nothing fails the send, which a client
 									# would answer by sending it again. The publish
@@ -1050,7 +1049,7 @@ fanned! = |at, steps|
 					got = Files.append_entry!(f.path, Feeds.sep, f.entry)
 					match got.status {
 						Appended => Host.publish!(f.key, f.event)
-						Failed => Host.fanout_failed!(f.surface, f.member, Paths.conv_key_bytes(at.key), at.topic, got.fault)
+						Failed => Host.fanout_failed!(f.surface, f.member, Paths.conv_key_bytes(at.key), at.topic.to_utf8(), got.fault)
 					}
 				}
 			}
