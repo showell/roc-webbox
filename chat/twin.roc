@@ -102,7 +102,7 @@ call = |req| {
 		34 => [Pages.sidebar_json(Pages.decode_sidebar(req.args))]
 		35 => {
 			limits = { image_max: u64(arg(7)), video_max: u64(arg(8)), accept: arg(9), search_min: u64(arg(10)) }
-			view = { key: arg(0), base: arg(1), sid: arg(2), title: arg(3), uid: arg(4), viewer: arg(5), sidebar_json: arg(6) }
+			view = { key: arg(0), base: arg(1), topic: arg(2), title: arg(3), uid: arg(4), viewer: arg(5), sidebar_json: arg(6) }
 			[Pages.conversation(srcs(req.args, 11), limits, view)]
 		}
 		36 => [Html.escape(arg(0))]
@@ -205,7 +205,7 @@ call = |req| {
 			members = List.sublist(req.args, { start: 4, len: n })
 			all = accounts(req.args, 4 + n, [])
 			kind = if arg(0) == [100] Dm else Channel
-			[Fanout.recent_where({ kind, key: arg(2), members, sid: [], index: 0, id: [], from: [], at: [], uid: [], accounts: all }, arg(1))]
+			[Fanout.recent_where({ kind, key: arg(2), members, topic: [], index: 0, id: [], from: [], at: [], uid: [], accounts: all }, arg(1))]
 		}
 		_ => crash "twin: no function ${U8.to_str(req.which)}"
 	}

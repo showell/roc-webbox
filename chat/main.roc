@@ -363,39 +363,39 @@ title! = |conv, who|
 	}
 
 ## POST .../pin and .../unpin: the member's pins in the conversation read,
-## `sid` pinned or unpinned (ChatState.pinned), and the file written back or,
+## `topic` pinned or unpinned (ChatState.pinned), and the file written back or,
 ## emptied, removed. A read that failed stops here: the set is not empty, it
 ## is unknown, and writing it would drop every pin. False when a step failed.
 pin! : Chat.Conv, List(U8), ChatState.Pin => Bool
-pin! = |conv, sid, pin| {
+pin! = |conv, topic, pin| {
 	path = Paths.pinned_path(Host.me!({}), conv.key)
 	match Files.read!(path) {
-		Found(stored) => repin!(path, stored, sid, pin)
-		Missing => repin!(path, [], sid, pin)
+		Found(stored) => repin!(path, stored, topic, pin)
+		Missing => repin!(path, [], topic, pin)
 		Failed => Bool.False
 	}
 }
 
-## The pinned file at `path`, read as `stored`, with `sid` pinned or
+## The pinned file at `path`, read as `stored`, with `topic` pinned or
 ## unpinned: written back, or, emptied, removed.
 repin! : Paths.ChatPath, List(U8), List(U8), ChatState.Pin => Bool
-repin! = |path, stored, sid, pin|
-	match ChatState.pinned(stored, sid, pin) {
+repin! = |path, stored, topic, pin|
+	match ChatState.pinned(stored, topic, pin) {
 		Write(bytes) => Files.write!(path, bytes)
 		Remove => Files.remove!(path)
 	}
 
-## **WHERE THE MEMBER RESUMES DM `conv`: TOPIC `sid`** (setLastViewedTopic):
+## **WHERE THE MEMBER RESUMES DM `conv`: TOPIC `topic`** (setLastViewedTopic):
 ## the topic last viewed there first, then the DM last in, each written
 ## only when it changed (ChatState.changed); false when a step failed, and
 ## nothing after it is written. A member or topic with no name records
 ## nothing.
 bookmark! : Chat.Conv, List(U8) => Bool
-bookmark! = |conv, sid| {
+bookmark! = |conv, topic| {
 	me = Host.me!({})
-	if me == [] or sid == [] {
+	if me == [] or topic == [] {
 		Bool.True
-	} else if write_if_changed!(Paths.last_session_path(me, conv.key), sid) {
+	} else if write_if_changed!(Paths.last_session_path(me, conv.key), topic) {
 		write_if_changed!(Paths.last_conv_path(me), conv.key)
 	} else {
 		Bool.False
@@ -411,7 +411,7 @@ write_if_changed! = |path, value|
 
 ## POST .../react: the form, then the reaction stored and sent live.
 react! : Chat.Conv, Who, List(U8) => Chat.Answer
-react! = |conv, who, sid| {
+react! = |conv, who, topic| {
 	body = Host.body!(Reaction)
 	if body.status == Answered {
 		Chat.answered
@@ -420,7 +420,7 @@ react! = |conv, who, sid| {
 			Malformed => Chat.malformed
 			Bad(why) => Chat.respond(400, [], why)
 			Reacted(r) =>
-				match reacted!(conv, who, sid, r) {
+				match reacted!(conv, who, topic, r) {
 					Stored => Chat.respond(204, [], [])
 					NoSuchMessage => Chat.respond(400, [], Str.to_utf8("react: no such message\n"))
 					Failed => Chat.answered
@@ -436,15 +436,15 @@ react! = |conv, who, sid| {
 ## topic's key. `Failed` when a step failed (the request has, with its
 ## error), and nothing after it is done.
 reacted! : Chat.Conv, Who, List(U8), { msg : U64, emoji : List(U8), change : Reaction.Change } => [Stored, NoSuchMessage, Failed]
-reacted! = |conv, who, sid, r|
+reacted! = |conv, who, topic, r|
 	match viewer!(who) {
 		Err(Failed) => Failed
 		Ok(name) => {
-			counted = Host.message_count!(conv, sid)
+			counted = Host.message_count!(conv, topic)
 			match counted.status {
 				Failed => Failed
 				Counted =>
-				# Message numbers start at 1 (the N of MSG_<sid>_N).
+				# Message numbers start at 1 (the N of MSG_<topic>_N).
 					if r.msg == 0 or r.msg > counted.count {
 						NoSuchMessage
 					} else {
@@ -453,9 +453,10 @@ reacted! = |conv, who, sid, r|
 						# **THE ECHO IS MADE BEFORE THE STORE** (metal-vmm QUEUE
 						# 177.1), as a message's: its key and frame, so nothing
 						# can fail between the append and the publish.
-						key = List.join([conv.key, ['/'], sid])
+						topic_at = { key: conv.key, topic }
+						key = Fanout.topic_key(topic_at)
 						frame = Frame.reaction(line)
-						if Files.append_line!(Paths.reactions_path(conv_kind(conv.family), { key: conv.key, topic: sid }), line) {
+						if Files.append_line!(Paths.reactions_path(conv_kind(conv.family), topic_at), line) {
 							# **STORED IS DONE**: the live publish cannot fail.
 							Host.publish!(key, frame)
 							Stored
@@ -570,7 +571,7 @@ page! = |route, at|
 		match sidebar!(route.sid, at) {
 			Err(Failed) => Chat.answered
 			Ok((viewer, sb)) => {
-				view = { key: route.key, base: sb.base, sid: route.sid, title: at.title, uid: sb.uid, viewer, sidebar_json: Pages.sidebar_json(sb) }
+				view = { key: route.key, base: sb.base, topic: route.sid, title: at.title, uid: sb.uid, viewer, sidebar_json: Pages.sidebar_json(sb) }
 				Chat.respond(200, html, Pages.conversation(Chrome.src_in(Host.srcs!({})), Host.limits!({}), view))
 			}
 		}
@@ -582,11 +583,11 @@ page! = |route, at|
 ## it), each online or not at the request's time (Host.online!, one asking
 ## for all); the member's channels (listUserChannels: a malformed one
 ## skipped and counted); their pins in this conversation (pinnedTopics,
-## sorted); its topics as they were listed to find topic `sid`. `Failed`
+## sorted); its topics as they were listed to find `topic`. `Failed`
 ## when a read failed (the request has, with its error): **A PINS FILE
 ## THAT WILL NOT READ IS NEVER NO PINS.**
 sidebar! : List(U8), AtTopic => Try((List(U8), Pages.Sidebar), [Failed])
-sidebar! = |sid, at| {
+sidebar! = |topic, at| {
 	me = Host.me!({})
 	match accounts!(at.who) {
 		Err(Failed) => Err(Failed)
@@ -604,8 +605,8 @@ sidebar! = |sid, at| {
 								Ok(rosters) =>
 									match Files.read!(Paths.pinned_path(me, at.conv.key)) {
 										Failed => Err(Failed)
-										Found(stored) => Ok((viewer, sidebar_of(me, sid, at, with_online(others, flags), Paths.member_channels(rosters, me), ChatState.pins(stored))))
-										Missing => Ok((viewer, sidebar_of(me, sid, at, with_online(others, flags), Paths.member_channels(rosters, me), [])))
+										Found(stored) => Ok((viewer, sidebar_of(me, topic, at, with_online(others, flags), Paths.member_channels(rosters, me), ChatState.pins(stored))))
+										Missing => Ok((viewer, sidebar_of(me, topic, at, with_online(others, flags), Paths.member_channels(rosters, me), [])))
 									}
 							}
 						}
@@ -622,8 +623,8 @@ with_online = |others, flags|
 		{ id: u.id, name: u.name, presence: if List.get(flags, i) == Ok(Online) Online else Offline })
 
 sidebar_of : List(U8), List(U8), AtTopic, List({ id : List(U8), name : List(U8), presence : [Online, Offline] }), List(List(U8)), List(List(U8)) -> Pages.Sidebar
-sidebar_of = |me, sid, at, others, channels, pins|
-	{ uid: me, kind: if at.conv.family == Dm Dm else Channel, key: at.conv.key, base: at.conv.base, sid, others, channels, pins, topics: at.topics }
+sidebar_of = |me, topic, at, others, channels, pins|
+	{ uid: me, kind: if at.conv.family == Dm Dm else Channel, key: at.conv.key, base: at.conv.base, topic, others, channels, pins, topics: at.topics }
 
 json : List(U8)
 json = Str.to_utf8("application/json; charset=utf-8")
@@ -701,22 +702,22 @@ msg! = |id|
 	if !Paths.valid_msg_ref_id(id) {
 		Chat.not_found
 	} else {
-		sid = match Paths.cut_last(id, '_') {
+		topic = match Paths.cut_last(id, '_') {
 			Ok((before, _)) => before
 			Err(None) => []
 		}
 		me = Host.me!({})
-		at = |base, key| List.join([Str.to_utf8(base), key, ['/'], sid, Str.to_utf8("#msg-"), id])
+		at = |base, key| List.join([Str.to_utf8(base), key, ['/'], topic, Str.to_utf8("#msg-"), id])
 		match roster!({}) {
 			Err(Failed) => Chat.answered
 			Ok(members) =>
-				match find_dm!(me, members, sid, 0) {
+				match find_dm!(me, members, topic, 0) {
 					Ok(conv) => Chat.found(at("/chat/c/", conv))
 					Err(None) =>
 						match channel_rosters!({}) {
 							Err(Failed) => Chat.answered
 							Ok(rosters) =>
-								match find_channel!(Paths.member_channels(rosters, me), sid, 0) {
+								match find_channel!(Paths.member_channels(rosters, me), topic, 0) {
 									Ok(name) => Chat.found(at("/channel/", name))
 									Err(None) => Chat.not_found
 								}
@@ -726,22 +727,22 @@ msg! = |id|
 	}
 
 find_dm! : List(U8), List({ id : List(U8), name : List(U8) }), List(U8), U64 => Try(List(U8), [None])
-find_dm! = |me, members, sid, i|
+find_dm! = |me, members, topic, i|
 	match List.get(members, i) {
 		Ok({ id, name: _ }) =>
 			if id == me {
-				find_dm!(me, members, sid, i + 1)
+				find_dm!(me, members, topic, i + 1)
 			} else {
 				conv = Paths.pair_key(Uid.from_bytes(me), Uid.from_bytes(id))
-				if List.contains(topics!(Dm, conv), sid) Ok(conv) else find_dm!(me, members, sid, i + 1)
+				if List.contains(topics!(Dm, conv), topic) Ok(conv) else find_dm!(me, members, topic, i + 1)
 			}
 		Err(_) => Err(None)
 	}
 
 find_channel! : List(List(U8)), List(U8), U64 => Try(List(U8), [None])
-find_channel! = |names, sid, i|
+find_channel! = |names, topic, i|
 	match List.get(names, i) {
-		Ok(name) => if List.contains(topics!(Channel, name), sid) Ok(name) else find_channel!(names, sid, i + 1)
+		Ok(name) => if List.contains(topics!(Channel, name), topic) Ok(name) else find_channel!(names, topic, i + 1)
 		Err(_) => Err(None)
 	}
 
@@ -785,12 +786,12 @@ make! = |route, conv, who, topic|
 				# The bookmark first, as a send's: one that fails makes no topic.
 				if dm and !bookmark!(conv, topic) {
 					Chat.answered
-				} else if !appended!(conv, who, { sid: topic, name, markdown: Str.to_utf8("hi"), cid: [] }) {
+				} else if !appended!(conv, who, { topic, name, markdown: Str.to_utf8("hi"), cid: [] }) {
 					Chat.answered
 				} else if dm and !announce!(route, conv, who, topic, name) {
 					Chat.answered
 				} else {
-					Chat.respond(200, json, Topics.made_json(route.key, topic))
+					Chat.respond(200, json, Topics.made_json({ key: route.key, topic }))
 				}
 			}
 		}
@@ -802,11 +803,11 @@ announce! : Route.R, Chat.Conv, Who, List(U8), List(U8) => Bool
 announce! = |route, conv, who, topic, name|
 	match Topics.highest_general(topics!(route.family, route.key)) {
 		Ok(gen) if gen != topic =>
-			appended!(conv, who, { sid: gen, name, markdown: List.join([Str.to_utf8("New topic: ["), topic, Str.to_utf8("]("), conv.base, ['/'], topic, Str.to_utf8(")")]), cid: [] })
+			appended!(conv, who, { topic: gen, name, markdown: List.join([Str.to_utf8("New topic: ["), topic, Str.to_utf8("]("), conv.base, ['/'], topic, Str.to_utf8(")")]), cid: [] })
 		_ => Bool.True
 	}
 
-## POST .../<sid>/send: docs/ROC-CHAT.md §6.2's steps, the store's append
+## POST .../<topic>/send: docs/ROC-CHAT.md §6.2's steps, the store's append
 ## the host's. A send makes its topic, so no topic need be there; the
 ## conversation must be the member's.
 send! : Chat.Request, Route.R => Chat.Answer
@@ -876,7 +877,7 @@ store! = |route, conv, who, send, { markdown: md, cid }|
 			Ok(name) =>
 				if conv.family == Dm and !bookmark!(conv, route.sid) {
 					Chat.answered
-				} else if !appended!(conv, who, { sid: route.sid, name, markdown: md, cid }) {
+				} else if !appended!(conv, who, { topic: route.sid, name, markdown: md, cid }) {
 					Chat.answered
 				} else if send == Async {
 					Chat.respond(204, [], [])
@@ -886,16 +887,16 @@ store! = |route, conv, who, send, { markdown: md, cid }|
 		}
 	}
 
-## A message not yet stored: its topic's `sid`, its author's `name`, its
+## A message not yet stored: its `topic`, its author's `name`, its
 ## `markdown`, and the sender's client id `cid`. Named fields because all
 ## four are byte lists: in a row of arguments, a swapped pair type-checks.
-Draft : { sid : List(U8), name : List(U8), markdown : List(U8), cid : List(U8) }
+Draft : { topic : List(U8), name : List(U8), markdown : List(U8), cid : List(U8) }
 
 ## **A MESSAGE STORED, THEN SENT LIVE** (angry-gopher chat_store
 ## `appendMessage`, its comments the spec): by the member, named `name`, to
-## topic `sid` of `conv` (the sid as the request spelled it), with the
+## `topic` of `conv` (as the request spelled it), with the
 ## sender's client id `cid` ("" for none). Its number is the topic's count
-## (`message_count!`), its id `<sid>_<n>`, its stamp the request's time; its
+## (`message_count!`), its id `<topic>_<n>`, its stamp the request's time; its
 ## block and its frame are made, then the block stored (`store_message!`:
 ## the append, the count cache, the search index), then the frame published
 ## on the topic's key, then the fan-out (`fanned!`, its steps Fanout.roc's,
@@ -903,7 +904,7 @@ Draft : { sid : List(U8), name : List(U8), markdown : List(U8), cid : List(U8) }
 ## names the other member). False when a step before the store failed (the
 ## request has, with its error), and nothing was stored.
 appended! : Chat.Conv, Who, Draft => Bool
-appended! = |conv, who, { sid, name, markdown: md, cid }|
+appended! = |conv, who, { topic, name, markdown: md, cid }|
 	# **NO MESSAGE WITHOUT AN AUTHOR** (the review of 156): the decoder
 	# refuses such a block on every read, so it would go out live and be
 	# gone on reload. A nameless member (a release cut short) cannot post.
@@ -911,7 +912,7 @@ appended! = |conv, who, { sid, name, markdown: md, cid }|
 		Host.fail!(NoAuthor, [])
 		Bool.False
 	} else {
-		counted = Host.message_count!(conv, sid)
+		counted = Host.message_count!(conv, topic)
 		match counted.status {
 			Failed => Bool.False
 			Counted => {
@@ -919,7 +920,7 @@ appended! = |conv, who, { sid, name, markdown: md, cid }|
 				uid = Host.me!({})
 				# A count of the largest U64 has no next number: the call
 				# crashes into a 500, storing nothing.
-				id = List.join([sid, ['_'], Str.to_utf8(U64.to_str(index + 1))])
+				id = List.join([topic, ['_'], Str.to_utf8(U64.to_str(index + 1))])
 				message = { id, from: name, at: Str.to_utf8(Time.rfc3339(Host.now!({}))), uid, markdown: md }
 				block = Transcript.stored_form(index, message)
 				rendered = Host.render!(md)
@@ -932,7 +933,8 @@ appended! = |conv, who, { sid, name, markdown: md, cid }|
 						# publish that failed after the store answered success
 						# with no echo on the sender's stream, whose client then
 						# sent the message again: a duplicate.
-						key = List.join([conv.key, ['/'], sid])
+						topic_at = { key: conv.key, topic }
+						key = Fanout.topic_key(topic_at)
 						frame = Frame.message({ index, from: name, from_uid: uid, at: message.at, html: rendered.html, markdown: md, id, cid })
 						# **THE FAN-OUT IS MADE BEFORE THE STORE TOO**: every
 						# member's events and feed entries, so what runs after
@@ -944,15 +946,15 @@ appended! = |conv, who, { sid, name, markdown: md, cid }|
 						match named {
 							Err(Failed) => Bool.False
 							Ok(all) => {
-								steps = Fanout.steps({ kind, key: conv.key, members: conv.members, sid, index, id, from: name, at: message.at, uid, accounts: all }, parts!(md))
-								if Host.store_message!(conv, sid, block, index, message) {
+								steps = Fanout.steps({ kind, key: conv.key, members: conv.members, topic, index, id, from: name, at: message.at, uid, accounts: all }, parts!(md))
+								if Host.store_message!(conv, topic, block, index, message) {
 									# **STORED IS DONE** (metal-vmm QUEUE 172): from
 									# here nothing fails the send, which a client
 									# would answer by sending it again. The publish
 									# cannot fail; the fan-out is best-effort, each
 									# failure counted and said.
 									Host.publish!(key, frame)
-									fanned!(conv.key, sid, steps)
+									fanned!(topic_at, steps)
 									Bool.True
 								} else {
 									Bool.False
@@ -989,10 +991,10 @@ parts! = |md| {
 ## **THE FAN-OUT, CARRIED OUT IN ITS ORDER** (Fanout.steps): each publish
 ## sent; each feed's entry appended and only then its event sent; each
 ## surface that failed for a member counted and said (`fanout_failed!`),
-## on topic `sid` of the conversation keyed `key`. **A FAILURE NEVER STOPS
+## on the topic `at`. **A FAILURE NEVER STOPS
 ## THE STEPS AFTER IT, NOR FAILS THE SEND.**
-fanned! : List(U8), List(U8), List(Fanout.Step) => {}
-fanned! = |key, sid, steps|
+fanned! : Paths.TopicAt, List(Fanout.Step) => {}
+fanned! = |at, steps|
 	match steps {
 		[] => {}
 		[step, .. as rest] => {
@@ -1002,11 +1004,11 @@ fanned! = |key, sid, steps|
 					got = Files.append_entry!(f.path, Feeds.sep, f.entry)
 					match got.status {
 						Appended => Host.publish!(f.key, f.event)
-						Failed => Host.fanout_failed!(f.surface, f.member, key, sid, got.fault)
+						Failed => Host.fanout_failed!(f.surface, f.member, at.key, at.topic, got.fault)
 					}
 				}
-				Failed(surface, member, fault) => Host.fanout_failed!(surface, member, key, sid, fault)
+				Failed(surface, member, fault) => Host.fanout_failed!(surface, member, at.key, at.topic, fault)
 			}
-			fanned!(key, sid, rest)
+			fanned!(at, rest)
 		}
 	}

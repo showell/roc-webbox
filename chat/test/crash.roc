@@ -5,8 +5,8 @@
 ## to the file primitives (`/read/<path>`, `/write/<path>`,
 ## `/remove/<path>`, `/list/<path>`, `/append/<path>`), as the chat's own
 ## Roc never would, so the seam's check of each is seen; it publishes
-## (`/publish/<key>`), counts (`/count/<sid>`), renders (`/render/<md>`),
-## stores a message (`/store/<sid>`), asks its parts (`/parts/<md>`),
+## (`/publish/<key>`), counts (`/count/<topic>`), renders (`/render/<md>`),
+## stores a message (`/store/<topic>`), asks its parts (`/parts/<md>`),
 ## appends a feed's entry and says one that failed (`/entry/<path>`), and asks
 ## `fail!` (`/fail/<reason>/<whose>`),
 ## `malformed_channel!` (`/malformed/<name>`), `accounts!` (`/accounts`),
@@ -35,7 +35,7 @@ handle! = |req|
 		Host.publish!(List.drop_first(req.sub, 9), Str.to_utf8("event: reaction\ndata: x\n\n"))
 		Chat.respond(200, [], Str.to_utf8("published"))
 	} else if starts(req.sub, "/count/") {
-		# DM 1_2's topic `<sid>`: every field of the conversation crosses.
+		# DM 1_2's topic `<topic>`: every field of the conversation crosses.
 		got = Host.message_count!({ family: Dm, key: Str.to_utf8("1_2"), base: Str.to_utf8("/chat/c/1_2"), members: [Str.to_utf8("1"), Str.to_utf8("2")] }, List.drop_first(req.sub, 7))
 		said = match got.status {
 			Counted => "counted ${U64.to_str(got.count)}"
@@ -50,7 +50,7 @@ handle! = |req|
 		}
 		Chat.respond(200, [], List.concat(Str.to_utf8(said), got.html))
 	} else if starts(req.sub, "/store/") {
-		# Message 9 of DM 1_2's topic `<sid>`: every field of the message a
+		# Message 9 of DM 1_2's topic `<topic>`: every field of the message a
 		# different string, so a record laid out wrong shows.
 		Chat.respond(200, [], done(Host.store_message!(dm12, List.drop_first(req.sub, 7), Str.to_utf8("the block"), 8, probe_message)))
 	} else if starts(req.sub, "/parts/") {

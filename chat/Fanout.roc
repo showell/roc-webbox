@@ -36,11 +36,11 @@ Fanout := [].{
 	]
 
 	## A message stored in a conversation (`kind`, its key and its
-	## members), as the fan-out takes it: its topic `sid` (as the request
+	## members), as the fan-out takes it: its `topic` (as the request
 	## spelled it), its number `index` (0 is the topic's first), its fields,
 	## its author's account `uid`, and the accounts the request holds (a
 	## DM's; a channel names none).
-	Sent : { kind : [Dm, Channel], key : List(U8), members : List(List(U8)), sid : List(U8), index : U64, id : List(U8), from : List(U8), at : List(U8), uid : List(U8), accounts : List(Accounts.Account) }
+	Sent : { kind : [Dm, Channel], key : List(U8), members : List(List(U8)), topic : List(U8), index : U64, id : List(U8), from : List(U8), at : List(U8), uid : List(U8), accounts : List(Accounts.Account) }
 
 	## **EVERY MEMBER IN THE CONVERSATION'S ORDER, EACH MEMBER'S SURFACES IN
 	## ONE ORDER: NOTIFY, SIDEBAR, RECENT, IMAGES, CODE** (fanoutCrossPage).
@@ -49,10 +49,10 @@ Fanout := [].{
 	## other member's.
 	steps : Sent, Parts -> List(Step)
 	steps = |m, parts| {
-		topic = { key: m.key, topic: m.sid }
-		url = topic_url(topic)
-		notify = notify_event(topic, notify_text(m.kind, m.from, topic))
-		added = topic_added(topic)
+		at = { key: m.key, topic: m.topic }
+		url = topic_url(at)
+		notify = notify_event(at, notify_text(m.kind, m.from, at))
+		added = topic_added(at)
 		head = { from: m.from, at: m.at, source_id: m.id, conv: m.key }
 		List.join(
 			List.map(
@@ -68,7 +68,7 @@ Fanout := [].{
 						match parts.excerpt {
 							Made(excerpt) => {
 								who = if uid == m.uid Str.to_utf8("You") else m.from
-								[Publish(recent_key(uid), Recent.chat_event({ at: m.at, url, who, label: recent_where(m, uid), topic: m.sid, excerpt, dm: if m.kind == Dm Dm else Channel }))]
+								[Publish(recent_key(uid), Recent.chat_event({ at: m.at, url, who, label: recent_where(m, uid), topic: m.topic, excerpt, dm: if m.kind == Dm Dm else Channel }))]
 							}
 							Failed(fault) => [Failed(Recent, uid, fault)]
 						},
@@ -91,7 +91,7 @@ Fanout := [].{
 
 	## **THE PER-MEMBER BUS KEYS** (chat_fanout `notifyBusKey`,
 	## `sidebarBusKey`, `recentBusKey`, `imagesBusKey`, `codeBusKey`): each
-	## namespaced, so none meets a topic's `<key>/<sid>`. The Zig streams
+	## namespaced, so none meets a topic's `<key>/<topic>` (topic_key). The Zig streams
 	## that serve them subscribe with the Zig's own, held equal by the twins.
 	notify_key : List(U8) -> List(U8)
 	notify_key = |uid| List.concat(Str.to_utf8("ntf:"), uid)
@@ -107,6 +107,11 @@ Fanout := [].{
 
 	code_key : List(U8) -> List(U8)
 	code_key = |uid| List.concat(Str.to_utf8("code:"), uid)
+
+	## The topic's live bus key, where its messages and reactions are
+	## published: `<key>/<topic>`.
+	topic_key : Paths.TopicAt -> List(U8)
+	topic_key = |{ key, topic }| List.join([key, ['/'], topic])
 
 	## The topic's page: the conversation's URL root (Feeds.base_url,
 	## convKeyBaseURL), then the topic.

@@ -2,6 +2,7 @@
 ## chat.zig): a name without case, the `general<N>` a new DM topic is
 ## announced in, the conversations JSON and the new topic's answer.
 import JsonText
+import Paths
 import Bytes
 import ZigText
 
@@ -52,6 +53,6 @@ Topics := [].{
 	}
 
 	## newTopic's answer: the conversation and the topic made.
-	made_json : List(U8), List(U8) -> List(U8)
-	made_json = |conv, sid| JsonText.obj([("conv", JsonText.str(conv)), ("sid", JsonText.str(sid))])
+	made_json : Paths.TopicAt -> List(U8)
+	made_json = |{ key, topic }| JsonText.obj([("conv", JsonText.str(key)), ("sid", JsonText.str(topic))])
 }

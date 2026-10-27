@@ -67,13 +67,13 @@ Paths := [].{
 	## validTopicID: letters and digits joined by single hyphens, none at
 	## either end, 1 to 80 bytes.
 	valid_topic_id : List(U8) -> Bool
-	valid_topic_id = |sid| {
-		n = List.len(sid)
-		if n == 0 or n > 80 or List.first(sid) == Ok('-') or List.last(sid) == Ok('-') {
+	valid_topic_id = |topic| {
+		n = List.len(topic)
+		if n == 0 or n > 80 or List.first(topic) == Ok('-') or List.last(topic) == Ok('-') {
 			Bool.False
 		} else {
 			(ok, _) = List.fold(
-				sid,
+				topic,
 				(Bool.True, Bool.False),
 				|(good, prev_hyphen), c|
 					if !good {

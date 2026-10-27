@@ -54,10 +54,10 @@ Conversation := [].{
 
 	## A topic's title: its conversation's, ": ", its id.
 	topic_title : List(U8), List(U8) -> List(U8)
-	topic_title = |title, sid| List.join([title, Str.to_utf8(": "), sid])
+	topic_title = |title, topic| List.join([title, Str.to_utf8(": "), topic])
 
-	## topicExists: a topic named `sid` without case is among `topics` (case
+	## topicExists: a topic named `topic` without case is among `topics` (case
 	## does not tell topics apart, on FAT or on Linux).
 	has_topic : List(List(U8)), List(U8) -> Bool
-	has_topic = |topics, sid| List.any(topics, |s| Topics.same_name(s, sid))
+	has_topic = |topics, topic| List.any(topics, |s| Topics.same_name(s, topic))
 }

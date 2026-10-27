@@ -17,12 +17,12 @@ Pages := [].{
 
 	## What the conversation page shows: the conversation's key and URL base,
 	## the topic, its title, the viewer, and the sidebar's JSON.
-	View : { key : List(U8), base : List(U8), sid : List(U8), title : List(U8), uid : List(U8), viewer : List(U8), sidebar_json : List(U8) }
+	View : { key : List(U8), base : List(U8), topic : List(U8), title : List(U8), uid : List(U8), viewer : List(U8), sidebar_json : List(U8) }
 
 	## What the sidebar shows: the viewer, the conversation (its kind), the
 	## topic, every other member (each online or not), the viewer's channels,
 	## their pins in this conversation, and its topics.
-	Sidebar : { uid : List(U8), kind : [Dm, Channel], key : List(U8), base : List(U8), sid : List(U8), others : List({ id : List(U8), name : List(U8), presence : [Online, Offline] }), channels : List(List(U8)), pins : List(List(U8)), topics : List(List(U8)) }
+	Sidebar : { uid : List(U8), kind : [Dm, Channel], key : List(U8), base : List(U8), topic : List(U8), others : List({ id : List(U8), name : List(U8), presence : [Online, Offline] }), channels : List(List(U8)), pins : List(List(U8)), topics : List(List(U8)) }
 
 	## A chat page's heading: its `title`, the `viewer`, and the nav item
 	## `active`. Named fields because all three are byte lists.
@@ -163,7 +163,7 @@ Pages := [].{
 				Str.to_utf8("<div id=\"chat-root\""),
 				attr("data-conv", Html.escape(v.key)),
 				attr("data-conv-base", Html.escape(v.base)),
-				attr("data-session", Html.escape(v.sid)),
+				attr("data-session", Html.escape(v.topic)),
 				attr("data-me", Html.escape(v.uid)),
 				attr("data-me-name", Html.escape(v.viewer)),
 				attr("data-upload-image-max", num(limits.image_max)),
@@ -196,7 +196,7 @@ Pages := [].{
 		room = |name|
 			JsonText.obj([("id", JsonText.str(prefixed("ch:", name))), ("label", JsonText.str(prefixed("# ", name))), ("url", JsonText.str(prefixed("/channel/", name))), ("active", JsonText.bool(sb.kind == Channel and name == sb.key))])
 		topic = |s|
-			JsonText.obj([("id", JsonText.str(s)), ("label", JsonText.str(s)), ("url", JsonText.str(List.join([sb.base, ['/'], s]))), ("active", JsonText.bool(s == sb.sid))])
+			JsonText.obj([("id", JsonText.str(s)), ("label", JsonText.str(s)), ("url", JsonText.str(List.join([sb.base, ['/'], s]))), ("active", JsonText.bool(s == sb.topic))])
 		pinned = List.keep_if(sb.topics, |s| List.contains(sb.pins, s))
 		rest = List.drop_if(sb.topics, |s| List.contains(sb.pins, s))
 		Html.script_safe(
@@ -221,7 +221,7 @@ Pages := [].{
 		(channels, after_channels) = counted(fields, 6 + 3 * n_others)
 		(pins, after_pins) = counted(fields, after_channels)
 		(topics, _) = counted(fields, after_pins)
-		{ uid: at(0), kind: if at(1) == ['1'] Dm else Channel, key: at(2), base: at(3), sid: at(4), others, channels, pins, topics }
+		{ uid: at(0), kind: if at(1) == ['1'] Dm else Channel, key: at(2), base: at(3), topic: at(4), others, channels, pins, topics }
 	}
 
 	## A count at `i`, then that many: the items, and where the next begins.

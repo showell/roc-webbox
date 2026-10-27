@@ -18,18 +18,18 @@ Count := [].{
 	count_blocks : List(U8) -> U64
 	count_blocks = |raw| List.count_if(Bytes.split_seq(raw, Transcript.sep), |p| ZigText.trim(p) != [])
 
-	## numberIn: the N of a `<sid>_<N>` id, or none when the id is not this
+	## numberIn: the N of a `<topic>_<N>` id, or none when the id is not this
 	## topic's.
 	number_in : List(U8), List(U8) -> Try(U64, [None])
-	number_in = |id, sid|
-		match Bytes.strip_prefix(id, sid) {
+	number_in = |id, topic|
+		match Bytes.strip_prefix(id, topic) {
 			Ok(['_', .. as rest]) => ZigText.parse_u64(rest)
 			_ => Err(None)
 		}
 
 	## indexOf: the number less one; message 0 is no message.
 	index_of : List(U8), List(U8) -> Try(U64, [None])
-	index_of = |id, sid| match number_in(id, sid) {
+	index_of = |id, topic| match number_in(id, topic) {
 		Ok(n) if n > 0 => Ok(n - 1)
 		_ => Err(None)
 	}
@@ -104,16 +104,16 @@ Count := [].{
 
 	## windowLast: the last block of the window read at the record's offset,
 	## believed when the window was not full and the block is a message of
-	## `sid` numbered at least `count`; the record `Current` when exactly
+	## `topic` numbered at least `count`; the record `Current` when exactly
 	## that, `Stale` when the block is past it.
 	window_last : U64, List(U8), Fill, List(U8) -> Try({ msg : Transcript.Msg, number : U64, record : Freshness }, [None])
-	window_last = |count, window, fill, sid|
+	window_last = |count, window, fill, topic|
 		if fill == Full {
 			Err(None)
 		} else {
 			match List.last(Transcript.decode_file(window).messages) {
 				Ok(msg) =>
-					match number_in(msg.id, sid) {
+					match number_in(msg.id, topic) {
 						Ok(number) if number >= count => Ok({ msg, number, record: if number == count Current else Stale })
 						_ => Err(None)
 					}
