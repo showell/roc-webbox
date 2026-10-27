@@ -1,7 +1,8 @@
 ## THE MEMBER'S IMAGES AND CODE FEEDS (angry-gopher images_store.zig,
 ## code_store.zig, markdown_fence.zig): each member's images.md and code.md
 ## read as the Zig reads them, and the JSON their pages boot with, byte for
-## byte. Pure; angry-gopher's chat_twin_test.zig holds each to its Zig.
+## byte. Text in and out; the scanning is over its bytes, cut only at ASCII
+## ones. Pure; angry-gopher's chat_twin_test.zig holds each to its Zig.
 import JsonText
 import Bytes
 import ZigText
@@ -9,51 +10,31 @@ import ZigText
 Feeds := [].{
 
 	## One entry's header line: `Sent by <from> at <at>, source MSG_<source_id> in <conv>:`.
-	Header : { from : List(U8), at : List(U8), source_id : List(U8), conv : List(U8) }
+	Header : { from : Str, at : Str, source_id : Str, conv : Str }
 
 	## A fenced block of a message, as the Code feed keeps it.
-	Block : { lang : List(U8), body : List(U8) }
+	Block : { lang : Str, body : Str }
 
 	## images_store `parseHeader`: `at` after the last " at " before the first
 	## ", source MSG_", `conv` after the first " in " after it.
-	header : List(U8) -> Try(Header, [NotAHeader])
-	header = |line|
-		match Bytes.strip_prefix(line, Str.to_utf8("Sent by ")) {
-			Ok(after) if List.last(after) == Ok(':') => {
-				inner = List.drop_last(after, 1)
-				match Bytes.cut_seq(inner, Str.to_utf8(", source MSG_")) {
-					Err(NotFound) => Err(NotAHeader)
-					Ok((left, right)) => {
-						at_sep = Str.to_utf8(" at ")
-						match (last_find(left, at_sep), Bytes.cut_seq(right, Str.to_utf8(" in "))) {
-							(Ok(a), Ok((source_id, conv))) => Ok({ from: List.take_first(left, a), at: List.drop_first(left, a + List.len(at_sep)), source_id, conv })
-							_ => Err(NotAHeader)
-						}
-					}
-				}
-			}
-			_ => Err(NotAHeader)
-		}
-
-	## Where `needle` last starts in `s`.
-	last_find : List(U8), List(U8) -> Try(U64, [NotFound])
-	last_find = |s, needle| {
-		n = List.len(needle)
-		if List.len(s) < n {
-			Err(NotFound)
-		} else {
-			last_find_from(s, needle, List.len(s) - n)
-		}
+	header : Str -> Try(Header, [NotAHeader])
+	header = |line| {
+		inner = if line.starts_with("Sent by ") and line.ends_with(":") Ok(line.drop_prefix("Sent by ").drop_suffix(":")) else Err(NotAHeader)
+		{ before: left, after: right } = inner?.split_first(", source MSG_").map_err(|_| NotAHeader)?
+		{ before: from, after: at } = left.split_last(" at ").map_err(|_| NotAHeader)?
+		{ before: source_id, after: conv } = right.split_first(" in ").map_err(|_| NotAHeader)?
+		Ok({ from, at, source_id, conv })
 	}
 
-	last_find_from : List(U8), List(U8), U64 -> Try(U64, [NotFound])
-	last_find_from = |s, needle, i|
-		if List.sublist(s, { start: i, len: List.len(needle) }) == needle {
-			Ok(i)
-		} else if i == 0 {
-			Err(NotFound)
-		} else {
-			last_find_from(s, needle, i - 1)
+	## **A CUT OF TEXT AT ASCII BYTES IS TEXT**: every slice the scanners
+	## below take of a feed's text or a message's markdown starts and ends
+	## at an ASCII byte (or the text's ends), so it decodes. One that does
+	## not is a bug here, and crashes (a 500).
+	text_of : List(U8) -> Str
+	text_of = |bytes|
+		match Str.from_utf8(bytes) {
+			Ok(t) => t
+			Err(_) => crash "Feeds: a cut split a codepoint"
 		}
 
 	## The file's blocks between separators, trimmed, the empty ones gone.
@@ -70,18 +51,18 @@ Feeds := [].{
 
 	## images_store `parseImagesFile`: every block whose header reads, with
 	## its `<img` tags (none is still an entry).
-	images : List(U8) -> List((Header, List(List(U8))))
+	images : Str -> List((Header, List(Str)))
 	images = |text|
 		List.fold(
-			blocks_of(text),
+			blocks_of(text.to_utf8()),
 			[],
 			|out, block| {
 				(line, body) = match find_byte(block, '\n', 0) {
 					Ok(nl) => (List.take_first(block, nl), List.drop_first(block, nl + 1))
 					Err(NotFound) => (block, [])
 				}
-				match header(line) {
-					Ok(h) => List.append(out, (h, img_tags(body)))
+				match header(text_of(line)) {
+					Ok(h) => List.append(out, (h, tags_in(body)))
 					Err(NotAHeader) => out
 				}
 			},
@@ -89,8 +70,11 @@ Feeds := [].{
 
 	## images_store `extractImageTags`: every `<img` (any case) followed by
 	## whitespace, to the next `>`.
-	img_tags : List(U8) -> List(List(U8))
-	img_tags = |s| img_tags_from(s, 0, [])
+	img_tags : Str -> List(Str)
+	img_tags = |s| tags_in(s.to_utf8())
+
+	tags_in : List(U8) -> List(Str)
+	tags_in = |s| List.map(img_tags_from(s, 0, []), text_of)
 
 	img_tags_from : List(U8), U64, List(List(U8)) -> List(List(U8))
 	img_tags_from = |s, i, out|
@@ -124,19 +108,19 @@ Feeds := [].{
 
 	## code_store `parseCodeFile`: every block with a header line and a body
 	## holding at least one fence that is not a quote.
-	code : List(U8) -> List((Header, List(Block)))
+	code : Str -> List((Header, List(Block)))
 	code = |text|
 		List.fold(
-			blocks_of(text),
+			blocks_of(text.to_utf8()),
 			[],
 			|out, block|
 				match find_byte(block, '\n', 0) {
 					Err(NotFound) => out
 					Ok(nl) =>
-						match header(List.take_first(block, nl)) {
+						match header(text_of(List.take_first(block, nl))) {
 							Err(NotAHeader) => out
 							Ok(h) => {
-								bs = code_blocks(List.drop_first(block, nl + 1))
+								bs = blocks_in(List.drop_first(block, nl + 1))
 								if bs == [] out else List.append(out, (h, bs))
 							}
 						}
@@ -146,8 +130,11 @@ Feeds := [].{
 	## code_store `extractCodeBlocks`: each fence's lines to the first close
 	## of its character at least as long, or to the end; a `quote` fence's
 	## lines skipped.
-	code_blocks : List(U8) -> List(Block)
-	code_blocks = |body| blocks_from(Bytes.split_byte(body, '\n'), 0, [])
+	code_blocks : Str -> List(Block)
+	code_blocks = |body| blocks_in(body.to_utf8())
+
+	blocks_in : List(U8) -> List(Block)
+	blocks_in = |body| blocks_from(Bytes.split_byte(body, '\n'), 0, [])
 
 	blocks_from : List(List(U8)), U64, List(Block) -> List(Block)
 	blocks_from = |ls, i, out|
@@ -159,7 +146,7 @@ Feeds := [].{
 					Ok(fo) => {
 						j = close_at(ls, fo.char, fo.count, i + 1)
 						body = Bytes.join_lines(List.sublist(ls, { start: i + 1, len: j - (i + 1) }))
-						blocks_from(ls, j + 1, if fo.lang == Str.to_utf8("quote") out else List.append(out, { lang: fo.lang, body }))
+						blocks_from(ls, j + 1, if fo.lang == Str.to_utf8("quote") out else List.append(out, { lang: text_of(fo.lang), body: text_of(body) }))
 					}
 				}
 		}
@@ -236,31 +223,28 @@ Feeds := [].{
 
 	## chat_fanout `convKeyBaseURL`: a conversation's URL root from its key.
 	## A DM's key holds `_` and a channel's name never does.
-	base_url : List(U8) -> List(U8)
-	base_url = |conv| List.concat(Str.to_utf8(if List.contains(conv, '_') "/chat/c/" else "/channel/"), conv)
+	base_url : Str -> Str
+	base_url = |conv| if conv.contains("_") "/chat/c/${conv}" else "/channel/${conv}"
 
 	## `convKeyBaseURL` then images_store `imagesSourceURL`: the source
-	## message's link, or its conversation's when its id has no topic part.
-	source_url : List(U8), List(U8) -> List(U8)
+	## message's link, or its conversation's when its id has no topic part
+	## (no `_`, or only one at its start).
+	source_url : Str, Str -> Str
 	source_url = |conv, source_id| {
 		base = base_url(conv)
-		cut = List.len(source_id) - count_back(source_id, |c| c != '_', 0)
-		# `cut` is one past the last '_' (0 when there is none).
-		if cut > 1 {
-			List.join([base, ['/'], List.take_first(source_id, cut - 1), Str.to_utf8("#msg-"), source_id])
-		} else {
-			base
+		match source_id.split_last("_") {
+			Ok({ before, after: _ }) if !before.is_empty() => "${base}/${before}#msg-${source_id}"
+			_ => base
 		}
 	}
 
 	## The fields every feed entry starts with, from its header.
-	# TEMPORARY DOOR: moves out in a later run.
 	head_fields : Header -> List((Str, List(U8)))
-	head_fields = |h| [("source_id", JsonText.str_at_door(h.source_id)), ("from", JsonText.str_at_door(h.from)), ("conv", JsonText.str_at_door(h.conv)), ("at", JsonText.str_at_door(h.at))]
+	head_fields = |h| [("source_id", JsonText.str(h.source_id)), ("from", JsonText.str(h.from)), ("conv", JsonText.str(h.conv)), ("at", JsonText.str(h.at))]
 
 	## The Images page's JSON: the newest `most` entries, each as
 	## images_store `encodeImagesEvent` writes it.
-	images_json : List((Header, List(List(U8)))), U64 -> List(U8)
+	images_json : List((Header, List(Str))), U64 -> List(U8)
 	images_json = |entries, most| {
 		tail = List.drop_first(entries, List.len(entries) - smaller(most, List.len(entries)))
 		JsonText.arr(List.map(tail, |(h, tags)| images_event(h, tags)))
@@ -273,34 +257,41 @@ Feeds := [].{
 
 	## images_store `encodeImagesEvent`: one entry as its page and its live
 	## stream (`img:<uid>`) send it, fields in its order, none left out.
-	# TEMPORARY DOOR: moves out in a later run.
-	images_event : Header, List(List(U8)) -> List(U8)
+	images_event : Header, List(Str) -> List(U8)
 	images_event = |h, tags|
-		JsonText.obj(List.concat(head_fields(h), [("images", JsonText.arr(List.map(tags, JsonText.str_at_door))), ("source_url", JsonText.str_at_door(source_url(h.conv, h.source_id)))]))
+		JsonText.obj(List.concat(head_fields(h), [("images", JsonText.arr(List.map(tags, JsonText.str))), ("source_url", JsonText.str(source_url(h.conv, h.source_id)))]))
 
 	## code_store `encodeCodeEvent`: one entry as its page and its live
 	## stream (`code:<uid>`) send it.
-	# TEMPORARY DOOR: moves out in a later run.
 	code_event : Header, List(Block) -> List(U8)
 	code_event = |h, bs| {
-		blocks = JsonText.arr(List.map(bs, |b| JsonText.obj([("lang", JsonText.str_at_door(b.lang)), ("body", JsonText.str_at_door(b.body))])))
-		JsonText.obj(List.concat(head_fields(h), [("blocks", blocks), ("source_url", JsonText.str_at_door(source_url(h.conv, h.source_id)))]))
+		blocks = JsonText.arr(List.map(bs, |b| JsonText.obj([("lang", JsonText.str(b.lang)), ("body", JsonText.str(b.body))])))
+		JsonText.obj(List.concat(head_fields(h), [("blocks", blocks), ("source_url", JsonText.str(source_url(h.conv, h.source_id)))]))
 	}
 
 	## The header line every entry starts with, as `header` reads it back.
-	header_line : Header -> List(U8)
-	header_line = |h| List.join([Str.to_utf8("Sent by "), h.from, Str.to_utf8(" at "), h.at, Str.to_utf8(", source MSG_"), h.source_id, Str.to_utf8(" in "), h.conv, [':']])
+	header_line : Header -> Str
+	header_line = |h| "Sent by ${h.from} at ${h.at}, source MSG_${h.source_id} in ${h.conv}:"
 
 	## images_store `formatImagesEntry`: the header, then each tag on a line
 	## of its own. **A TAG IS ONE LINE** (metal-vmm QUEUE 185): a CR or LF in
 	## one is a space, so no tag carries the separator and a forged header.
-	images_entry : Header, List(List(U8)) -> List(U8)
+	## The entry's bytes are the file's (Files.append_entry!).
+	images_entry : Header, List(Str) -> List(U8)
 	images_entry = |h, tags|
-		List.fold(tags, header_line(h), |out, tag| List.concat(List.append(out, '\n'), List.map(tag, |c| if c == '\n' or c == '\r' ' ' else c)))
+		List.fold(tags, header_line(h), |out, tag| "${out}\n${tag.replace_each("\n", " ").replace_each("\r", " ")}").to_utf8()
 
 	## code_store `formatCodeEntry`: the header, then each block as a
 	## backtick fence (whatever its opener was), one newline between them.
 	code_entry : Header, List(Block) -> List(U8)
 	code_entry = |h, bs|
-		List.concat(header_line(h), List.join(List.intersperse(List.map(bs, |b| List.join([Str.to_utf8("\n```"), b.lang, ['\n'], b.body, Str.to_utf8("\n```")])), ['\n'])))
+		"${header_line(h)}${Str.join_with(List.map(bs, |b| "\n```${b.lang}\n${b.body}\n```"), "\n")}".to_utf8()
 }
+
+# header: the last " at " before the source, the first " in " after it.
+expect Feeds.header("Sent by a at b at c, source MSG_x_1 in 1_2 in 3:") == Ok({ from: "a at b", at: "c", source_id: "x_1", conv: "1_2 in 3" })
+expect Feeds.header("Sent by ann at t, source MSG_x_1 in 1_2") == Err(NotAHeader)
+# source_url: the message's link when its id has a topic part.
+expect Feeds.source_url("1_2", "Plans_3") == "/chat/c/1_2/Plans#msg-Plans_3"
+expect Feeds.source_url("ops", "_1") == "/channel/ops"
+expect Feeds.images_entry({ from: "Zo\u(eb)", at: "t", source_id: "x_1", conv: "ops" }, ["<img\r\na>"]) == Str.to_utf8("Sent by Zo\u(eb) at t, source MSG_x_1 in ops:\n<img  a>")

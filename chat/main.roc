@@ -598,9 +598,9 @@ feed! = |which, rest|
 			(Ok(viewer), Ok(me)) => {
 				# A feed that failed is the request's failure; the page made
 				# of nothing is not sent.
-				file = match text_bytes!(Paths.feed_path(me, which)) {
-					Ok(bytes) => bytes
-					Err(Missing) | Err(Failed) => []
+				file = match Files.read!(Paths.feed_path(me, which)) {
+					Ok(text) => text
+					Err(Missing) | Err(Failed) => ""
 				}
 				src = Chrome.src_in(Host.srcs!({}))
 				page = match which {
@@ -1056,7 +1056,7 @@ appended! = |conv, who, { at: topic_at, name, markdown: md, cid }|
 						match (named, members!(conv.members)) {
 							(Ok(all), Ok(members)) => {
 								frame = Frame.message({ index, from: name, from_uid: me, at: stamp, html: page_html, markdown: md, id, cid })
-								steps = Fanout.steps({ key: topic_at.key, members, topic, index, id: id.to_utf8(), from: name, at: stamp, uid: me, accounts: all }, Fanout.parts_of(md))
+								steps = Fanout.steps({ key: topic_at.key, members, topic, index, id, from: name, at: stamp, uid: me, accounts: all }, Fanout.parts_of(md))
 								if Host.store_message!(conv, topic.to_utf8(), block, index, message) {
 									# **STORED IS DONE** (metal-vmm QUEUE 172): from
 									# here nothing fails the send, which a client

@@ -161,8 +161,17 @@ call = |req| {
 		}
 		36 => [Html.bytes(Html.escape(arg(0)))]
 		37 => [Html.script_json_bytes(Html.script_safe(arg(0)))]
-		38 => [Feeds.images_json(Feeds.images(arg(0)), u64(arg(1)))]
-		39 => [Feeds.code_json(Feeds.code(arg(0)))]
+		# A feed file is text (Files.read!'s door): the twin refuses any other.
+		38 =>
+			match text(arg(0)) {
+				Ok(file) => [Feeds.images_json(Feeds.images(file), u64(arg(1)))]
+				Err(Invalid) => []
+			}
+		39 =>
+			match text(arg(0)) {
+				Ok(file) => [Feeds.code_json(Feeds.code(file))]
+				Err(Invalid) => []
+			}
 		40 =>
 			match text(arg(0)) {
 				Ok(md) => [Recent.excerpt(md).to_utf8()]
@@ -275,11 +284,12 @@ call = |req| {
 				Ok(u) => [Fanout.notify_key(u), Fanout.sidebar_key(u), Fanout.recent_key(u), Fanout.images_key(u), Fanout.code_key(u)]
 				Err(NotAUid) => []
 			}
-		# A conversation's key and a topic id; the door refuses any other.
+		# A conversation's key, a topic id and a message id (text); the door
+		# refuses any other.
 		63 =>
-			match topic_at(arg(0), arg(1)) {
-				Ok(at) => [Feeds.base_url(arg(0)), Fanout.topic_url(at).to_utf8(), Feeds.source_url(arg(0), arg(2))]
-				Err(Invalid) => []
+			match (topic_at(arg(0), arg(1)), texts([arg(0), arg(2)])) {
+				(Ok(at), Ok([conv, id])) => [Feeds.base_url(conv).to_utf8(), Fanout.topic_url(at).to_utf8(), Feeds.source_url(conv, id).to_utf8()]
+				_ => []
 			}
 		# The notify event: from, key, topic (a DM's or a channel's, by its key).
 		64 =>
@@ -299,19 +309,26 @@ call = |req| {
 				_ => []
 			}
 		# An entry's header (source_id, from, conv, at), then its tags: the
-		# images.md entry and the live event.
-		67 => {
-			h = { source_id: arg(0), from: arg(1), conv: arg(2), at: arg(3) }
-			tags = List.drop_first(req.args, 4)
-			[Feeds.images_entry(h, tags), Feeds.images_event(h, tags)]
-		}
+		# images.md entry and the live event. All text, or no entry.
+		67 =>
+			match texts(req.args) {
+				Ok([source_id, from, conv, at, .. as tags]) => {
+					h = { source_id, from, conv, at }
+					[Feeds.images_entry(h, tags), Feeds.images_event(h, tags)]
+				}
+				_ => []
+			}
 		# The same header, then `lang, body` pairs: the code.md entry and the
-		# live event.
-		68 => {
-			h = { source_id: arg(0), from: arg(1), conv: arg(2), at: arg(3) }
-			blocks = pairs(req.args, 4, [])
-			[Feeds.code_entry(h, blocks), Feeds.code_event(h, blocks)]
-		}
+		# live event. All text, or no entry.
+		68 =>
+			match texts(req.args) {
+				Ok([source_id, from, conv, at, .. as rest]) => {
+					h = { source_id, from, conv, at }
+					blocks = pairs(rest, 0, [])
+					[Feeds.code_entry(h, blocks), Feeds.code_event(h, blocks)]
+				}
+				_ => []
+			}
 		# recentWhere for viewer `arg(1)` in a DM (`d`) or channel keyed
 		# `arg(2)`: the members counted by `arg(3)`, then the accounts.
 		# A viewer or member that is no Uid has no row: the door refuses it.
@@ -322,7 +339,7 @@ call = |req| {
 			decoded = List.map_try(accounts(req.args, 4 + n, []), Accounts.from_host)
 			key = if arg(0) == [100] Dm(valid_pair(arg(2))) else Channel(valid_channel(arg(2)))
 			match (Uid.from_utf8(arg(1)), decoded) {
-				(Ok(viewer), Ok(all)) if List.len(members) == n => [Fanout.recent_where({ key, members, topic: "", index: 0, id: [], from: "", at: "", uid: viewer, accounts: all }, viewer).to_utf8()]
+				(Ok(viewer), Ok(all)) if List.len(members) == n => [Fanout.recent_where({ key, members, topic: "", index: 0, id: "", from: "", at: "", uid: viewer, accounts: all }, viewer).to_utf8()]
 				_ => []
 			}
 		}
@@ -451,7 +468,7 @@ unreadable = |why|
 	}
 
 ## Code blocks as the test wrote them, `lang, body` pairs from `i`.
-pairs : List(List(U8)), U64, List(Feeds.Block) -> List(Feeds.Block)
+pairs : List(Str), U64, List(Feeds.Block) -> List(Feeds.Block)
 pairs = |args, i, out|
 	match (List.get(args, i), List.get(args, i + 1)) {
 		(Ok(lang), Ok(body)) => pairs(args, i + 2, List.append(out, { lang, body }))

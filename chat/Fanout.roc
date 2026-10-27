@@ -17,12 +17,12 @@ Fanout := [].{
 
 	## A message's parts, as its feeds keep them: the Recent row's excerpt,
 	## the `<img>` tags, the code blocks.
-	Parts : { excerpt : Str, images : List(List(U8)), code : List(Feeds.Block) }
+	Parts : { excerpt : Str, images : List(Str), code : List(Feeds.Block) }
 
 	## The parts of a message's markdown `md` (Recent.excerpt, Feeds.img_tags,
 	## Feeds.code_blocks; the twins hold each to its Zig).
 	parts_of : Str -> Parts
-	parts_of = |md| { excerpt: Recent.excerpt(md), images: Feeds.img_tags(md.to_utf8()), code: Feeds.code_blocks(md.to_utf8()) }
+	parts_of = |md| { excerpt: Recent.excerpt(md), images: Feeds.img_tags(md), code: Feeds.code_blocks(md) }
 
 	## The surfaces that can fail for a member, as /admin/host names them
 	## (Host.fanout_failed!'s; a feed's append is the one that still can).
@@ -43,7 +43,7 @@ Fanout := [].{
 	## spelled it), its number `index` (0 is the topic's first), its fields,
 	## its author's account `uid`, and the accounts the request holds (a
 	## DM's; a channel names none).
-	Sent : { key : Paths.ConvKey, members : List(Uid), topic : Str, index : U64, id : List(U8), from : Str, at : Str, uid : Uid, accounts : List(Accounts.Account) }
+	Sent : { key : Paths.ConvKey, members : List(Uid), topic : Str, index : U64, id : Str, from : Str, at : Str, uid : Uid, accounts : List(Accounts.Account) }
 
 	## **EVERY MEMBER IN THE CONVERSATION'S ORDER, EACH MEMBER'S SURFACES IN
 	## ONE ORDER: NOTIFY, SIDEBAR, RECENT, IMAGES, CODE** (fanoutCrossPage).
@@ -56,7 +56,7 @@ Fanout := [].{
 		url = topic_url(at)
 		notify = notify_event(at, notify_text(m.from, at))
 		added = topic_added(at)
-		head = { from: m.from.to_utf8(), at: m.at.to_utf8(), source_id: m.id, conv: Paths.conv_key_bytes(m.key) }
+		head = { from: m.from, at: m.at, source_id: m.id, conv: Paths.conv_key_to_str(m.key) }
 		List.join(
 			List.map(
 				m.members,
