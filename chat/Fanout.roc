@@ -70,7 +70,7 @@ Fanout := [].{
 						# **EVERY MEMBER SEES THE ROW, THE AUTHOR AS "YOU"**.
 						{
 							who = if uid == m.uid Str.to_utf8("You") else m.from
-							[Publish(recent_key(uid), Recent.chat_event({ at: m.at, url, who, label: recent_where(m, uid), topic: m.topic.to_utf8(), excerpt: parts.excerpt, dm: Paths.conv_kind(m.key) }))]
+							[Publish(recent_key(uid), Recent.chat_event({ at: m.at, url: url.to_utf8(), who, label: recent_where(m, uid), topic: m.topic.to_utf8(), excerpt: parts.excerpt, dm: Paths.conv_kind(m.key) }))]
 						},
 						# The feeds only when the message has what they keep.
 						match parts.images {
@@ -112,8 +112,8 @@ Fanout := [].{
 
 	## The topic's page: the conversation's URL root (Feeds.base_url,
 	## convKeyBaseURL), then the topic.
-	topic_url : Paths.TopicAt -> List(U8)
-	topic_url = |at| List.join([Feeds.base_url(Paths.conv_key_bytes(at.key)), ['/'], at.topic.to_utf8()])
+	topic_url : Paths.TopicAt -> Str
+	topic_url = |at| "${Paths.conv_base(at.key)}/${at.topic}"
 
 	## The status strip's line: a DM's "X sent you a message on <topic>.", a
 	## channel's "X posted to <key> > <topic>.".
@@ -127,12 +127,11 @@ Fanout := [].{
 	## The notify stream's event: conv, session, text, link_url (topic_url).
 	# TEMPORARY DOOR: moves out in a later run.
 	notify_event : Paths.TopicAt, List(U8) -> List(U8)
-	notify_event = |at, text| JsonText.obj([("conv", JsonText.str(Paths.conv_key_to_str(at.key))), ("session", JsonText.str(at.topic)), ("text", JsonText.str_at_door(text)), ("link_url", JsonText.str_at_door(topic_url(at)))])
+	notify_event = |at, text| JsonText.obj([("conv", JsonText.str(Paths.conv_key_to_str(at.key))), ("session", JsonText.str(at.topic)), ("text", JsonText.str_at_door(text)), ("link_url", JsonText.str(topic_url(at)))])
 
 	## The sidebar stream's topic-added: kind, conv, sid, url (topic_url).
-	# TEMPORARY DOOR: moves out in a later run.
 	topic_added : Paths.TopicAt -> List(U8)
-	topic_added = |at| JsonText.obj([("kind", JsonText.str("topic-added")), ("conv", JsonText.str(Paths.conv_key_to_str(at.key))), ("sid", JsonText.str(at.topic)), ("url", JsonText.str_at_door(topic_url(at)))])
+	topic_added = |at| JsonText.obj([("kind", JsonText.str("topic-added")), ("conv", JsonText.str(Paths.conv_key_to_str(at.key))), ("sid", JsonText.str(at.topic)), ("url", JsonText.str(topic_url(at)))])
 
 	## chat_fanout `recentWhere`, for `viewer`: a channel names itself ("in
 	## <key>"); a DM names the other member ("to <name>"; the DM with

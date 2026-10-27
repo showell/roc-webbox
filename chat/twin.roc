@@ -260,7 +260,7 @@ call = |req| {
 		# A conversation's key and a topic id; the door refuses any other.
 		63 =>
 			match topic_at(arg(0), arg(1)) {
-				Ok(at) => [Feeds.base_url(arg(0)), Fanout.topic_url(at), Feeds.source_url(arg(0), arg(2))]
+				Ok(at) => [Feeds.base_url(arg(0)), Fanout.topic_url(at).to_utf8(), Feeds.source_url(arg(0), arg(2))]
 				Err(Invalid) => []
 			}
 		# The notify event: from, key, topic (a DM's or a channel's, by its key).
