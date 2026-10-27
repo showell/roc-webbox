@@ -15,21 +15,53 @@ Paths := [].{
 		match cut_first(key, '_') {
 			Err(None) => Bool.False
 			Ok((x, y)) =>
-				canonical_uid(x) and canonical_uid(y) and pair_key(Uid.from_bytes(x), Uid.from_bytes(y)) == key and (user == Uid.from_bytes(x) or user == Uid.from_bytes(y))
+				canonical_uid(x) and canonical_uid(y) and pair_key_bytes(pair_key(Uid.from_bytes(x), Uid.from_bytes(y))) == key and (user == Uid.from_bytes(x) or user == Uid.from_bytes(y))
 		}
+
+	## **A DM'S KEY**: opaque (`::`), so only `pair_key` (from two uids) and
+	## `pair_key_of` (from bytes, validated) make one.
+	PairKey :: List(U8)
 
 	## chatPairKey: the smaller numeric id first, joined by `_` (a half that
 	## is no number counts as 0, as Zig's `atoiOr0`).
-	pair_key : Uid, Uid -> List(U8)
+	pair_key : Uid, Uid -> PairKey
 	pair_key = |ua, ub| {
 		a = Uid.bytes(ua)
 		b = Uid.bytes(ub)
 		if atoi_or0(a) <= atoi_or0(b) {
-			List.concat(List.append(a, '_'), b)
+			PairKey.(List.concat(List.append(a, '_'), b))
 		} else {
-			List.concat(List.append(b, '_'), a)
+			PairKey.(List.concat(List.append(b, '_'), a))
 		}
 	}
+
+	## The key, when it is exactly the canonical `<small>_<large>` of two
+	## different valid uids.
+	pair_key_of : List(U8) -> Try(PairKey, [Invalid])
+	pair_key_of = |key|
+		match cut_first(key, '_') {
+			Ok((x, y)) if canonical_uid(x) and canonical_uid(y) and x != y and pair_key_bytes(pair_key(Uid.from_bytes(x), Uid.from_bytes(y))) == key => Ok(PairKey.(key))
+			_ => Err(Invalid)
+		}
+
+	## The key's bytes.
+	pair_key_bytes : PairKey -> List(U8)
+	pair_key_bytes = |PairKey.(b)| b
+
+	## **WHICH CONVERSATION**: a DM, by its canonical pair key, two uids
+	## joined by `_`, the smaller first (`3_7`; pair_key); or a channel, by
+	## its name, a letter then letters, digits and hyphens (`general`;
+	## channel_name).
+	ConvKey : [Dm(PairKey), Channel(ChannelName)]
+
+	## The key's bytes, where it goes back out (a URL, a bus key, a JSON
+	## field, a host call): the pair key or the channel's name.
+	conv_key_bytes : ConvKey -> List(U8)
+	conv_key_bytes = |key|
+		match key {
+			Dm(pair) => pair_key_bytes(pair)
+			Channel(name) => channel_name_bytes(name)
+		}
 
 	## A uid as allocateUser writes one: digits, the first not zero.
 	canonical_uid : List(U8) -> Bool
@@ -391,10 +423,24 @@ expect Paths.bytes(Paths.feed_path(Str.to_utf8("3"), Images)) == Str.to_utf8("us
 expect Paths.bytes(Paths.feed_path(Str.to_utf8("3"), Code)) == Str.to_utf8("users/3/code.md")
 
 # pair_key: the smaller uid first, by number, not by bytes.
-expect Paths.pair_key(Uid.from_bytes(Str.to_utf8("7")), Uid.from_bytes(Str.to_utf8("3"))) == Str.to_utf8("3_7")
-expect Paths.pair_key(Uid.from_bytes(Str.to_utf8("3")), Uid.from_bytes(Str.to_utf8("7"))) == Str.to_utf8("3_7")
-expect Paths.pair_key(Uid.from_bytes(Str.to_utf8("10")), Uid.from_bytes(Str.to_utf8("9"))) == Str.to_utf8("9_10")
-expect Paths.pair_key(Uid.from_bytes(Str.to_utf8("5")), Uid.from_bytes(Str.to_utf8("5"))) == Str.to_utf8("5_5")
+expect Paths.pair_key_bytes(Paths.pair_key(Uid.from_bytes(Str.to_utf8("7")), Uid.from_bytes(Str.to_utf8("3")))) == Str.to_utf8("3_7")
+expect Paths.pair_key_bytes(Paths.pair_key(Uid.from_bytes(Str.to_utf8("3")), Uid.from_bytes(Str.to_utf8("7")))) == Str.to_utf8("3_7")
+expect Paths.pair_key_bytes(Paths.pair_key(Uid.from_bytes(Str.to_utf8("10")), Uid.from_bytes(Str.to_utf8("9")))) == Str.to_utf8("9_10")
+expect Paths.pair_key_bytes(Paths.pair_key(Uid.from_bytes(Str.to_utf8("5")), Uid.from_bytes(Str.to_utf8("5")))) == Str.to_utf8("5_5")
+
+# pair_key_of: only the canonical `<small>_<large>` of two different uids.
+expect match Paths.pair_key_of(Str.to_utf8("3_7")) {
+	Ok(key) => Paths.pair_key_bytes(key) == Str.to_utf8("3_7")
+	Err(Invalid) => Bool.False
+}
+expect Paths.pair_key_of(Str.to_utf8("7_3")).is_err()
+expect Paths.pair_key_of(Str.to_utf8("3_3")).is_err()
+expect Paths.pair_key_of(Str.to_utf8("3_")).is_err()
+expect Paths.pair_key_of(Str.to_utf8("_7")).is_err()
+expect Paths.pair_key_of(Str.to_utf8("a_b")).is_err()
+expect Paths.pair_key_of(Str.to_utf8("..")).is_err()
+expect Paths.pair_key_of(Str.to_utf8("3_7_9")).is_err()
+expect Paths.pair_key_of(Str.to_utf8("03_7")).is_err()
 
 # participant: only a canonical pair, and only its two members.
 expect Paths.participant(Str.to_utf8("3_7"), Uid.from_bytes(Str.to_utf8("3")))

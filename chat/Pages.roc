@@ -189,7 +189,7 @@ Pages := [].{
 	sidebar_json = |sb| {
 		prefixed = |prefix, s| List.concat(Str.to_utf8(prefix), s)
 		person = |u| {
-			pk = Paths.pair_key(Uid.from_bytes(sb.uid), Uid.from_bytes(u.id))
+			pk = Paths.pair_key_bytes(Paths.pair_key(Uid.from_bytes(sb.uid), Uid.from_bytes(u.id)))
 			online = if u.presence == Online [("online", JsonText.bool(Bool.True))] else []
 			JsonText.obj(List.concat([("id", JsonText.str(prefixed("uid:", u.id))), ("label", JsonText.str(u.name)), ("url", JsonText.str(prefixed("/chat/c/", pk))), ("active", JsonText.bool(sb.kind == Dm and pk == sb.key))], online))
 		}

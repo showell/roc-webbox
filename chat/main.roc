@@ -698,7 +698,7 @@ entries! = |me, members, i, acc|
 			if id == me {
 				entries!(me, members, i + 1, acc)
 			} else {
-				conv = Paths.pair_key(Uid.from_bytes(me), Uid.from_bytes(id))
+				conv = Paths.pair_key_bytes(Paths.pair_key(Uid.from_bytes(me), Uid.from_bytes(id)))
 				sessions = topics!(Dm, conv)
 				default = resume_at!(conv, sessions)
 				entries!(me, members, i + 1, List.append(acc, { conv, id, name, default, sessions }))
@@ -744,7 +744,7 @@ find_dm! = |me, members, topic, i|
 			if id == me {
 				find_dm!(me, members, topic, i + 1)
 			} else {
-				conv = Paths.pair_key(Uid.from_bytes(me), Uid.from_bytes(id))
+				conv = Paths.pair_key_bytes(Paths.pair_key(Uid.from_bytes(me), Uid.from_bytes(id)))
 				if List.contains(topics!(Dm, conv), topic) Ok(conv) else find_dm!(me, members, topic, i + 1)
 			}
 		Err(_) => Err(None)
