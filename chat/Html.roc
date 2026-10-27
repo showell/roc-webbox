@@ -10,18 +10,13 @@ Html := [].{
 		List.map(
 			s,
 			|c|
-				if c == '&' {
-					Str.to_utf8("&amp;")
-				} else if c == '\'' {
-					Str.to_utf8("&#39;")
-				} else if c == '<' {
-					Str.to_utf8("&lt;")
-				} else if c == '>' {
-					Str.to_utf8("&gt;")
-				} else if c == '"' {
-					Str.to_utf8("&#34;")
-				} else {
-					[c]
+				match c {
+					'&' => Str.to_utf8("&amp;")
+					'\'' => Str.to_utf8("&#39;")
+					'<' => Str.to_utf8("&lt;")
+					'>' => Str.to_utf8("&gt;")
+					'"' => Str.to_utf8("&#34;")
+					_ => [c]
 				},
 		),
 	)
