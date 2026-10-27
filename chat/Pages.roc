@@ -18,10 +18,10 @@ Pages := [].{
 	## the topic, its title, the viewer, and the sidebar's JSON.
 	View : { key : List(U8), base : List(U8), sid : List(U8), title : List(U8), uid : List(U8), viewer : List(U8), sidebar_json : List(U8) }
 
-	## What the sidebar shows: the viewer, the conversation (`dm` its kind
-	## or a channel's), the topic, every other member, the viewer's channels,
+	## What the sidebar shows: the viewer, the conversation (its kind), the
+	## topic, every other member (each online or not), the viewer's channels,
 	## their pins in this conversation, and its topics.
-	Sidebar : { uid : List(U8), dm : Bool, key : List(U8), base : List(U8), sid : List(U8), others : List({ id : List(U8), name : List(U8), online : Bool }), channels : List(List(U8)), pins : List(List(U8)), topics : List(List(U8)) }
+	Sidebar : { uid : List(U8), kind : [Dm, Channel], key : List(U8), base : List(U8), sid : List(U8), others : List({ id : List(U8), name : List(U8), presence : [Online, Offline] }), channels : List(List(U8)), pins : List(List(U8)), topics : List(List(U8)) }
 
 	shell : (List(U8) -> List(U8)), List(U8), List(U8), List(U8) -> Chrome.Shell
 	shell = |src, title, viewer, active| { tab: Str.to_utf8("Chat"), title, viewer, active, src }
@@ -174,11 +174,11 @@ Pages := [].{
 		prefixed = |prefix, s| List.concat(Str.to_utf8(prefix), s)
 		person = |u| {
 			pk = Paths.pair_key(sb.uid, u.id)
-			online = if u.online [("online", JsonText.bool(Bool.True))] else []
-			JsonText.obj(List.concat([("id", JsonText.str(prefixed("uid:", u.id))), ("label", JsonText.str(u.name)), ("url", JsonText.str(prefixed("/chat/c/", pk))), ("active", JsonText.bool(sb.dm and pk == sb.key))], online))
+			online = if u.presence == Online [("online", JsonText.bool(Bool.True))] else []
+			JsonText.obj(List.concat([("id", JsonText.str(prefixed("uid:", u.id))), ("label", JsonText.str(u.name)), ("url", JsonText.str(prefixed("/chat/c/", pk))), ("active", JsonText.bool(sb.kind == Dm and pk == sb.key))], online))
 		}
 		room = |name|
-			JsonText.obj([("id", JsonText.str(prefixed("ch:", name))), ("label", JsonText.str(prefixed("# ", name))), ("url", JsonText.str(prefixed("/channel/", name))), ("active", JsonText.bool(!sb.dm and name == sb.key))])
+			JsonText.obj([("id", JsonText.str(prefixed("ch:", name))), ("label", JsonText.str(prefixed("# ", name))), ("url", JsonText.str(prefixed("/channel/", name))), ("active", JsonText.bool(sb.kind == Channel and name == sb.key))])
 		topic = |s|
 			JsonText.obj([("id", JsonText.str(s)), ("label", JsonText.str(s)), ("url", JsonText.str(List.join([sb.base, ['/'], s]))), ("active", JsonText.bool(s == sb.sid))])
 		pinned = List.keep_if(sb.topics, |s| List.contains(sb.pins, s))
@@ -201,11 +201,11 @@ Pages := [].{
 	decode_sidebar = |fields| {
 		at = |i| List.get(fields, i) ?? []
 		n_others = ZigText.parse_u64(at(5)) ?? 0
-		others = List.sublist(fields, { start: 6, len: n_others }) |> List.map_with_index(|_, k| { id: at(6 + 3 * k), name: at(7 + 3 * k), online: at(8 + 3 * k) == ['1'] })
+		others = List.sublist(fields, { start: 6, len: n_others }) |> List.map_with_index(|_, k| { id: at(6 + 3 * k), name: at(7 + 3 * k), presence: if at(8 + 3 * k) == ['1'] Online else Offline })
 		(channels, after_channels) = counted(fields, 6 + 3 * n_others)
 		(pins, after_pins) = counted(fields, after_channels)
 		(topics, _) = counted(fields, after_pins)
-		{ uid: at(0), dm: at(1) == ['1'], key: at(2), base: at(3), sid: at(4), others, channels, pins, topics }
+		{ uid: at(0), kind: if at(1) == ['1'] Dm else Channel, key: at(2), base: at(3), sid: at(4), others, channels, pins, topics }
 	}
 
 	## A count at `i`, then that many: the items, and where the next begins.

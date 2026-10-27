@@ -629,14 +629,14 @@ sidebar! = |sid, at| {
 
 ## The other members, each beside its own flag (Host.online! answers one
 ## per id, in their order).
-with_online : List({ id : List(U8), name : List(U8) }), List([Offline, Online]) -> List({ id : List(U8), name : List(U8), online : Bool })
+with_online : List({ id : List(U8), name : List(U8) }), List([Offline, Online]) -> List({ id : List(U8), name : List(U8), presence : [Online, Offline] })
 with_online = |others, flags|
 	List.map_with_index(others, |u, i|
-		{ id: u.id, name: u.name, online: List.get(flags, i) == Ok(Online) })
+		{ id: u.id, name: u.name, presence: if List.get(flags, i) == Ok(Online) Online else Offline })
 
-sidebar_of : List(U8), List(U8), AtTopic, List({ id : List(U8), name : List(U8), online : Bool }), List(List(U8)), List(List(U8)) -> Pages.Sidebar
+sidebar_of : List(U8), List(U8), AtTopic, List({ id : List(U8), name : List(U8), presence : [Online, Offline] }), List(List(U8)), List(List(U8)) -> Pages.Sidebar
 sidebar_of = |me, sid, at, others, channels, pins|
-	{ uid: me, dm: at.conv.family == Dm, key: at.conv.key, base: at.conv.base, sid, others, channels, pins, topics: at.topics }
+	{ uid: me, kind: if at.conv.family == Dm Dm else Channel, key: at.conv.key, base: at.conv.base, sid, others, channels, pins, topics: at.topics }
 
 json : List(U8)
 json = Str.to_utf8("application/json; charset=utf-8")
