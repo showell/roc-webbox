@@ -52,9 +52,8 @@ Topics := [].{
 	}
 
 	## newTopic's answer: the conversation and the topic made.
-	# TEMPORARY DOOR: moves out in a later run.
-	made_json : Paths.TopicAt -> List(U8)
-	made_json = |{ key, topic }| JsonText.obj([("conv", JsonText.str_at_door(Paths.conv_key_bytes(key))), ("sid", JsonText.str_at_door(topic))])
+	made_json : { key : Paths.ConvKey, topic : Str } -> List(U8)
+	made_json = |{ key, topic }| JsonText.obj([("conv", JsonText.str(Paths.conv_key_to_str(key))), ("sid", JsonText.str(topic))])
 }
 
 # same_name: ASCII case folds, nothing past ASCII does.

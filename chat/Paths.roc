@@ -78,6 +78,14 @@ Paths := [].{
 			Channel(name) => channel_name_bytes(name)
 		}
 
+	## The key's text: the pair key or the channel's name.
+	conv_key_to_str : ConvKey -> Str
+	conv_key_to_str = |key|
+		match key {
+			Dm(pair) => pair_key_to_str(pair)
+			Channel(name) => channel_name_to_str(name)
+		}
+
 	## The key's family: a DM's or a channel's.
 	conv_kind : ConvKey -> [Dm, Channel]
 	conv_kind = |key|

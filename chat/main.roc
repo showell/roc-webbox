@@ -858,7 +858,7 @@ make! = |key, conv, who, text| {
 				} else if dm and !announce!(key, conv, who, topic, name) {
 					Chat.answered
 				} else {
-					Chat.respond(200, json, Topics.made_json({ key, topic }))
+					Chat.respond(200, json, Topics.made_json({ key, topic: text }))
 				}
 			}
 		}
