@@ -95,7 +95,7 @@ What this repo exports for a combination (`build.zig`):
 | `roc_todo` | `src/hosted.zig` with its Roc linked, for a Linux combination; takes the combination's `target`, `optimize` and `roc` options |
 | `roc_todo_metal` | the same for a combination's kernel: one of zig-metal-unikernel `addAppKernel`'s `parts`, with `assets.zon`; no target or mode (the kernel's), Roc built for `x64v1elf` |
 | `roc_hooks` | `src/roc_hooks.zig`, Roc's runtime when a binary holds two Roc apps |
-| `roc_chat`, `roc_chat_metal` | the Roc chat for angry-gopher, and for `gopher.elf` (Roc for `x64v1elf`): `src/chat_hosted.zig` with `chat/` linked (docs/ROC-CHAT.md) |
+| `roc_chat`, `roc_chat_metal` | the Roc chat for angry-gopher, and for `gopher.elf` (Roc for `x64v1elf`): `src/chat_hosted.zig` with `chat/` linked (docs/ROC-CHAT.md; how its Roc is written: `<roc-apps>/docs/roc-style.md`) |
 | `roc_chat_twin` | tests only: the chat's pure modules behind one entry (`src/twin_abi.zig`, `chat/twin.roc`), for angry-gopher's twin tests |
 
 Pitfalls:
