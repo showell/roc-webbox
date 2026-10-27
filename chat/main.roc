@@ -47,14 +47,14 @@ import Fanout
 handle! : Chat.Request => Chat.Answer
 handle! = |req|
 	match (if req.area == Channel Err(None) else Route.asset(req.sub)) {
-		Ok(route) => Chat.zig(route, Bool.False)
+		Ok(route) => Chat.zig(route, Uncounted)
 		Err(None) =>
 			if !Host.member!({}) {
 				area = if req.area == Channel "/channel" else "/chat"
 				Chat.redirect(List.concat(Str.to_utf8("/login/full?next=${area}"), req.sub))
 			} else {
 				route = if req.area == Channel Route.under_channel(req.sub) else Route.under_chat(req.sub)
-				if roc_serves(route) act!(req, route) else Chat.zig(route, !Route.is_stream(route))
+				if roc_serves(route) act!(req, route) else Chat.zig(route, if Route.is_stream(route) Uncounted else Counted)
 			}
 	}
 
@@ -111,7 +111,7 @@ in_conversation! = |req, route|
 		landing!(route)
 	} else {
 		match find!(route) {
-			Err(NotYours) => Chat.zig(route, Bool.False)
+			Err(NotYours) => Chat.zig(route, Uncounted)
 			Err(Failed) => Chat.answered
 			Ok((conv, who)) =>
 			# The title before the topics, as findTopic read them: a
@@ -123,7 +123,7 @@ in_conversation! = |req, route|
 						if Conversation.has_topic(topics, route.sid) {
 							in_topic!(req, route, { conv, who, title: Conversation.topic_title(t, route.sid), topics })
 						} else {
-							Chat.zig(route, Bool.False)
+							Chat.zig(route, Uncounted)
 						}
 					}
 				}
@@ -552,7 +552,7 @@ feed! = |which, rest|
 landing! : Route.R => Chat.Answer
 landing! = |route|
 	match find!(route) {
-		Err(NotYours) => Chat.zig(route, Bool.False)
+		Err(NotYours) => Chat.zig(route, Uncounted)
 		Err(Failed) => Chat.answered
 		Ok((conv, who)) => {
 			first = Paths.first_of(topics!(route.family, route.key))
@@ -778,7 +778,7 @@ new_topic! = |req, route|
 					}
 				}
 			}
-		Err(NotYours) => Chat.zig(route, Bool.False)
+		Err(NotYours) => Chat.zig(route, Uncounted)
 		Err(Failed) => Chat.answered
 	}
 
@@ -833,7 +833,7 @@ send! = |req, route|
 				Err(Failed) => Chat.answered
 				Ok(_) => sent!(req, route, conv, who)
 			}
-		Err(NotYours) => Chat.zig(route, Bool.False)
+		Err(NotYours) => Chat.zig(route, Uncounted)
 	}
 
 ## A send in `conv`, found and titled: the tail, the method, the header,

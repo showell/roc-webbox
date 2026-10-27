@@ -95,10 +95,11 @@ Chat := [].{
 	Message : { id : List(U8), from : List(U8), at : List(U8), uid : List(U8), markdown : List(U8) }
 
 	## What the answer is:
-	## - `Serve`: Zig serves `route` (marking presence first when `presence`);
+	## - `Serve`: Zig serves `route` (marking presence first when `presence`
+	##   is `Counted`);
 	## - `Redirect`: a 303 to `location`;
 	## - `Respond`: `status` with `body`, and a content-type when
-	##   `content_type` (with `nosniff`, the browser told not to guess another);
+	##   `content_type` (`sniff` `Forbid`: the browser told not to guess another);
 	## - `NotAllowed`: a 405 naming `allow`;
 	## - `Answered`: answered already, by the host inside the call (a body
 	##   too big), or failed there (the host returns its error);
@@ -110,17 +111,24 @@ Chat := [].{
 	##   out), then `location`.
 	Kind : [Serve, Redirect, Respond, NotAllowed, Answered, Malformed, NotFound, Found, Held]
 
-	Answer : { kind : Kind, location : List(U8), presence : Bool, route : Route, status : U16, content_type : List(U8), body : List(U8), allow : Method, nosniff : Bool }
+	## Whether a request Zig serves counts as the member's presence.
+	Counting : [Counted, Uncounted]
+
+	## Whether the browser may guess a type other than `content_type`
+	## (`Forbid`: the answer says `nosniff`).
+	Sniff : [Allow, Forbid]
+
+	Answer : { kind : Kind, location : List(U8), presence : Counting, route : Route, status : U16, content_type : List(U8), body : List(U8), allow : Method, sniff : Sniff }
 
 	## A route of `family` with nothing else.
 	family : Family -> Route
 	family = |f| { family: f, key: [], rest: [], sid: [], part: Landing, tail: Page }
 
 	none : Answer
-	none = { kind: Serve, location: [], presence: Bool.False, route: family(NotFound), status: 0, content_type: [], body: [], allow: Other, nosniff: Bool.False }
+	none = { kind: Serve, location: [], presence: Uncounted, route: family(NotFound), status: 0, content_type: [], body: [], allow: Other, sniff: Allow }
 
 	## Zig serves it.
-	zig : Route, Bool -> Answer
+	zig : Route, Counting -> Answer
 	zig = |route, presence| { ..none, route, presence }
 
 	## A 303 to `location`.
@@ -133,7 +141,7 @@ Chat := [].{
 
 	## A 200 of text, as stored: plain UTF-8, never sniffed for another type.
 	plain : List(U8) -> Answer
-	plain = |body| { ..respond(200, Str.to_utf8("text/plain; charset=utf-8"), body), nosniff: Bool.True }
+	plain = |body| { ..respond(200, Str.to_utf8("text/plain; charset=utf-8"), body), sniff: Forbid }
 
 	## A 200 of the host's held bytes as text, as stored, never sniffed.
 	held_plain : Answer

@@ -95,6 +95,13 @@ pub const Method = enum(u8) {
 /// Chat.roc's `Request`'s `area`: the path is under /channel or /chat.
 pub const Area = enum(u8) { channel, chat };
 
+/// Chat.roc's `Counting`: whether a request Zig serves counts as the
+/// member's presence (a stream does not).
+pub const Counting = enum(u8) { counted, uncounted };
+
+/// Chat.roc's `Sniff`: `forbid` when the answer says `nosniff`.
+pub const Sniff = enum(u8) { allow, forbid };
+
 /// Chat.roc's `Kind`: what an answer is (Chat.roc says each).
 pub const Kind = enum(u8) { answered, found, held, malformed, not_allowed, not_found, redirect, respond, serve };
 
@@ -174,7 +181,7 @@ pub const Presence = enum(u8) { offline, online };
 
 comptime {
     @setEvalBranchQuota(20_000);
-    for (.{ Family, Part, Tail, Method, Area, Kind, Form, BodyStatus, CountStatus, Hostility, ReadStatus, EntryKind, AccountKind, NameRead, AccountsStatus, FailReason, RenderStatus, PartStatus, AppendStatus, Surface, Presence }) |E| assertRocOrder(E);
+    for (.{ Family, Part, Tail, Method, Area, Counting, Sniff, Kind, Form, BodyStatus, CountStatus, Hostility, ReadStatus, EntryKind, AccountKind, NameRead, AccountsStatus, FailReason, RenderStatus, PartStatus, AppendStatus, Surface, Presence }) |E| assertRocOrder(E);
 }
 
 /// That `E`'s values are Roc's for the same tags: numbered from 0 in the

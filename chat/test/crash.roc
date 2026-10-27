@@ -183,7 +183,7 @@ handle! = |req|
 	} else if req.sub == Str.to_utf8("/crash") {
 		crash "a planted crash"
 	} else if req.sub == Str.to_utf8("/crash-after-asking") {
-		if Host.member!({}) crash "a planted crash, after asking" else Chat.zig(Chat.family(NotFound), Bool.False)
+		if Host.member!({}) crash "a planted crash, after asking" else Chat.zig(Chat.family(NotFound), Uncounted)
 	} else if req.sub == Str.to_utf8("/crash-after-asking-big") {
 		# A list grown a byte at a time, through many allocations, then a
 		# crash: each allocation is one a test can make fail. Bytes, said:
@@ -193,9 +193,9 @@ handle! = |req|
 		# happens to put it on a 16-byte boundary).
 		big : List(U8)
 		big = List.fold(List.repeat(7, 20000), [], |acc, b| List.append(acc, b))
-		if Host.member!({}) and List.len(big) == 20000 crash "a planted crash, after a big list" else Chat.zig(Chat.family(NotFound), Bool.False)
+		if Host.member!({}) and List.len(big) == 20000 crash "a planted crash, after a big list" else Chat.zig(Chat.family(NotFound), Uncounted)
 	} else {
-		Chat.zig(Chat.family(Default), Bool.True)
+		Chat.zig(Chat.family(Default), Counted)
 	}
 
 starts : List(U8), Str -> Bool

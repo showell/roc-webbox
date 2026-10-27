@@ -31,7 +31,7 @@ pub const Request = extern struct { sub: RocBytes, area: route_mod.Area, method:
 /// Chat.roc's `Route`.
 pub const RouteRec = extern struct { key: RocBytes, rest: RocBytes, sid: RocBytes, family: Family, part: route_mod.Part, tail: route_mod.Tail };
 /// Chat.roc's `Answer`.
-pub const Answer = extern struct { body: RocBytes, content_type: RocBytes, location: RocBytes, route: RouteRec, status: u16, allow: Method, kind: route_mod.Kind, nosniff: bool, presence: bool };
+pub const Answer = extern struct { body: RocBytes, content_type: RocBytes, location: RocBytes, route: RouteRec, status: u16, allow: Method, kind: route_mod.Kind, presence: route_mod.Counting, sniff: route_mod.Sniff };
 /// Host.roc's `body!` answer: `{ bytes : List(U8), status : [Answered, Read] }`.
 pub const Got = extern struct { bytes: RocBytes, status: route_mod.BodyStatus };
 /// Chat.roc's `Conv`, as Roc hands it to a hosted function.
@@ -812,7 +812,7 @@ pub fn decide(alloc: std.mem.Allocator, sub: []const u8, channel: bool, method: 
     var a: Answer = undefined;
     if (!guarded(sub, channel, .of(method), &a)) return error.RocCrashed;
     return switch (a.kind) {
-        .serve => .{ .serve = .{ .presence = a.presence, .route = .{
+        .serve => .{ .serve = .{ .presence = a.presence == .counted, .route = .{
             .family = a.route.family,
             .part = a.route.part,
             .tail = a.route.tail,
@@ -821,7 +821,7 @@ pub fn decide(alloc: std.mem.Allocator, sub: []const u8, channel: bool, method: 
             .sid = try alloc.dupe(u8, a.route.sid.slice()),
         } } },
         .redirect => .{ .redirect = try alloc.dupe(u8, a.location.slice()) },
-        .respond => .{ .respond = .{ .status = a.status, .content_type = try alloc.dupe(u8, a.content_type.slice()), .body = try alloc.dupe(u8, a.body.slice()), .nosniff = a.nosniff } },
+        .respond => .{ .respond = .{ .status = a.status, .content_type = try alloc.dupe(u8, a.content_type.slice()), .body = try alloc.dupe(u8, a.body.slice()), .nosniff = a.sniff == .forbid } },
         .not_allowed => .{ .not_allowed = switch (a.allow) {
             .get => .GET,
             .head => .HEAD,
@@ -832,6 +832,6 @@ pub fn decide(alloc: std.mem.Allocator, sub: []const u8, channel: bool, method: 
         .malformed => .malformed_form,
         .not_found => .not_found,
         .found => .{ .found = try alloc.dupe(u8, a.location.slice()) },
-        .held => .{ .held = .{ .status = a.status, .content_type = try alloc.dupe(u8, a.content_type.slice()), .nosniff = a.nosniff, .before = try alloc.dupe(u8, a.body.slice()), .after = try alloc.dupe(u8, a.location.slice()) } },
+        .held => .{ .held = .{ .status = a.status, .content_type = try alloc.dupe(u8, a.content_type.slice()), .nosniff = a.sniff == .forbid, .before = try alloc.dupe(u8, a.body.slice()), .after = try alloc.dupe(u8, a.location.slice()) } },
     };
 }
