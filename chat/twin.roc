@@ -65,7 +65,9 @@ call = |req| {
 		10 => [bool(text(arg(0)).map_ok(Paths.is_channel_name) == Ok(Bool.True))]
 		11 => [bool(Paths.valid_msg_ref_id(arg(0)))]
 		12 => [Paths.join(req.args)]
-		13 => [Paths.first_of(req.args)]
+		# A topic is text: a listing's names (Files.list!'s door skips one
+		# that is not UTF-8).
+		13 => [Paths.first_of(List.keep_oks(req.args, Str.from_utf8)).to_utf8()]
 		# A DM's folder is its key as joined, so any `arg(0)` stands for a folder.
 		14 => [Paths.transcript_path_bytes({ dir: Paths.dm_conv_dir(arg(0)), topic: arg(1) })]
 		15 => {
@@ -128,7 +130,8 @@ call = |req| {
 		39 => [Feeds.code_json(Feeds.code(arg(0)))]
 		40 => [Recent.excerpt(arg(0))]
 		41 => [Recent.json(arg(0), Recent.rows(written(req.args, 1, [])))]
-		42 => [ChatState.resume_topic(List.drop_first(req.args, 2), arg(0), int(arg(1)))]
+		# The topics are a listing's, text (Files.list!'s door skips the rest).
+		42 => [ChatState.resume_topic(List.keep_oks(List.drop_first(req.args, 2), Str.from_utf8), arg(0), int(arg(1)))]
 		43 =>
 			match ChatState.pinned(arg(0), arg(1), if arg(2) == [49] Pinned else Unpinned) {
 				Write(bytes) => [bytes]
@@ -147,13 +150,18 @@ call = |req| {
 		46 => [Conversation.dm_title(arg(0), arg(1))]
 		47 => [Conversation.channel_title(arg(0))]
 		48 => [Conversation.topic_title(arg(0), arg(1))]
-		49 => [bool(Conversation.has_topic(List.drop_first(req.args, 1), arg(0)))]
+		# The topics and the topic are text; a topic that is not is none.
+		49 =>
+			match Str.from_utf8(arg(0)) {
+				Ok(topic) => [bool(Conversation.has_topic(List.keep_oks(List.drop_first(req.args, 1), Str.from_utf8), topic))]
+				Err(_) => [bool(Bool.False)]
+			}
 		50 => [Conversation.dm_base(arg(0)), Conversation.channel_base(arg(0))]
 		51 => List.map(Paths.member_channels(flat_rosters(req.args, 1, []), arg(0)), Str.to_utf8)
 		52 => [ChatState.bookmark(file(arg(0), arg(1)))]
 		53 => [bool(ChatState.changed(file(arg(0), arg(1)), arg(2))), ChatState.bookmark_line(arg(2))]
 		54 => List.map([Paths.last_conv_path(arg(0)), Paths.last_session_path_bytes({ uid: arg(0), conv: arg(1) }), Paths.pinned_path_bytes({ uid: arg(0), conv: arg(1) }), Paths.feed_path(arg(0), Images), Paths.feed_path(arg(0), Code)], Paths.bytes)
-		55 => Paths.topics(entries(req.args, 0, []))
+		55 => List.map(Paths.topics(entries(req.args, 0, [])), Str.to_utf8)
 		56 =>
 			match Paths.channel_members(arg(0)) {
 				Ok(members) => List.prepend(members, [79])

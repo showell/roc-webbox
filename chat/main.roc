@@ -142,7 +142,7 @@ in_conversation! = |req, route|
 							Err(Failed) => Chat.answered
 							Ok(t) => {
 								topics = topics!(key)
-								if Conversation.has_topic(topics, route.topic.to_utf8()) {
+								if Conversation.has_topic(topics, route.topic) {
 									in_topic!(req, route, { key, conv, who, title: Conversation.topic_title(t, route.topic.to_utf8()), topics })
 								} else {
 									zig(route, Uncounted)
@@ -167,7 +167,7 @@ conv_key = |route|
 
 ## A topic found: its conversation, the accounts as far as they were asked,
 ## its title, and the conversation's topics as they were listed to find it.
-AtTopic : { key : Paths.ConvKey, conv : Chat.Conv, who : Who, title : List(U8), topics : List(List(U8)) }
+AtTopic : { key : Paths.ConvKey, conv : Chat.Conv, who : Who, title : List(U8), topics : List(Str) }
 
 ## A topic that is there: the method, then the work.
 in_topic! : Chat.Request, Route.R, AtTopic => Chat.Answer
@@ -367,7 +367,7 @@ rosters! = |names, i, out|
 
 ## **A CONVERSATION'S TOPICS** (listTopics): its sessions folder listed,
 ## the choice Paths.topics's.
-topics! : Paths.ConvKey => List(List(U8))
+topics! : Paths.ConvKey => List(Str)
 topics! = |key| Paths.topics(list!(Paths.topics_folder(key)))
 
 ## Files.list!'s entries. **NOTHING THERE HOLDS NOTHING** (webbox's
@@ -588,8 +588,8 @@ landing! = |route, key|
 		Err(Failed) => Chat.answered
 		Ok((conv, who)) => {
 			first = Paths.first_of(topics!(key))
-			if first != [] {
-				Chat.redirect(List.join([conv.base, ['/'], first]))
+			if !first.is_empty() {
+				Chat.redirect(List.join([conv.base, ['/'], first.to_utf8()]))
 			} else {
 				match title!(conv, who) {
 					Err(Failed) => Chat.answered
@@ -668,7 +668,7 @@ with_online = |others, flags|
 
 sidebar_of : List(U8), List(U8), AtTopic, List({ id : List(U8), name : List(U8), presence : [Online, Offline] }), List(Str), List(List(U8)) -> Pages.Sidebar
 sidebar_of = |me, topic, at, others, channels, pins|
-	{ uid: me, kind: if at.conv.family == Dm Dm else Channel, key: at.conv.key, base: at.conv.base, topic, others, channels: List.map(channels, Str.to_utf8), pins, topics: at.topics }
+	{ uid: me, kind: if at.conv.family == Dm Dm else Channel, key: at.conv.key, base: at.conv.base, topic, others, channels: List.map(channels, Str.to_utf8), pins, topics: List.map(at.topics, Str.to_utf8) }
 
 json : List(U8)
 json = Str.to_utf8("application/json; charset=utf-8")
@@ -687,7 +687,7 @@ resume! = |{}| {
 	match pair_of {
 		Ok(pair) if Paths.is_participant(pair, Uid.from_bytes(me)) => {
 			topics = topics!(Dm(pair))
-			if Paths.first_of(topics) == [] {
+			if Paths.first_of(topics).is_empty() {
 				Chat.redirect(List.concat(Str.to_utf8("/chat/c/"), conv))
 			} else {
 				Chat.redirect(List.join([Str.to_utf8("/chat/c/"), conv, ['/'], resume_at!(pair, topics)]))
@@ -703,7 +703,7 @@ resume! = |{}| {
 
 ## Where the member resumes DM `conv`, whose topics are `topics`: the choice
 ## ChatState's, the last-viewed topic and the clock the host's.
-resume_at! : Paths.PairKey, List(List(U8)) => List(U8)
+resume_at! : Paths.PairKey, List(Str) => List(U8)
 resume_at! = |pair, topics| {
 	last = ChatState.bookmark(text_bytes!(Paths.last_session_path(Uid.from_bytes(Host.me!({})), Dm(pair))))
 	ChatState.resume_topic(topics, last, Host.now!({}))
@@ -741,8 +741,9 @@ entries! = |me, members, i, acc|
 				match Paths.pair_key(Uid.from_bytes(me), Uid.from_bytes(id)) {
 					Ok(pair) => {
 						conv = Paths.pair_key_bytes(pair)
-						sessions = topics!(Dm(pair))
-						default = resume_at!(pair, sessions)
+						listed = topics!(Dm(pair))
+						sessions = List.map(listed, Str.to_utf8)
+						default = resume_at!(pair, listed)
 						entries!(me, members, i + 1, List.append(acc, { conv, id, name, default, sessions }))
 					}
 					# A member whose id is no uid has no DM.
@@ -791,7 +792,7 @@ find_dm! = |me, members, topic, i|
 				find_dm!(me, members, topic, i + 1)
 			} else {
 				match Paths.pair_key(Uid.from_bytes(me), Uid.from_bytes(id)) {
-					Ok(pair) if List.contains(topics!(Dm(pair)), topic) => Ok(Paths.pair_key_bytes(pair))
+					Ok(pair) if List.contains(List.map(topics!(Dm(pair)), Str.to_utf8), topic) => Ok(Paths.pair_key_bytes(pair))
 					_ => find_dm!(me, members, topic, i + 1)
 				}
 			}
@@ -805,7 +806,7 @@ find_channel! = |names, topic, i|
 		# no other).
 		Ok(name) =>
 			match Paths.channel_name_from_str(name) {
-				Ok(valid) if List.contains(topics!(Channel(valid)), topic) => Ok(name.to_utf8())
+				Ok(valid) if List.contains(List.map(topics!(Channel(valid)), Str.to_utf8), topic) => Ok(name.to_utf8())
 				_ => find_channel!(names, topic, i + 1)
 			}
 		Err(_) => Err(NoSuchTopic)
@@ -842,7 +843,7 @@ make! = |key, conv, who, text| {
 		Chat.respond(400, [], Str.to_utf8("Topic must be letters, digits, and hyphens only — no spaces, underscores, or punctuation.\n"))
 	} else if Topics.same_name(text, "new") {
 		Chat.respond(400, [], Str.to_utf8("\"new\" is reserved — pick another topic name.\n"))
-	} else if Conversation.has_topic(topics!(key), topic) {
+	} else if Conversation.has_topic(topics!(key), text) {
 		Chat.respond(409, [], Str.to_utf8("That topic already exists.\n"))
 	} else {
 		match viewer!(who) {
@@ -868,10 +869,7 @@ make! = |key, conv, who, text| {
 ## general<N>, unless that is the topic made.
 announce! : Paths.ConvKey, Chat.Conv, Who, List(U8), List(U8) => Bool
 announce! = |key, conv, who, topic, name|
-	# TEMPORARY DOOR: moves out in a later run. A listed name that isn't UTF-8
-	# is never `general<N>` (its digits would not parse), so dropping it
-	# keeps the Zig's answer.
-	match Topics.highest_general(List.keep_oks(topics!(key), Str.from_utf8)).map_ok(Str.to_utf8) {
+	match Topics.highest_general(topics!(key)).map_ok(Str.to_utf8) {
 		Ok(gen) if gen != topic =>
 			appended!(conv, who, { at: { key, topic: gen }, name, markdown: List.join([Str.to_utf8("New topic: ["), topic, Str.to_utf8("]("), conv.base, ['/'], topic, Str.to_utf8(")")]), cid: [] })
 		_ => Bool.True

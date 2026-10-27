@@ -182,12 +182,12 @@ Paths := [].{
 
 	## firstOf: "ChitChat" when there, else the first (the list is sorted),
 	## else none.
-	first_of : List(List(U8)) -> List(U8)
+	first_of : List(Str) -> Str
 	first_of = |topics|
-		if List.contains(topics, Str.to_utf8("ChitChat")) {
-			Str.to_utf8("ChitChat")
+		if List.contains(topics, "ChitChat") {
+			"ChitChat"
 		} else {
-			List.first(topics) ?? []
+			List.first(topics) ?? ""
 		}
 
 	## listUserChannels's decision: the names of the channels `uid` is in,
@@ -243,11 +243,8 @@ Paths := [].{
 	## folder is passed over) whose name ends in `.md`, that cut off, sorted
 	## by bytes. A folder named `x.md` is no topic; a file named `.md` is
 	## topic "".
-	topics : List(Entry) -> List(List(U8))
-	topics = |entries|
-		# TEMPORARY DOOR: moves out in a later run. A topic is bytes until
-		# TopicAt.topic is a Str.
-		Bytes.sort(List.keep_oks(entries, |e| if e.kind == Dir Err(NoSuffix) else str_suffix(e.name, ".md").map_ok(Str.to_utf8)))
+	topics : List(Entry) -> List(Str)
+	topics = |entries| sort_by_bytes(List.keep_oks(entries, |e| if e.kind == Dir Err(NoSuffix) else str_suffix(e.name, ".md")))
 
 	## `name` without `suffix`, when it ends in it.
 	str_suffix : Str, Str -> Try(Str, [NoSuffix])

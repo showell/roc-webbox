@@ -21,13 +21,13 @@ ChatState := [].{
 	## while the conversation still has it; else its first topic
 	## (Paths.first_of); else the date of `now_secs`, so a conversation's
 	## first post makes today's topic.
-	resume_topic : List(List(U8)), List(U8), I64 -> List(U8)
+	resume_topic : List(Str), List(U8), I64 -> List(U8)
 	resume_topic = |topics, last, now_secs|
-		if last != [] and List.contains(topics, last) {
+		if last != [] and List.any(topics, |t| t.to_utf8() == last) {
 			last
 		} else {
 			first = Paths.first_of(topics)
-			if first != [] first else Str.to_utf8(Time.date(now_secs))
+			if !first.is_empty() first.to_utf8() else Str.to_utf8(Time.date(now_secs))
 		}
 
 	## Whether the member wants a topic pinned or unpinned.
