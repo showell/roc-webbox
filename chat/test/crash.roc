@@ -3,7 +3,8 @@
 ## so the host's answer to a Roc crash (a 500, the call's memory dropped,
 ## the next request served) is seen. It also names any path a test likes
 ## to the file primitives (`/read/<path>`, `/write/<path>`,
-## `/remove/<path>`, `/list/<path>`, `/append/<path>`), as the chat's own
+## `/remove/<path>`, `/list/<path>`, `/append/<path>`, `/raw/<path>`,
+## `/links/<path>`), as the chat's own
 ## Roc never would, so the seam's check of each is seen; it publishes
 ## (`/publish/<key>`), counts (`/count/<topic>`), renders (`/render/<md>`),
 ## stores a message (`/store/<topic>`), appends a feed's entry and says one that failed (`/entry/<path>`), and asks
@@ -63,6 +64,10 @@ handle! = |req|
 				Chat.respond(200, [], Str.to_utf8("said"))
 			}
 		}
+	} else if starts(req.sub, "/raw/") {
+		Chat.respond(200, [], done(Host.raw!(List.drop_first(req.sub, 5))))
+	} else if starts(req.sub, "/links/") {
+		Chat.respond(200, [], done(Host.links!(List.drop_first(req.sub, 7))))
 	} else if starts(req.sub, "/remove/") {
 		Chat.respond(200, [], done(Host.remove!(List.drop_first(req.sub, 8))))
 	} else if starts(req.sub, "/list/") {

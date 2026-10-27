@@ -165,7 +165,7 @@ in_topic! = |req, route, found| {
 				Chat.not_allowed(Get)
 			} else if route.tail == Page {
 				page!(route, found)
-			} else if Host.raw!(conv, route.topic) {
+			} else if Files.held_raw!(Paths.transcript_path({ key: found.key, topic: route.topic })) {
 				Chat.held_plain
 			} else {
 				Chat.not_found
@@ -498,7 +498,7 @@ links! = |rest|
 			Err(Failed) => Chat.answered
 			Ok(viewer) => {
 				src = Chrome.src_in(Host.srcs!({}))
-				if Host.links!({}) {
+				if Files.held_rendered!(Paths.links_path(Host.me!({}))) {
 					(before, after) = Pages.links_around(src, viewer)
 					Chat.held_html(before, after)
 				} else {

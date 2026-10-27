@@ -314,12 +314,13 @@ pub const Host = struct {
     header: *const fn (ctx: *anyopaque, name: []const u8) []const []const u8 = noHeader,
     /// Host.hostile!.
     hostile: *const fn (ctx: *anyopaque, markdown: []const u8) route_mod.Hostility = noHostile,
-    /// Host.raw!: whether the host holds topic `sid`'s transcript in
-    /// `conv`, for a `held` answer.
-    raw: *const fn (ctx: *anyopaque, conv: Conv, sid: []const u8) bool = noRaw,
-    /// Host.links!: whether the host holds the member's links page
-    /// rendered, for a `held` answer.
-    links: *const fn (ctx: *anyopaque) bool = noHeld,
+    /// Host.raw!: whether the host holds the bytes of the file at `path`
+    /// under the chat root (the seam has checked it), for a `held` answer.
+    raw: *const fn (ctx: *anyopaque, path: []const u8) bool = noRaw,
+    /// Host.links!: whether the host holds the file at `path` under the
+    /// chat root (the seam has checked it) rendered as the server's own
+    /// markdown, for a `held` answer.
+    links: *const fn (ctx: *anyopaque, path: []const u8) bool = noHeld,
     /// Host.recent!: the member's recent rows, or none.
     recent: *const fn (ctx: *anyopaque) []const RecentRow = noRecent,
 };
@@ -333,10 +334,10 @@ fn noAppendLine(_: *anyopaque, _: []const u8, _: []const u8) bool {
 fn noCount(_: *anyopaque, _: Conv, _: []const u8) Count {
     @panic("message_count asked of a host that does not answer it");
 }
-fn noHeld(_: *anyopaque) bool {
+fn noHeld(_: *anyopaque, _: []const u8) bool {
     @panic("links asked of a host that does not answer it");
 }
-fn noRaw(_: *anyopaque, _: Conv, _: []const u8) bool {
+fn noRaw(_: *anyopaque, _: []const u8) bool {
     @panic("raw asked of a host that does not answer it");
 }
 fn noRead(_: *anyopaque, _: []const u8) Read {
@@ -456,7 +457,7 @@ pub const Routing = struct {
     fn nothing(_: *anyopaque) []const RecentRow {
         return &.{};
     }
-    fn holdsNone(_: *anyopaque) bool {
+    fn holdsNone(_: *anyopaque, _: []const u8) bool {
         return false;
     }
     fn noFile(_: *anyopaque, _: []const u8) Read {
@@ -685,9 +686,10 @@ export fn roc_chat_hostile(markdown: RocBytes) callconv(.c) route_mod.Hostility 
     return h.hostile(h.ctx, markdown.slice());
 }
 
-export fn roc_chat_raw(conv: ConvRec, sid: RocBytes) callconv(.c) bool {
+export fn roc_chat_raw(path: RocBytes) callconv(.c) bool {
     const h = current("raw");
-    return h.raw(h.ctx, .of(conv), sid.slice());
+    if (!underRoot(h, path.slice())) return false;
+    return h.raw(h.ctx, path.slice());
 }
 
 export fn roc_chat_recent() callconv(.c) RecentList {
@@ -695,9 +697,10 @@ export fn roc_chat_recent() callconv(.c) RecentList {
     return .from(h.recent(h.ctx));
 }
 
-export fn roc_chat_links() callconv(.c) bool {
+export fn roc_chat_links(path: RocBytes) callconv(.c) bool {
     const h = current("links");
-    return h.links(h.ctx);
+    if (!underRoot(h, path.slice())) return false;
+    return h.links(h.ctx, path.slice());
 }
 
 export fn roc_chat_srcs() callconv(.c) SrcList {

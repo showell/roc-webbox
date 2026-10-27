@@ -161,15 +161,17 @@ Host := [].{
 	## A request header's value, or none (read before the body).
 	header! : List(U8) => List(List(U8))
 
-	## Whether topic `sid` of `conv` has a transcript: the host reads it and
-	## holds it for the answer (Chat.held_plain), never handing it to Roc
-	## (false when the read failed, too).
-	raw! : Chat.Conv, List(U8) => Bool
+	## Whether the file at `path` under the chat root (checked as `read!`'s
+	## is) is there: the host reads it and holds its bytes for the answer
+	## (Chat.held_plain), never handing them to Roc (false when the read
+	## failed, too).
+	raw! : List(U8) => Bool
 
-	## Whether the member has a links page (users/<uid>/links.md): the host
-	## renders it as the server's own markdown and holds it for the answer
-	## (Chat.held_html) (false when the read failed, too).
-	links! : {} => Bool
+	## Whether the file at `path` under the chat root (checked as `read!`'s
+	## is) is there: the host renders it as the server's own markdown and
+	## holds it for the answer (Chat.held_html) (false when the read failed,
+	## too).
+	links! : List(U8) => Bool
 
 	## The member's recent feed as gathered (angry-gopher recent.zig
 	## `gatherRows`), each field as the host writes it: `secs` a signed

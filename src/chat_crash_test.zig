@@ -41,6 +41,8 @@ const Files = struct {
         h.read = read;
         h.write = write;
         h.remove = remove;
+        h.raw = raw;
+        h.links = links;
         h.list = list;
         h.fail = fail;
         h.fail_account = failAccount;
@@ -164,6 +166,14 @@ const Files = struct {
         say(ctx, "remove", path);
         return true;
     }
+    fn raw(ctx: *anyopaque, path: []const u8) bool {
+        say(ctx, "raw", path);
+        return true;
+    }
+    fn links(ctx: *anyopaque, path: []const u8) bool {
+        say(ctx, "links", path);
+        return true;
+    }
     fn fail(ctx: *anyopaque, e: anyerror) void {
         if (of(ctx).failed == null) of(ctx).failed = e;
     }
@@ -188,8 +198,10 @@ test "a path that would leave the chat root fails the request at the seam, the h
     roc.use(arena.allocator());
     defer roc.deinit();
     // Outside the root, by every way out: the request fails, nothing asked.
-    for ([_][]const u8{ "/read/../x", "/read//etc/passwd", "/read/", "/read/users/../../x", "/write/../x", "/write//etc/passwd", "/write/", "/remove/users/../../x", "/remove/" }) |sub|
+    for ([_][]const u8{ "/read/../x", "/read//etc/passwd", "/read/", "/read/users/../../x", "/write/../x", "/write//etc/passwd", "/write/", "/remove/users/../../x", "/remove/", "/raw/../x", "/raw//etc/passwd", "/raw/", "/links/users/../../x", "/links//etc/passwd" }) |sub|
         try probe(sub, "failed", "", error.PathOutsideChatRoot);
+    try probe("/raw/1_2/sessions/Plans.md", "done", "raw 1_2/sessions/Plans.md;", null);
+    try probe("/links/users/1/links.md", "done", "links users/1/links.md;", null);
     // Under it: the host's, each answer as it gave it.
     try probe("/read/users/1/ok", "found hi", "read users/1/ok;", null);
     try probe("/read/users/1/gone", "missing", "read users/1/gone;", null);

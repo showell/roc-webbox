@@ -41,6 +41,17 @@ Files := [].{
 	append_entry! : Paths.ChatPath, List(U8), List(U8) => { fault : U16, status : [Appended, Failed] }
 	append_entry! = |path, separator, entry| Host.append_entry!(Paths.bytes(path), separator, entry)
 
+	## Host.raw!: whether the file is there, the host holding its bytes for
+	## the answer (Chat.held_plain); false when the read failed, too.
+	held_raw! : Paths.ChatPath => Bool
+	held_raw! = |path| Host.raw!(Paths.bytes(path))
+
+	## Host.links!: whether the file is there, the host holding it rendered
+	## as the server's own markdown for the answer (Chat.held_html); false
+	## when the read or the render failed, too.
+	held_rendered! : Paths.ChatPath => Bool
+	held_rendered! = |path| Host.links!(Paths.bytes(path))
+
 	## Host.list!'s answer as one tag: the folder's entries, nothing there,
 	## or a listing that failed (the request has failed). **MISSING AND
 	## FAILED ARE NEVER ONE ANSWER** here; a caller may hold both empty.

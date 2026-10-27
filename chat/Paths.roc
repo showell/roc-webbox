@@ -391,8 +391,12 @@ Paths := [].{
 		)
 
 	## A topic's transcript: {conv_dir}/sessions/<topic>.md.
-	transcript_path : TopicAt -> List(U8)
-	transcript_path = |at| transcript_path_bytes({ dir: conv_dir(at.key), topic: at.topic })
+	transcript_path : TopicAt -> ChatPath
+	transcript_path = |at| ChatPath.(transcript_path_bytes({ dir: conv_dir(at.key), topic: at.topic }))
+
+	## The member's links page (the links route's file): users/<uid>/links.md.
+	links_path : List(U8) -> ChatPath
+	links_path = |uid| ChatPath.(join([Str.to_utf8("users"), uid, Str.to_utf8("links.md")]))
 
 	## transcript_path's core, from the conversation's folder as bytes: the
 	## twins feed it any (production: transcript_path).
@@ -438,8 +442,8 @@ expect match (Paths.pair_key_of(Str.to_utf8("3_7")), Paths.channel_name(Str.to_u
 			and (Paths.bytes(Paths.topics_folder(channel)) == Str.to_utf8("channels/general/sessions"))
 				and (Paths.bytes(Paths.reactions_path({ key: dm, topic: Str.to_utf8("ChitChat") })) == Str.to_utf8("3_7/sessions/ChitChat.reactions.jsonl"))
 					and (Paths.bytes(Paths.reactions_path({ key: channel, topic: Str.to_utf8("road-trip") })) == Str.to_utf8("channels/general/sessions/road-trip.reactions.jsonl"))
-						and (Paths.transcript_path({ key: dm, topic: Str.to_utf8("ChitChat") }) == Str.to_utf8("3_7/sessions/ChitChat.md"))
-							and (Paths.transcript_path({ key: channel, topic: Str.to_utf8("road-trip") }) == Str.to_utf8("channels/general/sessions/road-trip.md"))
+						and (Paths.bytes(Paths.transcript_path({ key: dm, topic: Str.to_utf8("ChitChat") })) == Str.to_utf8("3_7/sessions/ChitChat.md"))
+							and (Paths.bytes(Paths.transcript_path({ key: channel, topic: Str.to_utf8("road-trip") })) == Str.to_utf8("channels/general/sessions/road-trip.md"))
 								and (Paths.conv_dir(dm) == Str.to_utf8("3_7"))
 									and (Paths.conv_dir(channel) == Str.to_utf8("channels/general"))
 	}
@@ -556,3 +560,4 @@ expect Paths.bytes(Paths.reactions_path_bytes({ dir: Str.to_utf8("channels/../..
 expect Paths.transcript_path_bytes({ dir: [], topic: [] }) == Str.to_utf8("sessions/.md")
 expect Paths.bytes(Paths.last_session_path_bytes({ uid: Str.to_utf8("3"), conv: Str.to_utf8("../../x") })) == Str.to_utf8("users/3/last-sessions/../../x")
 expect Paths.bytes(Paths.feed_path(Str.to_utf8("/etc"), Code)) == Str.to_utf8("users/etc/code.md")
+expect Paths.bytes(Paths.links_path(Str.to_utf8("3"))) == Str.to_utf8("users/3/links.md")

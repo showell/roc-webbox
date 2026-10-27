@@ -258,12 +258,12 @@ const Scripted = struct {
         say(ctx, "hostile {s}", .{markdown});
         return me(ctx).hostile_answer;
     }
-    fn raw(ctx: *anyopaque, conv: Conv, sid: []const u8) bool {
-        say(ctx, "raw {s} {s}", .{ conv.key, sid });
+    fn raw(ctx: *anyopaque, path: []const u8) bool {
+        say(ctx, "raw {s}", .{path});
         return me(ctx).transcript;
     }
-    fn links(ctx: *anyopaque) bool {
-        say(ctx, "links", .{});
+    fn links(ctx: *anyopaque, path: []const u8) bool {
+        say(ctx, "links {s}", .{path});
         return me(ctx).linked;
     }
     fn srcs(ctx: *anyopaque) []const abi.Src {
@@ -839,13 +839,13 @@ test "a topic's raw transcript and /chat/links are the Roc's: a transcript the h
     use(testing.allocator);
     defer @import("roc_abi.zig").deinit();
     const a: Scripted = .{ .alloc = undefined };
-    try expectAct("/c/1_2/Plans/raw", false, .GET, a, .{ .held = .{ .status = 200, .content_type = "text/plain; charset=utf-8", .nosniff = true } }, dm_topic ++ "raw 1_2 Plans;");
+    try expectAct("/c/1_2/Plans/raw", false, .GET, a, .{ .held = .{ .status = 200, .content_type = "text/plain; charset=utf-8", .nosniff = true } }, dm_topic ++ "raw 1_2/sessions/Plans.md;");
     // Found as a topic, but the host read no transcript (gone since).
     try expectAct("/c/1_2/Plans/raw", false, .HEAD, blk: {
         var s = a;
         s.transcript = false;
         break :blk s;
-    }, .not_found, dm_topic ++ "raw 1_2 Plans;");
+    }, .not_found, dm_topic ++ "raw 1_2/sessions/Plans.md;");
     try expectAct("/c/1_2/Plans/raw", false, .POST, a, .{ .not_allowed = .GET }, dm_topic);
     // /chat/links asks the viewer, the scripts, then the page; below it, nothing.
     try expectAct("/links/x", false, .GET, a, .not_found, "member;presence;");
