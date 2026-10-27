@@ -88,10 +88,10 @@ call = |req| {
 		25 => [Frame.message({ index: u64(arg(0)), from: arg(1), from_uid: arg(2), at: arg(3), html: arg(4), markdown: arg(5), id: arg(6), cid: arg(7) })]
 		26 => [Frame.reaction(arg(0))]
 		27 =>
-			match Form.field(arg(0), arg(1)) {
-				Found(v) => [[70], v]
-				Missing => []
-				Malformed => [[77]]
+			match Str.from_utf8(arg(1)).map_ok(|name| Form.field(arg(0), name)) {
+				Ok(Found(v)) => [[70], Str.to_utf8(v)]
+				Ok(Missing) => []
+				Ok(Malformed) | Err(_) => [[77]]
 			}
 		28 =>
 			match Reaction.form(arg(0)) {

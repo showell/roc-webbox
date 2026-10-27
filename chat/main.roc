@@ -49,6 +49,12 @@ import Fanout
 
 handle! : Chat.Request => Chat.Answer
 handle! = |req|
+	# **A PATH IS TEXT AT THE DOOR**: one that is not UTF-8 is the site's 400
+	# for a malformed request, before anything else reads it.
+	if Str.from_utf8(req.sub).is_err() Chat.malformed else routed!(req)
+
+routed! : Chat.Request => Chat.Answer
+routed! = |req|
 	match (if req.area == Channel Err(NotAnAsset) else Route.asset(req.sub)) {
 		Ok(route) => Chat.zig(route, Uncounted)
 		Err(NotAnAsset) =>
@@ -785,9 +791,9 @@ new_topic! = |req, route, key|
 				if body.status == Answered {
 					Chat.answered
 				} else {
-					match Form.field(body.bytes, Str.to_utf8("topic")) {
+					match Form.field(body.bytes, "topic") {
 						Malformed => Chat.malformed
-						Found(raw) => make!(key, conv, who, ZigText.trim(raw))
+						Found(raw) => make!(key, conv, who, ZigText.trim(Str.to_utf8(raw)))
 						Missing => make!(key, conv, who, [])
 					}
 				}
@@ -873,14 +879,14 @@ sent! = |req, route, at, conv, who|
 		if body.status == Answered {
 			Chat.answered
 		} else {
-			match Form.field(body.bytes, Str.to_utf8("markdown")) {
+			match Form.field(body.bytes, "markdown") {
 				Malformed => Chat.malformed
 				Missing => refuse("not sent: no message (the form has no markdown field)\n")
 				Found(md) =>
-					match Form.field(body.bytes, Str.to_utf8("cid")) {
+					match Form.field(body.bytes, "cid") {
 						Malformed => Chat.malformed
-						Found(cid) => store!(at, conv, who, send, { markdown: md, cid })
-						Missing => store!(at, conv, who, send, { markdown: md, cid: [] })
+						Found(cid) => store!(at, conv, who, send, { markdown: Str.to_utf8(md), cid: Str.to_utf8(cid) })
+						Missing => store!(at, conv, who, send, { markdown: Str.to_utf8(md), cid: [] })
 					}
 			}
 		}
@@ -894,15 +900,14 @@ refuse = |why| Chat.respond(400, [], Str.to_utf8(why))
 ## a Draft once the message is judged and its author's name read.
 Posted : { markdown : List(U8), cid : List(U8) }
 
-## The message judged, then stored: empty, not UTF-8 text, or hostile is
-## refused; the bookmark (a DM's) before the store, so one that fails
-## stores nothing; then 204 for an async sender, else back to the topic.
+## The message judged, then stored: empty or hostile is refused (one that
+## is not UTF-8 text the form refused); the bookmark (a DM's) before the
+## store, so one that fails stores nothing; then 204 for an async sender,
+## else back to the topic.
 store! : Paths.TopicAt, Chat.Conv, Who, [Async, Sync], Posted => Chat.Answer
 store! = |at, conv, who, send, { markdown: md, cid }|
 	if ZigText.trim(md) == [] {
 		refuse("not sent: the message is empty\n")
-	} else if Str.from_utf8(md).is_err() {
-		refuse("not sent: the message is not UTF-8 text\n")
 	} else if Host.hostile!(md) != Fine {
 		Chat.answered
 	} else {

@@ -100,11 +100,17 @@ test "the router: a topic's tails, a channel, an asset before the gate, the gate
     try expectRoute("/docsX", false, .{ .family = .not_found }, true);
     try expectRoute("/searchX", false, .{ .family = .search, .rest = "X" }, true);
     try expectRoute("/chat.js", false, .{ .family = .asset, .rest = "chat.js" }, false);
-    // Bytes that are not UTF-8 come back as they went.
-    try expectRoute("/docs/\xff\xfe", false, .{ .family = .docs, .rest = "/\xff\xfe" }, true);
+    try expectRoute("/docs/caf\xc3\xa9/\xf0\x9f\x91\x8d", false, .{ .family = .docs, .rest = "/caf\xc3\xa9/\xf0\x9f\x91\x8d" }, true);
 
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
+    // **A PATH THAT IS NOT UTF-8 IS REFUSED AT THE DOOR**: the site's 400,
+    // before anyone is asked anything.
+    for ([_]bool{ false, true }) |channel| {
+        var routing: Routing = .{};
+        const bad = try decide(arena.allocator(), "/docs/\xff\xfe", channel, .GET, routing.host());
+        try testing.expect(bad == .malformed_form and !routing.marked);
+    }
     const away = try decide(arena.allocator(), "/c/1_2/general", false, .GET, answer(false));
     try testing.expectEqualStrings("/login/full?next=/chat/c/1_2/general", away.redirect);
     const asset = try decide(arena.allocator(), "/chat.js", false, .GET, answer(false));
@@ -406,9 +412,15 @@ test "a topic's reactions, react, pin and unpin are the Roc's: presence, the con
     }, .{ .respond = .{ .status = 400, .body = "react: msg must be a message number\n" } }, dm_topic ++ "body;");
     try expectAct("/c/1_2/Plans/react", false, .POST, blk: {
         var s = a;
-        s.body = "msg=1&emoji=%F0";
+        s.body = "msg=1&emoji=a";
         break :blk s;
     }, .{ .respond = .{ .status = 400, .body = "react: emoji must be one glyph\n" } }, dm_topic ++ "body;");
+    // A field that is not UTF-8 (a torn emoji) is a malformed form at the door.
+    try expectAct("/c/1_2/Plans/react", false, .POST, blk: {
+        var s = a;
+        s.body = "msg=1&emoji=%F0";
+        break :blk s;
+    }, .malformed_form, dm_topic ++ "body;");
     try expectAct("/c/1_2/Plans/react", false, .POST, blk: {
         var s = a;
         s.body = "msg=1&msg=2&emoji=%F0%9F%91%8D";
@@ -807,7 +819,8 @@ test "a send is the Roc's: the conversation, the method, the header, the body, t
         const s = sent(dm_said, "1_2", "Plans", "Steve", "hi", "c-1");
         break :blk s.count ++ s.render ++ s.store;
     });
-    // Judged by the Roc before the host is asked to: empty, not UTF-8.
+    // Judged by the Roc before the host is asked to: empty; not UTF-8, which
+    // the form's door refuses as malformed.
     try expectAct("/c/1_2/Plans/send", false, .POST, blk: {
         var s = a;
         s.body = "markdown=%20%0A";
@@ -817,7 +830,7 @@ test "a send is the Roc's: the conversation, the method, the header, the body, t
         var s = a;
         s.body = "markdown=%FF";
         break :blk s;
-    }, .{ .respond = .{ .status = 400, .body = "not sent: the message is not UTF-8 text\n" } }, asked);
+    }, .malformed_form, asked);
     // No conversation to send to: back to the Zig, which says why.
     try expectAct("/c/1_2/Plans/send", false, .POST, blk: {
         var s = a;

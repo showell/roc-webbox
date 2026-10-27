@@ -52,7 +52,7 @@ Reaction := [].{
 	## malformed whichever it is.
 	form : List(U8) -> Answer
 	form = |body|
-		match (Form.field(body, Str.to_utf8("msg")), Form.field(body, Str.to_utf8("emoji")), Form.field(body, Str.to_utf8("on"))) {
+		match (Form.field(body, "msg"), Form.field(body, "emoji"), Form.field(body, "on")) {
 			(Malformed, _, _) | (_, Malformed, _) | (_, _, Malformed) => Malformed
 			(m, e, o) => {
 				msg_s = found_or(m, [])
@@ -72,7 +72,7 @@ Reaction := [].{
 
 	found_or : Form.Field, List(U8) -> List(U8)
 	found_or = |f, default| match f {
-		Found(v) => v
+		Found(v) => Str.to_utf8(v)
 		_ => default
 	}
 
