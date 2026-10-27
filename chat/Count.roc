@@ -21,13 +21,9 @@ Count := [].{
 	## topic's.
 	number_in : List(U8), List(U8) -> Try(U64, [None])
 	number_in = |id, sid|
-		if Bytes.starts_with(id, sid) {
-			match List.drop_first(id, List.len(sid)) {
-				[95, .. as rest] => ZigText.parse_u64(rest)
-				_ => Err(None)
-			}
-		} else {
-			Err(None)
+		match Bytes.strip_prefix(id, sid) {
+			Ok(['_', .. as rest]) => ZigText.parse_u64(rest)
+			_ => Err(None)
 		}
 
 	## indexOf: the number less one; message 0 is no message.
@@ -42,10 +38,10 @@ Count := [].{
 	## last message, the count still good.
 	parse : List(U8) -> Try(Counted, [None])
 	parse = |raw|
-		if List.last(raw) != Ok(10) {
+		if List.last(raw) != Ok('\n') {
 			Err(None)
 		} else {
-			lines = Bytes.split_byte(raw, 10)
+			lines = Bytes.split_byte(raw, '\n')
 			match tokens(List.first(lines) ?? []) {
 				[c, s] =>
 					match (ZigText.parse_u64(c), ZigText.parse_u64(s)) {
@@ -68,14 +64,14 @@ Count := [].{
 
 	## std.mem.tokenizeScalar on a space: the runs between, none empty.
 	tokens : List(U8) -> List(List(U8))
-	tokens = |line| List.keep_if(Bytes.split_byte(line, 32), |t| t != [])
+	tokens = |line| List.keep_if(Bytes.split_byte(line, ' '), |t| t != [])
 
 	## countText: what a send writes, nobody as `-`.
 	text : U64, U64, Last -> List(U8)
 	text = |count, size, last| {
 		head = Str.to_utf8("${U64.to_str(count)} ${U64.to_str(size)}\n")
 		match last {
-			Known(l) => List.join([head, Str.to_utf8(U64.to_str(l.offset)), [32], if l.uid == [] no_uid else l.uid, [10]])
+			Known(l) => List.join([head, Str.to_utf8(U64.to_str(l.offset)), [' '], if l.uid == [] no_uid else l.uid, ['\n']])
 			Unknown => head
 		}
 	}

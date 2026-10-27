@@ -25,7 +25,7 @@ Time := [].{
 	unix_from_rfc3339 : List(U8) -> Try(I64, [None])
 	unix_from_rfc3339 = |t| {
 		at = |i| List.get(t, i) ?? 0
-		if List.len(t) < 20 or at(4) != 45 or at(7) != 45 or (at(10) != 84 and at(10) != 116) or at(13) != 58 or at(16) != 58 {
+		if List.len(t) < 20 or at(4) != '-' or at(7) != '-' or (at(10) != 'T' and at(10) != 't') or at(13) != ':' or at(16) != ':' {
 			Err(None)
 		} else {
 			match (digits(t, 0, 4), digits(t, 5, 2), digits(t, 8, 2), digits(t, 11, 2), digits(t, 14, 2), digits(t, 17, 2)) {
@@ -46,7 +46,7 @@ Time := [].{
 	offset_of : List(U8) -> Try(I64, [None])
 	offset_of = |rest0| {
 		rest = match rest0 {
-			[46, .. as frac] => {
+			['.', .. as frac] => {
 				n = count_digits(frac, 0)
 				if n == 0 Err(None) else Ok(List.drop_first(frac, n))
 			}
@@ -54,15 +54,15 @@ Time := [].{
 		}
 		match rest {
 			Err(None) => Err(None)
-			Ok([90]) | Ok([122]) => Ok(0)
-			Ok([sign, _, _, 58, _, _]) if sign == 43 or sign == 45 => {
+			Ok(['Z']) | Ok(['z']) => Ok(0)
+			Ok([sign, _, _, ':', _, _]) if sign == '+' or sign == '-' => {
 				r = rest ?? []
 				match (digits(r, 1, 2), digits(r, 4, 2)) {
 					(Ok(oh), Ok(om)) =>
 						if oh > 23 or om > 59 {
 							Err(None)
 						} else {
-							Ok((oh * 3600 + om * 60) * (if sign == 43 1 else -1))
+							Ok((oh * 3600 + om * 60) * (if sign == '+' 1 else -1))
 						}
 					_ => Err(None)
 				}
@@ -73,7 +73,7 @@ Time := [].{
 
 	count_digits : List(U8), U64 -> U64
 	count_digits = |l, n| match List.get(l, n) {
-		Ok(c) if c >= 48 and c <= 57 => count_digits(l, n + 1)
+		Ok(c) if c >= '0' and c <= '9' => count_digits(l, n + 1)
 		_ => n
 	}
 
@@ -81,10 +81,10 @@ Time := [].{
 	digits : List(U8), U64, U64 -> Try(I64, [None])
 	digits = |t, start, len| {
 		piece = List.sublist(t, { start, len })
-		if List.len(piece) != len or !List.all(piece, |c| c >= 48 and c <= 57) {
+		if List.len(piece) != len or !List.all(piece, |c| c >= '0' and c <= '9') {
 			Err(None)
 		} else {
-			Ok(List.fold(piece, 0, |n, c| n * 10 + U8.to_i64(c - 48)))
+			Ok(List.fold(piece, 0, |n, c| n * 10 + U8.to_i64(c - '0')))
 		}
 	}
 

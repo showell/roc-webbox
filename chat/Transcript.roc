@@ -38,7 +38,10 @@ Transcript := [].{
 	decode_block : List(U8) -> Msg
 	decode_block = |piece| {
 		first = line_at(piece, 0)
-		(id, start) = if Bytes.starts_with(first, msg_prefix) (List.drop_first(first, 4), List.len(first) + 1) else ([], 0)
+		(id, start) = match Bytes.strip_prefix(first, msg_prefix) {
+			Ok(rest) => (rest, List.len(first) + 1)
+			Err(NoMatch) => ([], 0)
+		}
 		headers(piece, start, { id, from: [], at: [], uid: [], markdown: [] })
 	}
 
@@ -51,7 +54,7 @@ Transcript := [].{
 
 	line_len : List(U8), U64, U64 -> U64
 	line_len = |piece, at, n| match List.get(piece, at + n) {
-		Ok(c) if c != 10 => line_len(piece, at, n + 1)
+		Ok(c) if c != '\n' => line_len(piece, at, n + 1)
 		_ => n
 	}
 
@@ -87,10 +90,10 @@ Transcript := [].{
 	## is the bytes it was.
 	unescape_body : List(U8) -> List(U8)
 	unescape_body = |body|
-		if Bytes.find(body, escaped_dashes, 0) == Err(None) body else Bytes.join_lines(List.map(Bytes.split_byte(body, 10), unescape_line))
+		if Bytes.find(body, escaped_dashes, 0) == Err(None) body else Bytes.join_lines(List.map(Bytes.split_byte(body, '\n'), unescape_line))
 
 	escaped_dashes : List(U8)
-	escaped_dashes = List.prepend(dashes, 92)
+	escaped_dashes = List.prepend(dashes, '\\')
 
 	## chatStoredForm: what message `index` adds to the file, its block after
 	## `sep` for every message but the first.
@@ -101,7 +104,7 @@ Transcript := [].{
 	## line, the body with each line escaped.
 	encode_block : Msg -> List(U8)
 	encode_block = |m| {
-		body = if Bytes.find(m.markdown, dashes, 0) == Err(None) m.markdown else Bytes.join_lines(List.map(Bytes.split_byte(m.markdown, 10), escape_line))
+		body = if Bytes.find(m.markdown, dashes, 0) == Err(None) m.markdown else Bytes.join_lines(List.map(Bytes.split_byte(m.markdown, '\n'), escape_line))
 		head = List.join([Str.to_utf8("MSG_"), m.id, Str.to_utf8("\nfrom: "), m.from, Str.to_utf8("\ndate: "), m.at])
 		uid = if m.uid == [] [] else List.concat(Str.to_utf8("\nuid: "), m.uid)
 		List.join([head, uid, Str.to_utf8("\n\n"), body])
@@ -117,15 +120,15 @@ Transcript := [].{
 	## A line of one or more backslashes then exactly the dashes loses one.
 	unescape_line : List(U8) -> List(U8)
 	unescape_line = |line| {
-		k = Bytes.leading(line, 92, 0)
+		k = Bytes.leading(line, '\\', 0)
 		if k >= 1 and List.drop_first(line, k) == dashes List.drop_first(line, 1) else line
 	}
 
 	## A line of any backslashes then exactly the dashes gains one.
 	escape_line : List(U8) -> List(U8)
 	escape_line = |line| {
-		k = Bytes.leading(line, 92, 0)
-		if List.drop_first(line, k) == dashes List.prepend(line, 92) else line
+		k = Bytes.leading(line, '\\', 0)
+		if List.drop_first(line, k) == dashes List.prepend(line, '\\') else line
 	}
 
 }

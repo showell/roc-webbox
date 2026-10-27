@@ -14,11 +14,11 @@ JsonText := [].{
 
 	## An object of `fields`, in order: `{"name":value,...}`.
 	obj : List((Str, List(U8))) -> List(U8)
-	obj = |fields| List.join([[123], comma(List.map(fields, |(name, value)| List.concat(Str.to_utf8("\"${name}\":"), value))), [125]])
+	obj = |fields| List.join([['{'], comma(List.map(fields, |(name, value)| List.concat(Str.to_utf8("\"${name}\":"), value))), ['}']])
 
 	## An array of values, in order: `[a,b]`.
 	arr : List(List(U8)) -> List(U8)
-	arr = |items| List.join([[91], comma(items), [93]])
+	arr = |items| List.join([['['], comma(items), [']']])
 
 	## A string field, or none when `s` is empty (an encoder that leaves an
 	## empty field out): for `obj(List.join([..., opt("url", key), ...]))`.
@@ -26,5 +26,5 @@ JsonText := [].{
 	opt = |name, s| if s == [] [] else [(name, str(s))]
 
 	comma : List(List(U8)) -> List(U8)
-	comma = |items| List.join(List.intersperse(items, [44]))
+	comma = |items| List.join(List.intersperse(items, [',']))
 }

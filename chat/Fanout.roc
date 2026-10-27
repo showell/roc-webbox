@@ -103,15 +103,15 @@ Fanout := [].{
 	## The topic's page: the conversation's URL root (Feeds.base_url,
 	## convKeyBaseURL), then the topic.
 	topic_url : List(U8), List(U8) -> List(U8)
-	topic_url = |key, sid| List.join([Feeds.base_url(key), [47], sid])
+	topic_url = |key, sid| List.join([Feeds.base_url(key), ['/'], sid])
 
 	## The status strip's line: a DM's "X sent you a message on <sid>.", a
 	## channel's "X posted to <key> > <sid>.".
 	notify_text : [Dm, Channel], List(U8), List(U8), List(U8) -> List(U8)
 	notify_text = |kind, from, key, sid|
 		match kind {
-			Dm => List.join([from, Str.to_utf8(" sent you a message on "), sid, [46]])
-			Channel => List.join([from, Str.to_utf8(" posted to "), key, Str.to_utf8(" > "), sid, [46]])
+			Dm => List.join([from, Str.to_utf8(" sent you a message on "), sid, ['.']])
+			Channel => List.join([from, Str.to_utf8(" posted to "), key, Str.to_utf8(" > "), sid, ['.']])
 		}
 
 	## The notify stream's event: conv, session, text, link_url.

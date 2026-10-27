@@ -10,7 +10,7 @@ Paths := [].{
 	## without a leading zero, the smaller first) and `user` is one of them.
 	participant : List(U8), List(U8) -> Bool
 	participant = |key, user|
-		match cut_first(key, 95) {
+		match cut_first(key, '_') {
 			Err(None) => Bool.False
 			Ok((x, y)) =>
 				canonical_uid(x) and canonical_uid(y) and pair_key(x, y) == key and (user == x or user == y)
@@ -21,15 +21,15 @@ Paths := [].{
 	pair_key : List(U8), List(U8) -> List(U8)
 	pair_key = |a, b|
 		if atoi_or0(a) <= atoi_or0(b) {
-			List.concat(List.append(a, 95), b)
+			List.concat(List.append(a, '_'), b)
 		} else {
-			List.concat(List.append(b, 95), a)
+			List.concat(List.append(b, '_'), a)
 		}
 
 	## A uid as allocateUser writes one: digits, the first not zero.
 	canonical_uid : List(U8) -> Bool
 	canonical_uid = |s| match s {
-		[first, ..] => first != 48 and List.all(s, |c| c >= 48 and c <= 57)
+		[first, ..] => first != '0' and List.all(s, |c| c >= '0' and c <= '9')
 		[] => Bool.False
 	}
 
@@ -45,13 +45,13 @@ Paths := [].{
 	valid_topic_id : List(U8) -> Bool
 	valid_topic_id = |sid| {
 		n = List.len(sid)
-		if n == 0 or n > 80 or List.first(sid) == Ok(45) or List.last(sid) == Ok(45) {
+		if n == 0 or n > 80 or List.first(sid) == Ok('-') or List.last(sid) == Ok('-') {
 			Bool.False
 		} else {
 			(ok, _) = List.fold(sid, (Bool.True, Bool.False), |(good, prev_hyphen), c|
 				if !good {
 					(Bool.False, prev_hyphen)
-				} else if c == 45 {
+				} else if c == '-' {
 					(!prev_hyphen, Bool.True)
 				} else {
 					(is_alnum(c), Bool.False)
@@ -65,7 +65,7 @@ Paths := [].{
 	valid_channel_name : List(U8) -> Bool
 	valid_channel_name = |name| match name {
 		[first, .. as more] =>
-			List.len(name) <= 40 and is_alpha(first) and List.all(more, |c| is_alnum(c) or c == 45)
+			List.len(name) <= 40 and is_alpha(first) and List.all(more, |c| is_alnum(c) or c == '-')
 		[] => Bool.False
 	}
 
@@ -73,10 +73,10 @@ Paths := [].{
 	## message's decimal number, cut at the last `_`.
 	valid_msg_ref_id : List(U8) -> Bool
 	valid_msg_ref_id = |id|
-		match cut_last(id, 95) {
+		match cut_last(id, '_') {
 			Err(None) => Bool.False
 			Ok((left, right)) =>
-				left != [] and right != [] and List.all(left, |c| is_alnum(c) or c == 45) and List.all(right, |c| c >= 48 and c <= 57)
+				left != [] and right != [] and List.all(left, |c| is_alnum(c) or c == '-') and List.all(right, |c| c >= '0' and c <= '9')
 		}
 
 	## firstOf: "ChitChat" when there, else the first (the list is sorted),
@@ -140,12 +140,12 @@ Paths := [].{
 	## what a line meant: whoever wrote the file fixes it.
 	channel_members : List(U8) -> Try(List(List(U8)), [Malformed])
 	channel_members = |file|
-		List.fold(Bytes.split_byte(file, 10), Ok([]), |acc, raw|
+		List.fold(Bytes.split_byte(file, '\n'), Ok([]), |acc, raw|
 			match acc {
 				Err(Malformed) => acc
 				Ok(out) => {
 					line = trim_line(raw)
-					if line == [] or List.first(line) == Ok(35) {
+					if line == [] or List.first(line) == Ok('#') {
 						acc
 					} else if !canonical_uid(line) or List.contains(out, line) {
 						Err(Malformed)
@@ -159,7 +159,7 @@ Paths := [].{
 	## has none of those).
 	trim_line : List(U8) -> List(U8)
 	trim_line = |s| {
-		ws = |c| c == 32 or c == 9 or c == 13
+		ws = |c| c == ' ' or c == '\t' or c == '\r'
 		front = List.drop_first(s, ZigText.count_while(s, ws, 0))
 		List.drop_last(front, ZigText.count_back_while(front, ws, 0))
 	}
@@ -223,14 +223,14 @@ Paths := [].{
 			if out == [] {
 				p
 			} else {
-				end = List.last(out) == Ok(47)
-				start = List.first(p) == Ok(47)
+				end = List.last(out) == Ok('/')
+				start = List.first(p) == Ok('/')
 				if end and start {
 					List.concat(out, List.drop_first(p, 1))
 				} else if end or start {
 					List.concat(out, p)
 				} else {
-					List.concat(List.append(out, 47), p)
+					List.concat(List.append(out, '/'), p)
 				}
 			})
 
@@ -239,10 +239,10 @@ Paths := [].{
 	transcript_path = |conv_dir, sid| join([conv_dir, Str.to_utf8("sessions"), List.concat(sid, Str.to_utf8(".md"))])
 
 	is_alpha : U8 -> Bool
-	is_alpha = |c| (c >= 65 and c <= 90) or (c >= 97 and c <= 122)
+	is_alpha = |c| (c >= 'A' and c <= 'Z') or (c >= 'a' and c <= 'z')
 
 	is_alnum : U8 -> Bool
-	is_alnum = |c| is_alpha(c) or (c >= 48 and c <= 57)
+	is_alnum = |c| is_alpha(c) or (c >= '0' and c <= '9')
 
 	## The bytes before and after the first `sep`.
 	cut_first : List(U8), U8 -> Try((List(U8), List(U8)), [None])

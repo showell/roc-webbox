@@ -42,7 +42,7 @@ ChatState := [].{
 		if next == [] {
 			Remove
 		} else {
-			Write(List.join(List.map(Bytes.sort(next), |s| List.append(s, 10))))
+			Write(List.join(List.map(Bytes.sort(next), |s| List.append(s, '\n'))))
 		}
 	}
 
@@ -56,7 +56,7 @@ ChatState := [].{
 	## trim also takes newlines, which a line split on them has none of),
 	## blank ones dropped.
 	parse : List(U8) -> List(List(U8))
-	parse = |b| List.drop_if(List.map(Bytes.split_byte(b, 10), ZigText.trim), |s| s == [])
+	parse = |b| List.drop_if(List.map(Bytes.split_byte(b, '\n'), ZigText.trim), |s| s == [])
 
 	## The member's DM last in (lastUserConv's file).
 	last_conv_path : List(U8) -> List(U8)
@@ -99,5 +99,5 @@ ChatState := [].{
 
 	## A bookmark as written: the value and a newline.
 	bookmark_line : List(U8) -> List(U8)
-	bookmark_line = |value| List.append(value, 10)
+	bookmark_line = |value| List.append(value, '\n')
 }

@@ -122,7 +122,7 @@ Pages := [].{
 	conversation : (List(U8) -> List(U8)), Limits, View -> List(U8)
 	conversation = |src, limits, v| {
 		s = shell(src, v.title, v.viewer, [])
-		attr = |name, value| List.join([Str.to_utf8(" ${name}=\""), value, [34]])
+		attr = |name, value| List.join([Str.to_utf8(" ${name}=\""), value, ['"']])
 		num = |n| Str.to_utf8(U64.to_str(n))
 		Chrome.page(s, List.join([
 			Str.to_utf8(Chrome.chat_css),
@@ -161,7 +161,7 @@ Pages := [].{
 		room = |name|
 			JsonText.obj([("id", JsonText.str(prefixed("ch:", name))), ("label", JsonText.str(prefixed("# ", name))), ("url", JsonText.str(prefixed("/channel/", name))), ("active", JsonText.bool(!sb.dm and name == sb.key))])
 		topic = |s|
-			JsonText.obj([("id", JsonText.str(s)), ("label", JsonText.str(s)), ("url", JsonText.str(List.join([sb.base, [47], s]))), ("active", JsonText.bool(s == sb.sid))])
+			JsonText.obj([("id", JsonText.str(s)), ("label", JsonText.str(s)), ("url", JsonText.str(List.join([sb.base, ['/'], s]))), ("active", JsonText.bool(s == sb.sid))])
 		pinned = List.keep_if(sb.topics, |s| List.contains(sb.pins, s))
 		rest = List.drop_if(sb.topics, |s| List.contains(sb.pins, s))
 		Html.script_safe(JsonText.obj([
@@ -180,11 +180,11 @@ Pages := [].{
 	decode_sidebar = |fields| {
 		at = |i| List.get(fields, i) ?? []
 		n_others = ZigText.parse_u64(at(5)) ?? 0
-		others = List.sublist(fields, { start: 6, len: n_others }) |> List.map_with_index(|_, k| { id: at(6 + 3 * k), name: at(7 + 3 * k), online: at(8 + 3 * k) == [49] })
+		others = List.sublist(fields, { start: 6, len: n_others }) |> List.map_with_index(|_, k| { id: at(6 + 3 * k), name: at(7 + 3 * k), online: at(8 + 3 * k) == ['1'] })
 		(channels, after_channels) = counted(fields, 6 + 3 * n_others)
 		(pins, after_pins) = counted(fields, after_channels)
 		(topics, _) = counted(fields, after_pins)
-		{ uid: at(0), dm: at(1) == [49], key: at(2), base: at(3), sid: at(4), others, channels, pins, topics }
+		{ uid: at(0), dm: at(1) == ['1'], key: at(2), base: at(3), sid: at(4), others, channels, pins, topics }
 	}
 
 	## A count at `i`, then that many: the items, and where the next begins.

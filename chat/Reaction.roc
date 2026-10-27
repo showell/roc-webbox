@@ -33,12 +33,12 @@ Reaction := [].{
 			(m, e, o) => {
 				msg_s = found_or(m, [])
 				emoji = found_or(e, [])
-				on_s = found_or(o, [49])
+				on_s = found_or(o, ['1'])
 				match ZigText.parse_u64(msg_s) {
 					Err(None) => Bad(Str.to_utf8("react: msg must be a message number\n"))
 					Ok(msg) =>
 						if valid_emoji(emoji) {
-							Reacted({ msg, emoji, on: on_s == [49] })
+							Reacted({ msg, emoji, on: on_s == ['1'] })
 						} else {
 							Bad(Str.to_utf8("react: emoji must be one glyph\n"))
 						}

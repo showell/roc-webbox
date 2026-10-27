@@ -29,18 +29,21 @@ Feeds := [].{
 	## ", source MSG_", `conv` after the first " in " after it.
 	header : List(U8) -> Try(Header, [None])
 	header = |line|
-		if !Bytes.starts_with(line, Str.to_utf8("Sent by ")) or List.last(line) != Ok(58) {
-			Err(None)
-		} else {
-			inner = List.drop_last(List.drop_first(line, 8), 1)
-			match Bytes.cut_seq(inner, Str.to_utf8(", source MSG_")) {
-				Err(None) => Err(None)
-				Ok((left, right)) =>
-					match (last_find(left, Str.to_utf8(" at ")), Bytes.cut_seq(right, Str.to_utf8(" in "))) {
-						(Ok(a), Ok((source_id, conv))) => Ok({ from: List.take_first(left, a), at: List.drop_first(left, a + 4), source_id, conv })
-						_ => Err(None)
+		match Bytes.strip_prefix(line, Str.to_utf8("Sent by ")) {
+			Ok(after) if List.last(after) == Ok(':') => {
+				inner = List.drop_last(after, 1)
+				match Bytes.cut_seq(inner, Str.to_utf8(", source MSG_")) {
+					Err(None) => Err(None)
+					Ok((left, right)) => {
+						at_sep = Str.to_utf8(" at ")
+						match (last_find(left, at_sep), Bytes.cut_seq(right, Str.to_utf8(" in "))) {
+							(Ok(a), Ok((source_id, conv))) => Ok({ from: List.take_first(left, a), at: List.drop_first(left, a + List.len(at_sep)), source_id, conv })
+							_ => Err(None)
+						}
 					}
+				}
 			}
+			_ => Err(None)
 		}
 
 	## Where `needle` last starts in `s`.
@@ -81,7 +84,7 @@ Feeds := [].{
 	images : List(U8) -> List((Header, List(List(U8))))
 	images = |text|
 		List.fold(blocks_of(text), [], |out, block| {
-			(line, body) = match find_byte(block, 10, 0) {
+			(line, body) = match find_byte(block, '\n', 0) {
 				Ok(nl) => (List.take_first(block, nl), List.drop_first(block, nl + 1))
 				Err(None) => (block, [])
 			}
@@ -101,7 +104,7 @@ Feeds := [].{
 		if i >= List.len(s) {
 			out
 		} else if i + 4 < List.len(s) and lower(List.sublist(s, { start: i, len: 4 })) == Str.to_utf8("<img") and is_space(List.get(s, i + 4) ?? 0) {
-			match find_byte(s, 62, i + 4) {
+			match find_byte(s, '>', i + 4) {
 				Ok(gt) => img_tags_from(s, gt + 1, List.append(out, List.sublist(s, { start: i, len: gt + 1 - i })))
 				Err(None) => img_tags_from(s, i + 1, out)
 			}
@@ -119,17 +122,19 @@ Feeds := [].{
 	smaller = |a, b| if a < b a else b
 
 	lower : List(U8) -> List(U8)
-	lower = |s| List.map(s, |c| if c >= 65 and c <= 90 c + 32 else c)
+	lower = |s| List.map(s, |c| if c >= 'A' and c <= 'Z' c - 'A' + 'a' else c)
 
+	## A space, tab, newline, CR, form feed (12) or vertical tab (11): Roc's
+	## character literals have no escape for the last two.
 	is_space : U8 -> Bool
-	is_space = |c| c == 32 or c == 9 or c == 10 or c == 13 or c == 12 or c == 11
+	is_space = |c| c == ' ' or c == '\t' or c == '\n' or c == '\r' or c == 12 or c == 11
 
 	## code_store `parseCodeFile`: every block with a header line and a body
 	## holding at least one fence that is not a quote.
 	code : List(U8) -> List((Header, List(Block)))
 	code = |text|
 		List.fold(blocks_of(text), [], |out, block|
-			match find_byte(block, 10, 0) {
+			match find_byte(block, '\n', 0) {
 				Err(None) => out
 				Ok(nl) =>
 					match header(List.take_first(block, nl)) {
@@ -145,7 +150,7 @@ Feeds := [].{
 	## of its character at least as long, or to the end; a `quote` fence's
 	## lines skipped.
 	code_blocks : List(U8) -> List(Block)
-	code_blocks = |body| blocks_from(Bytes.split_byte(body, 10), 0, [])
+	code_blocks = |body| blocks_from(Bytes.split_byte(body, '\n'), 0, [])
 
 	blocks_from : List(List(U8)), U64, List(Block) -> List(Block)
 	blocks_from = |ls, i, out|
@@ -173,19 +178,19 @@ Feeds := [].{
 	## backtick fence's).
 	fence_open : List(U8) -> Try({ char : U8, count : U64, lang : List(U8) }, [None])
 	fence_open = |line| {
-		indent = smaller(Bytes.leading(line, 32, 0), 4)
+		indent = smaller(Bytes.leading(line, ' ', 0), 4)
 		match List.get(line, indent) {
 			Err(_) => Err(None)
 			Ok(f) =>
-				if indent >= 4 or (f != 96 and f != 126) {
+				if indent >= 4 or (f != '`' and f != '~') {
 					Err(None)
 				} else {
 					count = Bytes.leading(List.drop_first(line, indent), f, 0)
 					info = trim_info(List.drop_first(line, indent + count))
-					if count < 3 or count > 10 or (f == 96 and List.contains(info, 96)) {
+					if count < 3 or count > 10 or (f == '`' and List.contains(info, '`')) {
 						Err(None)
 					} else {
-						lang = List.take_first(info, count_while(info, |c| c != 32 and c != 9, 0))
+						lang = List.take_first(info, count_while(info, |c| c != ' ' and c != '\t', 0))
 						Ok({ char: f, count, lang })
 					}
 				}
@@ -196,7 +201,7 @@ Feeds := [].{
 	## `char`, then only whitespace.
 	is_close : List(U8), U8, U64 -> Bool
 	is_close = |line, char, count| {
-		indent = smaller(Bytes.leading(line, 32, 0), 4)
+		indent = smaller(Bytes.leading(line, ' ', 0), 4)
 		if indent >= 4 {
 			Bool.False
 		} else {
@@ -208,7 +213,7 @@ Feeds := [].{
 	## `std.mem.trim(u8, s, " \t\r")`.
 	trim_info : List(U8) -> List(U8)
 	trim_info = |s| {
-		ws = |c| c == 32 or c == 9 or c == 13
+		ws = |c| c == ' ' or c == '\t' or c == '\r'
 		front = List.drop_first(s, count_while(s, ws, 0))
 		List.drop_last(front, count_back(front, ws, 0))
 	}
@@ -235,17 +240,17 @@ Feeds := [].{
 	## chat_fanout `convKeyBaseURL`: a conversation's URL root from its key.
 	## A DM's key holds `_` and a channel's name never does.
 	base_url : List(U8) -> List(U8)
-	base_url = |conv| List.concat(Str.to_utf8(if List.contains(conv, 95) "/chat/c/" else "/channel/"), conv)
+	base_url = |conv| List.concat(Str.to_utf8(if List.contains(conv, '_') "/chat/c/" else "/channel/"), conv)
 
 	## `convKeyBaseURL` then images_store `imagesSourceURL`: the source
 	## message's link, or its conversation's when its id has no topic part.
 	source_url : List(U8), List(U8) -> List(U8)
 	source_url = |conv, source_id| {
 		base = base_url(conv)
-		cut = List.len(source_id) - count_back(source_id, |c| c != 95, 0)
+		cut = List.len(source_id) - count_back(source_id, |c| c != '_', 0)
 		# `cut` is one past the last '_' (0 when there is none).
 		if cut > 1 {
-			List.join([base, [47], List.take_first(source_id, cut - 1), Str.to_utf8("#msg-"), source_id])
+			List.join([base, ['/'], List.take_first(source_id, cut - 1), Str.to_utf8("#msg-"), source_id])
 		} else {
 			base
 		}
@@ -284,18 +289,18 @@ Feeds := [].{
 
 	## The header line every entry starts with, as `header` reads it back.
 	header_line : Header -> List(U8)
-	header_line = |h| List.join([Str.to_utf8("Sent by "), h.from, Str.to_utf8(" at "), h.at, Str.to_utf8(", source MSG_"), h.source_id, Str.to_utf8(" in "), h.conv, [58]])
+	header_line = |h| List.join([Str.to_utf8("Sent by "), h.from, Str.to_utf8(" at "), h.at, Str.to_utf8(", source MSG_"), h.source_id, Str.to_utf8(" in "), h.conv, [':']])
 
 	## images_store `formatImagesEntry`: the header, then each tag on a line
 	## of its own. **A TAG IS ONE LINE** (metal-vmm QUEUE 185): a CR or LF in
 	## one is a space, so no tag carries the separator and a forged header.
 	images_entry : Header, List(List(U8)) -> List(U8)
 	images_entry = |h, tags|
-		List.fold(tags, header_line(h), |out, tag| List.concat(List.append(out, 10), List.map(tag, |c| if c == 10 or c == 13 32 else c)))
+		List.fold(tags, header_line(h), |out, tag| List.concat(List.append(out, '\n'), List.map(tag, |c| if c == '\n' or c == '\r' ' ' else c)))
 
 	## code_store `formatCodeEntry`: the header, then each block as a
 	## backtick fence (whatever its opener was), one newline between them.
 	code_entry : Header, List(Block) -> List(U8)
 	code_entry = |h, bs|
-		List.concat(header_line(h), List.join(List.intersperse(List.map(bs, |b| List.join([Str.to_utf8("\n```"), b.lang, [10], b.body, Str.to_utf8("\n```")])), [10])))
+		List.concat(header_line(h), List.join(List.intersperse(List.map(bs, |b| List.join([Str.to_utf8("\n```"), b.lang, ['\n'], b.body, Str.to_utf8("\n```")])), ['\n'])))
 }

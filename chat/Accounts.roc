@@ -59,7 +59,7 @@ Accounts := [].{
 	## The name file's bytes as getUserName reads them: trailing CRs and
 	## LFs cut, nothing else (inner and leading whitespace kept).
 	stored_name : List(U8) -> List(U8)
-	stored_name = |bytes| List.drop_last(bytes, ZigText.count_back_while(bytes, |c| c == 13 or c == 10, 0))
+	stored_name = |bytes| List.drop_last(bytes, ZigText.count_back_while(bytes, |c| c == '\r' or c == '\n', 0))
 
 	## **LISTAUTHORIZED**: every member and the agent, never a guest, each
 	## with its name, by numeric id as std.mem.sort orders them: the id

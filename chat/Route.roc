@@ -5,6 +5,7 @@
 ## the route, so this says only what the path says.
 ##
 ## A path is bytes (Chat.roc): every comparison is on bytes.
+import Bytes
 import Paths
 
 Route := [].{
@@ -17,22 +18,30 @@ Route := [].{
 			match family_under(sub) {
 				Ok(r) => r
 				Err(None) =>
-					if starts_with(sub, Str.to_utf8("/search")) {
-						with_rest(Search, drop(sub, 7))
-					} else if sub == Str.to_utf8("/default") {
-						family(Default)
-					} else if sub == Str.to_utf8("/conversations") {
-						family(Conversations)
-					} else if starts_with(sub, Str.to_utf8("/msg/")) {
-						with_rest(Msg, drop(sub, 5))
-					} else if starts_with(sub, Str.to_utf8("/c/")) {
-						conversation(Dm, segments(drop(sub, 3)))
-					} else if sub == Str.to_utf8("/notifications") {
-						family(Notifications)
-					} else if sub == Str.to_utf8("/sidebar/stream") {
-						family(SidebarStream)
-					} else {
-						family(NotFound)
+					match Bytes.strip_prefix(sub, Str.to_utf8("/search")) {
+						Ok(rest) => with_rest(Search, rest)
+						Err(NoMatch) =>
+							if sub == Str.to_utf8("/default") {
+								family(Default)
+							} else if sub == Str.to_utf8("/conversations") {
+								family(Conversations)
+							} else {
+								match Bytes.strip_prefix(sub, Str.to_utf8("/msg/")) {
+									Ok(rest) => with_rest(Msg, rest)
+									Err(NoMatch) =>
+										match Bytes.strip_prefix(sub, Str.to_utf8("/c/")) {
+											Ok(rest) => conversation(Dm, segments(rest))
+											Err(NoMatch) =>
+												if sub == Str.to_utf8("/notifications") {
+													family(Notifications)
+												} else if sub == Str.to_utf8("/sidebar/stream") {
+													family(SidebarStream)
+												} else {
+													family(NotFound)
+												}
+										}
+								}
+							}
 					}
 			}
 		}
@@ -45,7 +54,7 @@ Route := [].{
 	asset : List(U8) -> Try(R, [None])
 	asset = |sub|
 		if List.len(sub) > 1 and ends_with(sub, Str.to_utf8(".js")) {
-			Ok(with_rest(Asset, drop(sub, 1)))
+			Ok(with_rest(Asset, List.drop_first(sub, 1)))
 		} else {
 			Err(None)
 		}
@@ -75,7 +84,7 @@ Route := [].{
 	family : Family -> R
 	family = |f| { family: f, key: [], rest: [], sid: [], part: Landing, tail: Page }
 
-	slash = [47]
+	slash = ['/']
 
 	## The five families under a prefix of their own, at a segment's
 	## boundary (`/docsX` is none of them).
@@ -85,19 +94,11 @@ Route := [].{
 		List.fold(named, Err(None), |found, (prefix, f)|
 			match found {
 				Ok(r) => Ok(r)
-				Err(None) => {
-					p = Str.to_utf8(prefix)
-					if starts_with(sub, p) {
-						rest = drop(sub, List.len(p))
-						if rest == [] or starts_with(rest, slash) {
-							Ok(with_rest(f, rest))
-						} else {
-							Err(None)
-						}
-					} else {
-						Err(None)
+				Err(None) =>
+					match Bytes.strip_prefix(sub, Str.to_utf8(prefix)) {
+						Ok(rest) if rest == [] or Bytes.starts_with(rest, slash) => Ok(with_rest(f, rest))
+						_ => Err(None)
 					}
-				}
 			})
 	}
 
@@ -154,7 +155,7 @@ Route := [].{
 	segments : List(U8) -> List(List(U8))
 	segments = |path| {
 		(done, last) = List.fold(path, ([], []), |(segs, cur), b|
-			if b == 47 {
+			if b == '/' {
 				(if cur == [] segs else List.append(segs, cur), [])
 			} else {
 				(segs, List.append(cur, b))
@@ -162,14 +163,8 @@ Route := [].{
 		if last == [] done else List.append(done, last)
 	}
 
-	starts_with : List(U8), List(U8) -> Bool
-	starts_with = |l, p| List.len(l) >= List.len(p) and List.take_first(l, List.len(p)) == p
-
 	ends_with : List(U8), List(U8) -> Bool
 	ends_with = |l, p| List.len(l) >= List.len(p) and List.take_last(l, List.len(p)) == p
-
-	drop : List(U8), U64 -> List(U8)
-	drop = |l, n| List.drop_first(l, n)
 
 
 	valid_channel_name = Paths.valid_channel_name

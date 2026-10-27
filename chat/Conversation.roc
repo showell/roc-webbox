@@ -19,7 +19,7 @@ Conversation := [].{
 	## whole key when it has no `_`.
 	partner : List(U8), List(U8) -> List(U8)
 	partner = |key, me|
-		match Paths.cut_first(key, 95) {
+		match Paths.cut_first(key, '_') {
 			Ok((a, b)) => if a == me b else a
 			Err(None) => key
 		}
@@ -28,7 +28,7 @@ Conversation := [].{
 	## yourself, so no one is sent a notice twice.
 	dm_members : List(U8) -> List(List(U8))
 	dm_members = |key|
-		match Paths.cut_first(key, 95) {
+		match Paths.cut_first(key, '_') {
 			Ok((a, b)) => if a == b [a] else [a, b]
 			Err(None) => [key]
 		}
@@ -48,7 +48,7 @@ Conversation := [].{
 
 	## A channel's title: "#" and its name.
 	channel_title : List(U8) -> List(U8)
-	channel_title = |name| List.concat([35], name)
+	channel_title = |name| List.concat(['#'], name)
 
 	## A topic's title: its conversation's, ": ", its id.
 	topic_title : List(U8), List(U8) -> List(U8)

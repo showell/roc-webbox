@@ -466,7 +466,7 @@ reacted! = |conv, who, sid, r|
 						# **THE ECHO IS MADE BEFORE THE STORE** (metal-vmm QUEUE
 						# 177.1), as a message's: its key and frame, so nothing
 						# can fail between the append and the publish.
-						key = List.join([conv.key, [47], sid])
+						key = List.join([conv.key, ['/'], sid])
 						frame = Frame.reaction(line)
 						if Host.append_line!(Paths.reactions_path(conv_dir(conv.family, conv.key), sid), line) {
 							# **STORED IS DONE**: the live publish cannot fail.
@@ -557,7 +557,7 @@ landing! = |route|
 		Ok((conv, who)) => {
 			first = Paths.first_of(topics!(route.family, route.key))
 			if first != [] {
-				Chat.redirect(List.join([conv.base, [47], first]))
+				Chat.redirect(List.join([conv.base, ['/'], first]))
 			} else {
 				match title!(conv, who) {
 					Err(Failed) => Chat.answered
@@ -657,7 +657,7 @@ resume! = |{}| {
 		if Paths.first_of(topics) == [] {
 			Chat.redirect(List.concat(Str.to_utf8("/chat/c/"), conv))
 		} else {
-			Chat.redirect(List.join([Str.to_utf8("/chat/c/"), conv, [47], resume_at!(conv, topics)]))
+			Chat.redirect(List.join([Str.to_utf8("/chat/c/"), conv, ['/'], resume_at!(conv, topics)]))
 		}
 	}
 }
@@ -714,12 +714,12 @@ msg! = |id|
 	if !Paths.valid_msg_ref_id(id) {
 		Chat.not_found
 	} else {
-		sid = match Paths.cut_last(id, 95) {
+		sid = match Paths.cut_last(id, '_') {
 			Ok((before, _)) => before
 			Err(None) => []
 		}
 		me = Host.me!({})
-		at = |base, key| List.join([Str.to_utf8(base), key, [47], sid, Str.to_utf8("#msg-"), id])
+		at = |base, key| List.join([Str.to_utf8(base), key, ['/'], sid, Str.to_utf8("#msg-"), id])
 		match roster!({}) {
 			Err(Failed) => Chat.answered
 			Ok(members) =>
@@ -815,7 +815,7 @@ announce! : Route.R, Chat.Conv, Who, List(U8), List(U8) => Bool
 announce! = |route, conv, who, topic, name|
 	match Topics.highest_general(topics!(route.family, route.key)) {
 		Ok(gen) if gen != topic =>
-			appended!(conv, who, gen, name, List.join([Str.to_utf8("New topic: ["), topic, Str.to_utf8("]("), conv.base, [47], topic, Str.to_utf8(")")]), [])
+			appended!(conv, who, gen, name, List.join([Str.to_utf8("New topic: ["), topic, Str.to_utf8("]("), conv.base, ['/'], topic, Str.to_utf8(")")]), [])
 		_ => Bool.True
 	}
 
@@ -846,7 +846,7 @@ sent! = |req, route, conv, who|
 		Chat.not_allowed(Post)
 	} else {
 		# The header before the body: reading the body moves past it.
-		is_async = Host.header!(Str.to_utf8("x-chat-async")) == [[49]]
+		is_async = Host.header!(Str.to_utf8("x-chat-async")) == [['1']]
 		body = Host.body!(Message)
 		if !body.ok {
 			Chat.answered
@@ -889,7 +889,7 @@ store! = |route, conv, who, is_async, md, cid|
 				} else if is_async {
 					Chat.respond(204, [], [])
 				} else {
-					Chat.redirect(List.join([conv.base, [47], route.sid]))
+					Chat.redirect(List.join([conv.base, ['/'], route.sid]))
 				}
 		}
 	}
@@ -922,7 +922,7 @@ appended! = |conv, who, sid, name, md, cid|
 				uid = Host.me!({})
 				# A count of the largest U64 has no next number: the call
 				# crashes into a 500, storing nothing.
-				id = List.join([sid, [95], Str.to_utf8(U64.to_str(index + 1))])
+				id = List.join([sid, ['_'], Str.to_utf8(U64.to_str(index + 1))])
 				message = { id, from: name, at: Str.to_utf8(Time.rfc3339(Host.now!({}))), uid, markdown: md }
 				block = Transcript.stored_form(index, message)
 				rendered = Host.render!(md)
@@ -935,7 +935,7 @@ appended! = |conv, who, sid, name, md, cid|
 						# publish that failed after the store answered success
 						# with no echo on the sender's stream, whose client then
 						# sent the message again: a duplicate.
-						key = List.join([conv.key, [47], sid])
+						key = List.join([conv.key, ['/'], sid])
 						frame = Frame.message({ index, from: name, from_uid: uid, at: message.at, html: rendered.html, markdown: md, id, cid })
 						# **THE FAN-OUT IS MADE BEFORE THE STORE TOO**: every
 						# member's events and feed entries, so what runs after
