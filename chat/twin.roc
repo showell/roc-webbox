@@ -74,8 +74,8 @@ call = |req| {
 				Err(None) => []
 			}
 		24 =>
-			match Count.window_last(u64(arg(0)), arg(1), arg(2) == [49], arg(3)) {
-				Ok(w) => [num(w.number), bool(w.current), w.msg.id, w.msg.from, w.msg.at, w.msg.uid, w.msg.markdown]
+			match Count.window_last(u64(arg(0)), arg(1), if arg(2) == [49] Full else Partial, arg(3)) {
+				Ok(w) => [num(w.number), bool(w.record == Current), w.msg.id, w.msg.from, w.msg.at, w.msg.uid, w.msg.markdown]
 				Err(None) => []
 			}
 		25 => [Frame.message({ index: u64(arg(0)), from: arg(1), from_uid: arg(2), at: arg(3), html: arg(4), markdown: arg(5), id: arg(6), cid: arg(7) })]

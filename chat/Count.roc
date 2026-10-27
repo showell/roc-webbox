@@ -96,18 +96,25 @@ Count := [].{
 		_ => Err(None)
 	}
 
+	## Whether the window read filled its buffer (so its last block may be cut).
+	Fill : [Full, Partial]
+
+	## Whether the record's count is the window's last block's number.
+	Freshness : [Current, Stale]
+
 	## windowLast: the last block of the window read at the record's offset,
 	## believed when the window was not full and the block is a message of
-	## `sid` numbered at least `count`; `current` when exactly that.
-	window_last : U64, List(U8), Bool, List(U8) -> Try({ msg : Transcript.Msg, number : U64, current : Bool }, [None])
-	window_last = |count, window, full, sid|
-		if full {
+	## `sid` numbered at least `count`; the record `Current` when exactly
+	## that, `Stale` when the block is past it.
+	window_last : U64, List(U8), Fill, List(U8) -> Try({ msg : Transcript.Msg, number : U64, record : Freshness }, [None])
+	window_last = |count, window, fill, sid|
+		if fill == Full {
 			Err(None)
 		} else {
 			match List.last(Transcript.decode_file(window).messages) {
 				Ok(msg) =>
 					match number_in(msg.id, sid) {
-						Ok(number) if number >= count => Ok({ msg, number, current: number == count })
+						Ok(number) if number >= count => Ok({ msg, number, record: if number == count Current else Stale })
 						_ => Err(None)
 					}
 				Err(_) => Err(None)
