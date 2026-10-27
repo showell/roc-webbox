@@ -4,14 +4,15 @@
 -- (plants/<hunt>.roc) that must fire before its findings count. The trees
 -- are read once; a finding names its file, line and the definition it is in.
 -- Run from roc-webbox:
---   shale --budget steps=200000000 tools/roc_hunt/hunt.shale               every hunt over chat/'s production modules
---   shale --budget steps=200000000 tools/roc_hunt/hunt.shale self_test=1   every hunt's plants first
--- (The trees are some 20,000 lines, read a line at a time: the default
--- 5,000,000 steps do not reach the end of them.)
+--   shale tools/roc_hunt/hunt.shale               every hunt over chat/'s production modules
+--   shale tools/roc_hunt/hunt.shale self_test=1   every hunt's plants first
+-- The trees are some 20,000 lines, read a line at a time: the default
+-- 5,000,000 steps do not reach the end of them.
+-- budget: steps=200000000
 -- The production modules are chat/*.roc and chat/platform/*.roc, less
 -- twin.roc: tests may hold literal data.
 
-const roc_ast = "/home/steve/tools/roc-ast/bin/roc-ast"
+const roc_ast = real("tools:roc-ast/bin/roc-ast")
 const long_lines = 40
 
 -- ── the trees ────────────────────────────────────────────────────────────

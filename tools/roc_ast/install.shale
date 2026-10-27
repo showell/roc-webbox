@@ -7,7 +7,6 @@
 -- why). Run from roc-webbox:
 --   shale tools/roc_ast/install.shale
 
-local home = "/home/steve"
 local version = trim(read("roc-version"))
 local parts = split(version, "-")
 local short = parts[#parts]
@@ -19,12 +18,12 @@ if not starts_with(commit, short) then
   fail("roc-ast: roc-version pins Roc " .. short .. ", build.zig.zon fetches " .. commit .. ": zig fetch --save=roc the pinned commit's archive")
 end
 
-local src = home .. "/tools/roc-" .. short
+local src = real("tools:roc-" .. short)
 local head = trim(run({"git", "-C", src, "rev-parse", "HEAD"}, {timeout_ms = 30000, whole = 200}).out)
 if head ~= commit then
   fail("roc-ast: " .. src .. " is at " .. head .. ", not " .. commit .. ": git -C ~/tools/roc-pr worktree add --detach " .. src .. " " .. commit)
 end
 
-local built = run({home .. "/zig-0.16.0/zig", "build", "--fork=" .. src, "--prefix", home .. "/tools/roc-ast"}, {timeout_ms = 1800000, tail = 20, cwd = "tools/roc_ast"})
+local built = run({real("zig016:zig"), "build", "--fork=" .. src, "--prefix", real("tools:roc-ast")}, {timeout_ms = 1800000, tail = 20, cwd = "tools/roc_ast"})
 print(built.out)
 print("roc-ast: Roc " .. short .. "'s parser, installed at ~/tools/roc-ast/bin/roc-ast")

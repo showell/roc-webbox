@@ -20,7 +20,7 @@
   constructs our Roc style replaces, one named function a kind, the trees
   read once (Shale has no way to share functions between scripts). Each hunt
   has plants (`plants/<hunt>.roc`) that must fire first:
-  `shale --budget steps=200000000 tools/roc_hunt/hunt.shale self_test=1`,
+  `shale tools/roc_hunt/hunt.shale self_test=1` (its budget is in its header),
   then without `self_test` for chat/'s production modules.
   - `same_typed_args` — neighbouring arguments of one type, which a swap
     leaves type-correct (a record or a nominal type names them).
