@@ -17,7 +17,7 @@ Pages := [].{
 
 	## What the conversation page shows: the conversation's key and URL base,
 	## the topic, its title, the viewer, and the sidebar's JSON.
-	View : { key : List(U8), base : List(U8), topic : List(U8), title : List(U8), uid : List(U8), viewer : List(U8), sidebar_json : Html.ScriptJson }
+	View : { key : Str, base : Str, topic : Str, title : List(U8), uid : Uid, viewer : List(U8), sidebar_json : Html.ScriptJson }
 
 	## What the sidebar shows: the viewer, the conversation (its kind), the
 	## topic, every other member (each online or not), the viewer's channels,
@@ -165,10 +165,10 @@ Pages := [].{
 			Html.join([
 				Chrome.chat_css,
 				Html.trusted("<div id=\"chat-root\""),
-				attr("data-conv", Html.escape(v.key)),
-				attr("data-conv-base", Html.escape(v.base)),
-				attr("data-session", Html.escape(v.topic)),
-				attr("data-me", Html.escape(v.uid)),
+				attr("data-conv", Html.text(v.key)),
+				attr("data-conv-base", Html.text(v.base)),
+				attr("data-session", Html.text(v.topic)),
+				attr("data-me", Html.text(v.uid.to_str())),
 				attr("data-me-name", Html.escape(v.viewer)),
 				attr("data-upload-image-max", num(limits.image_max)),
 				attr("data-upload-video-max", num(limits.video_max)),

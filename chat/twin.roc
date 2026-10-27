@@ -128,8 +128,13 @@ call = |req| {
 			}
 		35 => {
 			limits = { image_max: u64(arg(7)), video_max: u64(arg(8)), accept: arg(9), search_min: u64(arg(10)) }
-			view = { key: arg(0), base: arg(1), topic: arg(2), title: arg(3), uid: arg(4), viewer: arg(5), sidebar_json: Html.twin_script_json(arg(6)) }
-			[Html.bytes(Pages.conversation(srcs(req.args, 11), limits, view))]
+			match (text(arg(0)), text(arg(1)), text(arg(2)), decode_uid(arg(4))) {
+				(Ok(key), Ok(base), Ok(topic), Ok(uid)) => {
+					view = { key, base, topic, title: arg(3), uid, viewer: arg(5), sidebar_json: Html.twin_script_json(arg(6)) }
+					[Html.bytes(Pages.conversation(srcs(req.args, 11), limits, view))]
+				}
+				_ => []
+			}
 		}
 		36 => [Html.bytes(Html.escape(arg(0)))]
 		37 => [Html.script_json_bytes(Html.script_safe(arg(0)))]

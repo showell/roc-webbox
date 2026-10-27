@@ -642,7 +642,7 @@ page! = |route, at|
 		match sidebar!(route.topic.to_utf8(), at) {
 			Err(Failed) => Chat.answered
 			Ok((viewer, sb)) => {
-				view = { key: route.key.to_utf8(), base: sb.base, topic: route.topic.to_utf8(), title: at.title, uid: sb.uid.to_str().to_utf8(), viewer, sidebar_json: Pages.sidebar_json(sb) }
+				view = { key: route.key, base: Paths.conv_base(at.key), topic: route.topic, title: at.title, uid: sb.uid, viewer, sidebar_json: Pages.sidebar_json(sb) }
 				Chat.respond(200, html, Html.bytes(Pages.conversation(Chrome.src_in(Host.srcs!({})), Host.limits!({}), view)))
 			}
 		}

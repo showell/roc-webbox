@@ -37,6 +37,10 @@ Html :: List(U8).{
 		),
 	)
 
+	## Text escaped, as `escape` escapes its bytes.
+	text : Str -> Html
+	text = |s| escape(s.to_utf8())
+
 	## **TRUSTED MARKUP, WRITTEN IN THE CODE**: a string literal only (the
 	## hunt `html_trusted_nonliteral`); anything computed goes through `escape`.
 	trusted : Str -> Html

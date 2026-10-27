@@ -81,6 +81,15 @@ Paths := [].{
 			Channel(name) => channel_name_to_str(name)
 		}
 
+	## The conversation's URL base: `/chat/c/` and a DM's pair key, or
+	## `/channel/` and a channel's name (the host's Conv.base).
+	conv_base : ConvKey -> Str
+	conv_base = |key|
+		match key {
+			Dm(pair) => "/chat/c/${pair_key_to_str(pair)}"
+			Channel(name) => "/channel/${channel_name_to_str(name)}"
+		}
+
 	## The key's family: a DM's or a channel's.
 	conv_kind : ConvKey -> [Dm, Channel]
 	conv_kind = |key|
@@ -548,3 +557,9 @@ expect Paths.channel_name_from_str("").is_err()
 # Uid.from_str make, so no path leaves the chat root. The topic is
 # upstream's: Route.conversation passes one only through is_topic_id, and
 # make! checks a new topic's id.
+
+# conv_base: the host's Conv.base (Conversation.dm_base, channel_base).
+expect match (Paths.pair_key_from_str("3_7"), Paths.channel_name_from_str("general")) {
+	(Ok(pair), Ok(name)) => (Paths.conv_base(Dm(pair)) == "/chat/c/3_7") and (Paths.conv_base(Channel(name)) == "/channel/general")
+	_ => Bool.False
+}
