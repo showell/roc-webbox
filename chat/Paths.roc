@@ -248,15 +248,25 @@ Paths := [].{
 	last_conv_path : List(U8) -> ChatPath
 	last_conv_path = |uid| ChatPath.(join([Str.to_utf8("users"), uid, Str.to_utf8("last-conv")]))
 
-	## The topic the member last viewed in DM `conv` (lastViewedTopic's
+	## The topic the member last viewed in DM `key` (lastViewedTopic's
 	## file): users/<uid>/last-sessions/<conv>.
-	last_session_path : List(U8), List(U8) -> ChatPath
-	last_session_path = |uid, conv| ChatPath.(join([Str.to_utf8("users"), uid, Str.to_utf8("last-sessions"), conv]))
+	last_session_path : Uid, ConvKey -> ChatPath
+	last_session_path = |uid, key| last_session_path_bytes({ uid: Uid.bytes(uid), conv: conv_key_bytes(key) })
 
-	## The member's pins in `conv` (pinnedTopics's file):
+	## last_session_path's core, from the uid and key as bytes: the twins
+	## feed it any (production: last_session_path).
+	last_session_path_bytes : { uid : List(U8), conv : List(U8) } -> ChatPath
+	last_session_path_bytes = |{ uid, conv }| ChatPath.(join([Str.to_utf8("users"), uid, Str.to_utf8("last-sessions"), conv]))
+
+	## The member's pins in `key` (pinnedTopics's file):
 	## users/<uid>/pinned-sessions/<conv>.
-	pinned_path : List(U8), List(U8) -> ChatPath
-	pinned_path = |uid, conv| ChatPath.(join([Str.to_utf8("users"), uid, Str.to_utf8("pinned-sessions"), conv]))
+	pinned_path : Uid, ConvKey -> ChatPath
+	pinned_path = |uid, key| pinned_path_bytes({ uid: Uid.bytes(uid), conv: conv_key_bytes(key) })
+
+	## pinned_path's core, from the uid and key as bytes: the twins feed it
+	## any (production: pinned_path).
+	pinned_path_bytes : { uid : List(U8), conv : List(U8) } -> ChatPath
+	pinned_path_bytes = |{ uid, conv }| ChatPath.(join([Str.to_utf8("users"), uid, Str.to_utf8("pinned-sessions"), conv]))
 
 	## The member's feed file: users/<uid>/images.md or code.md, where
 	## images_store and code_store keep them.
@@ -441,9 +451,12 @@ expect match Paths.channel_name(Str.to_utf8("general")) {
 	Err(Invalid) => Bool.False
 }
 expect Paths.bytes(Paths.last_conv_path(Str.to_utf8("3"))) == Str.to_utf8("users/3/last-conv")
-expect Paths.bytes(Paths.last_session_path(Str.to_utf8("3"), Str.to_utf8("3_7"))) == Str.to_utf8("users/3/last-sessions/3_7")
-expect Paths.bytes(Paths.pinned_path(Str.to_utf8("3"), Str.to_utf8("3_7"))) == Str.to_utf8("users/3/pinned-sessions/3_7")
-expect Paths.bytes(Paths.pinned_path(Str.to_utf8("3"), Str.to_utf8("general"))) == Str.to_utf8("users/3/pinned-sessions/general")
+expect Paths.bytes(Paths.last_session_path(Uid.from_bytes(Str.to_utf8("3")), Dm(Paths.pair_key(Uid.from_bytes(Str.to_utf8("3")), Uid.from_bytes(Str.to_utf8("7")))))) == Str.to_utf8("users/3/last-sessions/3_7")
+expect Paths.bytes(Paths.pinned_path(Uid.from_bytes(Str.to_utf8("3")), Dm(Paths.pair_key(Uid.from_bytes(Str.to_utf8("7")), Uid.from_bytes(Str.to_utf8("3")))))) == Str.to_utf8("users/3/pinned-sessions/3_7")
+expect match Paths.channel_name(Str.to_utf8("general")) {
+	Ok(name) => Paths.bytes(Paths.pinned_path(Uid.from_bytes(Str.to_utf8("3")), Channel(name))) == Str.to_utf8("users/3/pinned-sessions/general")
+	Err(Invalid) => Bool.False
+}
 expect Paths.bytes(Paths.feed_path(Str.to_utf8("3"), Images)) == Str.to_utf8("users/3/images.md")
 expect Paths.bytes(Paths.feed_path(Str.to_utf8("3"), Code)) == Str.to_utf8("users/3/code.md")
 
@@ -541,5 +554,5 @@ expect match Paths.channel_name([]) {
 # id, and a uid is the host's (Host.me!) or a canonical pair's half.
 expect Paths.bytes(Paths.reactions_path_bytes({ dir: Str.to_utf8("channels/../.."), topic: Str.to_utf8("../x") })) == Str.to_utf8("channels/../../sessions/../x.reactions.jsonl")
 expect Paths.transcript_path_bytes({ dir: [], topic: [] }) == Str.to_utf8("sessions/.md")
-expect Paths.bytes(Paths.last_session_path(Str.to_utf8("3"), Str.to_utf8("../../x"))) == Str.to_utf8("users/3/last-sessions/../../x")
+expect Paths.bytes(Paths.last_session_path_bytes({ uid: Str.to_utf8("3"), conv: Str.to_utf8("../../x") })) == Str.to_utf8("users/3/last-sessions/../../x")
 expect Paths.bytes(Paths.feed_path(Str.to_utf8("/etc"), Code)) == Str.to_utf8("users/etc/code.md")

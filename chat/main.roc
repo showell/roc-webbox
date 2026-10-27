@@ -187,7 +187,7 @@ in_topic! = |req, route, found| {
 				Chat.not_allowed(Post)
 			} else if route.tail == React {
 				react!(conv, who, { key: found.key, topic: route.topic })
-			} else if pin!(conv, route.topic, if route.tail == Pin Pinned else Unpinned) {
+			} else if pin!(found.key, route.topic, if route.tail == Pin Pinned else Unpinned) {
 				Chat.respond(204, [], [])
 			} else {
 				Chat.answered
@@ -383,9 +383,9 @@ title! = |conv, who|
 ## `topic` pinned or unpinned (ChatState.pinned), and the file written back or,
 ## emptied, removed. A read that failed stops here: the set is not empty, it
 ## is unknown, and writing it would drop every pin. False when a step failed.
-pin! : Chat.Conv, List(U8), ChatState.Pin => Bool
-pin! = |conv, topic, pin| {
-	path = Paths.pinned_path(Host.me!({}), conv.key)
+pin! : Paths.ConvKey, List(U8), ChatState.Pin => Bool
+pin! = |key, topic, pin| {
+	path = Paths.pinned_path(Uid.from_bytes(Host.me!({})), key)
 	match Files.read!(path) {
 		Found(stored) => repin!(path, stored, topic, pin)
 		Missing => repin!(path, [], topic, pin)
@@ -407,13 +407,13 @@ repin! = |path, stored, topic, pin|
 ## only when it changed (ChatState.changed); false when a step failed, and
 ## nothing after it is written. A member or topic with no name records
 ## nothing.
-bookmark! : Chat.Conv, List(U8) => Bool
-bookmark! = |conv, topic| {
+bookmark! : Paths.ConvKey, List(U8) => Bool
+bookmark! = |key, topic| {
 	me = Host.me!({})
 	if me == [] or topic == [] {
 		Bool.True
-	} else if write_if_changed!(Paths.last_session_path(me, conv.key), topic) {
-		write_if_changed!(Paths.last_conv_path(me), conv.key)
+	} else if write_if_changed!(Paths.last_session_path(Uid.from_bytes(me), key), topic) {
+		write_if_changed!(Paths.last_conv_path(me), Paths.conv_key_bytes(key))
 	} else {
 		Bool.False
 	}
@@ -581,7 +581,7 @@ landing! = |route, key|
 ## the limits the server enforces (Host.limits!).
 page! : Route.R, AtTopic => Chat.Answer
 page! = |route, at|
-	if at.conv.family == Dm and !bookmark!(at.conv, route.topic) {
+	if at.conv.family == Dm and !bookmark!(at.key, route.topic) {
 		Chat.answered
 	} else {
 		match sidebar!(route.topic, at) {
@@ -619,7 +619,7 @@ sidebar! = |topic, at| {
 							match channel_rosters!({}) {
 								Err(Failed) => Err(Failed)
 								Ok(rosters) =>
-									match Files.read!(Paths.pinned_path(me, at.conv.key)) {
+									match Files.read!(Paths.pinned_path(Uid.from_bytes(me), at.key)) {
 										Failed => Err(Failed)
 										Found(stored) => Ok((viewer, sidebar_of(me, topic, at, with_online(others, flags), Paths.member_channels(rosters, me), ChatState.pins(stored))))
 										Missing => Ok((viewer, sidebar_of(me, topic, at, with_online(others, flags), Paths.member_channels(rosters, me), [])))
@@ -657,7 +657,7 @@ resume! = |{}| {
 			if Paths.first_of(topics) == [] {
 				Chat.redirect(List.concat(Str.to_utf8("/chat/c/"), conv))
 			} else {
-				Chat.redirect(List.join([Str.to_utf8("/chat/c/"), conv, ['/'], resume_at!(conv, topics)]))
+				Chat.redirect(List.join([Str.to_utf8("/chat/c/"), conv, ['/'], resume_at!(pair, topics)]))
 			}
 		}
 		_ =>
@@ -670,9 +670,9 @@ resume! = |{}| {
 
 ## Where the member resumes DM `conv`, whose topics are `topics`: the choice
 ## ChatState's, the last-viewed topic and the clock the host's.
-resume_at! : List(U8), List(List(U8)) => List(U8)
-resume_at! = |conv, topics| {
-	last = ChatState.bookmark(Files.read!(Paths.last_session_path(Host.me!({}), conv)))
+resume_at! : Paths.PairKey, List(List(U8)) => List(U8)
+resume_at! = |pair, topics| {
+	last = ChatState.bookmark(Files.read!(Paths.last_session_path(Uid.from_bytes(Host.me!({})), Dm(pair))))
 	ChatState.resume_topic(topics, last, Host.now!({}))
 }
 
@@ -708,7 +708,7 @@ entries! = |me, members, i, acc|
 				pair = Paths.pair_key(Uid.from_bytes(me), Uid.from_bytes(id))
 				conv = Paths.pair_key_bytes(pair)
 				sessions = topics!(Dm(pair))
-				default = resume_at!(conv, sessions)
+				default = resume_at!(pair, sessions)
 				entries!(me, members, i + 1, List.append(acc, { conv, id, name, default, sessions }))
 			}
 		Err(_) => acc
@@ -808,7 +808,7 @@ make! = |key, conv, who, topic|
 			Ok(name) => {
 				dm = conv.family == Dm
 				# The bookmark first, as a send's: one that fails makes no topic.
-				if dm and !bookmark!(conv, topic) {
+				if dm and !bookmark!(key, topic) {
 					Chat.answered
 				} else if !appended!(conv, who, { at: { key, topic }, name, markdown: Str.to_utf8("hi"), cid: [] }) {
 					Chat.answered
@@ -899,7 +899,7 @@ store! = |at, conv, who, send, { markdown: md, cid }|
 		match viewer!(who) {
 			Err(Failed) => Chat.answered
 			Ok(name) =>
-				if conv.family == Dm and !bookmark!(conv, at.topic) {
+				if conv.family == Dm and !bookmark!(at.key, at.topic) {
 					Chat.answered
 				} else if !appended!(conv, who, { at, name, markdown: md, cid }) {
 					Chat.answered

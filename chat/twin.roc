@@ -131,7 +131,7 @@ call = |req| {
 		51 => Paths.member_channels(flat_rosters(req.args, 1, []), arg(0))
 		52 => [ChatState.bookmark(file(arg(0), arg(1)))]
 		53 => [bool(ChatState.changed(file(arg(0), arg(1)), arg(2))), ChatState.bookmark_line(arg(2))]
-		54 => List.map([Paths.last_conv_path(arg(0)), Paths.last_session_path(arg(0), arg(1)), Paths.pinned_path(arg(0), arg(1)), Paths.feed_path(arg(0), Images), Paths.feed_path(arg(0), Code)], Paths.bytes)
+		54 => List.map([Paths.last_conv_path(arg(0)), Paths.last_session_path_bytes({ uid: arg(0), conv: arg(1) }), Paths.pinned_path_bytes({ uid: arg(0), conv: arg(1) }), Paths.feed_path(arg(0), Images), Paths.feed_path(arg(0), Code)], Paths.bytes)
 		55 => Paths.topics(entries(req.args, 0, []))
 		56 =>
 			match Paths.channel_members(arg(0)) {
