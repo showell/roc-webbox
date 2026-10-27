@@ -109,9 +109,9 @@ Host := [].{
 	## them.
 	limits! : {} => { image_max : U64, video_max : U64, accept : List(U8), search_min : U64 }
 
-	## Where a page names each script, as `name, src` pairs (a src's hash is
-	## of bytes the host holds).
-	srcs! : {} => List(List(U8))
+	## Where a page names each script, by its name (a src's hash is of bytes
+	## the host holds).
+	srcs! : {} => List({ name : List(U8), src : List(U8) })
 
 	## **AFTER A FAILURE THE HOST DOES NOTHING MORE** for the call: a hosted
 	## function the Roc calls once one has failed answers empty, false or

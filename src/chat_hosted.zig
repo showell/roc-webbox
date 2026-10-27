@@ -34,6 +34,7 @@ pub const ReadStatus = route.ReadStatus;
 pub const Read = abi.Read;
 pub const Listing = abi.Listing;
 pub const Entry = abi.Entry;
+pub const Src = abi.Src;
 pub const EntryKind = route.EntryKind;
 pub const Conv = abi.Conv;
 pub const Account = abi.Account;
@@ -270,9 +271,9 @@ const Scripted = struct {
         say(ctx, "links", .{});
         return me(ctx).linked;
     }
-    fn srcs(ctx: *anyopaque) []const []const u8 {
+    fn srcs(ctx: *anyopaque) []const abi.Src {
         say(ctx, "srcs", .{});
-        return &.{};
+        return &abi.test_srcs;
     }
     fn render(ctx: *anyopaque, markdown: []const u8) abi.Rendered {
         say(ctx, "render {s}", .{markdown});

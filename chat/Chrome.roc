@@ -45,15 +45,12 @@ Chrome := [].{
 		List.join(List.intersperse(links, Str.to_utf8(" · ")))
 	}
 
-	## A script's src from `name, src` pairs (the host's `srcs!`), or none.
-	src_in : List(List(U8)) -> (List(U8) -> List(U8))
-	src_in = |pairs| |name| find_src(pairs, name, 0)
-
-	find_src : List(List(U8)), List(U8), U64 -> List(U8)
-	find_src = |pairs, name, i| match List.get(pairs, i) {
-		Ok(n) if n == name => List.get(pairs, i + 1) ?? []
-		Ok(_) => find_src(pairs, name, i + 2)
-		Err(_) => []
+	## A script's src from the host's `srcs!`. **AN UNKNOWN NAME IS A CRASH**
+	## (a 500), never an empty src: a page would link a script that is not there.
+	src_in : List({ name : List(U8), src : List(U8) }) -> (List(U8) -> List(U8))
+	src_in = |scripts| |name| match List.find_first(scripts, |s| s.name == name) {
+		Ok(s) => s.src
+		Err(_) => crash "Chrome: no script named <name>"
 	}
 
 	## A template with each `{s}` slot filled in turn.

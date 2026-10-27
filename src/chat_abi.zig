@@ -42,6 +42,8 @@ pub const ReadRec = extern struct { bytes: RocBytes, status: route_mod.ReadStatu
 pub const EntryRec = extern struct { name: RocBytes, kind: route_mod.EntryKind };
 /// Host.roc's `list!` answer: `{ entries : List(...), status : [Failed, Found, Missing] }`.
 pub const ListRec = extern struct { entries: EntryList, status: route_mod.ReadStatus };
+/// One of Host.roc's `srcs!` scripts: `{ name : List(U8), src : List(U8) }`.
+pub const SrcRec = extern struct { name: RocBytes, src: RocBytes };
 /// One of Host.roc's `accounts!` accounts: `{ id : List(U8), kind : [Agent, Guest, Member, Unreadable], name : List(U8), name_read : [Found, Unreadable] }`.
 pub const AccountRec = extern struct { id: RocBytes, name: RocBytes, kind: route_mod.AccountKind, name_read: route_mod.NameRead };
 /// Host.roc's `accounts!` answer: `{ accounts : List(...), status : [Failed, Found] }`.
@@ -102,6 +104,12 @@ pub const EntryList = RecList(EntryRec, Entry, struct {
     }
 }.rec);
 
+pub const SrcList = RecList(SrcRec, Src, struct {
+    fn rec(it: Src) SrcRec {
+        return .{ .name = .from(it.name), .src = .from(it.src) };
+    }
+}.rec);
+
 pub const AccountList = RecList(AccountRec, Account, struct {
     fn rec(it: Account) AccountRec {
         return switch (it.name) {
@@ -119,7 +127,7 @@ pub const BlockList = RecList(BlockRec, Block, struct {
 
 comptime {
     const w = @sizeOf(usize);
-    std.debug.assert(@sizeOf(RocBytes) == 3 * w and @sizeOf(Request) == 4 * w and @sizeOf(RouteRec) == 10 * w and @sizeOf(Answer) == 20 * w and @sizeOf(Got) == 4 * w and @sizeOf(ConvRec) == 10 * w and @sizeOf(ReadRec) == 4 * w and @sizeOf(EntryRec) == 4 * w and @sizeOf(ListRec) == 4 * w and @sizeOf(AccountRec) == 7 * w and @sizeOf(AccountsRec) == 4 * w and @sizeOf(CountRec) == 16 and @sizeOf(RenderRec) == 4 * w and @sizeOf(MessageRec) == 15 * w);
+    std.debug.assert(@sizeOf(RocBytes) == 3 * w and @sizeOf(Request) == 4 * w and @sizeOf(RouteRec) == 10 * w and @sizeOf(Answer) == 20 * w and @sizeOf(Got) == 4 * w and @sizeOf(ConvRec) == 10 * w and @sizeOf(ReadRec) == 4 * w and @sizeOf(EntryRec) == 4 * w and @sizeOf(SrcRec) == 6 * w and @sizeOf(ListRec) == 4 * w and @sizeOf(AccountRec) == 7 * w and @sizeOf(AccountsRec) == 4 * w and @sizeOf(CountRec) == 16 and @sizeOf(RenderRec) == 4 * w and @sizeOf(MessageRec) == 15 * w);
     std.debug.assert(@sizeOf(BlockRec) == 6 * w and @sizeOf(CodePartRec) == 4 * w and @sizeOf(ExcerptPartRec) == 4 * w and @sizeOf(ImagesPartRec) == 4 * w and @sizeOf(PartsRec) == 12 * w and @sizeOf(AppendRec) == 4);
     std.debug.assert(@sizeOf(LimitsRec) == 3 * w + 24 and @sizeOf(route_mod.Presence) == 1);
     // **A FAULT IS THE HOST'S ERROR, CARRIED BY THE ROC AS A NUMBER** it
@@ -140,6 +148,9 @@ pub const Entry = struct { name: []const u8, kind: route_mod.EntryKind };
 /// gives them; nothing there; or a listing that failed (the host has failed
 /// the request). Missing and failed are never one answer.
 pub const Listing = union(route_mod.ReadStatus) { failed, found: []const Entry, missing };
+
+/// A script a page names: its name and its src.
+pub const Src = struct { name: []const u8, src: []const u8 };
 
 /// An account as the host read it: its id (a canonical folder's name), its
 /// kind (`.unreadable` when its password's stat failed), its `name` file's
@@ -294,8 +305,8 @@ pub const Host = struct {
     online: *const fn (ctx: *anyopaque, id: []const u8) route_mod.Presence = noOnline,
     /// Host.limits!: the limits the upload and search code enforce.
     limits: *const fn (ctx: *anyopaque) Limits = noLimits,
-    /// Host.srcs!: where a page names each script, as `name, src` pairs.
-    srcs: *const fn (ctx: *anyopaque) []const []const u8 = noSrcs,
+    /// Host.srcs!: where a page names each script, by its name.
+    srcs: *const fn (ctx: *anyopaque) []const Src = noSrcs,
     /// Host.me!: the member's id.
     me: *const fn (ctx: *anyopaque) []const u8 = noBytes,
     /// Host.now!: the request's time, Unix seconds.
@@ -412,9 +423,21 @@ fn noLimits(_: *anyopaque) Limits {
 fn noList(_: *anyopaque) []const []const u8 {
     @panic("a hosted list asked of a host that does not answer it");
 }
-fn noSrcs(_: *anyopaque) []const []const u8 {
+fn noSrcs(_: *anyopaque) []const Src {
     @panic("srcs asked of a host that does not answer it");
 }
+/// Every script a chat page names, each its own name as its src: a test
+/// host's `srcs`, since a name the host does not answer crashes the page.
+pub const test_srcs = blk: {
+    const names = [_][]const u8{ "colors.js", "viewport.js", "chat_theme.js", "chrome_drawer.js", "chat_add_topic.js", "chat_first_topic.js", "recent.js", "notify.js", "styles.js", "chat_image_popup.js", "images.js", "chat_code_popup.js", "code.js", "chat_time_popup.js", "chat_save_popup.js", "message.js", "message_view.js", "nav_stack.js", "middle_pane.js", "chat_search.js", "chat_drag_to_pin.js", "chat_left_sidebar.js", "chat_right_sidebar.js", "chat_emoji.js", "chat_reactions.js", "chat_compose.js", "chat_help.js", "chat_responsive.js", "chat.js" };
+    var out: [names.len]Src = undefined;
+    for (names, &out) |n, *o| o.* = .{ .name = n, .src = n };
+    break :blk out;
+};
+pub fn everyScript(_: *anyopaque) []const Src {
+    return &test_srcs;
+}
+
 var host: ?Host = null;
 
 /// **A HOST FOR THE ROUTER ALONE**, for a test of its decisions: it says
@@ -437,7 +460,7 @@ pub const Routing = struct {
         h.accounts = noAccount;
         h.read = noFile;
         h.list = noFolder;
-        h.srcs = nothing;
+        h.srcs = everyScript;
         h.links = holdsNone;
         h.recent = nothing;
         return h;
@@ -721,7 +744,7 @@ export fn roc_chat_links() callconv(.c) bool {
     return h.links(h.ctx);
 }
 
-export fn roc_chat_srcs() callconv(.c) roc.RocBytesList {
+export fn roc_chat_srcs() callconv(.c) SrcList {
     const h = current("srcs");
     return .from(h.srcs(h.ctx));
 }

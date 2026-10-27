@@ -312,4 +312,11 @@ maybe = |t| match t {
 
 ## The scripts' srcs, as `name, src` pairs from argument `from` on.
 srcs : List(List(U8)), U64 -> (List(U8) -> List(U8))
-srcs = |args, from| Chrome.src_in(List.drop_first(args, from))
+srcs = |args, from| Chrome.src_in(scripts(args, from, []))
+
+scripts : List(List(U8)), U64, List({ name : List(U8), src : List(U8) }) -> List({ name : List(U8), src : List(U8) })
+scripts = |args, i, out|
+	match (List.get(args, i), List.get(args, i + 1)) {
+		(Ok(name), Ok(src)) => scripts(args, i + 2, List.append(out, { name, src }))
+		_ => out
+	}
