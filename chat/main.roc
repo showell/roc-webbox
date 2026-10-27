@@ -426,7 +426,7 @@ write_if_changed! = |path, value|
 react! : Chat.Conv, Who, List(U8) => Chat.Answer
 react! = |conv, who, sid| {
 	body = Host.body!(Reaction)
-	if !body.ok {
+	if body.status == Answered {
 		Chat.answered
 	} else {
 		match Reaction.form(body.bytes) {
@@ -768,7 +768,7 @@ new_topic! = |req, route|
 				Chat.not_allowed(Post)
 			} else {
 				body = Host.body!(Message)
-				if !body.ok {
+				if body.status == Answered {
 					Chat.answered
 				} else {
 					match Form.field(body.bytes, Str.to_utf8("topic")) {
@@ -848,7 +848,7 @@ sent! = |req, route, conv, who|
 		# The header before the body: reading the body moves past it.
 		send = if Host.header!(Str.to_utf8("x-chat-async")) == [['1']] Async else Sync
 		body = Host.body!(Message)
-		if !body.ok {
+		if body.status == Answered {
 			Chat.answered
 		} else {
 			match Form.field(body.bytes, Str.to_utf8("markdown")) {

@@ -98,6 +98,10 @@ pub const Kind = enum(u8) { answered, found, held, malformed, not_allowed, not_f
 /// Host.roc's `body!` argument: whose limit the body is read to.
 pub const Form = enum(u8) { message, reaction };
 
+/// Host.roc's `body!` answer's `status`: the body read (its bytes beside
+/// it), or answered by the host instead (too big) or failed.
+pub const BodyStatus = enum(u8) { answered, read };
+
 /// Host.roc's `message_count!` answer's `status`: the topic's messages
 /// counted (the count beside it), or a count that failed (the host has
 /// failed the request). **NEVER 0 FOR A COUNT THAT FAILED**: a reaction
@@ -167,7 +171,7 @@ pub const Presence = enum(u8) { offline, online };
 
 comptime {
     @setEvalBranchQuota(20_000);
-    for (.{ Family, Part, Tail, Method, Kind, Form, CountStatus, Hostility, ReadStatus, EntryKind, AccountKind, NameRead, AccountsStatus, FailReason, RenderStatus, PartStatus, AppendStatus, Surface, Presence }) |E| assertRocOrder(E);
+    for (.{ Family, Part, Tail, Method, Kind, Form, BodyStatus, CountStatus, Hostility, ReadStatus, EntryKind, AccountKind, NameRead, AccountsStatus, FailReason, RenderStatus, PartStatus, AppendStatus, Surface, Presence }) |E| assertRocOrder(E);
 }
 
 /// That `E`'s values are Roc's for the same tags: numbered from 0 in the

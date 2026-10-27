@@ -32,8 +32,8 @@ pub const Request = extern struct { sub: RocBytes, channel: bool, method: Method
 pub const RouteRec = extern struct { key: RocBytes, rest: RocBytes, sid: RocBytes, family: Family, part: route_mod.Part, tail: route_mod.Tail };
 /// Chat.roc's `Answer`.
 pub const Answer = extern struct { body: RocBytes, content_type: RocBytes, location: RocBytes, route: RouteRec, status: u16, allow: Method, kind: route_mod.Kind, nosniff: bool, presence: bool };
-/// Host.roc's `{ ok : Bool, bytes : List(U8) }`.
-pub const Got = extern struct { bytes: RocBytes, ok: bool };
+/// Host.roc's `body!` answer: `{ bytes : List(U8), status : [Answered, Read] }`.
+pub const Got = extern struct { bytes: RocBytes, status: route_mod.BodyStatus };
 /// Chat.roc's `Conv`, as Roc hands it to a hosted function.
 pub const ConvRec = extern struct { base: RocBytes, key: RocBytes, members: roc.RocBytesList, family: Family };
 /// Host.roc's `read!` answer: `{ bytes : List(U8), status : [Failed, Found, Missing] }`.
@@ -529,8 +529,8 @@ fn current(comptime name: []const u8) Host {
 }
 
 fn got(bytes: ?[]const u8) Got {
-    const b = bytes orelse return .{ .bytes = .from(""), .ok = false };
-    return .{ .bytes = .from(b), .ok = true };
+    const b = bytes orelse return .{ .bytes = .from(""), .status = .answered };
+    return .{ .bytes = .from(b), .status = .read };
 }
 
 export fn roc_chat_member() callconv(.c) bool {

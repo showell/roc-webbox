@@ -31,9 +31,9 @@ Host := [].{
 	accounts! : {} => { accounts : List({ id : List(U8), kind : [Agent, Guest, Member, Unreadable], name : List(U8), name_read : [Found, Unreadable] }), status : [Failed, Found] }
 
 	## The request's body, read to a form's limit (`which`: the react
-	## form's or a message's); not `ok` when the host answered instead (too
-	## big) or failed.
-	body! : [Reaction, Message] => { ok : Bool, bytes : List(U8) }
+	## form's or a message's): `Read`, its bytes beside it; `Answered` when
+	## the host answered instead (too big) or failed.
+	body! : [Reaction, Message] => { bytes : List(U8), status : [Answered, Read] }
 
 	## **THE BUS, AS A PRIMITIVE** (webbox's `bus.publish`): `bytes` to every
 	## subscriber on `key`, each its own copy, as the stream writes it. It
