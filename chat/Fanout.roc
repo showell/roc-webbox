@@ -10,6 +10,7 @@ import Feeds
 import Recent
 import Accounts
 import JsonText
+import Paths
 
 Fanout := [].{
 
@@ -30,7 +31,7 @@ Fanout := [].{
 	##   failed), counted and said.
 	Step : [
 		Publish(List(U8), List(U8)),
-		Feed({ surface : Surface, member : List(U8), path : List(U8), entry : List(U8), key : List(U8), event : List(U8) }),
+		Feed({ surface : Surface, member : List(U8), path : Paths.ChatPath, entry : List(U8), key : List(U8), event : List(U8) }),
 		Failed(Surface, List(U8), U16),
 	]
 
@@ -75,12 +76,12 @@ Fanout := [].{
 						# that failed fails them whatever it held.
 						match parts.images {
 							Made([]) => []
-							Made(tags) => [Feed({ surface: Images, member: uid, path: Feeds.path(uid, Images), entry: Feeds.images_entry(head, tags), key: images_key(uid), event: Feeds.images_event(head, tags) })]
+							Made(tags) => [Feed({ surface: Images, member: uid, path: Paths.feed_path(uid, Images), entry: Feeds.images_entry(head, tags), key: images_key(uid), event: Feeds.images_event(head, tags) })]
 							Failed(fault) => [Failed(Images, uid, fault)]
 						},
 						match parts.code {
 							Made([]) => []
-							Made(blocks) => [Feed({ surface: Code, member: uid, path: Feeds.path(uid, Code), entry: Feeds.code_entry(head, blocks), key: code_key(uid), event: Feeds.code_event(head, blocks) })]
+							Made(blocks) => [Feed({ surface: Code, member: uid, path: Paths.feed_path(uid, Code), entry: Feeds.code_entry(head, blocks), key: code_key(uid), event: Feeds.code_event(head, blocks) })]
 							Failed(fault) => [Failed(Code, uid, fault)]
 						},
 					]),

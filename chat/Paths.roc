@@ -149,6 +149,16 @@ Paths := [].{
 	channel_path : List(U8) -> ChatPath
 	channel_path = |name| ChatPath.(join([Str.to_utf8("channels"), List.concat(name, Str.to_utf8(".channel"))]))
 
+	## The folder of every channel's member file (channelRosters's listing):
+	## channels.
+	channels_folder : ChatPath
+	channels_folder = ChatPath.(Str.to_utf8("channels"))
+
+	## A conversation's topics folder (listTopics's listing): sessions_dir
+	## of its folder.
+	topics_folder : List(U8) -> ChatPath
+	topics_folder = |conv_dir| ChatPath.(sessions_dir(conv_dir))
+
 	## The member's DM last in (lastUserConv's file): users/<uid>/last-conv.
 	last_conv_path : List(U8) -> ChatPath
 	last_conv_path = |uid| ChatPath.(join([Str.to_utf8("users"), uid, Str.to_utf8("last-conv")]))

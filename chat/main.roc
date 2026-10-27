@@ -295,9 +295,8 @@ channel_members! = |name|
 ## BEFORE IT**, which would leave the rest out.
 channel_rosters! : {} => Try(List(Paths.Roster), [Failed])
 channel_rosters! = |{}| {
-	got = Host.list!(Str.to_utf8("channels"))
-	match got.status {
-		Found => rosters!(Paths.channel_names(got.entries), 0, [])
+	match Files.list!(Paths.channels_folder) {
+		Found(entries) => rosters!(Paths.channel_names(entries), 0, [])
 		Missing => Ok([])
 		Failed => Err(Failed)
 	}
@@ -322,7 +321,7 @@ rosters! = |names, i, out|
 ## **A CONVERSATION'S TOPICS** (listTopics): its sessions folder listed,
 ## the choice Paths.topics's.
 topics! : Chat.Family, List(U8) => List(List(U8))
-topics! = |family, key| Paths.topics(list!(Paths.sessions_dir(conv_dir(family, key))))
+topics! = |family, key| Paths.topics(list!(Paths.topics_folder(conv_dir(family, key))))
 
 ## A DM's or a channel's folder under the chat root.
 conv_dir : Chat.Family, List(U8) -> List(U8)
@@ -333,17 +332,15 @@ conv_dir = |family, key|
 		_ => crash "conv_dir: a family with no conversation"
 	}
 
-## Host.list!'s entries. **NOTHING THERE HOLDS NOTHING** (webbox's
+## Files.list!'s entries. **NOTHING THERE HOLDS NOTHING** (webbox's
 ## store.list); a listing that failed has failed the request, and answers
 ## nothing too, so what follows writes nothing (the host does nothing more).
-list! : List(U8) => List(Paths.Entry)
-list! = |path| {
-	got = Host.list!(path)
-	match got.status {
-		Found => got.entries
+list! : Paths.ChatPath => List(Paths.Entry)
+list! = |path|
+	match Files.list!(path) {
+		Found(entries) => entries
 		Missing | Failed => []
 	}
-}
 
 ## `conv`'s title (convTitle): a DM's partner's name (its accounts known
 ## since find!), a channel's own. `Failed` when the partner's name would not
@@ -1002,7 +999,7 @@ fanned! = |key, sid, steps|
 			match step {
 				Publish(on, bytes) => Host.publish!(on, bytes)
 				Feed(f) => {
-					got = Host.append_entry!(f.path, Feeds.sep, f.entry)
+					got = Files.append_entry!(f.path, Feeds.sep, f.entry)
 					match got.status {
 						Appended => Host.publish!(f.key, f.event)
 						Failed => Host.fanout_failed!(f.surface, f.member, key, sid, got.fault)

@@ -4,15 +4,9 @@
 ## byte. Pure; angry-gopher's chat_twin_test.zig holds each to its Zig.
 import JsonText
 import Bytes
-import Paths
 import ZigText
 
 Feeds := [].{
-
-	## The member's feed file's bytes (Paths.feed_path), for the fan-out's
-	## append, which has not moved to Files.roc.
-	path : List(U8), [Images, Code] -> List(U8)
-	path = |uid, which| Paths.bytes(Paths.feed_path(uid, which))
 
 	## One entry's header line: `Sent by <from> at <at>, source MSG_<source_id> in <conv>:`.
 	Header : { from : List(U8), at : List(U8), source_id : List(U8), conv : List(U8) }
