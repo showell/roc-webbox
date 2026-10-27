@@ -37,11 +37,6 @@ JsonText := [].{
 	opt : Str, Str -> List((Str, List(U8)))
 	opt = |name, s| if s == "" [] else [(name, str(s))]
 
-	## TEMPORARY DOOR: moves out in a later run. `opt` of bytes not yet
-	## decoded, written as `str_at_door` writes them.
-	opt_at_door : Str, List(U8) -> List((Str, List(U8)))
-	opt_at_door = |name, s| if s == [] [] else [(name, str_at_door(s))]
-
 	comma : List(List(U8)) -> List(U8)
 	comma = |items| List.join(List.intersperse(items, [',']))
 }
@@ -58,4 +53,3 @@ expect JsonText.str_at_door(Str.to_utf8("👍")) == Str.to_utf8("\"👍\"")
 expect JsonText.str_at_door([0xc3]) == Str.to_utf8("[195]")
 expect JsonText.str_at_door([0x61, 0xff]) == Str.to_utf8("[97,255]")
 expect JsonText.str_at_door([]) == Str.to_utf8("\"\"")
-expect JsonText.opt_at_door("who", [0xff]) == [("who", Str.to_utf8("[255]"))]

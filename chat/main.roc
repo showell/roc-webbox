@@ -506,7 +506,7 @@ react! = |conv, who, at| {
 ## time, then its sidecar line appended and its frame published on the
 ## topic's key. `Failed` when a step failed (the request has, with its
 ## error), and nothing after it is done.
-reacted! : Chat.Conv, Who, Paths.TopicAt, { msg : U64, emoji : List(U8), change : Reaction.Change } => [Stored, NoSuchMessage, Failed]
+reacted! : Chat.Conv, Who, Paths.TopicAt, { msg : U64, emoji : Str, change : Reaction.Change } => [Stored, NoSuchMessage, Failed]
 reacted! = |conv, who, topic_at, r|
 	match (viewer!(who), me!({})) {
 		(Ok(name), Ok(uid)) => {

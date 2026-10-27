@@ -118,11 +118,12 @@ call = |req| {
 			}
 		28 =>
 			match Reaction.form(arg(0)) {
-				Reacted(r) => [[82], num(r.msg), r.emoji, bool(Reaction.is_added(r.change))]
+				Reacted(r) => [[82], num(r.msg), r.emoji.to_utf8(), bool(Reaction.is_added(r.change))]
 				Bad(why) => [[66], why]
 				Malformed => [[77]]
 			}
-		29 => [bool(Reaction.valid_emoji(arg(0)))]
+		# Bytes that are not UTF-8 are no glyph: the form refuses them first.
+		29 => [bool(text(arg(0)).map_ok(Reaction.valid_emoji) == Ok(Bool.True))]
 		# A heading's title, viewer and active item are text.
 		30 =>
 			match texts([arg(1), arg(2), arg(3)]) {
@@ -263,8 +264,8 @@ call = |req| {
 			}
 		}
 		61 =>
-			match (Uid.from_utf8(arg(1)), Str.from_utf8(arg(5)), text(arg(2))) {
-				(Ok(uid), Ok(at), Ok(from)) => [Reaction.line({ msg: u64(arg(0)), uid, from, emoji: arg(3), change: if arg(4) == [49] Added else Removed, at })]
+			match (Uid.from_utf8(arg(1)), Str.from_utf8(arg(5)), texts([arg(2), arg(3)])) {
+				(Ok(uid), Ok(at), Ok([from, emoji])) => [Reaction.line({ msg: u64(arg(0)), uid, from, emoji, change: if arg(4) == [49] Added else Removed, at })]
 				_ => []
 			}
 		# The fan-out: member `arg(0)`'s five keys; conversation `arg(0)`'s
