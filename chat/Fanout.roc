@@ -49,8 +49,9 @@ Fanout := [].{
 	steps : Sent, Parts -> List(Step)
 	steps = |m, parts| {
 		url = topic_url(m.key, m.sid)
-		notify = notify_event(m.key, m.sid, notify_text(m.kind, m.from, m.key, m.sid), url)
-		added = topic_added(m.key, m.sid, url)
+		topic = { key: m.key, sid: m.sid, url }
+		notify = notify_event(topic, notify_text(m.kind, m.from, topic))
+		added = topic_added(topic)
 		head = { from: m.from, at: m.at, source_id: m.id, conv: m.key }
 		List.join(
 			List.map(
@@ -113,20 +114,25 @@ Fanout := [].{
 
 	## The status strip's line: a DM's "X sent you a message on <sid>.", a
 	## channel's "X posted to <key> > <sid>.".
-	notify_text : [Dm, Channel], List(U8), List(U8), List(U8) -> List(U8)
-	notify_text = |kind, from, key, sid|
+	notify_text : [Dm, Channel], List(U8), Topic -> List(U8)
+	notify_text = |kind, from, { key, sid, url: _ }|
 		match kind {
 			Dm => List.join([from, Str.to_utf8(" sent you a message on "), sid, ['.']])
 			Channel => List.join([from, Str.to_utf8(" posted to "), key, Str.to_utf8(" > "), sid, ['.']])
 		}
 
+	## A topic as the fan-out's events name it: its conversation's `key`,
+	## its `sid`, and its page's `url` (topic_url). Named fields because all
+	## three are byte lists.
+	Topic : { key : List(U8), sid : List(U8), url : List(U8) }
+
 	## The notify stream's event: conv, session, text, link_url.
-	notify_event : List(U8), List(U8), List(U8), List(U8) -> List(U8)
-	notify_event = |key, sid, text, url| JsonText.obj([("conv", JsonText.str(key)), ("session", JsonText.str(sid)), ("text", JsonText.str(text)), ("link_url", JsonText.str(url))])
+	notify_event : Topic, List(U8) -> List(U8)
+	notify_event = |{ key, sid, url }, text| JsonText.obj([("conv", JsonText.str(key)), ("session", JsonText.str(sid)), ("text", JsonText.str(text)), ("link_url", JsonText.str(url))])
 
 	## The sidebar stream's topic-added: kind, conv, sid, url.
-	topic_added : List(U8), List(U8), List(U8) -> List(U8)
-	topic_added = |key, sid, url| JsonText.obj([("kind", JsonText.str(Str.to_utf8("topic-added"))), ("conv", JsonText.str(key)), ("sid", JsonText.str(sid)), ("url", JsonText.str(url))])
+	topic_added : Topic -> List(U8)
+	topic_added = |{ key, sid, url }| JsonText.obj([("kind", JsonText.str(Str.to_utf8("topic-added"))), ("conv", JsonText.str(key)), ("sid", JsonText.str(sid)), ("url", JsonText.str(url))])
 
 	## chat_fanout `recentWhere`, for `viewer`: a channel names itself ("in
 	## <key>"); a DM names the other member ("to <name>"; the DM with
