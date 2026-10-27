@@ -26,26 +26,6 @@ Feeds := [].{
 		Ok({ from, at, source_id, conv })
 	}
 
-	## **A CUT OF TEXT AT ASCII BYTES IS TEXT**: every slice the scanners
-	## below take of a feed's text or a message's markdown starts and ends
-	## at an ASCII byte (or the text's ends), so it decodes. One that does
-	## not is a bug here, and crashes (a 500).
-	text_of : List(U8) -> Str
-	text_of = |bytes|
-		match Str.from_utf8(bytes) {
-			Ok(t) => t
-			Err(_) => crash "Feeds: a cut split a codepoint"
-		}
-
-	## The file's blocks between separators, trimmed, the empty ones gone.
-	blocks_of : List(U8) -> List(List(U8))
-	blocks_of = |text|
-		if ZigText.trim(text) == [] {
-			[]
-		} else {
-			List.keep_if(List.map(Bytes.split_seq(text, sep), ZigText.trim), |b| b != [])
-		}
-
 	sep : List(U8)
 	sep = Str.to_utf8("\n\n-------------\n\n")
 
@@ -73,30 +53,11 @@ Feeds := [].{
 	img_tags : Str -> List(Str)
 	img_tags = |s| tags_in(s.to_utf8())
 
-	tags_in : List(U8) -> List(Str)
-	tags_in = |s| List.map(img_tags_from(s, 0, []), text_of)
-
-	img_tags_from : List(U8), U64, List(List(U8)) -> List(List(U8))
-	img_tags_from = |s, i, out|
-		if i >= List.len(s) {
-			out
-		} else if i + 4 < List.len(s) and lower(List.sublist(s, { start: i, len: 4 })) == Str.to_utf8("<img") and is_space(List.get(s, i + 4) ?? 0) {
-			match find_byte(s, '>', i + 4) {
-				Ok(gt) => img_tags_from(s, gt + 1, List.append(out, List.sublist(s, { start: i, len: gt + 1 - i })))
-				Err(NotFound) => img_tags_from(s, i + 1, out)
-			}
-		} else {
-			img_tags_from(s, i + 1, out)
-		}
-
 	find_byte : List(U8), U8, U64 -> Try(U64, [NotFound])
 	find_byte = |s, b, i| match List.get(s, i) {
 		Ok(c) => if c == b Ok(i) else find_byte(s, b, i + 1)
 		Err(_) => Err(NotFound)
 	}
-
-	smaller : U64, U64 -> U64
-	smaller = |a, b| if a < b a else b
 
 	lower : List(U8) -> List(U8)
 	lower = |s| List.map(s, |c| if c >= 'A' and c <= 'Z' c - 'A' + 'a' else c)
@@ -133,24 +94,6 @@ Feeds := [].{
 	code_blocks : Str -> List(Block)
 	code_blocks = |body| blocks_in(body.to_utf8())
 
-	blocks_in : List(U8) -> List(Block)
-	blocks_in = |body| blocks_from(Bytes.split_byte(body, '\n'), 0, [])
-
-	blocks_from : List(List(U8)), U64, List(Block) -> List(Block)
-	blocks_from = |ls, i, out|
-		match List.get(ls, i) {
-			Err(_) => out
-			Ok(line) =>
-				match fence_open(line) {
-					Err(NotAFence) => blocks_from(ls, i + 1, out)
-					Ok(fo) => {
-						j = close_at(ls, fo.char, fo.count, i + 1)
-						body = Bytes.join_lines(List.sublist(ls, { start: i + 1, len: j - (i + 1) }))
-						blocks_from(ls, j + 1, if fo.lang == Str.to_utf8("quote") out else List.append(out, { lang: text_of(fo.lang), body: text_of(body) }))
-					}
-				}
-		}
-
 	close_at : List(List(U8)), U8, U64, U64 -> U64
 	close_at = |ls, char, count, j| match List.get(ls, j) {
 		Err(_) => j
@@ -179,27 +122,6 @@ Feeds := [].{
 					}
 				}
 		}
-	}
-
-	## markdown_fence `isClose`: up to three spaces, at least `count` of
-	## `char`, then only whitespace.
-	is_close : List(U8), U8, U64 -> Bool
-	is_close = |line, char, count| {
-		indent = smaller(Bytes.leading(line, ' ', 0), 4)
-		if indent >= 4 {
-			Bool.False
-		} else {
-			n = Bytes.leading(List.drop_first(line, indent), char, 0)
-			n >= count and trim_info(List.drop_first(line, indent + n)) == []
-		}
-	}
-
-	## `std.mem.trim(u8, s, " \t\r")`.
-	trim_info : List(U8) -> List(U8)
-	trim_info = |s| {
-		ws = |c| c == ' ' or c == '\t' or c == '\r'
-		front = List.drop_first(s, count_while(s, ws, 0))
-		List.drop_last(front, count_back(front, ws, 0))
 	}
 
 	## How many bytes from `i` on keep `keep`.
@@ -238,10 +160,6 @@ Feeds := [].{
 		}
 	}
 
-	## The fields every feed entry starts with, from its header.
-	head_fields : Header -> List((Str, List(U8)))
-	head_fields = |h| [("source_id", JsonText.str(h.source_id)), ("from", JsonText.str(h.from)), ("conv", JsonText.str(h.conv)), ("at", JsonText.str(h.at))]
-
 	## The Images page's JSON: the newest `most` entries, each as
 	## images_store `encodeImagesEvent` writes it.
 	images_json : List((Header, List(Str))), U64 -> List(U8)
@@ -269,10 +187,6 @@ Feeds := [].{
 		JsonText.obj(List.concat(head_fields(h), [("blocks", blocks), ("source_url", JsonText.str(source_url(h.conv, h.source_id)))]))
 	}
 
-	## The header line every entry starts with, as `header` reads it back.
-	header_line : Header -> Str
-	header_line = |h| "Sent by ${h.from} at ${h.at}, source MSG_${h.source_id} in ${h.conv}:"
-
 	## images_store `formatImagesEntry`: the header, then each tag on a line
 	## of its own. **A TAG IS ONE LINE** (metal-vmm QUEUE 185): a CR or LF in
 	## one is a space, so no tag carries the separator and a forged header.
@@ -287,6 +201,92 @@ Feeds := [].{
 	code_entry = |h, bs|
 		"${header_line(h)}${Str.join_with(List.map(bs, |b| "\n```${b.lang}\n${b.body}\n```"), "\n")}".to_utf8()
 }
+
+## **A CUT OF TEXT AT ASCII BYTES IS TEXT**: every slice the scanners
+## below take of a feed's text or a message's markdown starts and ends
+## at an ASCII byte (or the text's ends), so it decodes. One that does
+## not is a bug here, and crashes (a 500).
+text_of : List(U8) -> Str
+text_of = |bytes|
+	match Str.from_utf8(bytes) {
+		Ok(t) => t
+		Err(_) => crash "Feeds: a cut split a codepoint"
+	}
+
+## The file's blocks between separators, trimmed, the empty ones gone.
+blocks_of : List(U8) -> List(List(U8))
+blocks_of = |text|
+	if ZigText.trim(text) == [] {
+		[]
+	} else {
+		List.keep_if(List.map(Bytes.split_seq(text, Feeds.sep), ZigText.trim), |b| b != [])
+	}
+
+tags_in : List(U8) -> List(Str)
+tags_in = |s| List.map(img_tags_from(s, 0, []), text_of)
+
+img_tags_from : List(U8), U64, List(List(U8)) -> List(List(U8))
+img_tags_from = |s, i, out|
+	if i >= List.len(s) {
+		out
+	} else if i + 4 < List.len(s) and Feeds.lower(List.sublist(s, { start: i, len: 4 })) == Str.to_utf8("<img") and Feeds.is_space(List.get(s, i + 4) ?? 0) {
+		match Feeds.find_byte(s, '>', i + 4) {
+			Ok(gt) => img_tags_from(s, gt + 1, List.append(out, List.sublist(s, { start: i, len: gt + 1 - i })))
+			Err(NotFound) => img_tags_from(s, i + 1, out)
+		}
+	} else {
+		img_tags_from(s, i + 1, out)
+	}
+
+smaller : U64, U64 -> U64
+smaller = |a, b| if a < b a else b
+
+blocks_in : List(U8) -> List(Block)
+blocks_in = |body| blocks_from(Bytes.split_byte(body, '\n'), 0, [])
+
+blocks_from : List(List(U8)), U64, List(Block) -> List(Block)
+blocks_from = |ls, i, out|
+	match List.get(ls, i) {
+		Err(_) => out
+		Ok(line) =>
+			match Feeds.fence_open(line) {
+				Err(NotAFence) => blocks_from(ls, i + 1, out)
+				Ok(fo) => {
+					j = Feeds.close_at(ls, fo.char, fo.count, i + 1)
+					body = Bytes.join_lines(List.sublist(ls, { start: i + 1, len: j - (i + 1) }))
+					blocks_from(ls, j + 1, if fo.lang == Str.to_utf8("quote") out else List.append(out, { lang: text_of(fo.lang), body: text_of(body) }))
+				}
+			}
+	}
+
+## markdown_fence `isClose`: up to three spaces, at least `count` of
+## `char`, then only whitespace.
+is_close : List(U8), U8, U64 -> Bool
+is_close = |line, char, count| {
+	indent = smaller(Bytes.leading(line, ' ', 0), 4)
+	if indent >= 4 {
+		Bool.False
+	} else {
+		n = Bytes.leading(List.drop_first(line, indent), char, 0)
+		n >= count and trim_info(List.drop_first(line, indent + n)) == []
+	}
+}
+
+## `std.mem.trim(u8, s, " \t\r")`.
+trim_info : List(U8) -> List(U8)
+trim_info = |s| {
+	ws = |c| c == ' ' or c == '\t' or c == '\r'
+	front = List.drop_first(s, Feeds.count_while(s, ws, 0))
+	List.drop_last(front, Feeds.count_back(front, ws, 0))
+}
+
+## The fields every feed entry starts with, from its header.
+head_fields : Header -> List((Str, List(U8)))
+head_fields = |h| [("source_id", JsonText.str(h.source_id)), ("from", JsonText.str(h.from)), ("conv", JsonText.str(h.conv)), ("at", JsonText.str(h.at))]
+
+## The header line every entry starts with, as `header` reads it back.
+header_line : Header -> Str
+header_line = |h| "Sent by ${h.from} at ${h.at}, source MSG_${h.source_id} in ${h.conv}:"
 
 # header: the last " at " before the source, the first " in " after it.
 expect Feeds.header("Sent by a at b at c, source MSG_x_1 in 1_2 in 3:") == Ok({ from: "a at b", at: "c", source_id: "x_1", conv: "1_2 in 3" })

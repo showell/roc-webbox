@@ -81,28 +81,6 @@ Route := [].{
 	family : Family -> R
 	family = |f| { family: f, key: "", rest: "", topic: "", part: Landing, tail: Page }
 
-	## The five families under a prefix of their own, at a segment's
-	## boundary (`/docsX` is none of them).
-	family_under : Str -> Try(R, [NotUnderAPrefix])
-	family_under = |sub| {
-		named = [("/docs", Docs), ("/recent", Recent), ("/images", Images), ("/code", Code), ("/links", Links)]
-		List.fold(
-			named,
-			Err(NotUnderAPrefix),
-			|found, (prefix, f)|
-				match found {
-					Ok(r) => Ok(r)
-					Err(NotUnderAPrefix) =>
-						if sub.starts_with(prefix) {
-							rest = sub.drop_prefix(prefix)
-							if rest.is_empty() or rest.starts_with("/") Ok(with_rest(f, rest)) else Err(NotUnderAPrefix)
-						} else {
-							Err(NotUnderAPrefix)
-						}
-				},
-		)
-	}
-
 	## A DM's or a channel's route from its path's segments.
 	conversation : Family, List(Str) -> R
 	conversation = |f, segs| match segs {
@@ -125,35 +103,56 @@ Route := [].{
 				}
 			}
 	}
+}
 
-	## A topic's tail (chat.zig `topicRoute`): one segment naming it, or
-	## `uploads/<file>`.
-	tail_of : R, List(Str) -> R
-	tail_of = |r, segs|
-		match segs {
-			[] => r
-			[first, ..] if first == "uploads" =>
-				match segs {
-					[_, file] => { ..r, tail: Uploads, rest: file }
-					_ => { ..r, tail: Invalid }
-				}
-			[first] => { ..r, tail: named_tail(first) }
-			[first, ..] => { ..r, tail: if first == "send" InvalidSend else Invalid }
-		}
+## The five families under a prefix of their own, at a segment's
+## boundary (`/docsX` is none of them).
+family_under : Str -> Try(R, [NotUnderAPrefix])
+family_under = |sub| {
+	named = [("/docs", Docs), ("/recent", Recent), ("/images", Images), ("/code", Code), ("/links", Links)]
+	List.fold(
+		named,
+		Err(NotUnderAPrefix),
+		|found, (prefix, f)|
+			match found {
+				Ok(r) => Ok(r)
+				Err(NotUnderAPrefix) =>
+					if sub.starts_with(prefix) {
+						rest = sub.drop_prefix(prefix)
+						if rest.is_empty() or rest.starts_with("/") Ok(with_rest(f, rest)) else Err(NotUnderAPrefix)
+					} else {
+						Err(NotUnderAPrefix)
+					}
+			},
+	)
+}
 
-	## The tail one segment names, or `Invalid`.
-	named_tail : Str -> Tail
-	named_tail = |seg| {
-		tails = [("stream", Stream), ("send", Send), ("upload", Upload), ("pin", Pin), ("unpin", Unpin), ("raw", Raw), ("download", Download), ("saved", Saved), ("reactions", Reactions), ("react", React)]
-		List.fold(tails, Invalid, |found, (name, tail)|
-			if found == Invalid and name == seg tail else found)
+## A topic's tail (chat.zig `topicRoute`): one segment naming it, or
+## `uploads/<file>`.
+tail_of : R, List(Str) -> R
+tail_of = |r, segs|
+	match segs {
+		[] => r
+		[first, ..] if first == "uploads" =>
+			match segs {
+				[_, file] => { ..r, tail: Uploads, rest: file }
+				_ => { ..r, tail: Invalid }
+			}
+		[first] => { ..r, tail: named_tail(first) }
+		[first, ..] => { ..r, tail: if first == "send" InvalidSend else Invalid }
 	}
 
-	with_rest : Family, Str -> R
-	with_rest = |f, rest| { ..family(f), rest }
-
-	## The path's segments, empty ones skipped (chat.zig's SegIter).
-	segments : Str -> List(Str)
-	segments = |path| path.split_on("/").drop_if(|s| s.is_empty())
-
+## The tail one segment names, or `Invalid`.
+named_tail : Str -> Tail
+named_tail = |seg| {
+	tails = [("stream", Stream), ("send", Send), ("upload", Upload), ("pin", Pin), ("unpin", Unpin), ("raw", Raw), ("download", Download), ("saved", Saved), ("reactions", Reactions), ("react", React)]
+	List.fold(tails, Invalid, |found, (name, tail)|
+		if found == Invalid and name == seg tail else found)
 }
+
+with_rest : Family, Str -> R
+with_rest = |f, rest| { ..Route.family(f), rest }
+
+## The path's segments, empty ones skipped (chat.zig's SegIter).
+segments : Str -> List(Str)
+segments = |path| path.split_on("/").drop_if(|s| s.is_empty())

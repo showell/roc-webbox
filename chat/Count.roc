@@ -53,20 +53,6 @@ Count := [].{
 			}
 		}
 
-	parse_last : List(U8) -> Last
-	parse_last = |line| match tokens(line) {
-		[o, uid] =>
-			match ZigText.parse_u64(o) {
-				Ok(offset) => Known({ offset, uid: if uid == no_uid [] else uid })
-				Err(NotANumber) | Err(TooBig) => Unknown
-			}
-		_ => Unknown
-	}
-
-	## std.mem.tokenizeScalar on a space: the runs between, none empty.
-	tokens : List(U8) -> List(List(U8))
-	tokens = |line| List.keep_if(Bytes.split_byte(line, ' '), |t| t != [])
-
 	## countText: what a send writes, nobody as `-`.
 	text : U64, U64, Last -> List(U8)
 	text = |count, size, last| {
@@ -76,9 +62,6 @@ Count := [].{
 			Unknown => head
 		}
 	}
-
-	no_uid : List(U8)
-	no_uid = Str.to_utf8("-")
 
 	## believedCount: the sidecar's count when the transcript is still the
 	## size it was taken at.
@@ -122,3 +105,20 @@ Count := [].{
 			}
 		}
 }
+
+parse_last : List(U8) -> Last
+parse_last = |line| match tokens(line) {
+	[o, uid] =>
+		match ZigText.parse_u64(o) {
+			Ok(offset) => Known({ offset, uid: if uid == no_uid [] else uid })
+			Err(NotANumber) | Err(TooBig) => Unknown
+		}
+	_ => Unknown
+}
+
+## std.mem.tokenizeScalar on a space: the runs between, none empty.
+tokens : List(U8) -> List(List(U8))
+tokens = |line| List.keep_if(Bytes.split_byte(line, ' '), |t| t != [])
+
+no_uid : List(U8)
+no_uid = Str.to_utf8("-")

@@ -84,15 +84,15 @@ ChatState := [].{
 			Err(Missing) | Err(Failed) => Bool.True
 		}
 
-	## The most of a bookmark the Zig read: setLastViewedTopic's
-	## `.limited(256)` refuses a file of 256 bytes or more.
-	bookmark_most : U64
-	bookmark_most = 255
-
 	## A bookmark as written: the value and a newline.
 	bookmark_line : Str -> List(U8)
 	bookmark_line = |value| "${value}\n".to_utf8()
 }
+
+## The most of a bookmark the Zig read: setLastViewedTopic's
+## `.limited(256)` refuses a file of 256 bytes or more.
+bookmark_most : U64
+bookmark_most = 255
 
 # pins: each line trimmed, blank ones dropped, sorted by bytes; text past
 # ASCII kept whole.

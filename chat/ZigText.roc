@@ -41,25 +41,6 @@ ZigText := [].{
 	json_string : Str -> List(U8)
 	json_string = |s| List.append(List.fold(Str.to_utf8(s), ['"'], |out, c| List.concat(out, escaped(c))), '"')
 
-	## Backspace (8) and form feed (12) stay numbers: Roc's character
-	## literals have no escape for either.
-	escaped : U8 -> List(U8)
-	escaped = |c|
-		match c {
-			'"' => ['\\', '"']
-			'\\' => ['\\', '\\']
-			8 => ['\\', 'b']
-			12 => ['\\', 'f']
-			'\n' => ['\\', 'n']
-			'\r' => ['\\', 'r']
-			'\t' => ['\\', 't']
-			_ if c < 0x20 => List.concat(Str.to_utf8("\\u00"), [hex(c // 16), hex(c % 16)])
-			_ => [c]
-		}
-
-	hex : U8 -> U8
-	hex = |d| if d < 10 d + '0' else d - 10 + 'a'
-
 	## `std.mem.trim(u8, s, " \t\r\n")`, as the sidecars' readers trim.
 	## trim's, on text: the same four ASCII spaces off each end (Str.trim's
 	## are Unicode's, and the Zig's are not).
@@ -100,3 +81,22 @@ ZigText := [].{
 		_ => n
 	}
 }
+
+## Backspace (8) and form feed (12) stay numbers: Roc's character
+## literals have no escape for either.
+escaped : U8 -> List(U8)
+escaped = |c|
+	match c {
+		'"' => ['\\', '"']
+		'\\' => ['\\', '\\']
+		8 => ['\\', 'b']
+		12 => ['\\', 'f']
+		'\n' => ['\\', 'n']
+		'\r' => ['\\', 'r']
+		'\t' => ['\\', 't']
+		_ if c < 0x20 => List.concat(Str.to_utf8("\\u00"), [hex(c // 16), hex(c % 16)])
+		_ => [c]
+	}
+
+hex : U8 -> U8
+hex = |d| if d < 10 d + '0' else d - 10 + 'a'

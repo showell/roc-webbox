@@ -25,10 +25,10 @@ JsonText := [].{
 	## empty field out): for `obj(List.join([..., opt("url", key), ...]))`.
 	opt : Str, Str -> List((Str, List(U8)))
 	opt = |name, s| if s == "" [] else [(name, str(s))]
-
-	comma : List(List(U8)) -> List(U8)
-	comma = |items| List.join(List.intersperse(items, [',']))
 }
+
+comma : List(List(U8)) -> List(U8)
+comma = |items| List.join(List.intersperse(items, [',']))
 
 # str: text escaped, a character past ASCII as its own UTF-8.
 expect JsonText.str("caf\u(e9) \"q\"\n") == Str.to_utf8("\"caf\u(e9) \\\"q\\\"\\n\"")

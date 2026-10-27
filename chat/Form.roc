@@ -33,36 +33,36 @@ Form := [].{
 			_ => Malformed
 		}
 	}
-
-	## formDecode, or `BadEscape` for a `%` that is not two hex digits.
-	decode : List(U8) -> Try(List(U8), [BadEscape])
-	decode = |raw| decode_from(raw, 0, [])
-
-	decode_from : List(U8), U64, List(U8) -> Try(List(U8), [BadEscape])
-	decode_from = |raw, i, out| match List.get(raw, i) {
-		Err(_) => Ok(out)
-		Ok('+') => decode_from(raw, i + 1, List.append(out, ' '))
-		Ok('%') =>
-			match (List.get(raw, i + 1), List.get(raw, i + 2)) {
-				(Ok(h), Ok(l)) =>
-					match (hex(h), hex(l)) {
-						(Ok(hi), Ok(lo)) => decode_from(raw, i + 3, List.append(out, hi * 16 + lo))
-						_ => Err(BadEscape)
-					}
-				_ => Err(BadEscape)
-			}
-		Ok(c) => decode_from(raw, i + 1, List.append(out, c))
-	}
-
-	hex : U8 -> Try(U8, [NotHex])
-	hex = |c|
-		match c {
-			_ if c >= '0' and c <= '9' => Ok(c - '0')
-			_ if c >= 'a' and c <= 'f' => Ok(c - 'a' + 10)
-			_ if c >= 'A' and c <= 'F' => Ok(c - 'A' + 10)
-			_ => Err(NotHex)
-		}
 }
+
+## formDecode, or `BadEscape` for a `%` that is not two hex digits.
+decode : List(U8) -> Try(List(U8), [BadEscape])
+decode = |raw| decode_from(raw, 0, [])
+
+decode_from : List(U8), U64, List(U8) -> Try(List(U8), [BadEscape])
+decode_from = |raw, i, out| match List.get(raw, i) {
+	Err(_) => Ok(out)
+	Ok('+') => decode_from(raw, i + 1, List.append(out, ' '))
+	Ok('%') =>
+		match (List.get(raw, i + 1), List.get(raw, i + 2)) {
+			(Ok(h), Ok(l)) =>
+				match (hex(h), hex(l)) {
+					(Ok(hi), Ok(lo)) => decode_from(raw, i + 3, List.append(out, hi * 16 + lo))
+					_ => Err(BadEscape)
+				}
+			_ => Err(BadEscape)
+		}
+	Ok(c) => decode_from(raw, i + 1, List.append(out, c))
+}
+
+hex : U8 -> Try(U8, [NotHex])
+hex = |c|
+	match c {
+		_ if c >= '0' and c <= '9' => Ok(c - '0')
+		_ if c >= 'a' and c <= 'f' => Ok(c - 'a' + 10)
+		_ if c >= 'A' and c <= 'F' => Ok(c - 'A' + 10)
+		_ => Err(NotHex)
+	}
 
 # The door: `é` and an emoji decode; a lone `%E9` or `%FF` is malformed.
 expect Form.field(Str.to_utf8("t=caf%C3%A9"), "t") == Found("café")

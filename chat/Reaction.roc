@@ -70,12 +70,6 @@ Reaction := [].{
 			}
 		}
 
-	found_or : Form.Field, Str -> Str
-	found_or = |f, default| match f {
-		Found(v) => v
-		_ => default
-	}
-
 	## validEmoji: the SHAPE of one glyph, 1 to 16 bytes (a limit on bytes)
 	## with no ASCII byte at all (every emoji, its variation selector and ZWJ are
 	## above U+2000), so a name, a digit or a quote is never one.
@@ -84,4 +78,10 @@ Reaction := [].{
 		s = text.to_utf8()
 		List.len(s) >= 1 and List.len(s) <= 16 and List.all(s, |c| c >= 128)
 	}
+}
+
+found_or : Form.Field, Str -> Str
+found_or = |f, default| match f {
+	Found(v) => v
+	_ => default
 }

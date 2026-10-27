@@ -210,15 +210,6 @@ Paths := [].{
 	## A channel and its members, as its member file lists them.
 	Roster : { name : Str, members : List(Uid) }
 
-	## A DM's or a channel's folder under the chat root: a DM's pair key
-	## (dmConvDir), a channel's channels/<name> (channelConvDir).
-	conv_dir : ConvKey -> Str
-	conv_dir = |key|
-		match key {
-			Dm(pair) => pair_key_to_str(pair)
-			Channel(ChannelName.(name)) => "channels/${name}"
-		}
-
 	## **A CONVERSATION'S TOPICS** (listTopics): of its sessions folder's
 	## entries, every one that is not a folder (a file, or a link: only a
 	## folder is passed over) whose name ends in `.md`, that cut off, sorted
@@ -226,10 +217,6 @@ Paths := [].{
 	## topic "".
 	topics : List(Entry) -> List(Str)
 	topics = |entries| sort_by_bytes(List.keep_oks(entries, |e| if e.kind == Dir Err(NoSuffix) else str_suffix(e.name, ".md")))
-
-	## `name` without `suffix`, when it ends in it.
-	str_suffix : Str, Str -> Try(Str, [NoSuffix])
-	str_suffix = |name, suffix| if name.ends_with(suffix) Ok(name.drop_suffix(suffix)) else Err(NoSuffix)
 
 	## **A FILE UNDER THE CHAT ROOT, NAMED HERE**: opaque (`::`), so only
 	## this module makes one, and Files.roc, the one module that reaches the
@@ -315,15 +302,6 @@ Paths := [].{
 				},
 		)
 
-	## channelMembers's trim: spaces, tabs and CRs (a line split on newlines
-	## has none of those).
-	trim_line : List(U8) -> List(U8)
-	trim_line = |s| {
-		ws = |c| c == ' ' or c == '\t' or c == '\r'
-		front = List.drop_first(s, ZigText.count_while(s, ws, 0))
-		List.drop_last(front, ZigText.count_back_while(front, ws, 0))
-	}
-
 	## channelRosters's choice from channels/'s entries: the name of each one
 	## whose name ends in `.channel`, of any kind (one that is a folder will
 	## not read, and fails the listing, as the Zig's did), that cut off, in
@@ -360,27 +338,6 @@ Paths := [].{
 	rosters : List(Str), List(Try(Str, [Missing, Failed])) -> { rosters : List(Roster), malformed : List(Str) }
 	rosters = |names, files| rosters_from(names, files, 0, { rosters: [], malformed: [] })
 
-	rosters_from : List(Str), List(Try(Str, [Missing, Failed])), U64, { rosters : List(Roster), malformed : List(Str) } -> { rosters : List(Roster), malformed : List(Str) }
-	rosters_from = |names, files, i, got|
-		match (List.get(names, i), List.get(files, i)) {
-			(Ok(name), Ok(file)) =>
-				match roster(name, file) {
-					Listed(r) => rosters_from(names, files, i + 1, { rosters: List.append(got.rosters, r), malformed: got.malformed })
-					Malformed => rosters_from(names, files, i + 1, { rosters: got.rosters, malformed: List.append(got.malformed, name) })
-					Gone => rosters_from(names, files, i + 1, got)
-					Failed => got
-				}
-			_ => got
-		}
-
-	## `name` without `suffix`, when it ends in it.
-	cut_suffix : List(U8), List(U8) -> Try(List(U8), [NoSuffix])
-	cut_suffix = |name, suffix| {
-		n = List.len(name)
-		k = List.len(suffix)
-		if n >= k and List.drop_first(name, n - k) == suffix Ok(List.take_first(name, n - k)) else Err(NoSuffix)
-	}
-
 	## A topic's transcript: {conv_dir}/sessions/<topic>.md.
 	transcript_path : TopicAt -> ChatPath
 	transcript_path = |at| ChatPath.("${conv_dir(at.key)}/sessions/${at.topic}.md")
@@ -388,12 +345,6 @@ Paths := [].{
 	## The member's links page (the links route's file): users/<uid>/links.md.
 	links_path : Uid -> ChatPath
 	links_path = |uid| ChatPath.("users/${uid.to_str()}/links.md")
-
-	is_alpha : U8 -> Bool
-	is_alpha = |c| (c >= 'A' and c <= 'Z') or (c >= 'a' and c <= 'z')
-
-	is_alnum : U8 -> Bool
-	is_alnum = |c| is_alpha(c) or (c >= '0' and c <= '9')
 
 	## The bytes before and after the first `sep`.
 	cut_first : List(U8), U8 -> Try((List(U8), List(U8)), [NoSeparator])
@@ -417,6 +368,55 @@ Paths := [].{
 	}
 }
 
+## A DM's or a channel's folder under the chat root: a DM's pair key
+## (dmConvDir), a channel's channels/<name> (channelConvDir).
+conv_dir : ConvKey -> Str
+conv_dir = |key|
+	match key {
+		Dm(pair) => Paths.pair_key_to_str(pair)
+		Channel(ChannelName.(name)) => "channels/${name}"
+	}
+
+## `name` without `suffix`, when it ends in it.
+str_suffix : Str, Str -> Try(Str, [NoSuffix])
+str_suffix = |name, suffix| if name.ends_with(suffix) Ok(name.drop_suffix(suffix)) else Err(NoSuffix)
+
+## channelMembers's trim: spaces, tabs and CRs (a line split on newlines
+## has none of those).
+trim_line : List(U8) -> List(U8)
+trim_line = |s| {
+	ws = |c| c == ' ' or c == '\t' or c == '\r'
+	front = List.drop_first(s, ZigText.count_while(s, ws, 0))
+	List.drop_last(front, ZigText.count_back_while(front, ws, 0))
+}
+
+rosters_from : List(Str), List(Try(Str, [Missing, Failed])), U64, { rosters : List(Roster), malformed : List(Str) } -> { rosters : List(Roster), malformed : List(Str) }
+rosters_from = |names, files, i, got|
+	match (List.get(names, i), List.get(files, i)) {
+		(Ok(name), Ok(file)) =>
+			match Paths.roster(name, file) {
+				Listed(r) => rosters_from(names, files, i + 1, { rosters: List.append(got.rosters, r), malformed: got.malformed })
+				Malformed => rosters_from(names, files, i + 1, { rosters: got.rosters, malformed: List.append(got.malformed, name) })
+				Gone => rosters_from(names, files, i + 1, got)
+				Failed => got
+			}
+		_ => got
+	}
+
+## `name` without `suffix`, when it ends in it.
+cut_suffix : List(U8), List(U8) -> Try(List(U8), [NoSuffix])
+cut_suffix = |name, suffix| {
+	n = List.len(name)
+	k = List.len(suffix)
+	if n >= k and List.drop_first(name, n - k) == suffix Ok(List.take_first(name, n - k)) else Err(NoSuffix)
+}
+
+is_alpha : U8 -> Bool
+is_alpha = |c| (c >= 'A' and c <= 'Z') or (c >= 'a' and c <= 'z')
+
+is_alnum : U8 -> Bool
+is_alnum = |c| is_alpha(c) or (c >= '0' and c <= '9')
+
 # The builders' exact bytes, for a DM (`3_7`) and a channel (`general`).
 expect match (Paths.pair_key_from_str("3_7"), Paths.channel_name_from_str("general")) {
 	(Ok(pair), Ok(name)) => {
@@ -428,8 +428,8 @@ expect match (Paths.pair_key_from_str("3_7"), Paths.channel_name_from_str("gener
 					and (Paths.bytes(Paths.reactions_path({ key: channel, topic: "road-trip" })) == Str.to_utf8("channels/general/sessions/road-trip.reactions.jsonl"))
 						and (Paths.bytes(Paths.transcript_path({ key: dm, topic: "ChitChat" })) == Str.to_utf8("3_7/sessions/ChitChat.md"))
 							and (Paths.bytes(Paths.transcript_path({ key: channel, topic: "road-trip" })) == Str.to_utf8("channels/general/sessions/road-trip.md"))
-								and (Paths.conv_dir(dm) == "3_7")
-									and (Paths.conv_dir(channel) == "channels/general")
+								and (conv_dir(dm) == "3_7")
+									and (conv_dir(channel) == "channels/general")
 	}
 	_ => Bool.False
 }

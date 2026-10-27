@@ -57,11 +57,6 @@ Accounts := [].{
 			[] => Ok("")
 		}
 
-	## The name file's bytes as getUserName reads them: trailing CRs and
-	## LFs cut, nothing else (inner and leading whitespace kept).
-	stored_name : List(U8) -> List(U8)
-	stored_name = |bytes| List.drop_last(bytes, ZigText.count_back_while(bytes, |c| c == '\r' or c == '\n', 0))
-
 	## **AN ACCOUNT DECODED WHERE THE HOST HANDS IT**: its id a Uid, its
 	## name text (`stored_name`'s cut first). The host lists only folders a
 	## counter named, and a name is UTF-8 when it is set (users.zig
@@ -114,6 +109,11 @@ Accounts := [].{
 			)
 			|> List.map(|x| { id: x.a.id, name: x.a.name })
 }
+
+## The name file's bytes as getUserName reads them: trailing CRs and
+## LFs cut, nothing else (inner and leading whitespace kept).
+stored_name : List(U8) -> List(U8)
+stored_name = |bytes| List.drop_last(bytes, ZigText.count_back_while(bytes, |c| c == '\r' or c == '\n', 0))
 
 expect Accounts.from_host({ id: Str.to_utf8("7"), kind: Member, name: Str.to_utf8("caf\u(e9)\r\n"), name_read: Found }).map_ok(|a| a.name) == Ok("caf\u(e9)")
 expect Accounts.from_host({ id: Str.to_utf8("7"), kind: Member, name: [0x41, 0xff], name_read: Found }) == Err(NameNotUtf8(Str.to_utf8("7")))

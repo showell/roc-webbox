@@ -28,9 +28,6 @@ Pages := [].{
 	## `active`. Named fields because all three are text.
 	Heading : { title : Str, viewer : Str, active : Str }
 
-	shell : (List(U8) -> Html), Heading -> Chrome.Shell
-	shell = |src, { title, viewer, active }| { tab: Html.trusted("Chat"), title, viewer, active, src }
-
 	## A conversation with no topics yet: the `viewer`, its URL `base`, and
 	## its `title`.
 	Topicless : { viewer : Str, base : Str, title : Str }
@@ -97,31 +94,6 @@ Pages := [].{
 			Err(NotFound) => crash "Pages.links_around: the page lost its mark"
 		}
 
-	links_css : Html
-	links_css = Html.trusted("<style>\n.links-page { max-width: 46rem; margin: 0 auto; line-height: 1.55; }\n.links-page h2 { margin-top: 1.6rem; }\n.links-page li { margin: 3px 0; }\n</style>")
-
-	## images.zig's and code.zig's pages: the attention strip, the feed's
-	## mount, its JSON (`json`, script-safe) and its scripts.
-	feed : (List(U8) -> Html), Str, [Images, Code], List(U8), List(Str) -> Html
-	feed = |src, viewer, which, json, scripts| {
-		(name, title) = match which {
-			Images => ("images", "Images")
-			Code => ("code", "Code")
-		}
-		s = { tab: Html.escape(Str.to_utf8(title)), title, viewer, active: name, src }
-		id = Html.escape(Str.to_utf8(name))
-		Chrome.page(
-			s,
-			Html.join([
-				Html.trusted("<div class=\"chat-notify\" id=\"chat-notify\"></div><div id=\""),
-				id,
-				Html.trusted("-mount\"></div>"),
-				Html.json_script(Html.join([Html.trusted("<script id=\""), id, Html.trusted("-data\" type=\"application/json\">")]), Html.script_safe(json)),
-				Html.join(List.map(scripts, |js| Chrome.script(s, js))),
-			]),
-		)
-	}
-
 	## A feed page's `viewer` and its feed's `json`.
 	FeedView : { viewer : Str, json : List(U8) }
 
@@ -182,10 +154,6 @@ Pages := [].{
 		)
 	}
 
-	## The bundles the conversation page loads, in document order.
-	page_scripts : List(Str)
-	page_scripts = ["chat_image_popup.js", "chat_code_popup.js", "chat_time_popup.js", "chat_save_popup.js", "message.js", "message_view.js", "nav_stack.js", "middle_pane.js", "chat_search.js", "chat_drag_to_pin.js", "chat_add_topic.js", "chat_left_sidebar.js", "chat_right_sidebar.js", "chat_emoji.js", "chat_reactions.js", "chat_compose.js", "chat_help.js", "chat_responsive.js", "chat.js", "notify.js"]
-
 	## sidebarJSON: every other member (a DM each) and the viewer's channels,
 	## then this conversation's topics, pinned and not; made safe inside the
 	## page's `<script>`.
@@ -230,14 +198,46 @@ Pages := [].{
 		(topics, _) = counted(fields, after_pins)?
 		Ok({ uid: uid_at(0)?, kind: if at(1) == ['1'] Dm else Channel, key: text_at(2)?, base: text_at(3)?, topic: text_at(4)?, others: List.map_try(others, |o| o)?, channels, pins, topics })
 	}
+}
 
-	## A count at `i`, then that many texts, and where the next begins;
-	## `NotUtf8` when one is not text.
-	counted : List(List(U8)), U64 -> Try((List(Str), U64), [NotUtf8])
-	counted = |fields, i| {
-		n = ZigText.parse_u64(List.get(fields, i) ?? []) ?? 0
-		items = List.sublist(fields, { start: i + 1, len: n })
-		texts = List.keep_oks(items, Str.from_utf8)
-		if List.len(texts) == List.len(items) Ok((texts, i + 1 + n)) else Err(NotUtf8)
+shell : (List(U8) -> Html), Heading -> Chrome.Shell
+shell = |src, { title, viewer, active }| { tab: Html.trusted("Chat"), title, viewer, active, src }
+
+links_css : Html
+links_css = Html.trusted("<style>\n.links-page { max-width: 46rem; margin: 0 auto; line-height: 1.55; }\n.links-page h2 { margin-top: 1.6rem; }\n.links-page li { margin: 3px 0; }\n</style>")
+
+## images.zig's and code.zig's pages: the attention strip, the feed's
+## mount, its JSON (`json`, script-safe) and its scripts.
+feed : (List(U8) -> Html), Str, [Images, Code], List(U8), List(Str) -> Html
+feed = |src, viewer, which, json, scripts| {
+	(name, title) = match which {
+		Images => ("images", "Images")
+		Code => ("code", "Code")
 	}
+	s = { tab: Html.escape(Str.to_utf8(title)), title, viewer, active: name, src }
+	id = Html.escape(Str.to_utf8(name))
+	Chrome.page(
+		s,
+		Html.join([
+			Html.trusted("<div class=\"chat-notify\" id=\"chat-notify\"></div><div id=\""),
+			id,
+			Html.trusted("-mount\"></div>"),
+			Html.json_script(Html.join([Html.trusted("<script id=\""), id, Html.trusted("-data\" type=\"application/json\">")]), Html.script_safe(json)),
+			Html.join(List.map(scripts, |js| Chrome.script(s, js))),
+		]),
+	)
+}
+
+## The bundles the conversation page loads, in document order.
+page_scripts : List(Str)
+page_scripts = ["chat_image_popup.js", "chat_code_popup.js", "chat_time_popup.js", "chat_save_popup.js", "message.js", "message_view.js", "nav_stack.js", "middle_pane.js", "chat_search.js", "chat_drag_to_pin.js", "chat_add_topic.js", "chat_left_sidebar.js", "chat_right_sidebar.js", "chat_emoji.js", "chat_reactions.js", "chat_compose.js", "chat_help.js", "chat_responsive.js", "chat.js", "notify.js"]
+
+## A count at `i`, then that many texts, and where the next begins;
+## `NotUtf8` when one is not text.
+counted : List(List(U8)), U64 -> Try((List(Str), U64), [NotUtf8])
+counted = |fields, i| {
+	n = ZigText.parse_u64(List.get(fields, i) ?? []) ?? 0
+	items = List.sublist(fields, { start: i + 1, len: n })
+	texts = List.keep_oks(items, Str.from_utf8)
+	if List.len(texts) == List.len(items) Ok((texts, i + 1 + n)) else Err(NotUtf8)
 }
