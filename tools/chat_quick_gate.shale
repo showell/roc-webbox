@@ -38,10 +38,6 @@
 --   - `zig build codec-bench`, which links the twin archive: run by hand;
 --   - roc_hunt's plants (tools/roc_hunt/hunt.shale self_test=1): they test
 --     the hunts against their own plants, never chat/;
---   - roc fmt --check: no file in chat/ or chat/platform/ is as `roc fmt`
---     formats it (it puts a trailing lambda's arguments a line each, and a
---     blank line after `X := [].{`), so as a gate it would fail every run.
---     Whether the chat takes roc fmt's layout is Steve's to decide.
 --
 -- **RUN THE FULL GATES INSTEAD** when a step changes anything beyond the
 -- chat's Roc and its seam: angry-gopher's Zig other than its chat twins'
@@ -113,8 +109,14 @@ local branch = run({"git", "rev-parse", "--abbrev-ref", "HEAD"}, {tail = 5, time
 print("roc-webbox " .. trim(branch.out) .. " " .. git_head("") .. " (" .. here .. ")")
 print("angry-gopher " .. trim(found.out) .. " (" .. gopher .. ")")
 
+-- Every tracked .roc file of the chat, its platforms and its test app: a
+-- vertical stack is asked for with a trailing comma, which roc fmt keeps.
+const roc_fmt_check = {"roc", "fmt", "--check"}
+for f in lines(trim(run({"git", "ls-files", "chat/*.roc", "chat/platform/*.roc", "chat/twin/*.roc", "chat/twin/platform/*.roc", "chat/test/*.roc"}, {whole = 100000, timeout_ms = 10000}).out)) do push(roc_fmt_check, f) end
+
 part("zig fmt --check, roc-webbox", {"zig", "fmt", "--check", "src", "build.zig"})
 part("zig fmt --check, angry-gopher", {"zig", "fmt", "--check", gopher .. "/zig-server/src", gopher_build})
+part("roc fmt --check, the chat's Roc", roc_fmt_check)
 part("roc check chat/main.roc", {"roc", "check", "chat/main.roc"})
 part("roc check chat/twin.roc", {"roc", "check", "chat/twin.roc"})
 part("roc-webbox zig build test", {"zig", "build", "test", "--summary", "failures"})
