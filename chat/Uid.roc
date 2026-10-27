@@ -8,6 +8,5 @@ Uid := List(U8).{
 	bytes : Uid -> List(U8)
 	bytes = |Uid.(b)| b
 
-	is_eq : Uid, Uid -> Bool
-	is_eq = |Uid.(a), Uid.(b)| a == b
+	is_eq : _
 }
