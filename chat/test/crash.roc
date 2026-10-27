@@ -9,8 +9,9 @@
 ## stores a message (`/store/<sid>`), asks its parts (`/parts/<md>`),
 ## appends a feed's entry and says one that failed (`/entry/<path>`), and asks
 ## `fail!` (`/fail/<reason>/<whose>`),
-## `malformed_channel!` (`/malformed/<name>`) and `accounts!`
-## (`/accounts`). Never linked into a server.
+## `malformed_channel!` (`/malformed/<name>`), `accounts!` (`/accounts`),
+## `online!` (`/online/<id>,<id>`) and `limits!` (`/limits`). Never linked
+## into a server.
 app [handle!] { pf: platform "../platform/main.roc" }
 
 import pf.Chat
@@ -122,6 +123,20 @@ handle! = |req|
 			crash "crash.roc: /fail/ with no reason"
 		}
 		Chat.respond(200, [], Str.to_utf8("failed"))
+	} else if starts(req.sub, "/online/") {
+		# `/online/<id>,<id>,...`: each id's flag in its place, ` <id>:on` or
+		# ` <id>:off`, so a list that crossed short, long or shifted shows.
+		ids = split_on(List.drop_first(req.sub, 8), 44)
+		flags = Host.online!(ids)
+		said = List.map_with_index(flags, |f, i| List.join([[32], List.get(ids, i) ?? Str.to_utf8("?"), Str.to_utf8(match f {
+			Online => ":on"
+			Offline => ":off"
+		})]))
+		Chat.respond(200, [], List.concat(Str.to_utf8("flags ${U64.to_str(List.len(flags))}"), List.join(said)))
+	} else if req.sub == Str.to_utf8("/limits") {
+		# Every field its own, so a record laid out wrong shows.
+		l = Host.limits!({})
+		Chat.respond(200, [], List.concat(Str.to_utf8("image=${U64.to_str(l.image_max)} video=${U64.to_str(l.video_max)} search=${U64.to_str(l.search_min)} accept="), l.accept))
 	} else if starts(req.sub, "/malformed/") {
 		Host.malformed_channel!(List.drop_first(req.sub, 11))
 		Chat.respond(200, [], Str.to_utf8("counted"))
@@ -148,6 +163,16 @@ starts = |l, p| {
 	pre = Str.to_utf8(p)
 	List.take_first(l, List.len(pre)) == pre
 }
+
+## `l` cut at each `sep`.
+split_on : List(U8), U8 -> List(List(U8))
+split_on = |l, sep|
+	List.fold(l, [[]], |acc, b|
+		if b == sep {
+			List.append(acc, [])
+		} else {
+			List.update(acc, List.len(acc) - 1, |last| List.append(last, b)) ?? acc
+		})
 
 dm12 : Chat.Conv
 dm12 = { family: Dm, key: Str.to_utf8("1_2"), base: Str.to_utf8("/chat/c/1_2"), members: [Str.to_utf8("1"), Str.to_utf8("2")] }

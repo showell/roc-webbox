@@ -46,6 +46,12 @@ ChatState := [].{
 		}
 	}
 
+	## pinnedTopics: the member's pins in a conversation, as its file
+	## `stored` lists them, sorted by bytes. A pin no longer a topic stays:
+	## the sidebar shows topics, pinned or not, so it drops out there.
+	pins : List(U8) -> List(List(U8))
+	pins = |stored| Bytes.sort(parse(stored))
+
 	## parsePinned: the lines, each trimmed of spaces, tabs and CRs (ZigText's
 	## trim also takes newlines, which a line split on them has none of),
 	## blank ones dropped.

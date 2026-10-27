@@ -93,10 +93,19 @@ Host := [].{
 	## operator's count, kept by the host for /admin/host.
 	malformed_channel! : List(U8) => {}
 
-	## Topic `sid`'s page's data, in `conv`: the viewer, the four limits
-	## (image, video, accept, search), then the sidebar's fields
-	## (Pages.decode_sidebar). None when it failed.
-	page! : Chat.Conv, List(U8) => List(List(U8))
+	## **WHO IS ONLINE, AT THE REQUEST'S TIME** (angry-gopher presence.zig
+	## `isOnline`): for each of `ids`, in their order, whether it was seen
+	## within the presence window of the request's `now`. A read of the
+	## host's process-lifetime map, one call for the whole roster. It cannot
+	## fail; an id never seen is `Offline`.
+	online! : List(List(U8)) => List([Offline, Online])
+
+	## **THE LIMITS THE SERVER ENFORCES**, as the page tells its client: the
+	## largest image and video an upload takes, the types it accepts, the
+	## shortest word a search looks for. **SINGLE-SOURCED IN THE HOST**: the
+	## upload and search code enforce these values, so the Roc never copies
+	## them.
+	limits! : {} => { image_max : U64, video_max : U64, accept : List(U8), search_min : U64 }
 
 	## Where a page names each script, as `name, src` pairs (a src's hash is
 	## of bytes the host holds).

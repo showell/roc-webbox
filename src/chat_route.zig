@@ -161,9 +161,13 @@ pub const AppendStatus = enum(u8) { appended, failed };
 /// them). Notify and sidebar are made of the Roc's bytes alone, so never.
 pub const Surface = enum(u8) { code, images, recent };
 
+/// Host.roc's `online!` answer: each id seen within the presence window of
+/// the request's time, or not (never seen is `offline`).
+pub const Presence = enum(u8) { offline, online };
+
 comptime {
     @setEvalBranchQuota(20_000);
-    for (.{ Family, Part, Tail, Method, Kind, Form, CountStatus, Hostility, ReadStatus, EntryKind, AccountKind, NameRead, AccountsStatus, FailReason, RenderStatus, PartStatus, AppendStatus, Surface }) |E| assertRocOrder(E);
+    for (.{ Family, Part, Tail, Method, Kind, Form, CountStatus, Hostility, ReadStatus, EntryKind, AccountKind, NameRead, AccountsStatus, FailReason, RenderStatus, PartStatus, AppendStatus, Surface, Presence }) |E| assertRocOrder(E);
 }
 
 /// That `E`'s values are Roc's for the same tags: numbered from 0 in the

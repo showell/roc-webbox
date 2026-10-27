@@ -53,7 +53,19 @@ const Files = struct {
         h.message_parts = parts;
         h.append_entry = appendEntry;
         h.fanout_failed = fanoutFailed;
+        h.online = online;
+        h.limits = limits;
         return h;
+    }
+    /// Members 2 and 12 were seen lately; anyone else not.
+    fn online(ctx: *anyopaque, id: []const u8) @import("chat_route.zig").Presence {
+        say(ctx, "online", id);
+        return if (std.mem.eql(u8, id, "2") or std.mem.eql(u8, id, "12")) .online else .offline;
+    }
+    /// Every limit its own number, so one in another's place shows.
+    fn limits(ctx: *anyopaque) abi.Limits {
+        say(ctx, "limits", "");
+        return .{ .image_max = 10485760, .video_max = 104857600, .accept = "image/*,video/mp4", .search_min = 2 };
     }
     /// `boom` makes no part, each failing with its own error; anything else
     /// makes each, every field its own bytes.
@@ -236,6 +248,17 @@ test "a message's render and store cross the seam: the HTML or a render that fai
     const fields = "id=Plans_9 from=Steve at=2026-10-26T00:00:00Z uid=1 md=**hi**";
     try probe("/store/Plans", "done", "store dm 1_2 /chat/c/1_2 1,2 Plans the block 8 " ++ fields ++ ";", null);
     try probe("/store/Broken", "failed", "store dm 1_2 /chat/c/1_2 1,2 Broken the block 8 " ++ fields ++ ";", error.IsDir);
+}
+
+test "presence crosses one flag for each id, in its place, never short, long or shifted; the limits cross every field in its own place" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    roc.use(arena.allocator());
+    defer roc.deinit();
+    try probe("/online/1,2,3,12", "flags 4 1:off 2:on 3:off 12:on", "online 1;online 2;online 3;online 12;", null);
+    try probe("/online/2", "flags 1 2:on", "online 2;", null);
+    try probe("/online/7", "flags 1 7:off", "online 7;", null);
+    try probe("/limits", "image=10485760 video=104857600 search=2 accept=image/*,video/mp4", "limits ;", null);
 }
 
 test "a folder's listing: a path that would leave the root fails the request at the seam; under it, its entries and their kinds, nothing there, and a listing that failed are three answers" {

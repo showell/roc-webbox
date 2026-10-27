@@ -171,10 +171,11 @@ Pages := [].{
 		]))
 	}
 
-	## The sidebar as it crosses from the host (angry-gopher chat_page.zig
-	## `sidebarFields`): the viewer, "1" for a DM, the key, base and topic,
+	## The sidebar as the twin hands it (angry-gopher chat_twin_test.zig, to
+	## chat/twin.roc): the viewer, "1" for a DM, the key, base and topic,
 	## then each list counted: the others (id, name, "1" when online), the
-	## channels, the pins, the topics.
+	## channels, the pins, the topics. The chat's own page reads its sidebar
+	## itself (chat/main.roc `sidebar!`).
 	decode_sidebar : List(List(U8)) -> Sidebar
 	decode_sidebar = |fields| {
 		at = |i| List.get(fields, i) ?? []
@@ -192,8 +193,4 @@ Pages := [].{
 		n = ZigText.parse_u64(List.get(fields, i) ?? []) ?? 0
 		(List.sublist(fields, { start: i + 1, len: n }), i + 1 + n)
 	}
-
-	## A number the host sent as its digits.
-	number : List(U8) -> U64
-	number = |digits| ZigText.parse_u64(digits) ?? 0
 }

@@ -40,6 +40,8 @@ pub const Account = abi.Account;
 pub const Accounts = abi.Accounts;
 pub const AccountKind = route.AccountKind;
 pub const AccountRead = abi.AccountRead;
+pub const Limits = abi.Limits;
+pub const Presence = route.Presence;
 
 /// roc_abi.zig's arena, from `base`, once, as the host starts.
 pub fn use(base: std.mem.Allocator) void {
@@ -131,8 +133,8 @@ const Scripted = struct {
     files: []const File = &.{},
     /// Whether a write or a remove succeeds.
     write_ok: bool = true,
-    /// The page's data, or none when it failed.
-    page: []const []const u8 = &.{},
+    /// The members seen within the presence window; any other is offline.
+    online_ids: []const []const u8 = &.{},
     is_async: bool = false,
     hostile_answer: route.Hostility = .fine,
     /// Whether markdown renders (as `<p>` around it), and whether a
@@ -153,7 +155,7 @@ const Scripted = struct {
     const Channel = struct { name: []const u8, read: abi.Read };
 
     fn host(self: *Scripted) Host {
-        return .{ .ctx = self, .member = member, .presence = presence, .accounts = accountsOf, .me = meId, .now = nowOf, .body = bodyOf, .publish = publish, .append_line = appendLine, .message_count = messageCount, .read = readOf, .write = writeOf, .remove = removeOf, .list = listOf, .fail = failOf, .fail_account = failAccountOf, .malformed_channel = malformed, .page = pageOf, .header = header, .hostile = hostile, .render = render, .store_message = storeMessage, .message_parts = partsOf, .append_entry = appendEntry, .fanout_failed = fanoutFailed, .raw = raw, .links = links, .srcs = srcs };
+        return .{ .ctx = self, .member = member, .presence = presence, .accounts = accountsOf, .me = meId, .now = nowOf, .body = bodyOf, .publish = publish, .append_line = appendLine, .message_count = messageCount, .read = readOf, .write = writeOf, .remove = removeOf, .list = listOf, .fail = failOf, .fail_account = failAccountOf, .malformed_channel = malformed, .online = onlineOf, .limits = limitsOf, .header = header, .hostile = hostile, .render = render, .store_message = storeMessage, .message_parts = partsOf, .append_entry = appendEntry, .fanout_failed = fanoutFailed, .raw = raw, .links = links, .srcs = srcs };
     }
     fn me(ctx: *anyopaque) *Scripted {
         return @ptrCast(@alignCast(ctx));
@@ -242,10 +244,15 @@ const Scripted = struct {
     fn failAccountOf(ctx: *anyopaque, which: abi.AccountRead, id: []const u8) void {
         say(ctx, "fail {t} {s}", .{ which, id });
     }
-    fn pageOf(ctx: *anyopaque, conv: Conv, sid: []const u8) []const []const u8 {
-        sayConv(ctx, "page", conv);
-        say(ctx, " {s}", .{sid});
-        return me(ctx).page;
+    /// Asked id by id by the seam, for the Roc's one asking.
+    fn onlineOf(ctx: *anyopaque, id: []const u8) route.Presence {
+        say(ctx, "online {s}", .{id});
+        for (me(ctx).online_ids) |o| if (std.mem.eql(u8, o, id)) return .online;
+        return .offline;
+    }
+    fn limitsOf(ctx: *anyopaque) abi.Limits {
+        say(ctx, "limits", .{});
+        return .{ .image_max = 11, .video_max = 22, .accept = "image/*,video/*", .search_min = 3 };
     }
     fn header(ctx: *anyopaque, header_name: []const u8) []const []const u8 {
         say(ctx, "header {s}", .{header_name});
@@ -490,30 +497,108 @@ test "a topic's reactions, react, pin and unpin are the Roc's: presence, the con
     try expectAct("/c/1_2/Plans/stream", false, .GET, a, .{ .serve = .{ .route = .{ .family = .dm, .key = "1_2", .sid = "Plans", .part = .topic, .tail = .stream }, .presence = false } }, "member;");
 }
 
-test "a DM's page and landing, and the DM with yourself: the title the Roc's, a page's bookmark before its data" {
+/// What DM 1_2's page asks once its bookmark is recorded (its accounts known
+/// since the DM was found), Debbie the only other member: the roster's
+/// presence, the member's channels, their pins there, the scripts, the
+/// limits.
+const dm_page = "online 2;list channels;read channels/ops.channel;read users/1/pinned-sessions/1_2;srcs;limits;";
+
+/// The page `sub` served from `script`: what it asked, and its body. One
+/// not served (a 200) fails the test.
+fn served(arena: std.mem.Allocator, sub: []const u8, channel: bool, script: Scripted) !struct { asked: []const u8, body: []const u8 } {
+    var s = script;
+    s.alloc = arena;
+    const got = try decide(arena, sub, channel, .GET, s.host());
+    if (got != .respond or got.respond.status != 200) {
+        std.debug.print("{s}: got {f} asking \"{s}\", want a page\n", .{ sub, got, s.asked.items });
+        return error.TestUnexpectedResult;
+    }
+    return .{ .asked = s.asked.items, .body = got.respond.body };
+}
+
+test "a DM's page and landing, and the DM with yourself: the title the Roc's, a page's bookmark before its sidebar" {
     use(testing.allocator);
     defer @import("roc_abi.zig").deinit();
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
     const a: Scripted = .{ .alloc = undefined };
-    // A page whose data failed: the bookmark was asked first.
-    try expectAct("/c/1_2/Plans", false, .GET, a, .answered, dm_topic ++ bookmarked("Plans") ++ "page dm 1_2 /chat/c/1_2 [1,2] Plans;");
+    // A page: the bookmark first, then the sidebar as sidebarOf read it.
+    try testing.expectEqualStrings(dm_topic ++ bookmarked("Plans") ++ dm_page, (try served(arena.allocator(), "/c/1_2/Plans", false, a)).asked);
     try expectAct("/c/1_2/Plans", false, .GET, blk: {
         var s = a;
         s.write_ok = false;
         break :blk s;
     }, .answered, dm_topic ++ "read users/1/last-sessions/1_2;write users/1/last-sessions/1_2 Plans\n;");
-    // A channel's page moves no bookmark.
-    try expectAct("/ops/Plans", true, .GET, a, .answered, ops_topic ++ "page channel ops /channel/ops [1,3] Plans;");
+    // A channel's page moves no bookmark; its accounts are asked for the
+    // viewer and the roster.
+    try testing.expectEqualStrings(ops_topic ++ "accounts;online 2;list channels;read channels/ops.channel;read users/1/pinned-sessions/ops;srcs;limits;", (try served(arena.allocator(), "/ops/Plans", true, a)).asked);
     // The landing: the first topic, or the page offering one, titled by the
     // partner's id when the account has no name.
     try expectAct("/c/1_2", false, .GET, a, .{ .redirect = "/chat/c/1_2/Plans" }, "member;presence;accounts;list 1_2/sessions;");
-    var arena = std.heap.ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
     var s: Scripted = .{ .alloc = arena.allocator(), .topics = &.{}, .accounts = &.{ steve, .{ .id = "2", .name = .{ .found = "" }, .kind = .guest } } };
     const got = try decide(arena.allocator(), "/c/1_2", false, .GET, s.host());
     try testing.expectEqualStrings("member;presence;accounts;list 1_2/sessions;srcs;", s.asked.items);
     try testing.expect(std.mem.indexOf(u8, got.respond.body, "Chat w/2") != null);
     // The DM with yourself: one member, its partner yourself.
     try expectAct("/c/1_1/Plans/reactions", false, .GET, a, .{ .respond = .{ .status = 200, .content_type = "application/x-ndjson; charset=utf-8", .body = "" } }, "member;presence;accounts;list 1_1/sessions;read 1_1/sessions/Plans.reactions.jsonl;");
+}
+
+test "a page's sidebar is the Roc's (sidebarOf): the roster but the viewer, each beside its own presence; the channels; the pins, stale ones dropped; the limits the host's; and a read that fails serves no page" {
+    use(testing.allocator);
+    defer @import("roc_abi.zig").deinit();
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    // Steve views; Debbie, Ann and the agent Claude are the roster (by
+    // numeric id, never the guest), only Ann seen lately.
+    const all = [_]abi.Account{ .{ .id = "5", .name = .{ .found = "Claude" }, .kind = .agent }, steve, .{ .id = "3", .name = .{ .found = "Ann" }, .kind = .member }, .{ .id = "2", .name = .{ .found = "Debbie" }, .kind = .member }, .{ .id = "4", .name = .{ .found = "Guest" }, .kind = .guest } };
+    const pins = "users/1/pinned-sessions/1_2";
+    const a: Scripted = .{ .alloc = undefined, .accounts = &all, .online_ids = &.{"3"}, .topics = &.{ "Plans", "Other" }, .files = &.{.{ .path = pins, .read = .{ .found = "Stale\nPlans\n" } }} };
+    const p = try served(arena.allocator(), "/c/1_2/Plans", false, a);
+    // **ONE ASKING FOR THE WHOLE ROSTER**, its ids in the roster's order.
+    try testing.expectEqualStrings(dm_topic ++ bookmarked("Plans") ++ "online 2;online 3;online 5;list channels;read channels/ops.channel;read " ++ pins ++ ";srcs;limits;", p.asked);
+    const conversations =
+        "{\"conversations\":[{\"id\":\"uid:2\",\"label\":\"Debbie\",\"url\":\"/chat/c/1_2\",\"active\":true}," ++
+        "{\"id\":\"uid:3\",\"label\":\"Ann\",\"url\":\"/chat/c/1_3\",\"active\":false,\"online\":true}," ++
+        "{\"id\":\"uid:5\",\"label\":\"Claude\",\"url\":\"/chat/c/1_5\",\"active\":false}," ++
+        "{\"id\":\"ch:ops\",\"label\":\"# ops\",\"url\":\"/channel/ops\",\"active\":false}]," ++
+        "\"pinned_sessions\":[{\"id\":\"Plans\",\"label\":\"Plans\",\"url\":\"/chat/c/1_2/Plans\",\"active\":true}]," ++
+        "\"topics\":[{\"id\":\"Other\",\"label\":\"Other\",\"url\":\"/chat/c/1_2/Other\",\"active\":false}]}";
+    for ([_][]const u8{ conversations, "data-upload-image-max=\"11\" data-upload-video-max=\"22\" data-upload-accept=\"image/*,video/*\" data-search-min=\"3\"" }) |want| if (std.mem.indexOf(u8, p.body, want) == null) {
+        std.debug.print("not in the page: {s}\nin: {s}\n", .{ want, p.body });
+        return error.TestUnexpectedResult;
+    };
+    // A malformed channel is skipped and counted; the page is served.
+    const m = try served(arena.allocator(), "/c/1_2/Plans", false, blk: {
+        var s = a;
+        s.channels = &.{ .{ .name = "bad", .read = .{ .found = "x\n" } }, .{ .name = "ops", .read = .{ .found = "1\n" } } };
+        break :blk s;
+    });
+    try testing.expect(std.mem.indexOf(u8, m.asked, "list channels;read channels/bad.channel;malformed bad;read channels/ops.channel;") != null);
+    // **A READ THAT FAILED SERVES NO PAGE**, and nothing after it is asked:
+    // the pins (a folder: never no pins), a member file, the roster's
+    // account, the viewer's own name (a channel's, asked for the page).
+    try expectAct("/c/1_2/Plans", false, .GET, blk: {
+        var s = a;
+        s.files = &.{.{ .path = pins, .read = .failed }};
+        break :blk s;
+    }, .answered, dm_topic ++ bookmarked("Plans") ++ "online 2;online 3;online 5;list channels;read channels/ops.channel;read " ++ pins ++ ";");
+    try expectAct("/c/1_2/Plans", false, .GET, blk: {
+        var s = a;
+        s.channels = &.{.{ .name = "ops", .read = .failed }};
+        break :blk s;
+    }, .answered, dm_topic ++ bookmarked("Plans") ++ "online 2;online 3;online 5;list channels;read channels/ops.channel;");
+    const ann_unnamed = [_]abi.Account{ steve, .{ .id = "2", .name = .{ .found = "Debbie" }, .kind = .member }, .{ .id = "3", .name = .unreadable, .kind = .member } };
+    try expectAct("/c/1_2/Plans", false, .GET, blk: {
+        var s = a;
+        s.accounts = &ann_unnamed;
+        break :blk s;
+    }, .answered, dm_topic ++ bookmarked("Plans") ++ "fail name 3;");
+    const me_unnamed = [_]abi.Account{ .{ .id = "1", .name = .unreadable, .kind = .member }, .{ .id = "3", .name = .unreadable, .kind = .member } };
+    try expectAct("/ops/Plans", true, .GET, blk: {
+        var s = a;
+        s.accounts = &me_unnamed;
+        break :blk s;
+    }, .answered, ops_topic ++ "accounts;fail name 1;");
 }
 
 /// What storing a message asks, step by step: message 4 (index 3, the
@@ -790,33 +875,36 @@ test "the member's bookmarks are the Roc's files: the topic last viewed first, t
     use(testing.allocator);
     defer @import("roc_abi.zig").deinit();
     const a: Scripted = .{ .alloc = undefined };
-    const page = "page dm 1_2 /chat/c/1_2 [1,2] Plans;";
+    const page = dm_page;
     const ls = "users/1/last-sessions/1_2";
     const lc = "users/1/last-conv";
+    var pages = std.heap.ArenaAllocator.init(testing.allocator);
+    defer pages.deinit();
     // Both already say so, whitespace around them: nothing written.
-    try expectAct("/c/1_2/Plans", false, .GET, blk: {
+    try testing.expectEqualStrings(dm_topic ++ "read " ++ ls ++ ";read " ++ lc ++ ";" ++ page, (try served(pages.allocator(), "/c/1_2/Plans", false, blk: {
         var s = a;
         s.files = &.{ .{ .path = ls, .read = .{ .found = "Plans\r\n" } }, .{ .path = lc, .read = .{ .found = " \t1_2 \n" } } };
         break :blk s;
-    }, .answered, dm_topic ++ "read " ++ ls ++ ";read " ++ lc ++ ";" ++ page);
+    })).asked);
     // Only the topic changed; only the DM changed.
-    try expectAct("/c/1_2/Plans", false, .GET, blk: {
+    try testing.expectEqualStrings(dm_topic ++ "read " ++ ls ++ ";write " ++ ls ++ " Plans\n;read " ++ lc ++ ";" ++ page, (try served(pages.allocator(), "/c/1_2/Plans", false, blk: {
         var s = a;
         s.files = &.{ .{ .path = ls, .read = .{ .found = "Other\n" } }, .{ .path = lc, .read = .{ .found = "1_2" } } };
         break :blk s;
-    }, .answered, dm_topic ++ "read " ++ ls ++ ";write " ++ ls ++ " Plans\n;read " ++ lc ++ ";" ++ page);
-    try expectAct("/c/1_2/Plans", false, .GET, blk: {
+    })).asked);
+    try testing.expectEqualStrings(dm_topic ++ "read " ++ ls ++ ";read " ++ lc ++ ";write " ++ lc ++ " 1_2\n;" ++ page, (try served(pages.allocator(), "/c/1_2/Plans", false, blk: {
         var s = a;
         s.files = &.{ .{ .path = ls, .read = .{ .found = "Plans" } }, .{ .path = lc, .read = .{ .found = "1_3\n" } } };
         break :blk s;
-    }, .answered, dm_topic ++ "read " ++ ls ++ ";read " ++ lc ++ ";write " ++ lc ++ " 1_2\n;" ++ page);
+    })).asked);
     // A bookmark that will not read is written again (the write says
-    // whether it can be: a real host has failed the request already).
-    try expectAct("/c/1_2/Plans", false, .GET, blk: {
+    // whether it can be: a real host has failed the request already, and
+    // answers its "failed" values after: a scripted one goes on).
+    try testing.expectEqualStrings(dm_topic ++ "read " ++ ls ++ ";write " ++ ls ++ " Plans\n;read " ++ lc ++ ";" ++ page, (try served(pages.allocator(), "/c/1_2/Plans", false, blk: {
         var s = a;
         s.files = &.{ .{ .path = ls, .read = .failed }, .{ .path = lc, .read = .{ .found = "1_2\n" } } };
         break :blk s;
-    }, .answered, dm_topic ++ "read " ++ ls ++ ";write " ++ ls ++ " Plans\n;read " ++ lc ++ ";" ++ page);
+    })).asked);
     // /chat reads them back: the DM last in, then where it resumes.
     try expectAct("", false, .GET, blk: {
         var s = a;
@@ -864,13 +952,14 @@ test "/chat/msg: every channel's roster, which are the member's, and their order
         break :blk s;
     }, .{ .found = "/channel/ops/Plans#msg-Plans_1" }, "member;presence;accounts;list channels;read channels/Abad.channel;malformed Abad;read channels/Agone.channel;read channels/ops.channel;read channels/Adup.channel;malformed Adup;list channels/ops/sessions;");
     // A member file that will not read: nothing past it is read, and no
-    // channel searched (the host has failed the request); one malformed
-    // before it was counted already, as the Zig counted it.
+    // channel searched (the host has failed the request), never "no such
+    // topic"; one malformed before it was counted already, as the Zig
+    // counted it.
     try expectAct("/msg/Plans_1", false, .GET, blk: {
         var s = a;
         s.channels = &.{ .{ .name = "Abad", .read = .{ .found = "x\n" } }, .{ .name = "ops", .read = .failed }, .{ .name = "Zed", .read = .{ .found = "1\n" } } };
         break :blk s;
-    }, .not_found, "member;presence;accounts;list channels;read channels/Abad.channel;malformed Abad;read channels/ops.channel;");
+    }, .answered, "member;presence;accounts;list channels;read channels/Abad.channel;malformed Abad;read channels/ops.channel;");
 }
 
 test "a channel's member file is the Roc's: a malformed one fails its own route by its reason (never the 404 of a channel not the member's); a missing one is no channel" {
@@ -929,8 +1018,9 @@ test "the accounts are asked of the host at most once a request: once by every r
         .{ .sub = "/c/1_2", .script = .{ .alloc = undefined, .topics = &.{} }, .times = 1 },
         .{ .sub = "/c/1_2/Plans/send", .method = .POST, .script = send, .times = 1 },
         .{ .sub = "/c/1_2/new", .method = .POST, .script = .{ .alloc = undefined, .body = "topic=Ideas" }, .times = 1 },
-        // A channel: only what names the viewer asks.
-        .{ .sub = "/ops/Plans", .channel = true, .times = 0 },
+        // A channel: only what names the viewer asks (a page names them,
+        // and its sidebar lists the roster, from one asking).
+        .{ .sub = "/ops/Plans", .channel = true, .times = 1 },
         .{ .sub = "/ops/Plans/pin", .channel = true, .method = .POST, .times = 0 },
         // A reaction names its reactor: a DM's from the accounts it was
         // found by, a channel's asked for it.

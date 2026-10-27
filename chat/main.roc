@@ -118,26 +118,33 @@ in_conversation! = |req, route|
 				# partner whose name will not read fails every topic route.
 				match title!(conv, who) {
 					Err(Failed) => Chat.answered
-					Ok(t) =>
-						if Conversation.has_topic(topics!(route.family, route.key), route.sid) {
-							in_topic!(req, route, conv, who, Conversation.topic_title(t, route.sid))
+					Ok(t) => {
+						topics = topics!(route.family, route.key)
+						if Conversation.has_topic(topics, route.sid) {
+							in_topic!(req, route, { conv, who, title: Conversation.topic_title(t, route.sid), topics })
 						} else {
 							Chat.zig(route, Bool.False)
 						}
+					}
 				}
 		}
 	}
 
-## A topic that is there, in `conv`, titled `title`: the method, then the
-## work.
-in_topic! : Chat.Request, Route.R, Chat.Conv, Who, List(U8) => Chat.Answer
-in_topic! = |req, route, conv, who, title|
+## A topic found: its conversation, the accounts as far as they were asked,
+## its title, and the conversation's topics as they were listed to find it.
+AtTopic : { conv : Chat.Conv, who : Who, title : List(U8), topics : List(List(U8)) }
+
+## A topic that is there: the method, then the work.
+in_topic! : Chat.Request, Route.R, AtTopic => Chat.Answer
+in_topic! = |req, route, found| {
+	conv = found.conv
+	who = found.who
 	match route.tail {
 		Page | Raw =>
 			if req.method != Get and req.method != Head {
 				Chat.not_allowed(Get)
 			} else if route.tail == Page {
-				page!(route, conv, title)
+				page!(route, found)
 			} else if Host.raw!(conv, route.sid) {
 				Chat.held_plain
 			} else {
@@ -166,6 +173,7 @@ in_topic! = |req, route, conv, who, title|
 				Chat.answered
 			}
 	}
+}
 
 ## **THE CONVERSATION A DM OR CHANNEL ROUTE NAMES, IF IT IS THE MEMBER'S**
 ## (angry-gopher chat.zig `findConv`): a DM whose pair holds the member
@@ -280,14 +288,23 @@ channel_members! = |name|
 ## (Paths.channel_names), then each member file read and judged in the
 ## listing's order (Paths.roster), a malformed one counted as it is met
 ## (Host.malformed_channel!), as the Zig counted it, before any read after
-## it can fail.
-channel_rosters! : {} => List(Paths.Roster)
-channel_rosters! = |{}| rosters!(Paths.channel_names(list!(Str.to_utf8("channels"))), 0, [])
+## it can fail. `Failed` when the listing or a member file would not read
+## (the request has failed with its error): **NEVER THE ROSTERS THAT READ
+## BEFORE IT**, which would leave the rest out.
+channel_rosters! : {} => Try(List(Paths.Roster), [Failed])
+channel_rosters! = |{}| {
+	got = Host.list!(Str.to_utf8("channels"))
+	match got.status {
+		Found => rosters!(Paths.channel_names(got.entries), 0, [])
+		Missing => Ok([])
+		Failed => Err(Failed)
+	}
+}
 
-rosters! : List(List(U8)), U64, List(Paths.Roster) => List(Paths.Roster)
+rosters! : List(List(U8)), U64, List(Paths.Roster) => Try(List(Paths.Roster), [Failed])
 rosters! = |names, i, out|
 	match List.get(names, i) {
-		Err(_) => out
+		Err(_) => Ok(out)
 		Ok(name) =>
 			match Paths.roster(name, read!(Paths.channel_path(name))) {
 				Listed(r) => rosters!(names, i + 1, List.append(out, r))
@@ -296,7 +313,7 @@ rosters! = |names, i, out|
 					rosters!(names, i + 1, out)
 				}
 				Gone => rosters!(names, i + 1, out)
-				Failed => out
+				Failed => Err(Failed)
 			}
 	}
 
@@ -554,24 +571,72 @@ landing! = |route|
 		}
 	}
 
-## A topic's page, titled `title`: a DM's topic recorded as where the
-## member resumes it first (a bookmark that fails serves no page), then
-## what the host read.
-page! : Route.R, Chat.Conv, List(U8) => Chat.Answer
-page! = |route, conv, title|
-	if conv.family == Dm and !bookmark!(conv, route.sid) {
+## A topic's page (angry-gopher chat_page.zig `conversationPage`): a DM's
+## topic recorded as where the member resumes it first (a bookmark that
+## fails serves no page), then the viewer and the sidebar (`sidebar!`), and
+## the limits the server enforces (Host.limits!).
+page! : Route.R, AtTopic => Chat.Answer
+page! = |route, at|
+	if at.conv.family == Dm and !bookmark!(at.conv, route.sid) {
 		Chat.answered
 	} else {
-		match Host.page!(conv, route.sid) {
-			[viewer, image_max, video_max, accept, search_min, .. as fields] => {
-				sb = Pages.decode_sidebar(fields)
-				limits = { image_max: Pages.number(image_max), video_max: Pages.number(video_max), accept, search_min: Pages.number(search_min) }
-				view = { key: route.key, base: sb.base, sid: route.sid, title, uid: sb.uid, viewer, sidebar_json: Pages.sidebar_json(sb) }
-				Chat.respond(200, html, Pages.conversation(Chrome.src_in(Host.srcs!({})), limits, view))
+		match sidebar!(route.sid, at) {
+			Err(Failed) => Chat.answered
+			Ok((viewer, sb)) => {
+				view = { key: route.key, base: sb.base, sid: route.sid, title: at.title, uid: sb.uid, viewer, sidebar_json: Pages.sidebar_json(sb) }
+				Chat.respond(200, html, Pages.conversation(Chrome.src_in(Host.srcs!({})), Host.limits!({}), view))
 			}
-			_ => Chat.answered
 		}
 	}
+
+## **THE VIEWER AND THE SIDEBAR, READ IN THE ZIG'S ORDER** (conversationPage's
+## getUserName, then sidebarOf): the viewer's name; every other authorized
+## member (listAuthorized: an account it reads that will not read fails
+## it), each online or not at the request's time (Host.online!, one asking
+## for all); the member's channels (listUserChannels: a malformed one
+## skipped and counted); their pins in this conversation (pinnedTopics,
+## sorted); its topics as they were listed to find topic `sid`. `Failed`
+## when a read failed (the request has, with its error): **A PINS FILE
+## THAT WILL NOT READ IS NEVER NO PINS.**
+sidebar! : List(U8), AtTopic => Try((List(U8), Pages.Sidebar), [Failed])
+sidebar! = |sid, at| {
+	me = Host.me!({})
+	match accounts!(at.who) {
+		Err(Failed) => Err(Failed)
+		Ok(all) =>
+			match named!(Accounts.name(all, me)) {
+				Err(Failed) => Err(Failed)
+				Ok(viewer) =>
+					match named!(Accounts.authorized(all)) {
+						Err(Failed) => Err(Failed)
+						Ok(roster) => {
+							others = List.drop_if(roster, |u| u.id == me)
+							flags = Host.online!(List.map(others, |u| u.id))
+							match channel_rosters!({}) {
+								Err(Failed) => Err(Failed)
+								Ok(rosters) =>
+									match read!(ChatState.pinned_path(me, at.conv.key)) {
+										Failed => Err(Failed)
+										Found(stored) => Ok((viewer, sidebar_of(me, sid, at, with_online(others, flags), Paths.member_channels(rosters, me), ChatState.pins(stored))))
+										Missing => Ok((viewer, sidebar_of(me, sid, at, with_online(others, flags), Paths.member_channels(rosters, me), [])))
+									}
+							}
+						}
+					}
+			}
+	}
+}
+
+## The other members, each beside its own flag (Host.online! answers one
+## per id, in their order).
+with_online : List({ id : List(U8), name : List(U8) }), List([Offline, Online]) -> List({ id : List(U8), name : List(U8), online : Bool })
+with_online = |others, flags|
+	List.map_with_index(others, |u, i|
+		{ id: u.id, name: u.name, online: List.get(flags, i) == Ok(Online) })
+
+sidebar_of : List(U8), List(U8), AtTopic, List({ id : List(U8), name : List(U8), online : Bool }), List(List(U8)), List(List(U8)) -> Pages.Sidebar
+sidebar_of = |me, sid, at, others, channels, pins|
+	{ uid: me, dm: at.conv.family == Dm, key: at.conv.key, base: at.conv.base, sid, others, channels, pins, topics: at.topics }
 
 json : List(U8)
 json = Str.to_utf8("application/json; charset=utf-8")
@@ -661,9 +726,13 @@ msg! = |id|
 				match find_dm!(me, members, sid, 0) {
 					Ok(conv) => Chat.found(at("/chat/c/", conv))
 					Err(None) =>
-						match find_channel!(Paths.member_channels(channel_rosters!({}), me), sid, 0) {
-							Ok(name) => Chat.found(at("/channel/", name))
-							Err(None) => Chat.not_found
+						match channel_rosters!({}) {
+							Err(Failed) => Chat.answered
+							Ok(rosters) =>
+								match find_channel!(Paths.member_channels(rosters, me), sid, 0) {
+									Ok(name) => Chat.found(at("/channel/", name))
+									Err(None) => Chat.not_found
+								}
 						}
 				}
 		}

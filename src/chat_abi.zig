@@ -65,6 +65,14 @@ pub const ImagesPartRec = extern struct { tags: roc.RocBytesList, fault: u16, st
 pub const PartsRec = extern struct { code: CodePartRec, excerpt: ExcerptPartRec, images: ImagesPartRec };
 /// Host.roc's `append_entry!` answer: `{ fault : U16, status : [Appended, Failed] }`.
 pub const AppendRec = extern struct { fault: u16, status: route_mod.AppendStatus };
+/// Host.roc's `limits!` answer: `{ image_max : U64, video_max : U64,
+/// accept : List(U8), search_min : U64 }`. **THE U64S COME FIRST, BY NAME,
+/// THEN THE LIST**, though all are 8-aligned: the pinned Roc lays it out so,
+/// and the seam's probe (`/limits`, every field its own number) holds it.
+pub const LimitsRec = extern struct { image_max: u64, search_min: u64, video_max: u64, accept: RocBytes };
+/// Host.roc's `online!` answer, `List([Offline, Online])`: its elements one
+/// byte each, so laid out as a `List(U8)` is.
+pub const PresenceList = RocBytes;
 
 /// A Roc list of `Rec`, each made of an `Item` by `rec`: its elements hold
 /// a refcounted list, so it has the two-word header (count, refcount) a
@@ -113,6 +121,7 @@ comptime {
     const w = @sizeOf(usize);
     std.debug.assert(@sizeOf(RocBytes) == 3 * w and @sizeOf(Request) == 4 * w and @sizeOf(RouteRec) == 10 * w and @sizeOf(Answer) == 20 * w and @sizeOf(Got) == 4 * w and @sizeOf(ConvRec) == 10 * w and @sizeOf(ReadRec) == 4 * w and @sizeOf(EntryRec) == 4 * w and @sizeOf(ListRec) == 4 * w and @sizeOf(AccountRec) == 7 * w and @sizeOf(AccountsRec) == 4 * w and @sizeOf(CountRec) == 16 and @sizeOf(RenderRec) == 4 * w and @sizeOf(MessageRec) == 15 * w);
     std.debug.assert(@sizeOf(BlockRec) == 6 * w and @sizeOf(CodePartRec) == 4 * w and @sizeOf(ExcerptPartRec) == 4 * w and @sizeOf(ImagesPartRec) == 4 * w and @sizeOf(PartsRec) == 12 * w and @sizeOf(AppendRec) == 4);
+    std.debug.assert(@sizeOf(LimitsRec) == 3 * w + 24 and @sizeOf(route_mod.Presence) == 1);
     // **A FAULT IS THE HOST'S ERROR, CARRIED BY THE ROC AS A NUMBER** it
     // never reads (`@intFromError`), handed back to say it: it fits a U16.
     std.debug.assert(@bitSizeOf(anyerror) <= 16);
@@ -189,6 +198,12 @@ pub const Parts = struct { excerpt: Part([]const u8), images: Part([]const []con
 /// A feed's entry appended (Host.append_entry!), or why not: the
 /// fan-out's failure, never the request's.
 pub const Appended = union(route_mod.AppendStatus) { appended, failed: anyerror };
+
+/// **THE LIMITS THE SERVER ENFORCES** (Host.limits!), as the conversation
+/// page tells its client: the largest image and video an upload takes, the
+/// types it accepts, the shortest word a search looks for. The host's own
+/// constants, never copied into the Roc.
+pub const Limits = struct { image_max: u64, video_max: u64, accept: []const u8, search_min: u64 };
 
 /// Which of an account's reads a lookup needed, and failed on: its kind
 /// (the password's stat) or its name.
@@ -273,9 +288,12 @@ pub const Host = struct {
     /// Host.malformed_channel!: channel `name`'s member file skipped by a
     /// listing as malformed, counted for the operator.
     malformed_channel: *const fn (ctx: *anyopaque, name: []const u8) void = noMalformed,
-    /// Host.page!: topic `sid`'s page's data in `conv` (Pages.roc reads
-    /// it), or none when it failed.
-    page: *const fn (ctx: *anyopaque, conv: Conv, sid: []const u8) []const []const u8 = noPage,
+    /// Host.online!, asked by the seam once for each of the Roc's ids:
+    /// whether `id` was seen within the presence window of the request's
+    /// time. A read of process-lifetime state; it cannot fail.
+    online: *const fn (ctx: *anyopaque, id: []const u8) route_mod.Presence = noOnline,
+    /// Host.limits!: the limits the upload and search code enforce.
+    limits: *const fn (ctx: *anyopaque) Limits = noLimits,
     /// Host.srcs!: where a page names each script, as `name, src` pairs.
     srcs: *const fn (ctx: *anyopaque) []const []const u8 = noSrcs,
     /// Host.me!: the member's id.
@@ -385,8 +403,11 @@ fn noFanoutFailed(_: *anyopaque, _: route_mod.Surface, _: []const u8, _: []const
     @panic("fanout_failed asked of a host that does not answer it");
 }
 
-fn noPage(_: *anyopaque, _: Conv, _: []const u8) []const []const u8 {
-    @panic("page asked of a host that does not answer it");
+fn noOnline(_: *anyopaque, _: []const u8) route_mod.Presence {
+    @panic("online asked of a host that does not answer it");
+}
+fn noLimits(_: *anyopaque) Limits {
+    @panic("limits asked of a host that does not answer it");
 }
 fn noList(_: *anyopaque) []const []const u8 {
     @panic("a hosted list asked of a host that does not answer it");
@@ -590,9 +611,21 @@ export fn roc_chat_malformed_channel(name: RocBytes) callconv(.c) void {
     h.malformed_channel(h.ctx, name.slice());
 }
 
-export fn roc_chat_page(conv: ConvRec, sid: RocBytes) callconv(.c) roc.RocBytesList {
-    const h = current("page");
-    return .from(h.page(h.ctx, .of(conv), sid.slice()));
+/// **ONE FLAG FOR EACH ID, IN ITS PLACE**: the Roc asks once for the whole
+/// roster, and the seam asks the host id by id, so the answer is exactly as
+/// long as the ids and never out of their order.
+export fn roc_chat_online(ids: roc.RocBytesList) callconv(.c) PresenceList {
+    const h = current("online");
+    const items = ids.slice();
+    const flags = roc.alloc().alloc(u8, items.len) catch @panic("roc_chat: out of memory for the presence flags");
+    for (items, flags) |*id, *f| f.* = @backingInt(h.online(h.ctx, id.slice()));
+    return .from(flags);
+}
+
+export fn roc_chat_limits() callconv(.c) LimitsRec {
+    const h = current("limits");
+    const l = h.limits(h.ctx);
+    return .{ .accept = .from(l.accept), .image_max = l.image_max, .search_min = l.search_min, .video_max = l.video_max };
 }
 
 export fn roc_chat_me() callconv(.c) RocBytes {
