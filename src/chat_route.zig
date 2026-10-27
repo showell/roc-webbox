@@ -197,7 +197,7 @@ pub const RowConv = enum(u8) { channel, dm };
 
 comptime {
     @setEvalBranchQuota(20_000);
-    for (.{ Family, Part, Tail, Method, Area, Counting, Sniff, Kind, Form, BodyStatus, CountStatus, Hostility, ReadStatus, EntryKind, AccountKind, NameRead, AccountsStatus, FailReason, RenderStatus, AppendStatus, Surface, Presence, RowKind, RowConv }) |E| assertRocOrder(E);
+    for (.{ Family, Part, Tail, Method, Area, Counting, Sniff, Kind, Form, BodyStatus, CountStatus, Hostility, ReadStatus, EntryKind, AccountKind, NameRead, AccountsStatus, FailReason, RenderStatus, AppendStatus, Surface, Presence, RowKind, RowConv, Membership, Done, Serving }) |E| assertRocOrder(E);
 }
 
 /// That `E`'s values are Roc's for the same tags: numbered from 0 in the

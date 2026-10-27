@@ -112,7 +112,8 @@ gate that builds it. There is no Zig fallback build. So:
   `chat/platform/main.roc` needs its `roc_chat_*` export in
   `src/chat_abi.zig`.
 - The records are laid out by hand in `src/chat_abi.zig`, their sizes
-  asserted at compile time. Roc lays fields out by alignment, then by name;
+  asserted at compile time. Roc's field order is stated once, in
+  `src/roc_abi.zig` (not "by alignment": a U64 comes before a List);
   tag-union discriminants are alphabetical, so adding a tag renumbers the
   others.
 - Hosted function names are unique per app (`roc_chat_` prefixed), so the

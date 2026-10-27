@@ -1,6 +1,6 @@
 //! **THE ROC CHAT'S SIDE OF THE SEAM** (chat/platform/): the records
-//! `roc_chat_handle` takes and answers, laid out as Roc lays them (fields
-//! by alignment, then by name; sizes asserted below), and the hosted
+//! `roc_chat_handle` takes and answers, laid out as Roc lays them (Roc's
+//! field order, as roc_abi.zig states it; sizes asserted below), and the hosted
 //! functions (chat/platform/Host.roc), each answered by the host's `Host`
 //! for the call. The runtime and the call's arena are roc_abi.zig's, shared
 //! with any other Roc app in the binary.

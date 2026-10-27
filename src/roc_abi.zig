@@ -110,7 +110,14 @@ pub const RocBytesList = extern struct {
 };
 
 /// What the app is handed for a request (platform/Http.roc's `Request`):
-/// fields in Roc's order, by alignment and then by name.
+/// fields in Roc's order.
+///
+/// **ROC'S FIELD ORDER, FOR EVERY RECORD THAT CROSSES** (the pinned Roc's
+/// src/layout/field_order.zig): by descending sort key, then by name. A
+/// pointer's key sits between 4- and 8-byte alignment, so an 8-byte number
+/// (U64, I64) comes before a pointer or a List or Str (pointer-led), and those
+/// before a U32. Not "by alignment": on 64-bit a pointer and a U64 align
+/// alike, but the U64 still comes first.
 pub const Request = extern struct { body: RocStr, method: RocStr, path: RocStr, user: RocStr };
 
 /// What the app answers (`Response`).
