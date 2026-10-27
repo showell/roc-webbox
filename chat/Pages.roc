@@ -22,7 +22,7 @@ Pages := [].{
 	## What the sidebar shows: the viewer, the conversation (its kind), the
 	## topic, every other member (each online or not), the viewer's channels,
 	## their pins in this conversation, and its topics.
-	Sidebar : { uid : Uid, kind : [Dm, Channel], key : List(U8), base : List(U8), topic : List(U8), others : List({ id : Uid, name : List(U8), presence : [Online, Offline] }), channels : List(List(U8)), pins : List(List(U8)), topics : List(List(U8)) }
+	Sidebar : { uid : Uid, kind : [Dm, Channel], key : Str, base : Str, topic : Str, others : List({ id : Uid, name : List(U8), presence : [Online, Offline] }), channels : List(Str), pins : List(Str), topics : List(Str) }
 
 	## A chat page's heading: its `title`, the `viewer`, and the nav item
 	## `active`. Named fields because all three are byte lists.
@@ -189,19 +189,18 @@ Pages := [].{
 	## sidebarJSON: every other member (a DM each) and the viewer's channels,
 	## then this conversation's topics, pinned and not; made safe inside the
 	## page's `<script>`.
-	# TEMPORARY DOOR: moves out in a later run.
+	# TEMPORARY DOOR: moves out in a later run (a member's name, still bytes).
 	sidebar_json : Sidebar -> Html.ScriptJson
 	sidebar_json = |sb| {
-		prefixed = |prefix, s| JsonText.str_at_door(List.concat(Str.to_utf8(prefix), s))
 		person = |u| {
-			pk = Paths.pair_key_bytes(Paths.pair_key(sb.uid, u.id))
+			pk = Paths.pair_key_to_str(Paths.pair_key(sb.uid, u.id))
 			online = if u.presence == Online [("online", JsonText.bool(Bool.True))] else []
-			JsonText.obj(List.concat([("id", JsonText.str("uid:${u.id.to_str()}")), ("label", JsonText.str_at_door(u.name)), ("url", prefixed("/chat/c/", pk)), ("active", JsonText.bool(sb.kind == Dm and pk == sb.key))], online))
+			JsonText.obj(List.concat([("id", JsonText.str("uid:${u.id.to_str()}")), ("label", JsonText.str_at_door(u.name)), ("url", JsonText.str("/chat/c/${pk}")), ("active", JsonText.bool(sb.kind == Dm and pk == sb.key))], online))
 		}
 		room = |name|
-			JsonText.obj([("id", prefixed("ch:", name)), ("label", prefixed("# ", name)), ("url", prefixed("/channel/", name)), ("active", JsonText.bool(sb.kind == Channel and name == sb.key))])
+			JsonText.obj([("id", JsonText.str("ch:${name}")), ("label", JsonText.str("# ${name}")), ("url", JsonText.str("/channel/${name}")), ("active", JsonText.bool(sb.kind == Channel and name == sb.key))])
 		topic = |s|
-			JsonText.obj([("id", JsonText.str_at_door(s)), ("label", JsonText.str_at_door(s)), ("url", JsonText.str_at_door(List.join([sb.base, ['/'], s]))), ("active", JsonText.bool(s == sb.topic))])
+			JsonText.obj([("id", JsonText.str(s)), ("label", JsonText.str(s)), ("url", JsonText.str("${sb.base}/${s}")), ("active", JsonText.bool(s == sb.topic))])
 		pinned = List.keep_if(sb.topics, |s| List.contains(sb.pins, s))
 		rest = List.drop_if(sb.topics, |s| List.contains(sb.pins, s))
 		Html.script_safe(
@@ -217,28 +216,33 @@ Pages := [].{
 	## chat/twin.roc): the viewer, "1" for a DM, the key, base and topic,
 	## then each list counted: the others (id, name, "1" when online), the
 	## channels, the pins, the topics. The chat's own page reads its sidebar
-	## itself (chat/main.roc `sidebar!`). **ITS UIDS ARE DECODED HERE, AT
-	## THE DOOR**: one that is no uid is `NotAUid`.
-	decode_sidebar : List(List(U8)) -> Try(Sidebar, [NotAUid])
+	## itself (chat/main.roc `sidebar!`). **ITS UIDS AND TEXT ARE DECODED
+	## HERE, AT THE DOOR**: one that is no uid is `NotAUid`, text that is not
+	## UTF-8 `NotUtf8`.
+	decode_sidebar : List(List(U8)) -> Try(Sidebar, [NotAUid, NotUtf8])
 	decode_sidebar = |fields| {
 		at = |i| List.get(fields, i) ?? []
+		text_at = |i| Str.from_utf8(at(i)).map_err(|_| NotUtf8)
 		uid_at = |i| Uid.from_str(Str.from_utf8(at(i)) ?? "")
 		n_others = ZigText.parse_u64(at(5)) ?? 0
 		others = List.sublist(fields, { start: 6, len: n_others }) |> List.map_with_index(|_, k| uid_at(6 + 3 * k).map_ok(|id| { id, name: at(7 + 3 * k), presence: if at(8 + 3 * k) == ['1'] Online else Offline }))
-		(channels, after_channels) = counted(fields, 6 + 3 * n_others)
-		(pins, after_pins) = counted(fields, after_channels)
-		(topics, _) = counted(fields, after_pins)
+		(channels, after_channels) = counted(fields, 6 + 3 * n_others)?
+		(pins, after_pins) = counted(fields, after_channels)?
+		(topics, _) = counted(fields, after_pins)?
 		if List.any(others, |o| o.is_err()) {
 			Err(NotAUid)
 		} else {
-			Ok({ uid: uid_at(0)?, kind: if at(1) == ['1'] Dm else Channel, key: at(2), base: at(3), topic: at(4), others: List.keep_oks(others, |o| o), channels, pins, topics })
+			Ok({ uid: uid_at(0)?, kind: if at(1) == ['1'] Dm else Channel, key: text_at(2)?, base: text_at(3)?, topic: text_at(4)?, others: List.keep_oks(others, |o| o), channels, pins, topics })
 		}
 	}
 
-	## A count at `i`, then that many: the items, and where the next begins.
-	counted : List(List(U8)), U64 -> (List(List(U8)), U64)
+	## A count at `i`, then that many texts, and where the next begins;
+	## `NotUtf8` when one is not text.
+	counted : List(List(U8)), U64 -> Try((List(Str), U64), [NotUtf8])
 	counted = |fields, i| {
 		n = ZigText.parse_u64(List.get(fields, i) ?? []) ?? 0
-		(List.sublist(fields, { start: i + 1, len: n }), i + 1 + n)
+		items = List.sublist(fields, { start: i + 1, len: n })
+		texts = List.keep_oks(items, Str.from_utf8)
+		if List.len(texts) == List.len(items) Ok((texts, i + 1 + n)) else Err(NotUtf8)
 	}
 }

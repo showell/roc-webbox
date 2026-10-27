@@ -53,8 +53,10 @@ ChatState := [].{
 	## pinnedTopics: the member's pins in a conversation, as its file
 	## `stored` lists them, sorted by bytes. A pin no longer a topic stays:
 	## the sidebar shows topics, pinned or not, so it drops out there.
-	pins : List(U8) -> List(List(U8))
-	pins = |stored| Bytes.sort(parse(stored))
+	## The lines of text cut at ASCII bytes are text, so `from_utf8` drops
+	## none.
+	pins : Str -> List(Str)
+	pins = |stored| Paths.sort_by_bytes(List.keep_oks(parse(stored.to_utf8()), Str.from_utf8))
 
 	## parsePinned: the lines, each trimmed of spaces, tabs and CRs (ZigText's
 	## trim also takes newlines, which a line split on them has none of),
@@ -93,3 +95,7 @@ ChatState := [].{
 	bookmark_line : List(U8) -> List(U8)
 	bookmark_line = |value| List.append(value, '\n')
 }
+
+# pins: each line trimmed, blank ones dropped, sorted by bytes; text past
+# ASCII kept whole.
+expect ChatState.pins("b \r\n\n caf\u(e9)\t\na\n") == ["a", "b", "caf\u(e9)"]

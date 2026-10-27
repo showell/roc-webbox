@@ -639,7 +639,7 @@ page! = |route, at|
 	if at.conv.family == Dm and bookmark!(at.key, route.topic).is_err() {
 		Chat.answered
 	} else {
-		match sidebar!(route.topic.to_utf8(), at) {
+		match sidebar!(route.topic, at) {
 			Err(Failed) => Chat.answered
 			Ok((viewer, sb)) => {
 				view = { key: route.key, base: Paths.conv_base(at.key), topic: route.topic, title: at.title, uid: sb.uid, viewer, sidebar_json: Pages.sidebar_json(sb) }
@@ -657,7 +657,7 @@ page! = |route, at|
 ## sorted); its topics as they were listed to find `topic`. `Failed`
 ## when a read failed (the request has, with its error): **A PINS FILE
 ## THAT WILL NOT READ IS NEVER NO PINS.**
-sidebar! : List(U8), AtTopic => Try((List(U8), Pages.Sidebar), [Failed])
+sidebar! : Str, AtTopic => Try((List(U8), Pages.Sidebar), [Failed])
 sidebar! = |topic, at| {
 	uid = me!({})?
 	me = uid.to_str().to_utf8()
@@ -675,7 +675,7 @@ sidebar! = |topic, at| {
 							match channel_rosters!({}) {
 								Err(Failed) => Err(Failed)
 								Ok(rosters) =>
-									match text_bytes!(Paths.pinned_path(uid, at.key)) {
+									match Files.read!(Paths.pinned_path(uid, at.key)) {
 										Err(Failed) => Err(Failed)
 										Ok(stored) => Ok((viewer, sidebar_of(uid, topic, at, with_online(others, flags), Paths.member_channels(rosters, me), ChatState.pins(stored))))
 										Err(Missing) => Ok((viewer, sidebar_of(uid, topic, at, with_online(others, flags), Paths.member_channels(rosters, me), [])))
@@ -694,9 +694,9 @@ with_online = |others, flags|
 	List.map_with_index(others, |u, i|
 		{ id: u.id, name: u.name, presence: if List.get(flags, i) == Ok(Online) Online else Offline })
 
-sidebar_of : Uid, List(U8), AtTopic, List({ id : Uid, name : List(U8), presence : [Online, Offline] }), List(Str), List(List(U8)) -> Pages.Sidebar
+sidebar_of : Uid, Str, AtTopic, List({ id : Uid, name : List(U8), presence : [Online, Offline] }), List(Str), List(Str) -> Pages.Sidebar
 sidebar_of = |me, topic, at, others, channels, pins|
-	{ uid: me, kind: if at.conv.family == Dm Dm else Channel, key: at.conv.key, base: at.conv.base, topic, others, channels: List.map(channels, Str.to_utf8), pins, topics: List.map(at.topics, Str.to_utf8) }
+	{ uid: me, kind: if at.conv.family == Dm Dm else Channel, key: Paths.conv_key_to_str(at.key), base: Paths.conv_base(at.key), topic, others, channels, pins, topics: at.topics }
 
 json : List(U8)
 json = Str.to_utf8("application/json; charset=utf-8")

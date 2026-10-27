@@ -124,7 +124,7 @@ call = |req| {
 		34 =>
 			match Pages.decode_sidebar(req.args) {
 				Ok(sb) => [Html.script_json_bytes(Pages.sidebar_json(sb))]
-				Err(NotAUid) => []
+				Err(NotAUid) | Err(NotUtf8) => []
 			}
 		35 => {
 			limits = { image_max: u64(arg(7)), video_max: u64(arg(8)), accept: arg(9), search_min: u64(arg(10)) }
