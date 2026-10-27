@@ -11,12 +11,19 @@ Files := [].{
 	read! : Paths.ChatPath => [Found(List(U8)), Missing, Failed]
 	read! = |path| {
 		got = Host.read!(Paths.bytes(path))
-		match got.status {
-			Found => Found(got.bytes)
+		answer(got.status, got.bytes)
+	}
+
+	## **A HOST'S STATUS AND WHAT CAME WITH IT, AS ONE TAG**: `Found` carries
+	## `got`; `Missing` and `Failed` carry nothing, and each stays itself.
+	## read! and list! both answer by it.
+	answer : [Found, Missing, Failed], a -> [Found(a), Missing, Failed]
+	answer = |status, got|
+		match status {
+			Found => Found(got)
 			Missing => Missing
 			Failed => Failed
 		}
-	}
 
 	## Host.write!: the whole file as `bytes`; false when it failed.
 	write! : Paths.ChatPath, List(U8) => Bool
@@ -40,10 +47,22 @@ Files := [].{
 	list! : Paths.ChatPath => [Found(List(Paths.Entry)), Missing, Failed]
 	list! = |path| {
 		got = Host.list!(Paths.bytes(path))
-		match got.status {
-			Found => Found(got.entries)
-			Missing => Missing
-			Failed => Failed
-		}
+		answer(got.status, got.entries)
 	}
 }
+
+# read!'s answers: bytes found, empty bytes found (an empty file is there),
+# nothing there, a failed read; never one for another.
+expect Files.answer(Found, Str.to_utf8("hi")) == Found(Str.to_utf8("hi"))
+expect Files.answer(Found, []) == Found([])
+expect Files.answer(Missing, Str.to_utf8("hi")) == Missing
+expect Files.answer(Failed, Str.to_utf8("hi")) == Failed
+expect Files.answer(Missing, []) != Failed
+expect Files.answer(Failed, []) != Missing
+
+# list!'s: an empty folder is Found([]), never Missing; Missing and Failed
+# stay apart.
+expect Files.answer(Found, [{ kind: File, name: Str.to_utf8("a.md") }]) == Found([{ kind: File, name: Str.to_utf8("a.md") }])
+expect Files.answer(Found, List.drop_first([{ kind: Dir, name: [] }], 1)) == Found(List.drop_first([{ kind: Dir, name: [] }], 1))
+expect Files.answer(Missing, [{ kind: Dir, name: Str.to_utf8("x") }]) == Missing
+expect Files.answer(Failed, [{ kind: Dir, name: Str.to_utf8("x") }]) == Failed

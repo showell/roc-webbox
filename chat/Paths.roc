@@ -356,3 +356,82 @@ Paths := [].{
 		Err(_) => Err(None)
 	}
 }
+
+# The builders' exact bytes, for a DM (`3_7`) and a channel (`general`).
+expect Paths.bytes(Paths.topics_folder(Dm, Str.to_utf8("3_7"))) == Str.to_utf8("3_7/sessions")
+expect Paths.bytes(Paths.topics_folder(Channel, Str.to_utf8("general"))) == Str.to_utf8("channels/general/sessions")
+expect Paths.bytes(Paths.reactions_path(Dm, { key: Str.to_utf8("3_7"), topic: Str.to_utf8("ChitChat") })) == Str.to_utf8("3_7/sessions/ChitChat.reactions.jsonl")
+expect Paths.bytes(Paths.reactions_path(Channel, { key: Str.to_utf8("general"), topic: Str.to_utf8("road-trip") })) == Str.to_utf8("channels/general/sessions/road-trip.reactions.jsonl")
+expect Paths.transcript_path(Dm, { key: Str.to_utf8("3_7"), topic: Str.to_utf8("ChitChat") }) == Str.to_utf8("3_7/sessions/ChitChat.md")
+expect Paths.transcript_path(Channel, { key: Str.to_utf8("general"), topic: Str.to_utf8("road-trip") }) == Str.to_utf8("channels/general/sessions/road-trip.md")
+expect Paths.conv_dir(Dm, Str.to_utf8("3_7")) == Str.to_utf8("3_7")
+expect Paths.conv_dir(Channel, Str.to_utf8("general")) == Str.to_utf8("channels/general")
+expect Paths.bytes(Paths.channels_folder) == Str.to_utf8("channels")
+expect Paths.bytes(Paths.channel_path(Str.to_utf8("general"))) == Str.to_utf8("channels/general.channel")
+expect Paths.bytes(Paths.last_conv_path(Str.to_utf8("3"))) == Str.to_utf8("users/3/last-conv")
+expect Paths.bytes(Paths.last_session_path(Str.to_utf8("3"), Str.to_utf8("3_7"))) == Str.to_utf8("users/3/last-sessions/3_7")
+expect Paths.bytes(Paths.pinned_path(Str.to_utf8("3"), Str.to_utf8("3_7"))) == Str.to_utf8("users/3/pinned-sessions/3_7")
+expect Paths.bytes(Paths.pinned_path(Str.to_utf8("3"), Str.to_utf8("general"))) == Str.to_utf8("users/3/pinned-sessions/general")
+expect Paths.bytes(Paths.feed_path(Str.to_utf8("3"), Images)) == Str.to_utf8("users/3/images.md")
+expect Paths.bytes(Paths.feed_path(Str.to_utf8("3"), Code)) == Str.to_utf8("users/3/code.md")
+
+# pair_key: the smaller uid first, by number, not by bytes.
+expect Paths.pair_key(Uid.from_bytes(Str.to_utf8("7")), Uid.from_bytes(Str.to_utf8("3"))) == Str.to_utf8("3_7")
+expect Paths.pair_key(Uid.from_bytes(Str.to_utf8("3")), Uid.from_bytes(Str.to_utf8("7"))) == Str.to_utf8("3_7")
+expect Paths.pair_key(Uid.from_bytes(Str.to_utf8("10")), Uid.from_bytes(Str.to_utf8("9"))) == Str.to_utf8("9_10")
+expect Paths.pair_key(Uid.from_bytes(Str.to_utf8("5")), Uid.from_bytes(Str.to_utf8("5"))) == Str.to_utf8("5_5")
+
+# participant: only a canonical pair, and only its two members.
+expect Paths.participant(Str.to_utf8("3_7"), Uid.from_bytes(Str.to_utf8("3")))
+expect Paths.participant(Str.to_utf8("3_7"), Uid.from_bytes(Str.to_utf8("7")))
+expect !Paths.participant(Str.to_utf8("3_7"), Uid.from_bytes(Str.to_utf8("9")))
+expect !Paths.participant(Str.to_utf8("7_3"), Uid.from_bytes(Str.to_utf8("3")))
+expect !Paths.participant(Str.to_utf8("03_7"), Uid.from_bytes(Str.to_utf8("7")))
+expect !Paths.participant(Str.to_utf8(".._3"), Uid.from_bytes(Str.to_utf8("3")))
+expect !Paths.participant(Str.to_utf8("3_../7"), Uid.from_bytes(Str.to_utf8("3")))
+expect !Paths.participant(Str.to_utf8("3_7/x"), Uid.from_bytes(Str.to_utf8("3")))
+expect !Paths.participant(Str.to_utf8(".."), Uid.from_bytes(Str.to_utf8("3")))
+expect !Paths.participant([], Uid.from_bytes([]))
+
+# valid_topic_id: letters and digits joined by single hyphens, 1 to 80.
+expect Paths.valid_topic_id(Str.to_utf8("ChitChat"))
+expect Paths.valid_topic_id(Str.to_utf8("road-trip-2"))
+expect Paths.valid_topic_id(Str.to_utf8("9"))
+expect Paths.valid_topic_id(List.repeat('a', 80))
+expect !Paths.valid_topic_id(List.repeat('a', 81))
+expect !Paths.valid_topic_id([])
+expect !Paths.valid_topic_id(Str.to_utf8(".."))
+expect !Paths.valid_topic_id(Str.to_utf8("a/b"))
+expect !Paths.valid_topic_id(Str.to_utf8("../x"))
+expect !Paths.valid_topic_id(Str.to_utf8("-a"))
+expect !Paths.valid_topic_id(Str.to_utf8("a-"))
+expect !Paths.valid_topic_id(Str.to_utf8("a--b"))
+expect !Paths.valid_topic_id(Str.to_utf8("a_b"))
+expect !Paths.valid_topic_id(Str.to_utf8("a b"))
+expect !Paths.valid_topic_id(Str.to_utf8("a.md"))
+
+# valid_channel_name: a letter, then letters, digits and hyphens, 1 to 40.
+expect Paths.valid_channel_name(Str.to_utf8("general"))
+expect Paths.valid_channel_name(Str.to_utf8("a-1-"))
+expect Paths.valid_channel_name(List.repeat('a', 40))
+expect !Paths.valid_channel_name(List.repeat('a', 41))
+expect !Paths.valid_channel_name([])
+expect !Paths.valid_channel_name(Str.to_utf8("1abc"))
+expect !Paths.valid_channel_name(Str.to_utf8("-abc"))
+expect !Paths.valid_channel_name(Str.to_utf8(".."))
+expect !Paths.valid_channel_name(Str.to_utf8("a/b"))
+expect !Paths.valid_channel_name(Str.to_utf8("a_b"))
+expect !Paths.valid_channel_name(Str.to_utf8("a.channel"))
+
+# **THE BUILDERS REFUSE NOTHING**: they join what they are handed, so a
+# hostile key or topic makes a path out of the chat root. What keeps one
+# out is upstream: Route.conversation passes a channel's key and a topic
+# only through valid_channel_name and valid_topic_id, a DM's key reaches a
+# builder only past find!'s Paths.participant, make! checks a new topic's
+# id, and a uid is the host's (Host.me!) or a canonical pair's half.
+expect Paths.bytes(Paths.topics_folder(Dm, Str.to_utf8(".."))) == Str.to_utf8("../sessions")
+expect Paths.bytes(Paths.reactions_path(Channel, { key: Str.to_utf8("../.."), topic: Str.to_utf8("../x") })) == Str.to_utf8("channels/../../sessions/../x.reactions.jsonl")
+expect Paths.bytes(Paths.channel_path(Str.to_utf8("../x"))) == Str.to_utf8("channels/../x.channel")
+expect Paths.bytes(Paths.last_session_path(Str.to_utf8("3"), Str.to_utf8("../../x"))) == Str.to_utf8("users/3/last-sessions/../../x")
+expect Paths.bytes(Paths.feed_path(Str.to_utf8("/etc"), Code)) == Str.to_utf8("users/etc/code.md")
+expect Paths.bytes(Paths.topics_folder(Dm, [])) == Str.to_utf8("sessions")
