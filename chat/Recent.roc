@@ -6,6 +6,7 @@ import JsonText
 import Bytes
 import Feeds
 import Time
+import Uid
 import ZigText
 
 Recent := [].{
@@ -31,18 +32,18 @@ Recent := [].{
 
 	## The page's JSON: every row newest first (a tie by its URL or slug,
 	## else as gathered), each as recent_feed's encoders write it.
-	json : List(U8), List(Row) -> List(U8)
+	json : Uid, List(Row) -> List(U8)
 	json = |me, rs| JsonText.arr(List.map(sort(rs), |r| event(me, r)))
 
 	## A row as recent_feed's encoders write it: empty fields left out.
 	# TEMPORARY DOOR: moves out in a later run.
-	event : List(U8), Row -> List(U8)
+	event : Uid, Row -> List(U8)
 	event = |me, r| {
 		at = JsonText.str(Time.rfc3339(r.secs))
 		if r.kind == Doc {
 			JsonText.obj(List.join([[("kind", JsonText.str("doc")), ("at", at)], JsonText.opt("who", "You"), JsonText.opt_at_door("slug", r.key), JsonText.opt_at_door("title", r.label)]))
 		} else {
-			who = if r.uid == [] [] else if r.uid == me Str.to_utf8("You") else r.name
+			who = if r.uid == [] [] else if r.uid == me.to_str().to_utf8() Str.to_utf8("You") else r.name
 			chat_event({ at: Str.to_utf8(Time.rfc3339(r.secs)), url: r.key, who, label: r.label, topic: r.topic, excerpt: excerpt(r.markdown), dm: r.dm })
 		}
 	}

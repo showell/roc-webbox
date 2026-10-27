@@ -508,9 +508,8 @@ react! = |conv, who, at| {
 ## error), and nothing after it is done.
 reacted! : Chat.Conv, Who, Paths.TopicAt, { msg : U64, emoji : List(U8), change : Reaction.Change } => [Stored, NoSuchMessage, Failed]
 reacted! = |conv, who, topic_at, r|
-	match viewer!(who) {
-		Err(Failed) => Failed
-		Ok(name) => {
+	match (viewer!(who), me!({})) {
+		(Ok(name), Ok(uid)) => {
 			counted = Host.message_count!(conv, topic_at.topic.to_utf8())
 			match counted.status {
 				Failed => Failed
@@ -519,8 +518,8 @@ reacted! = |conv, who, topic_at, r|
 					if r.msg == 0 or r.msg > counted.count {
 						NoSuchMessage
 					} else {
-						at = Str.to_utf8(Time.rfc3339(Host.now!({})))
-						line = Reaction.line({ msg: r.msg, uid: Host.me!({}), from: name, emoji: r.emoji, change: r.change, at })
+						at = Time.rfc3339(Host.now!({}))
+						line = Reaction.line({ msg: r.msg, uid, from: name, emoji: r.emoji, change: r.change, at })
 						# **THE ECHO IS MADE BEFORE THE STORE** (metal-vmm QUEUE
 						# 177.1), as a message's: its key and frame, so nothing
 						# can fail between the append and the publish.
@@ -537,6 +536,7 @@ reacted! = |conv, who, topic_at, r|
 					}
 			}
 		}
+		_ => Failed
 	}
 
 html : List(U8)
@@ -570,13 +570,12 @@ recent! = |rest|
 	if rest != [] {
 		Chat.not_found
 	} else {
-		match viewer!(Unasked) {
-			Err(Failed) => Chat.answered
-			Ok(viewer) => {
+		match (viewer!(Unasked), me!({})) {
+			(Ok(viewer), Ok(me)) => {
 				rows = Recent.rows(Host.recent!({}))
-				me = Host.me!({})
 				Chat.respond(200, html, Html.bytes(Pages.recent(Chrome.src_in(Host.srcs!({})), { viewer, json: Recent.json(me, rows) })))
 			}
+			_ => Chat.answered
 		}
 	}
 

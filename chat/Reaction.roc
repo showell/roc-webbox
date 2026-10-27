@@ -4,19 +4,20 @@
 import Form
 import ZigText
 import JsonText
+import Uid
 
 Reaction := [].{
 
 	## One reaction as the sidecar keeps it: message number `msg`, the
 	## reactor's account `uid` and name `from`, the `emoji`, its `change`,
-	## and when (`at`). Named fields because four are byte lists.
+	## and when (`at`).
 	Event : {
 		msg : U64,
-		uid : List(U8),
+		uid : Uid,
 		from : List(U8),
 		emoji : List(U8),
 		change : Change,
-		at : List(U8),
+		at : Str,
 	}
 
 	## **THE ONE PLACE THE SIDECAR'S LINE SHAPE IS WRITTEN** (reactionLine):
@@ -29,11 +30,11 @@ Reaction := [].{
 	line = |{ msg, uid, from, emoji, change, at }|
 		JsonText.obj([
 			("msg", Str.to_utf8(U64.to_str(msg))),
-			("uid", JsonText.str_at_door(uid)),
+			("uid", JsonText.str(uid.to_str())),
 			("from", JsonText.str_at_door(from)),
 			("emoji", JsonText.str_at_door(emoji)),
 			("on", JsonText.bool(is_added(change))),
-			("at", JsonText.str_at_door(at)),
+			("at", JsonText.str(at)),
 		])
 
 	## Whether the reactor put the glyph on the message or took it back.

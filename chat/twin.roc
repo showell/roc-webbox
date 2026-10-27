@@ -141,7 +141,11 @@ call = |req| {
 		38 => [Feeds.images_json(Feeds.images(arg(0)), u64(arg(1)))]
 		39 => [Feeds.code_json(Feeds.code(arg(0)))]
 		40 => [Recent.excerpt(arg(0))]
-		41 => [Recent.json(arg(0), Recent.rows(written(req.args, 1, [])))]
+		41 =>
+			match decode_uid(arg(0)) {
+				Ok(me) => [Recent.json(me, Recent.rows(written(req.args, 1, [])))]
+				Err(NotAUid) => []
+			}
 		# The topics are a listing's, text (Files.list!'s door skips the rest).
 		42 => [ChatState.resume_topic(List.keep_oks(List.drop_first(req.args, 2), Str.from_utf8), arg(0), int(arg(1)))]
 		43 =>
@@ -236,7 +240,11 @@ call = |req| {
 			}
 			List.concat(asked, roster)
 		}
-		61 => [Reaction.line({ msg: u64(arg(0)), uid: arg(1), from: arg(2), emoji: arg(3), change: if arg(4) == [49] Added else Removed, at: arg(5) })]
+		61 =>
+			match (decode_uid(arg(1)), Str.from_utf8(arg(5))) {
+				(Ok(uid), Ok(at)) => [Reaction.line({ msg: u64(arg(0)), uid, from: arg(2), emoji: arg(3), change: if arg(4) == [49] Added else Removed, at })]
+				_ => []
+			}
 		# The fan-out: member `arg(0)`'s five keys; conversation `arg(0)`'s
 		# URL root, topic `arg(1)`'s page and message `arg(2)`'s link.
 		# A member that is no Uid has no keys: the door refuses it.
