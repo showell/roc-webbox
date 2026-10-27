@@ -384,8 +384,8 @@ pin! = |conv, sid, pin| {
 repin! : Paths.ChatPath, List(U8), List(U8), ChatState.Pin => Bool
 repin! = |path, stored, sid, pin|
 	match ChatState.pinned(stored, sid, pin) {
-		Write(bytes) => Host.write!(Paths.bytes(path), bytes)
-		Remove => Host.remove!(Paths.bytes(path))
+		Write(bytes) => Files.write!(path, bytes)
+		Remove => Files.remove!(path)
 	}
 
 ## **WHERE THE MEMBER RESUMES DM `conv`: TOPIC `sid`** (setLastViewedTopic):
@@ -410,7 +410,7 @@ bookmark! = |conv, sid| {
 ## disk requests each time.
 write_if_changed! : Paths.ChatPath, List(U8) => Bool
 write_if_changed! = |path, value|
-	if ChatState.changed(Files.read!(path), value) Host.write!(Paths.bytes(path), ChatState.bookmark_line(value)) else Bool.True
+	if ChatState.changed(Files.read!(path), value) Files.write!(path, ChatState.bookmark_line(value)) else Bool.True
 
 ## POST .../react: the form, then the reaction stored and sent live.
 react! : Chat.Conv, Who, List(U8) => Chat.Answer
@@ -458,7 +458,7 @@ reacted! = |conv, who, sid, r|
 						# can fail between the append and the publish.
 						key = List.join([conv.key, ['/'], sid])
 						frame = Frame.reaction(line)
-						if Host.append_line!(Paths.bytes(Paths.reactions_path(conv_dir(conv.family, conv.key), sid)), line) {
+						if Files.append_line!(Paths.reactions_path(conv_dir(conv.family, conv.key), sid), line) {
 							# **STORED IS DONE**: the live publish cannot fail.
 							Host.publish!(key, frame)
 							Stored
