@@ -41,6 +41,11 @@
     production calls the typed layer. The unwrappers (`conv_key_bytes`,
     `pair_key_bytes`, `channel_name_bytes`) and `Uid.from_bytes` are not
     cores.
+  - `html_trusted_nonliteral` — a call to `Html.trusted` whose argument is
+    not a string literal free of interpolation, or `Html.trusted` passed as
+    a value; `Html.host_markup` outside `chat/Chrome.roc` (the host's script
+    srcs); `Html.twin_script_json` anywhere (the twins' alone). `Html` is
+    opaque, so these and `Html.escape` are the only ways bytes become a page.
 
 A hunt worth running again is saved here, with plants; a one-off question is
 asked inline and not kept.
