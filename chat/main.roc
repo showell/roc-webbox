@@ -46,14 +46,14 @@ import Fanout
 
 handle! : Chat.Request => Chat.Answer
 handle! = |req|
-	match (if req.channel Err(None) else Route.asset(req.sub)) {
+	match (if req.area == Channel Err(None) else Route.asset(req.sub)) {
 		Ok(route) => Chat.zig(route, Bool.False)
 		Err(None) =>
 			if !Host.member!({}) {
-				area = if req.channel "/channel" else "/chat"
+				area = if req.area == Channel "/channel" else "/chat"
 				Chat.redirect(List.concat(Str.to_utf8("/login/full?next=${area}"), req.sub))
 			} else {
-				route = if req.channel Route.under_channel(req.sub) else Route.under_chat(req.sub)
+				route = if req.area == Channel Route.under_channel(req.sub) else Route.under_chat(req.sub)
 				if roc_serves(route) act!(req, route) else Chat.zig(route, !Route.is_stream(route))
 			}
 	}

@@ -14,9 +14,9 @@ Chat := [].{
 	## A request's method, as the router tells them apart.
 	Method : [Get, Head, Post, Other]
 
-	## `sub` is the path under /chat or /channel (`channel` says which), as
+	## `sub` is the path under /chat or /channel (`area` says which), as
 	## angry-gopher's router cut it: "" or starting with "/", no query.
-	Request : { sub : List(U8), channel : Bool, method : Method }
+	Request : { sub : List(U8), area : [Channel, Chat], method : Method }
 
 	## Which part of the chat a path names. `rest` (below) is the family's
 	## own remainder where it has one.

@@ -27,7 +27,7 @@ const Family = route_mod.Family;
 const Method = route_mod.Method;
 
 /// Chat.roc's `Request`.
-pub const Request = extern struct { sub: RocBytes, channel: bool, method: Method };
+pub const Request = extern struct { sub: RocBytes, area: route_mod.Area, method: Method };
 /// Chat.roc's `Route`.
 pub const RouteRec = extern struct { key: RocBytes, rest: RocBytes, sid: RocBytes, family: Family, part: route_mod.Part, tail: route_mod.Tail };
 /// Chat.roc's `Answer`.
@@ -792,7 +792,7 @@ fn crashed(message: []const u8) noreturn {
 /// not to one already gone.
 noinline fn guarded(sub: []const u8, channel: bool, method: Method, out: *Answer) bool {
     if (sljmp.setjmp(&jump) != 0) return false;
-    out.* = roc_chat_handle(.{ .sub = .from(sub), .channel = channel, .method = method });
+    out.* = roc_chat_handle(.{ .sub = .from(sub), .area = if (channel) .channel else .chat, .method = method });
     return true;
 }
 
