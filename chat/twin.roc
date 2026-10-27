@@ -169,7 +169,7 @@ call = |req| {
 			}
 			List.concat(asked, roster)
 		}
-		61 => [Reaction.line(u64(arg(0)), arg(1), arg(2), arg(3), if arg(4) == [49] Added else Removed, arg(5))]
+		61 => [Reaction.line({ msg: u64(arg(0)), uid: arg(1), from: arg(2), emoji: arg(3), change: if arg(4) == [49] Added else Removed, at: arg(5) })]
 		# The fan-out: member `arg(0)`'s five keys; conversation `arg(0)`'s
 		# URL root, topic `arg(1)`'s page and message `arg(2)`'s link.
 		62 => [Fanout.notify_key(arg(0)), Fanout.sidebar_key(arg(0)), Fanout.recent_key(arg(0)), Fanout.images_key(arg(0)), Fanout.code_key(arg(0))]

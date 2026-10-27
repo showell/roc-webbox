@@ -462,7 +462,7 @@ reacted! = |conv, who, sid, r|
 						NoSuchMessage
 					} else {
 						at = Str.to_utf8(Time.rfc3339(Host.now!({})))
-						line = Reaction.line(r.msg, Host.me!({}), name, r.emoji, r.change, at)
+						line = Reaction.line({ msg: r.msg, uid: Host.me!({}), from: name, emoji: r.emoji, change: r.change, at })
 						# **THE ECHO IS MADE BEFORE THE STORE** (metal-vmm QUEUE
 						# 177.1), as a message's: its key and frame, so nothing
 						# can fail between the append and the publish.

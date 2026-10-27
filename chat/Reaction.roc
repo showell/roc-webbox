@@ -7,13 +7,25 @@ import JsonText
 
 Reaction := [].{
 
+	## One reaction as the sidecar keeps it: message number `msg`, the
+	## reactor's account `uid` and name `from`, the `emoji`, its `change`,
+	## and when (`at`). Named fields because four are byte lists.
+	Event : {
+		msg : U64,
+		uid : List(U8),
+		from : List(U8),
+		emoji : List(U8),
+		change : Change,
+		at : List(U8),
+	}
+
 	## **THE ONE PLACE THE SIDECAR'S LINE SHAPE IS WRITTEN** (reactionLine):
 	## `{"msg":N,"uid":…,"from":…,"emoji":…,"on":…,"at":…}`, in that order,
 	## the strings as the Zig's JSON writes them. `Removed` (`"on":false`) is a
 	## retraction: the client folds by last event wins per (msg, uid, emoji),
 	## so the file stays append-only.
-	line : U64, List(U8), List(U8), List(U8), Change, List(U8) -> List(U8)
-	line = |msg, uid, from, emoji, change, at|
+	line : Event -> List(U8)
+	line = |{ msg, uid, from, emoji, change, at }|
 		JsonText.obj([
 			("msg", Str.to_utf8(U64.to_str(msg))),
 			("uid", JsonText.str(uid)),
