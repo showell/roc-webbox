@@ -44,13 +44,23 @@ function read_trees(files)
       -- A destructure (`(a, b) = ...`) names nothing: it is its
       -- definition's.
       if (name == nil or name == "") and #stack > 0 then name = stack[#stack][2] end
-      push(stack, {d, name or ""})
+      push(stack, {d, name or "", false})
+    end
+    -- A type's own name (`Row : { dm : Bool }`), for what is inside it; a
+    -- module's type (`Html := [].{ ... }`) holds the definitions, which
+    -- name themselves.
+    if starts_with(t, "(s-type-decl ") and i < #text then
+      push(stack, {d, between(trim(text[i + 1]), "(name \"", "\")") or "", true})
     end
     push(file, current)
-    -- The top-level definition, not the innermost: a local's name (`id`,
-    -- `path`) recurs across definitions, and a finding grouped by it
-    -- landed under another definition's line.
-    if #stack > 0 then push(within, stack[1][2]) else push(within, "") end
+    -- The outermost value definition, not the innermost: a local's name
+    -- (`id`, `path`) recurs across definitions, and a finding grouped by it
+    -- landed under another definition's line. Outside any, the innermost
+    -- type's.
+    local named = ""
+    for s in stack do if named == "" and not s[3] then named = s[2] end end
+    if named == "" and #stack > 0 then named = stack[#stack][2] end
+    push(within, named)
     i = i + 1
   end
   return {text = text, depth = depth, file = file, within = within}
