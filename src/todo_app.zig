@@ -45,11 +45,11 @@ pub fn setup(io: Io, base: std.mem.Allocator, roots: ?webbox.site.Roots) !StartR
 
 /// The visitor's cookie: `__Host-roc-todo` behind HTTPS, a year long,
 /// renewed when used past half of it.
-fn visitorCookie() signed_cookie.Cookie {
+fn visitorCookie() signed_cookie.Cookie([]const u8) {
     return .{
         .name = signed_cookie.named("roc-todo", transport),
         .transport = transport,
-        .kind = .{ .label = "roc-todo visitor\n", .lifetime_secs = 365 * 24 * 60 * 60, .skew_secs = 300, .validId = signed_cookie.isVisitorId },
+        .kind = .{ .label = "roc-todo visitor\n", .lifetime_secs = 365 * 24 * 60 * 60, .skew_secs = 300, .parse = webbox.signed.textIf(signed_cookie.isVisitorId) },
     };
 }
 
