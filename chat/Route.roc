@@ -74,7 +74,7 @@ Route := [].{
 
 	## A route, as Chat.roc's `Route` (records are structural: the same
 	## type).
-	R : { family : Family, key : List(U8), rest : List(U8), sid : List(U8), part : Part, tail : Tail }
+	R : { family : Family, key : List(U8), rest : List(U8), topic : List(U8), part : Part, tail : Tail }
 
 	## Chat.roc's, spelled again (aliases are structural: the same types).
 	Family : [NotFound, Asset, Default, Docs, Recent, Images, Code, Links, Search, Conversations, Msg, Dm, Channel, Notifications, SidebarStream]
@@ -83,7 +83,7 @@ Route := [].{
 
 	## A route of `family` with nothing else.
 	family : Family -> R
-	family = |f| { family: f, key: [], rest: [], sid: [], part: Landing, tail: Page }
+	family = |f| { family: f, key: [], rest: [], topic: [], part: Landing, tail: Page }
 
 	slash = ['/']
 
@@ -124,7 +124,7 @@ Route := [].{
 						} else if !valid_topic_id(first) {
 							{ ..base, part: Invalid }
 						} else {
-							tail_of({ ..base, part: Topic, sid: first }, after)
+							tail_of({ ..base, part: Topic, topic: first }, after)
 						}
 				}
 			}

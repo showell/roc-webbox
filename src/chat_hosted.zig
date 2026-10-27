@@ -92,10 +92,10 @@ fn expectRoute(sub: []const u8, channel: bool, want: Route, presence: bool) !voi
 test "the router: a topic's tails, a channel, an asset before the gate, the gate" {
     use(testing.allocator);
     defer @import("roc_abi.zig").deinit();
-    try expectRoute("/c/1_2/general/send", false, .{ .family = .dm, .key = "1_2", .sid = "general", .part = .topic, .tail = .send }, true);
-    try expectRoute("/c/1_2/general/uploads/a.png", false, .{ .family = .dm, .key = "1_2", .sid = "general", .part = .topic, .tail = .uploads, .rest = "a.png" }, true);
-    try expectRoute("/c/1_2/general/stream", false, .{ .family = .dm, .key = "1_2", .sid = "general", .part = .topic, .tail = .stream }, false);
-    try expectRoute("/c/1_2/general/send/x", false, .{ .family = .dm, .key = "1_2", .sid = "general", .part = .topic, .tail = .invalid_send }, true);
+    try expectRoute("/c/1_2/general/send", false, .{ .family = .dm, .key = "1_2", .topic = "general", .part = .topic, .tail = .send }, true);
+    try expectRoute("/c/1_2/general/uploads/a.png", false, .{ .family = .dm, .key = "1_2", .topic = "general", .part = .topic, .tail = .uploads, .rest = "a.png" }, true);
+    try expectRoute("/c/1_2/general/stream", false, .{ .family = .dm, .key = "1_2", .topic = "general", .part = .topic, .tail = .stream }, false);
+    try expectRoute("/c/1_2/general/send/x", false, .{ .family = .dm, .key = "1_2", .topic = "general", .part = .topic, .tail = .invalid_send }, true);
     try expectRoute("/c/1_2/bad_id", false, .{ .family = .dm, .key = "1_2", .part = .invalid }, true);
     try expectRoute("/ops/new", true, .{ .family = .channel, .key = "ops", .part = .new }, true);
     try expectRoute("/9ops/x", true, .{ .family = .not_found }, true);
@@ -484,7 +484,7 @@ test "a topic's reactions, react, pin and unpin are the Roc's: presence, the con
     try expectAct("/c/1_2/plans/pin", false, .PUT, a, .{ .not_allowed = .POST }, dm_topic);
     // A topic that is not there, or a conversation that is not the member's:
     // Zig's to answer, presence already counted.
-    const gone: Decision = .{ .serve = .{ .route = .{ .family = .dm, .key = "1_2", .sid = "Gone", .part = .topic, .tail = .react }, .presence = false } };
+    const gone: Decision = .{ .serve = .{ .route = .{ .family = .dm, .key = "1_2", .topic = "Gone", .part = .topic, .tail = .react }, .presence = false } };
     try expectAct("/c/1_2/Gone/react", false, .POST, a, gone, dm_topic);
     try expectAct("/c/1_2/Gone/react", false, .POST, blk: {
         var s = a;
@@ -492,11 +492,11 @@ test "a topic's reactions, react, pin and unpin are the Roc's: presence, the con
         break :blk s;
     }, gone, "member;presence;accounts;");
     // Not one of the pair, a pair not canonical: no account asked.
-    try expectAct("/c/2_3/Plans/react", false, .POST, a, .{ .serve = .{ .route = .{ .family = .dm, .key = "2_3", .sid = "Plans", .part = .topic, .tail = .react }, .presence = false } }, "member;presence;");
-    try expectAct("/c/2_1/Plans/react", false, .POST, a, .{ .serve = .{ .route = .{ .family = .dm, .key = "2_1", .sid = "Plans", .part = .topic, .tail = .react }, .presence = false } }, "member;presence;");
-    try expectAct("/dev/Plans/pin", true, .POST, a, .{ .serve = .{ .route = .{ .family = .channel, .key = "dev", .sid = "Plans", .part = .topic, .tail = .pin }, .presence = false } }, "member;presence;read channels/dev.channel;");
+    try expectAct("/c/2_3/Plans/react", false, .POST, a, .{ .serve = .{ .route = .{ .family = .dm, .key = "2_3", .topic = "Plans", .part = .topic, .tail = .react }, .presence = false } }, "member;presence;");
+    try expectAct("/c/2_1/Plans/react", false, .POST, a, .{ .serve = .{ .route = .{ .family = .dm, .key = "2_1", .topic = "Plans", .part = .topic, .tail = .react }, .presence = false } }, "member;presence;");
+    try expectAct("/dev/Plans/pin", true, .POST, a, .{ .serve = .{ .route = .{ .family = .channel, .key = "dev", .topic = "Plans", .part = .topic, .tail = .pin }, .presence = false } }, "member;presence;read channels/dev.channel;");
     // A route still Zig's goes there, asking nothing more.
-    try expectAct("/c/1_2/Plans/stream", false, .GET, a, .{ .serve = .{ .route = .{ .family = .dm, .key = "1_2", .sid = "Plans", .part = .topic, .tail = .stream }, .presence = false } }, "member;");
+    try expectAct("/c/1_2/Plans/stream", false, .GET, a, .{ .serve = .{ .route = .{ .family = .dm, .key = "1_2", .topic = "Plans", .part = .topic, .tail = .stream }, .presence = false } }, "member;");
 }
 
 /// What DM 1_2's page asks once its bookmark is recorded (its accounts known
@@ -845,7 +845,7 @@ test "a send is the Roc's: the conversation, the method, the header, the body, t
         var s = a;
         s.accounts = &.{steve};
         break :blk s;
-    }, .{ .serve = .{ .route = .{ .family = .dm, .key = "1_2", .sid = "Plans", .part = .topic, .tail = .send }, .presence = false } }, "member;presence;accounts;");
+    }, .{ .serve = .{ .route = .{ .family = .dm, .key = "1_2", .topic = "Plans", .part = .topic, .tail = .send }, .presence = false } }, "member;presence;accounts;");
     try expectAct("/c/1_2/Plans/send", false, .GET, a, .{ .not_allowed = .POST }, found);
     // A new topic in a DM: the bookmark, the first message, the announcement
     // in its highest general<N>, each with the conversation.
@@ -1180,5 +1180,5 @@ test "the accounts are the Roc's to read: a guest's DM is opened, the roster is 
     const guest: Scripted = .{ .alloc = undefined, .accounts = &all, .body = "markdown=hi" };
     try expectAct("/c/1_4/Plans/send", false, .POST, guest, .{ .redirect = "/chat/c/1_4/Plans" }, "member;presence;accounts;header x-chat-async;body;hostile hi;read users/1/last-sessions/1_4;write users/1/last-sessions/1_4 Plans\n;read users/1/last-conv;write users/1/last-conv 1_4\n;" ++ comptime sentAll(sent("dm 1_4 /chat/c/1_4 [1,4]", "1_4", "Plans", "Steve", "hi", "")));
     // Not an account: the Zig's to answer.
-    try expectAct("/c/1_5/Plans/send", false, .POST, guest, .{ .serve = .{ .route = .{ .family = .dm, .key = "1_5", .sid = "Plans", .part = .topic, .tail = .send }, .presence = false } }, "member;presence;accounts;");
+    try expectAct("/c/1_5/Plans/send", false, .POST, guest, .{ .serve = .{ .route = .{ .family = .dm, .key = "1_5", .topic = "Plans", .part = .topic, .tail = .send }, .presence = false } }, "member;presence;accounts;");
 }

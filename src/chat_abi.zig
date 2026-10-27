@@ -29,7 +29,7 @@ const Method = route_mod.Method;
 /// Chat.roc's `Request`.
 pub const Request = extern struct { sub: RocBytes, area: route_mod.Area, method: Method };
 /// Chat.roc's `Route`.
-pub const RouteRec = extern struct { key: RocBytes, rest: RocBytes, sid: RocBytes, family: Family, part: route_mod.Part, tail: route_mod.Tail };
+pub const RouteRec = extern struct { key: RocBytes, rest: RocBytes, topic: RocBytes, family: Family, part: route_mod.Part, tail: route_mod.Tail };
 /// Chat.roc's `Answer`.
 pub const Answer = extern struct { body: RocBytes, content_type: RocBytes, location: RocBytes, route: RouteRec, status: u16, allow: Method, kind: route_mod.Kind, presence: route_mod.Counting, sniff: route_mod.Sniff };
 /// Host.roc's `body!` answer: `{ bytes : List(U8), status : [Answered, Read] }`.
@@ -818,7 +818,7 @@ pub fn decide(alloc: std.mem.Allocator, sub: []const u8, channel: bool, method: 
             .tail = a.route.tail,
             .key = try alloc.dupe(u8, a.route.key.slice()),
             .rest = try alloc.dupe(u8, a.route.rest.slice()),
-            .sid = try alloc.dupe(u8, a.route.sid.slice()),
+            .topic = try alloc.dupe(u8, a.route.topic.slice()),
         } } },
         .redirect => .{ .redirect = try alloc.dupe(u8, a.location.slice()) },
         .respond => .{ .respond = .{ .status = a.status, .content_type = try alloc.dupe(u8, a.content_type.slice()), .body = try alloc.dupe(u8, a.body.slice()), .nosniff = a.sniff == .forbid } },

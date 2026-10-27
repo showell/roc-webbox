@@ -122,8 +122,8 @@ in_conversation! = |req, route|
 					Err(Failed) => Chat.answered
 					Ok(t) => {
 						topics = topics!(route.family, route.key)
-						if Conversation.has_topic(topics, route.sid) {
-							in_topic!(req, route, { conv, who, title: Conversation.topic_title(t, route.sid), topics })
+						if Conversation.has_topic(topics, route.topic) {
+							in_topic!(req, route, { conv, who, title: Conversation.topic_title(t, route.topic), topics })
 						} else {
 							Chat.zig(route, Uncounted)
 						}
@@ -147,7 +147,7 @@ in_topic! = |req, route, found| {
 				Chat.not_allowed(Get)
 			} else if route.tail == Page {
 				page!(route, found)
-			} else if Host.raw!(conv, route.sid) {
+			} else if Host.raw!(conv, route.topic) {
 				Chat.held_plain
 			} else {
 				Chat.not_found
@@ -158,7 +158,7 @@ in_topic! = |req, route, found| {
 			} else {
 				# readReactions's: nobody has reacted yet is no events.
 				ndjson = Str.to_utf8("application/x-ndjson; charset=utf-8")
-				match Files.read!(Paths.reactions_path(conv_kind(conv.family), { key: conv.key, topic: route.sid })) {
+				match Files.read!(Paths.reactions_path(conv_kind(conv.family), { key: conv.key, topic: route.topic })) {
 					Found(bytes) => Chat.respond(200, ndjson, bytes)
 					Missing => Chat.respond(200, ndjson, [])
 					Failed => Chat.answered
@@ -168,8 +168,8 @@ in_topic! = |req, route, found| {
 			if req.method != Post {
 				Chat.not_allowed(Post)
 			} else if route.tail == React {
-				react!(conv, who, route.sid)
-			} else if pin!(conv, route.sid, if route.tail == Pin Pinned else Unpinned) {
+				react!(conv, who, route.topic)
+			} else if pin!(conv, route.topic, if route.tail == Pin Pinned else Unpinned) {
 				Chat.respond(204, [], [])
 			} else {
 				Chat.answered
@@ -565,13 +565,13 @@ landing! = |route|
 ## the limits the server enforces (Host.limits!).
 page! : Route.R, AtTopic => Chat.Answer
 page! = |route, at|
-	if at.conv.family == Dm and !bookmark!(at.conv, route.sid) {
+	if at.conv.family == Dm and !bookmark!(at.conv, route.topic) {
 		Chat.answered
 	} else {
-		match sidebar!(route.sid, at) {
+		match sidebar!(route.topic, at) {
 			Err(Failed) => Chat.answered
 			Ok((viewer, sb)) => {
-				view = { key: route.key, base: sb.base, topic: route.sid, title: at.title, uid: sb.uid, viewer, sidebar_json: Pages.sidebar_json(sb) }
+				view = { key: route.key, base: sb.base, topic: route.topic, title: at.title, uid: sb.uid, viewer, sidebar_json: Pages.sidebar_json(sb) }
 				Chat.respond(200, html, Pages.conversation(Chrome.src_in(Host.srcs!({})), Host.limits!({}), view))
 			}
 		}
@@ -875,14 +875,14 @@ store! = |route, conv, who, send, { markdown: md, cid }|
 		match viewer!(who) {
 			Err(Failed) => Chat.answered
 			Ok(name) =>
-				if conv.family == Dm and !bookmark!(conv, route.sid) {
+				if conv.family == Dm and !bookmark!(conv, route.topic) {
 					Chat.answered
-				} else if !appended!(conv, who, { topic: route.sid, name, markdown: md, cid }) {
+				} else if !appended!(conv, who, { topic: route.topic, name, markdown: md, cid }) {
 					Chat.answered
 				} else if send == Async {
 					Chat.respond(204, [], [])
 				} else {
-					Chat.redirect(List.join([conv.base, ['/'], route.sid]))
+					Chat.redirect(List.join([conv.base, ['/'], route.topic]))
 				}
 		}
 	}

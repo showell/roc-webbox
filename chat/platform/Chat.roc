@@ -63,7 +63,7 @@ Chat := [].{
 		## A topic id that is not one: refused after the conversation's own checks.
 		Invalid,
 
-		## `sid` a valid topic id, `tail` what of it.
+		## `topic` a valid topic id, `tail` what of it.
 		Topic,
 	]
 
@@ -79,7 +79,7 @@ Chat := [].{
 	## rest of a docs/recent/images/code/links/search path, a message id,
 	## an upload's file. Unused fields are empty, `Landing` and `Page`, so
 	## two routes are equal exactly when they go the same place.
-	Route : { family : Family, key : List(U8), rest : List(U8), sid : List(U8), part : Part, tail : Tail }
+	Route : { family : Family, key : List(U8), rest : List(U8), topic : List(U8), part : Part, tail : Tail }
 
 	## A DM or channel the Roc found to be the member's (chat/main.roc
 	## `find!`), as the host takes it for an operation on it: `family` `Dm`
@@ -89,7 +89,7 @@ Chat := [].{
 	Conv : { family : Family, key : List(U8), base : List(U8), members : List(List(U8)) }
 
 	## A message as the store keeps it (angry-gopher chat_store `ChatMessage`,
-	## the Roc's Transcript.Msg): its id (`<sid>_<n>`), its author's name as
+	## the Roc's Transcript.Msg): its id (`<topic>_<n>`), its author's name as
 	## sent and account (`uid`), its stamp, its markdown. Handed to the store
 	## (the count and the search index take it) and to the fan-out.
 	Message : { id : List(U8), from : List(U8), at : List(U8), uid : List(U8), markdown : List(U8) }
@@ -122,7 +122,7 @@ Chat := [].{
 
 	## A route of `family` with nothing else.
 	family : Family -> Route
-	family = |f| { family: f, key: [], rest: [], sid: [], part: Landing, tail: Page }
+	family = |f| { family: f, key: [], rest: [], topic: [], part: Landing, tail: Page }
 
 	none : Answer
 	none = { kind: Serve, location: [], presence: Uncounted, route: family(NotFound), status: 0, content_type: [], body: [], allow: Other, sniff: Allow }

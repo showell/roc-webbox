@@ -49,7 +49,7 @@ pub const Part = enum(u8) {
     landing,
     /// `.../new`: a topic made.
     new,
-    /// `sid` a valid topic id, `tail` what of it.
+    /// `topic` a valid topic id, `tail` what of it.
     topic,
 };
 
@@ -223,17 +223,17 @@ pub const Route = struct {
     family: Family,
     key: []const u8 = "",
     rest: []const u8 = "",
-    sid: []const u8 = "",
+    topic: []const u8 = "",
     part: Part = .landing,
     tail: Tail = .page,
 
     pub fn eql(a: Route, b: Route) bool {
         return a.family == b.family and a.part == b.part and a.tail == b.tail and
-            std.mem.eql(u8, a.key, b.key) and std.mem.eql(u8, a.rest, b.rest) and std.mem.eql(u8, a.sid, b.sid);
+            std.mem.eql(u8, a.key, b.key) and std.mem.eql(u8, a.rest, b.rest) and std.mem.eql(u8, a.topic, b.topic);
     }
 
     pub fn format(r: Route, w: *std.Io.Writer) std.Io.Writer.Error!void {
-        try w.print("{t} key=\"{s}\" rest=\"{s}\" sid=\"{s}\" {t} {t}", .{ r.family, r.key, r.rest, r.sid, r.part, r.tail });
+        try w.print("{t} key=\"{s}\" rest=\"{s}\" topic=\"{s}\" {t} {t}", .{ r.family, r.key, r.rest, r.topic, r.part, r.tail });
     }
 };
 
