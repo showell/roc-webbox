@@ -846,7 +846,7 @@ sent! = |req, route, conv, who|
 		Chat.not_allowed(Post)
 	} else {
 		# The header before the body: reading the body moves past it.
-		is_async = Host.header!(Str.to_utf8("x-chat-async")) == [['1']]
+		send = if Host.header!(Str.to_utf8("x-chat-async")) == [['1']] Async else Sync
 		body = Host.body!(Message)
 		if !body.ok {
 			Chat.answered
@@ -857,8 +857,8 @@ sent! = |req, route, conv, who|
 				Found(md) =>
 					match Form.field(body.bytes, Str.to_utf8("cid")) {
 						Malformed => Chat.malformed
-						Found(cid) => store!(route, conv, who, is_async, md, cid)
-						Missing => store!(route, conv, who, is_async, md, [])
+						Found(cid) => store!(route, conv, who, send, md, cid)
+						Missing => store!(route, conv, who, send, md, [])
 					}
 			}
 		}
@@ -870,8 +870,8 @@ refuse = |why| Chat.respond(400, [], Str.to_utf8(why))
 ## The message judged, then stored: empty, not UTF-8 text, or hostile is
 ## refused; the bookmark (a DM's) before the store, so one that fails
 ## stores nothing; then 204 for an async sender, else back to the topic.
-store! : Route.R, Chat.Conv, Who, Bool, List(U8), List(U8) => Chat.Answer
-store! = |route, conv, who, is_async, md, cid|
+store! : Route.R, Chat.Conv, Who, [Async, Sync], List(U8), List(U8) => Chat.Answer
+store! = |route, conv, who, send, md, cid|
 	if ZigText.trim(md) == [] {
 		refuse("not sent: the message is empty\n")
 	} else if Str.from_utf8(md).is_err() {
@@ -886,7 +886,7 @@ store! = |route, conv, who, is_async, md, cid|
 					Chat.answered
 				} else if !appended!(conv, who, route.sid, name, md, cid) {
 					Chat.answered
-				} else if is_async {
+				} else if send == Async {
 					Chat.respond(204, [], [])
 				} else {
 					Chat.redirect(List.join([conv.base, ['/'], route.sid]))
