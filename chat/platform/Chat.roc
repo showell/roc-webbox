@@ -143,13 +143,15 @@ Chat := [].{
 	plain : List(U8) -> Answer
 	plain = |body| { ..respond(200, Str.to_utf8("text/plain; charset=utf-8"), body), sniff: Forbid }
 
-	## A 200 of the host's held bytes as text, as stored, never sniffed.
-	held_plain : Answer
-	held_plain = { ..plain([]), kind: Held }
+	## A 200 of the bytes the host is serving (Files.serve_file!) as text, as
+	## stored, never sniffed.
+	served_plain : Answer
+	served_plain = { ..plain([]), kind: Held }
 
-	## A 200 page: `before`, the host's held bytes, `after`.
-	held_html : List(U8), List(U8) -> Answer
-	held_html = |before, after| { ..respond(200, Str.to_utf8("text/html; charset=utf-8"), before), kind: Held, location: after }
+	## A 200 page: `before`, what the host is serving (Files.serve_rendered!),
+	## `after`.
+	served_html : List(U8), List(U8) -> Answer
+	served_html = |before, after| { ..respond(200, Str.to_utf8("text/html; charset=utf-8"), before), kind: Held, location: after }
 
 	## A 405 naming `allow`.
 	not_allowed : Method -> Answer

@@ -184,9 +184,9 @@ in_topic! = |req, route, found| {
 			} else if route.tail == Page {
 				page!(route, found)
 			} else {
-				match Files.held_raw!(Paths.transcript_path({ key: found.key, topic: route.topic })) {
-					Held => Chat.held_plain
-					NotHeld => Chat.not_found
+				match Files.serve_file!(Paths.transcript_path({ key: found.key, topic: route.topic })) {
+					Serving => Chat.served_plain
+					NotServing => Chat.not_found
 				}
 			}
 		Reactions =>
@@ -551,12 +551,12 @@ links! = |rest|
 			(Err(Failed), _) | (Ok(_), Err(Failed)) => Chat.answered
 			(Ok(viewer), Ok(me)) => {
 				src = Chrome.src_in(Host.srcs!({}))
-				match Files.held_rendered!(Paths.links_path(me)) {
-					Held => {
+				match Files.serve_rendered!(Paths.links_path(me)) {
+					Serving => {
 						(before, after) = Pages.links_around(src, viewer)
-						Chat.held_html(before, after)
+						Chat.served_html(before, after)
 					}
-					NotHeld => Chat.respond(200, html, Html.bytes(Pages.links(src, viewer, NoLinks)))
+					NotServing => Chat.respond(200, html, Html.bytes(Pages.links(src, viewer, NoLinks)))
 				}
 			}
 		}

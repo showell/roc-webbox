@@ -164,13 +164,13 @@ Host := [].{
 
 	## Whether the file at `path` under the chat root (checked as `read!`'s
 	## is) is there: the host reads it and holds its bytes for the answer
-	## (Chat.held_plain), never handing them to Roc (false when the read
+	## (Chat.served_plain), never handing them to Roc (false when the read
 	## failed, too).
 	raw! : List(U8) => Bool
 
 	## Whether the file at `path` under the chat root (checked as `read!`'s
 	## is) is there: the host renders it as the server's own markdown and
-	## holds it for the answer (Chat.held_html) (false when the read failed,
+	## holds it for the answer (Chat.served_html) (false when the read failed,
 	## too).
 	links! : List(U8) => Bool
 
