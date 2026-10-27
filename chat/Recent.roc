@@ -14,14 +14,22 @@ Recent := [].{
 	## One gathered row (recent.zig `Row`): `key` a chat row's URL or a doc's
 	## slug, `label` its "to …"/"in …" or the doc's title; `dm` as
 	## ChatEvent's.
-	Row : { kind : [Doc, Message], secs : I64, uid : List(U8), name : List(U8), key : List(U8), label : List(U8), topic : List(U8), markdown : List(U8), dm : [Dm, Channel] }
+	Row : { kind : [Doc, Message], secs : I64, uid : Str, name : Str, key : Str, label : Str, topic : Str, markdown : Str, dm : [Dm, Channel] }
 
 	## A row as the host writes it (Host.recent!): `secs` a signed decimal.
 	Written : { kind : [Doc, Message], secs : List(U8), uid : List(U8), name : List(U8), key : List(U8), label : List(U8), topic : List(U8), markdown : List(U8), dm : [Dm, Channel] }
 
-	## The host's rows, read.
-	rows : List(Written) -> List(Row)
-	rows = |ws| List.map(ws, |w| { kind: w.kind, secs: signed(w.secs), uid: w.uid, name: w.name, key: w.key, label: w.label, topic: w.topic, markdown: w.markdown, dm: w.dm })
+	## The host's rows, read. **EACH ROW'S TEXT DECODED HERE, AT THE
+	## DOOR**: the host gathers it from stored files and names, so a field
+	## that is not UTF-8 is corrupt data, and `NotUtf8` with its bytes.
+	rows : List(Written) -> Try(List(Row), [NotUtf8(List(U8))])
+	rows = |ws| List.map_try(ws, decoded)
+
+	decoded : Written -> Try(Row, [NotUtf8(List(U8))])
+	decoded = |w| {
+		text = |bytes| Str.from_utf8(bytes).map_err(|_| NotUtf8(bytes))
+		Ok({ kind: w.kind, secs: signed(w.secs), uid: text(w.uid)?, name: text(w.name)?, key: text(w.key)?, label: text(w.label)?, topic: text(w.topic)?, markdown: text(w.markdown)?, dm: w.dm })
+	}
 
 	## A signed decimal, as the host writes one.
 	signed : List(U8) -> I64
@@ -36,35 +44,33 @@ Recent := [].{
 	json = |me, rs| JsonText.arr(List.map(sort(rs), |r| event(me, r)))
 
 	## A row as recent_feed's encoders write it: empty fields left out.
-	# TEMPORARY DOOR: moves out in a later run.
 	event : Uid, Row -> List(U8)
 	event = |me, r| {
 		at = JsonText.str(Time.rfc3339(r.secs))
 		if r.kind == Doc {
-			JsonText.obj(List.join([[("kind", JsonText.str("doc")), ("at", at)], JsonText.opt("who", "You"), JsonText.opt_at_door("slug", r.key), JsonText.opt_at_door("title", r.label)]))
+			JsonText.obj(List.join([[("kind", JsonText.str("doc")), ("at", at)], JsonText.opt("who", "You"), JsonText.opt("slug", r.key), JsonText.opt("title", r.label)]))
 		} else {
-			who = if r.uid == [] [] else if r.uid == me.to_str().to_utf8() Str.to_utf8("You") else r.name
-			chat_event({ at: Str.to_utf8(Time.rfc3339(r.secs)), url: r.key, who, label: r.label, topic: r.topic, excerpt: excerpt(r.markdown), dm: r.dm })
+			who = if r.uid == "" "" else if r.uid == me.to_str() "You" else r.name
+			chat_event({ at: Time.rfc3339(r.secs), url: r.key, who, label: r.label, topic: r.topic, excerpt: excerpt(r.markdown), dm: r.dm })
 		}
 	}
 
 	## One chat message's row, its fields as written (`at` already a stamp).
-	ChatEvent : { at : List(U8), url : List(U8), who : List(U8), label : List(U8), topic : List(U8), excerpt : List(U8), dm : [Dm, Channel] }
+	ChatEvent : { at : Str, url : Str, who : Str, label : Str, topic : Str, excerpt : Str, dm : [Dm, Channel] }
 
 	## recent_feed `encodeChatEvent`: `kind` and `at`, then url, who, where,
 	## topic and excerpt each left out when empty, then `"dm":true` for a
 	## DM. The page's backlog and the live stream (`rec:<uid>`) send it.
-	# TEMPORARY DOOR: moves out in a later run.
 	chat_event : ChatEvent -> List(U8)
 	chat_event = |e|
 		JsonText.obj(
 			List.join([
-				[("kind", JsonText.str("chat")), ("at", JsonText.str_at_door(e.at))],
-				JsonText.opt_at_door("url", e.url),
-				JsonText.opt_at_door("who", e.who),
-				JsonText.opt_at_door("where", e.label),
-				JsonText.opt_at_door("topic", e.topic),
-				JsonText.opt_at_door("excerpt", e.excerpt),
+				[("kind", JsonText.str("chat")), ("at", JsonText.str(e.at))],
+				JsonText.opt("url", e.url),
+				JsonText.opt("who", e.who),
+				JsonText.opt("where", e.label),
+				JsonText.opt("topic", e.topic),
+				JsonText.opt("excerpt", e.excerpt),
 				if e.dm == Dm [("dm", JsonText.bool(Bool.True))] else [],
 			]),
 		)
@@ -92,12 +98,22 @@ Recent := [].{
 			|> List.map(|x| x.row)
 
 	before : Row, Row -> Bool
-	before = |x, y| if x.secs != y.secs x.secs > y.secs else Bytes.less(x.key, y.key)
+	before = |x, y| if x.secs != y.secs x.secs > y.secs else Bytes.less(x.key.to_utf8(), y.key.to_utf8())
 
 	## recent_feed `recentExcerpt`: a quote fence becomes "[quoted text]",
 	## an image "[image]", whitespace one space, cut at 350 codepoints.
-	excerpt : List(U8) -> List(U8)
-	excerpt = |md| cap(collapse_ws(md_images(html_images(quotes(md)))), 350)
+	## **TEXT IN, TEXT OUT**: every edit below works on ASCII bytes alone
+	## (a fence, `<img…>`, `![…](…)`, whitespace) and the cut falls where a
+	## codepoint starts, so UTF-8 in is UTF-8 out; a failure to decode is a
+	## bug here, and crashes (a 500).
+	excerpt : Str -> Str
+	excerpt = |text| {
+		md = text.to_utf8()
+		match Str.from_utf8(cap(collapse_ws(md_images(html_images(quotes(md)))), 350)) {
+			Ok(cut) => cut
+			Err(_) => crash "Recent.excerpt: an edit split a codepoint"
+		}
+	}
 
 	## `collapseQuotes`: line by line, a quote fence's span to "[quoted
 	## text]", another fence's lines as they are, each line ended.
@@ -218,3 +234,11 @@ Recent := [].{
 			cap_from(s, most, i + n, count + 1)
 		}
 }
+
+# excerpt cuts at a codepoint: a multi-byte character at and past the cut
+# (two bytes, four bytes) comes out whole or not at all, so its Str holds.
+expect Recent.excerpt(Str.concat(Str.repeat("a", 349), "\u(e9)\u(e9)")) == Str.concat(Str.repeat("a", 349), "\u(e9)…")
+expect Recent.excerpt(Str.repeat("👍", 351)) == Str.concat(Str.repeat("👍", 350), "…")
+expect Recent.excerpt(Str.concat(Str.repeat("a", 348), " \u(e9)\u(e9)")) == Str.concat(Str.repeat("a", 348), " \u(e9)…")
+expect Recent.excerpt(Str.repeat("\u(e9)", 350)) == Str.repeat("\u(e9)", 350)
+expect Recent.excerpt("caf\u(e9) ![x](y.png)  <img src=a>\n```quote\nhi\n```") == "caf\u(e9) [image] [image] [quoted text]"

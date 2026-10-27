@@ -138,7 +138,7 @@ in_conversation! = |req, route|
 					Ok((conv, who)) =>
 					# The title before the topics, as findTopic read them: a
 					# partner whose name will not read fails every topic route.
-						match title!(conv, key, who) {
+						match title!(key, who) {
 							Err(Failed) => Chat.answered
 							Ok(t) => {
 								topics = topics!(key)
@@ -167,7 +167,7 @@ conv_key = |route|
 
 ## A topic found: its conversation, the accounts as far as they were asked,
 ## its title, and the conversation's topics as they were listed to find it.
-AtTopic : { key : Paths.ConvKey, conv : Chat.Conv, who : Who, title : List(U8), topics : List(Str) }
+AtTopic : { key : Paths.ConvKey, conv : Chat.Conv, who : Who, title : Str, topics : List(Str) }
 
 ## A topic that is there: the method, then the work.
 in_topic! : Chat.Request, Route.R, AtTopic => Chat.Answer
@@ -265,16 +265,16 @@ accounts! = |who|
 		Unasked => {
 			got = Host.accounts!({})
 			match got.status {
-				# **EACH ID DECODED HERE, AT THE DOOR**: the host lists only the
-				# folders a counter named, so one that is no uid fails the
-				# request (NotUtf8, about it).
+				# **EACH ID AND NAME DECODED HERE, AT THE DOOR**
+				# (Accounts.from_host): one that is no uid, or a name that is
+				# not UTF-8, fails the request (NotUtf8, about the account).
 				Found =>
-					match List.keep_if(got.accounts, |a| Uid.from_utf8(a.id).is_err()) {
-						[bad, ..] => {
-							Host.fail!(NotUtf8, bad.id)
+					match List.map_try(got.accounts, Accounts.from_host) {
+						Ok(all) => Ok(all)
+						Err(NotAUid(bad)) | Err(NameNotUtf8(bad)) => {
+							Host.fail!(NotUtf8, bad)
 							Err(Failed)
 						}
-						[] => Ok(List.keep_oks(got.accounts, |a| Uid.from_utf8(a.id).map_ok(|id| { id, kind: a.kind, name: a.name, name_read: a.name_read })))
 					}
 				Failed => Err(Failed)
 			}
@@ -283,7 +283,7 @@ accounts! = |who|
 
 ## The member's name (getUserName of their own id), from the accounts.
 ## `Failed` when it would not read (the request has failed with its error).
-viewer! : Who => Try(List(U8), [Failed])
+viewer! : Who => Try(Str, [Failed])
 viewer! = |who| {
 	me = me!({})?
 	match accounts!(who) {
@@ -412,8 +412,8 @@ list! = |path|
 ## `conv`'s title (convTitle): a DM's partner's name (its accounts known
 ## since find!), a channel's own. `Failed` when the partner's name would not
 ## read (the request has failed with its error).
-title! : Chat.Conv, Paths.ConvKey, Who => Try(List(U8), [Failed])
-title! = |conv, key, who|
+title! : Paths.ConvKey, Who => Try(Str, [Failed])
+title! = |key, who|
 	match key {
 		Dm(pair) =>
 			match accounts!(who) {
@@ -426,7 +426,7 @@ title! = |conv, key, who|
 				}
 				Err(Failed) => Err(Failed)
 			}
-		Channel(_) => Ok(Conversation.channel_title(conv.key))
+		Channel(name) => Ok(Conversation.channel_title(name))
 	}
 
 ## POST .../pin and .../unpin: the member's pins in the conversation read,
@@ -572,8 +572,15 @@ recent! = |rest|
 	} else {
 		match (viewer!(Unasked), me!({})) {
 			(Ok(viewer), Ok(me)) => {
-				rows = Recent.rows(Host.recent!({}))
-				Chat.respond(200, html, Html.bytes(Pages.recent(Chrome.src_in(Host.srcs!({})), { viewer, json: Recent.json(me, rows) })))
+				# A row whose text is not UTF-8 is stored data gone bad: the
+				# request fails (NotUtf8, about the field's bytes).
+				match Recent.rows(Host.recent!({})) {
+					Ok(rows) => Chat.respond(200, html, Html.bytes(Pages.recent(Chrome.src_in(Host.srcs!({})), { viewer, json: Recent.json(me, rows) })))
+					Err(NotUtf8(bad)) => {
+						Host.fail!(NotUtf8, bad)
+						Chat.answered
+					}
+				}
 			}
 			_ => Chat.answered
 		}
@@ -617,7 +624,7 @@ landing! = |route, key|
 			if !first.is_empty() {
 				Chat.redirect(List.join([conv.base, ['/'], first.to_utf8()]))
 			} else {
-				match title!(conv, key, who) {
+				match title!(key, who) {
 					Err(Failed) => Chat.answered
 					Ok(title) =>
 						match viewer!(who) {
@@ -656,7 +663,7 @@ page! = |route, at|
 ## sorted); its topics as they were listed to find `topic`. `Failed`
 ## when a read failed (the request has, with its error): **A PINS FILE
 ## THAT WILL NOT READ IS NEVER NO PINS.**
-sidebar! : Str, AtTopic => Try((List(U8), Pages.Sidebar), [Failed])
+sidebar! : Str, AtTopic => Try((Str, Pages.Sidebar), [Failed])
 sidebar! = |topic, at| {
 	uid = me!({})?
 	me = uid.to_str().to_utf8()
@@ -688,12 +695,12 @@ sidebar! = |topic, at| {
 
 ## The other members, each beside its own flag (Host.online! answers one
 ## per id, in their order).
-with_online : List({ id : Uid, name : List(U8) }), List([Offline, Online]) -> List({ id : Uid, name : List(U8), presence : [Online, Offline] })
+with_online : List({ id : Uid, name : Str }), List([Offline, Online]) -> List({ id : Uid, name : Str, presence : [Online, Offline] })
 with_online = |others, flags|
 	List.map_with_index(others, |u, i|
 		{ id: u.id, name: u.name, presence: if List.get(flags, i) == Ok(Online) Online else Offline })
 
-sidebar_of : Uid, Str, AtTopic, List({ id : Uid, name : List(U8), presence : [Online, Offline] }), List(Str), List(Str) -> Pages.Sidebar
+sidebar_of : Uid, Str, AtTopic, List({ id : Uid, name : Str, presence : [Online, Offline] }), List(Str), List(Str) -> Pages.Sidebar
 sidebar_of = |me, topic, at, others, channels, pins|
 	{ uid: me, kind: if at.conv.family == Dm Dm else Channel, key: Paths.conv_key_to_str(at.key), base: Paths.conv_base(at.key), topic, others, channels, pins, topics: at.topics }
 
@@ -751,14 +758,14 @@ conversations! = |{}|
 ## The authorized roster (listAuthorized), from the accounts. `Failed` when
 ## the accounts could not be listed, or one the roster reads would not read
 ## (the request has failed with its error).
-roster! : {} => Try(List({ id : Uid, name : List(U8) }), [Failed])
+roster! : {} => Try(List({ id : Uid, name : Str }), [Failed])
 roster! = |{}|
 	match accounts!(Unasked) {
 		Ok(all) => named!(Accounts.authorized(all))
 		Err(Failed) => Err(Failed)
 	}
 
-entries! : Uid, List({ id : Uid, name : List(U8) }), U64, List(Topics.Entry) => List(Topics.Entry)
+entries! : Uid, List({ id : Uid, name : Str }), U64, List(Topics.Entry) => List(Topics.Entry)
 entries! = |me, members, i, acc|
 	match List.get(members, i) {
 		Ok({ id, name }) =>
@@ -816,7 +823,7 @@ msg! = |id|
 		}
 	}
 
-find_dm! : Uid, List({ id : Uid, name : List(U8) }), List(U8), U64 => Try(List(U8), [NoSuchTopic])
+find_dm! : Uid, List({ id : Uid, name : Str }), List(U8), U64 => Try(List(U8), [NoSuchTopic])
 find_dm! = |me, members, topic, i|
 	match List.get(members, i) {
 		Ok({ id, name: _ }) =>
@@ -882,7 +889,7 @@ make! = |key, conv, who, topic| {
 				# The bookmark first, as a send's: one that fails makes no topic.
 				if dm and bookmark!(key, topic).is_err() {
 					Chat.answered
-				} else if !appended!(conv, who, { at: { key, topic }, name, markdown: Str.to_utf8("hi"), cid: [] }) {
+				} else if !appended!(conv, who, { at: { key, topic }, name, markdown: "hi", cid: "" }) {
 					Chat.answered
 				} else if dm and !announce!(key, conv, who, topic, name) {
 					Chat.answered
@@ -896,11 +903,11 @@ make! = |key, conv, who, topic| {
 
 ## A DM's new topic, said where the partner already watches: its highest
 ## general<N>, unless that is the topic made.
-announce! : Paths.ConvKey, Chat.Conv, Who, Str, List(U8) => Bool
+announce! : Paths.ConvKey, Chat.Conv, Who, Str, Str => Bool
 announce! = |key, conv, who, topic, name|
 	match Topics.highest_general(topics!(key)) {
 		Ok(gen) if gen != topic =>
-			appended!(conv, who, { at: { key, topic: gen }, name, markdown: List.join([Str.to_utf8("New topic: [${topic}]("), conv.base, Str.to_utf8("/${topic})")]), cid: [] })
+			appended!(conv, who, { at: { key, topic: gen }, name, markdown: "New topic: [${topic}](${Paths.conv_base(key)}/${topic})", cid: "" })
 		_ => Bool.True
 	}
 
@@ -914,7 +921,7 @@ send! = |req, route, key|
 		Ok((conv, who)) =>
 		# The title before any tail, unused, as the Zig's convRoute read
 		# it: a partner whose name will not read fails a send too.
-			match title!(conv, key, who) {
+			match title!(key, who) {
 				Err(Failed) => Chat.answered
 				Ok(_) => sent!(req, route, { key, topic: route.topic }, conv, who)
 			}
@@ -942,8 +949,8 @@ sent! = |req, route, at, conv, who|
 				Found(md) =>
 					match Form.field(body.bytes, "cid") {
 						Malformed => Chat.malformed
-						Found(cid) => store!(at, conv, who, send, { markdown: Str.to_utf8(md), cid: Str.to_utf8(cid) })
-						Missing => store!(at, conv, who, send, { markdown: Str.to_utf8(md), cid: [] })
+						Found(cid) => store!(at, conv, who, send, { markdown: md, cid })
+						Missing => store!(at, conv, who, send, { markdown: md, cid: "" })
 					}
 			}
 		}
@@ -953,9 +960,9 @@ refuse : Str -> Chat.Answer
 refuse = |why| Chat.respond(400, [], Str.to_utf8(why))
 
 ## What the send form carried: the message's `markdown` and the sender's
-## client id `cid`. Named fields because both are byte lists. It becomes
+## client id `cid`. Named fields because both are text. It becomes
 ## a Draft once the message is judged and its author's name read.
-Posted : { markdown : List(U8), cid : List(U8) }
+Posted : { markdown : Str, cid : Str }
 
 ## The message judged, then stored: empty or hostile is refused (one that
 ## is not UTF-8 text the form refused); the bookmark (a DM's) before the
@@ -963,9 +970,9 @@ Posted : { markdown : List(U8), cid : List(U8) }
 ## else back to the topic.
 store! : Paths.TopicAt, Chat.Conv, Who, [Async, Sync], Posted => Chat.Answer
 store! = |at, conv, who, send, { markdown: md, cid }|
-	if ZigText.trim(md) == [] {
+	if ZigText.trim(md.to_utf8()) == [] {
 		refuse("not sent: the message is empty\n")
-	} else if Host.hostile!(md) != Fine {
+	} else if Host.hostile!(md.to_utf8()) != Fine {
 		Chat.answered
 	} else {
 		match viewer!(who) {
@@ -987,7 +994,7 @@ store! = |at, conv, who, send, { markdown: md, cid }|
 ## topic), its author's `name`, its `markdown`, and the sender's client id
 ## `cid`. Named fields because three are byte lists: in a row of
 ## arguments, a swapped pair type-checks.
-Draft : { at : Paths.TopicAt, name : List(U8), markdown : List(U8), cid : List(U8) }
+Draft : { at : Paths.TopicAt, name : Str, markdown : Str, cid : Str }
 
 ## **A MESSAGE STORED, THEN SENT LIVE** (angry-gopher chat_store
 ## `appendMessage`, its comments the spec): by the member, named `name`, to
@@ -1005,7 +1012,7 @@ appended! = |conv, who, { at: topic_at, name, markdown: md, cid }|
 	# **NO MESSAGE WITHOUT AN AUTHOR** (the review of 156): the decoder
 	# refuses such a block on every read, so it would go out live and be
 	# gone on reload. A nameless member (a release cut short) cannot post.
-	if name == [] {
+	if name == "" {
 		Host.fail!(NoAuthor, [])
 		Bool.False
 	} else {
@@ -1017,11 +1024,11 @@ appended! = |conv, who, { at: topic_at, name, markdown: md, cid }|
 				uid = me.to_str().to_utf8()
 				# A count of the largest U64 has no next number: the call
 				# crashes into a 500, storing nothing.
-				id = "${topic}_${U64.to_str(index + 1)}".to_utf8()
+				id = "${topic}_${U64.to_str(index + 1)}"
 				stamp = Time.rfc3339(Host.now!({}))
-				message = { id, from: name, at: stamp.to_utf8(), uid, markdown: md }
+				message = { id: id.to_utf8(), from: name.to_utf8(), at: stamp.to_utf8(), uid, markdown: md.to_utf8() }
 				block = Transcript.stored_form(index, message)
-				rendered = Host.render!(md)
+				rendered = Host.render!(md.to_utf8())
 				match rendered.status {
 					Failed => Bool.False
 					Rendered => {
@@ -1041,7 +1048,7 @@ appended! = |conv, who, { at: topic_at, name, markdown: md, cid }|
 						match (named, members!(conv.members)) {
 							(Ok(all), Ok(members)) => {
 								frame = Frame.message({ index, from: name, from_uid: me, at: stamp, html: rendered.html, markdown: md, id, cid })
-								steps = Fanout.steps({ key: topic_at.key, members, topic, index, id, from: name, at: message.at, uid: me, accounts: all }, Fanout.parts_of(md))
+								steps = Fanout.steps({ key: topic_at.key, members, topic, index, id: id.to_utf8(), from: name, at: stamp, uid: me, accounts: all }, Fanout.parts_of(md))
 								if Host.store_message!(conv, topic.to_utf8(), block, index, message) {
 									# **STORED IS DONE** (metal-vmm QUEUE 172): from
 									# here nothing fails the send, which a client

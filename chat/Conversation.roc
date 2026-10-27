@@ -35,16 +35,16 @@ Conversation := [].{
 
 	## A DM's title: "Chat w/" and the partner's name, or their id when the
 	## account has no name (getUserName's "").
-	dm_title : List(U8), Uid -> List(U8)
-	dm_title = |name, other| List.concat(Str.to_utf8("Chat w/"), if name == [] other.to_str().to_utf8() else name)
+	dm_title : Str, Uid -> Str
+	dm_title = |name, other| "Chat w/${if name == "" other.to_str() else name}"
 
 	## A channel's title: "#" and its name.
-	channel_title : List(U8) -> List(U8)
-	channel_title = |name| List.concat(['#'], name)
+	channel_title : Paths.ChannelName -> Str
+	channel_title = |name| "#${Paths.channel_name_to_str(name)}"
 
 	## A topic's title: its conversation's, ": ", its id.
-	topic_title : List(U8), Str -> List(U8)
-	topic_title = |title, topic| List.concat(title, ": ${topic}".to_utf8())
+	topic_title : Str, Str -> Str
+	topic_title = |title, topic| "${title}: ${topic}"
 
 	## topicExists: a topic named `topic` without case is among `topics` (case
 	## does not tell topics apart, on FAT or on Linux).

@@ -36,16 +36,16 @@ Topics := [].{
 
 	## One DM in /chat/conversations: its pair, the partner, where the member
 	## resumes it, and its topics.
-	Entry : { conv : Paths.PairKey, id : Uid, name : List(U8), default : List(U8), sessions : List(Str) }
+	Entry : { conv : Paths.PairKey, id : Uid, name : Str, default : List(U8), sessions : List(Str) }
 
 	## chatConversations' JSON: the member, then a DM with every other.
-	# TEMPORARY DOOR: moves out in a later run (a name and a bookmark, still bytes).
+	# TEMPORARY DOOR: moves out in a later run (a bookmark, still bytes).
 	conversations_json : Uid, List(Entry) -> List(U8)
 	conversations_json = |me, entries| {
 		one = |e|
 			JsonText.obj([
 				("conv", JsonText.str(Paths.pair_key_to_str(e.conv))),
-				("partner", JsonText.obj([("id", JsonText.str(e.id.to_str())), ("name", JsonText.str_at_door(e.name))])),
+				("partner", JsonText.obj([("id", JsonText.str(e.id.to_str())), ("name", JsonText.str(e.name))])),
 				("default", JsonText.str_at_door(e.default)),
 				("sessions", JsonText.arr(List.map(e.sessions, JsonText.str))),
 			])

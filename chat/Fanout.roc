@@ -17,12 +17,12 @@ Fanout := [].{
 
 	## A message's parts, as its feeds keep them: the Recent row's excerpt,
 	## the `<img>` tags, the code blocks.
-	Parts : { excerpt : List(U8), images : List(List(U8)), code : List(Feeds.Block) }
+	Parts : { excerpt : Str, images : List(List(U8)), code : List(Feeds.Block) }
 
 	## The parts of a message's markdown `md` (Recent.excerpt, Feeds.img_tags,
 	## Feeds.code_blocks; the twins hold each to its Zig).
-	parts_of : List(U8) -> Parts
-	parts_of = |md| { excerpt: Recent.excerpt(md), images: Feeds.img_tags(md), code: Feeds.code_blocks(md) }
+	parts_of : Str -> Parts
+	parts_of = |md| { excerpt: Recent.excerpt(md), images: Feeds.img_tags(md.to_utf8()), code: Feeds.code_blocks(md.to_utf8()) }
 
 	## The surfaces that can fail for a member, as /admin/host names them
 	## (Host.fanout_failed!'s; a feed's append is the one that still can).
@@ -43,7 +43,7 @@ Fanout := [].{
 	## spelled it), its number `index` (0 is the topic's first), its fields,
 	## its author's account `uid`, and the accounts the request holds (a
 	## DM's; a channel names none).
-	Sent : { key : Paths.ConvKey, members : List(Uid), topic : Str, index : U64, id : List(U8), from : List(U8), at : List(U8), uid : Uid, accounts : List(Accounts.Account) }
+	Sent : { key : Paths.ConvKey, members : List(Uid), topic : Str, index : U64, id : List(U8), from : Str, at : Str, uid : Uid, accounts : List(Accounts.Account) }
 
 	## **EVERY MEMBER IN THE CONVERSATION'S ORDER, EACH MEMBER'S SURFACES IN
 	## ONE ORDER: NOTIFY, SIDEBAR, RECENT, IMAGES, CODE** (fanoutCrossPage).
@@ -56,7 +56,7 @@ Fanout := [].{
 		url = topic_url(at)
 		notify = notify_event(at, notify_text(m.from, at))
 		added = topic_added(at)
-		head = { from: m.from, at: m.at, source_id: m.id, conv: Paths.conv_key_bytes(m.key) }
+		head = { from: m.from.to_utf8(), at: m.at.to_utf8(), source_id: m.id, conv: Paths.conv_key_bytes(m.key) }
 		List.join(
 			List.map(
 				m.members,
@@ -69,8 +69,8 @@ Fanout := [].{
 						if m.index == 0 [Publish(sidebar_key(uid), added)] else [],
 						# **EVERY MEMBER SEES THE ROW, THE AUTHOR AS "YOU"**.
 						{
-							who = if uid == m.uid Str.to_utf8("You") else m.from
-							[Publish(recent_key(uid), Recent.chat_event({ at: m.at, url: url.to_utf8(), who, label: recent_where(m, uid), topic: m.topic.to_utf8(), excerpt: parts.excerpt, dm: Paths.conv_kind(m.key) }))]
+							who = if uid == m.uid "You" else m.from
+							[Publish(recent_key(uid), Recent.chat_event({ at: m.at, url, who, label: recent_where(m, uid), topic: m.topic, excerpt: parts.excerpt, dm: Paths.conv_kind(m.key) }))]
 						},
 						# The feeds only when the message has what they keep.
 						match parts.images {
@@ -117,17 +117,16 @@ Fanout := [].{
 
 	## The status strip's line: a DM's "X sent you a message on <topic>.", a
 	## channel's "X posted to <key> > <topic>.".
-	notify_text : List(U8), Paths.TopicAt -> List(U8)
+	notify_text : Str, Paths.TopicAt -> Str
 	notify_text = |from, at|
 		match at.key {
-			Dm(_) => List.join([from, " sent you a message on ${at.topic}.".to_utf8()])
-			Channel(name) => List.join([from, " posted to ${Paths.channel_name_to_str(name)} > ${at.topic}.".to_utf8()])
+			Dm(_) => "${from} sent you a message on ${at.topic}."
+			Channel(name) => "${from} posted to ${Paths.channel_name_to_str(name)} > ${at.topic}."
 		}
 
 	## The notify stream's event: conv, session, text, link_url (topic_url).
-	# TEMPORARY DOOR: moves out in a later run.
-	notify_event : Paths.TopicAt, List(U8) -> List(U8)
-	notify_event = |at, text| JsonText.obj([("conv", JsonText.str(Paths.conv_key_to_str(at.key))), ("session", JsonText.str(at.topic)), ("text", JsonText.str_at_door(text)), ("link_url", JsonText.str(topic_url(at)))])
+	notify_event : Paths.TopicAt, Str -> List(U8)
+	notify_event = |at, text| JsonText.obj([("conv", JsonText.str(Paths.conv_key_to_str(at.key))), ("session", JsonText.str(at.topic)), ("text", JsonText.str(text)), ("link_url", JsonText.str(topic_url(at)))])
 
 	## The sidebar stream's topic-added: kind, conv, sid, url (topic_url).
 	topic_added : Paths.TopicAt -> List(U8)
@@ -138,19 +137,19 @@ Fanout := [].{
 	## yourself has none, so "to " and the name of no one). **A NAME THAT
 	## WILL NOT READ GIVES ""** (its absent-ok): the label only, the row is
 	## still sent.
-	recent_where : Sent, Uid -> List(U8)
+	recent_where : Sent, Uid -> Str
 	recent_where = |m, viewer|
 		match m.key {
-			Channel(name) => List.concat(Str.to_utf8("in "), Paths.channel_name_bytes(name))
+			Channel(name) => "in ${Paths.channel_name_to_str(name)}"
 			Dm(_) => {
 				# The DM with yourself has no other member, so no name.
 				match List.keep_if(m.members, |member| member != viewer).last() {
 					Ok(other) =>
 						match Accounts.name(m.accounts, other) {
-							Ok(name) => List.concat(Str.to_utf8("to "), name)
-							Err(_) => []
+							Ok(name) => "to ${name}"
+							Err(_) => ""
 						}
-					Err(_) => Str.to_utf8("to ")
+					Err(_) => "to "
 				}
 			}
 		}

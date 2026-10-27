@@ -14,7 +14,7 @@ Reaction := [].{
 	Event : {
 		msg : U64,
 		uid : Uid,
-		from : List(U8),
+		from : Str,
 		emoji : List(U8),
 		change : Change,
 		at : Str,
@@ -31,7 +31,7 @@ Reaction := [].{
 		JsonText.obj([
 			("msg", Str.to_utf8(U64.to_str(msg))),
 			("uid", JsonText.str(uid.to_str())),
-			("from", JsonText.str_at_door(from)),
+			("from", JsonText.str(from)),
 			("emoji", JsonText.str_at_door(emoji)),
 			("on", JsonText.bool(is_added(change))),
 			("at", JsonText.str(at)),

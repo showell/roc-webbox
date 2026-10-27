@@ -14,7 +14,7 @@ Chrome := [].{
 	## the sub-nav's bold one (none for "") and where each script is.
 	## The tab's title is markup the code writes (Html.trusted); the title and
 	## the viewer are text, escaped here.
-	Shell : { tab : Html, title : List(U8), viewer : List(U8), active : List(U8), src : List(U8) -> Html }
+	Shell : { tab : Html, title : Str, viewer : Str, active : Str, src : List(U8) -> Html }
 
 	## page() then Html.bytes(): the shell, `body`, and the shell closed.
 	page : Shell, Html -> Html
@@ -26,9 +26,9 @@ Chrome := [].{
 			top_bar_css,
 			head_b2,
 			Html.fill(head_scripts, [(s.src)(Str.to_utf8("colors.js")), (s.src)(Str.to_utf8("viewport.js")), (s.src)(Str.to_utf8("chat_theme.js")), (s.src)(Str.to_utf8("chrome_drawer.js"))]),
-			Html.fill(top_a, [Html.escape(s.title)]),
+			Html.fill(top_a, [Html.text(s.title)]),
 			nav(s.active),
-			Html.fill(top_b, [Html.escape(s.viewer)]),
+			Html.fill(top_b, [Html.text(s.viewer)]),
 			Html.trusted("<div class=\"app-body-wrap\">"),
 			body,
 			Html.trusted("</div></body></html>"),
@@ -39,14 +39,14 @@ Chrome := [].{
 	script = |s, name| Html.join([Html.trusted("<script src=\""), (s.src)(Str.to_utf8(name)), Html.trusted("\"></script>")])
 
 	## The sub-nav, " · " between, the `active` one bold and not a link.
-	nav : List(U8) -> Html
+	nav : Str -> Html
 	nav = |active| {
 		items = [("/chat", "Chat", "chat"), ("/chat/docs", "Docs", "docs"), ("/chat/recent", "Recent", "recent"), ("/chat/images", "Images", "images"), ("/chat/code", "Code", "code"), ("/chat/links", "Links", "links")]
 		links = List.map(
 			items,
 			|(href, label, key)| {
 				text = Html.escape(Str.to_utf8(label))
-				if Str.to_utf8(key) == active
+				if key == active
 					Html.join([Html.trusted("<strong>"), text, Html.trusted("</strong>")])
 				else
 					Html.join([Html.trusted("<a href=\""), Html.escape(Str.to_utf8(href)), Html.trusted("\">"), text, Html.trusted("</a>")])

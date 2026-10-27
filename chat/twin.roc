@@ -103,8 +103,10 @@ call = |req| {
 				Err(NotBelieved) => []
 			}
 		25 =>
-			match (Uid.from_utf8(arg(2)), Str.from_utf8(arg(3))) {
-				(Ok(from_uid), Ok(at)) => [Frame.message({ index: u64(arg(0)), from: arg(1), from_uid, at, html: arg(4), markdown: arg(5), id: arg(6), cid: arg(7) })]
+		# Its author, stamp, markdown, id and cid are text; the html is the
+		# host's bytes.
+			match (Uid.from_utf8(arg(2)), texts([arg(1), arg(3), arg(5), arg(6), arg(7)])) {
+				(Ok(from_uid), Ok([from, at, markdown, id, cid])) => [Frame.message({ index: u64(arg(0)), from, from_uid, at, html: arg(4), markdown, id, cid })]
 				_ => []
 			}
 		26 => [Frame.reaction(arg(0))]
@@ -121,14 +123,27 @@ call = |req| {
 				Malformed => [[77]]
 			}
 		29 => [bool(Reaction.valid_emoji(arg(0)))]
-		30 => [Html.bytes(Chrome.page({ tab: Html.host_markup(arg(0)), title: arg(1), viewer: arg(2), active: arg(3), src: srcs(req.args, 5) }, Html.host_markup(arg(4))))]
-		31 => [Html.bytes(Pages.not_found(srcs(req.args, 3), { viewer: arg(0), what: arg(1), back: arg(2) }))]
-		32 =>
-			match Str.from_utf8(arg(1)) {
-				Ok(base) => [Html.bytes(Pages.no_topics(srcs(req.args, 3), { viewer: arg(0), base, title: arg(2) }))]
-				Err(_) => []
+		# A heading's title, viewer and active item are text.
+		30 =>
+			match texts([arg(1), arg(2), arg(3)]) {
+				Ok([title, viewer, active]) => [Html.bytes(Chrome.page({ tab: Html.host_markup(arg(0)), title, viewer, active, src: srcs(req.args, 5) }, Html.host_markup(arg(4))))]
+				_ => []
 			}
-		33 => [Html.bytes(Pages.no_conversations(srcs(req.args, 1), arg(0)))]
+		31 =>
+			match texts([arg(0), arg(1), arg(2)]) {
+				Ok([viewer, what, back]) => [Html.bytes(Pages.not_found(srcs(req.args, 3), { viewer, what, back }))]
+				_ => []
+			}
+		32 =>
+			match texts([arg(0), arg(1), arg(2)]) {
+				Ok([viewer, base, title]) => [Html.bytes(Pages.no_topics(srcs(req.args, 3), { viewer, base, title }))]
+				_ => []
+			}
+		33 =>
+			match text(arg(0)) {
+				Ok(viewer) => [Html.bytes(Pages.no_conversations(srcs(req.args, 1), viewer))]
+				Err(Invalid) => []
+			}
 		34 =>
 			match Pages.decode_sidebar(req.args) {
 				Ok(sb) => [Html.script_json_bytes(Pages.sidebar_json(sb))]
@@ -136,9 +151,9 @@ call = |req| {
 			}
 		35 => {
 			limits = { image_max: u64(arg(7)), video_max: u64(arg(8)), accept: arg(9), search_min: u64(arg(10)) }
-			match (text(arg(0)), text(arg(1)), text(arg(2)), Uid.from_utf8(arg(4))) {
-				(Ok(key), Ok(base), Ok(topic), Ok(uid)) => {
-					view = { key, base, topic, title: arg(3), uid, viewer: arg(5), sidebar_json: Html.twin_script_json(arg(6)) }
+			match (texts([arg(0), arg(1), arg(2), arg(3), arg(5)]), Uid.from_utf8(arg(4))) {
+				(Ok([key, base, topic, title, viewer]), Ok(uid)) => {
+					view = { key, base, topic, title, uid, viewer, sidebar_json: Html.twin_script_json(arg(6)) }
 					[Html.bytes(Pages.conversation(srcs(req.args, 11), limits, view))]
 				}
 				_ => []
@@ -148,11 +163,15 @@ call = |req| {
 		37 => [Html.script_json_bytes(Html.script_safe(arg(0)))]
 		38 => [Feeds.images_json(Feeds.images(arg(0)), u64(arg(1)))]
 		39 => [Feeds.code_json(Feeds.code(arg(0)))]
-		40 => [Recent.excerpt(arg(0))]
+		40 =>
+			match text(arg(0)) {
+				Ok(md) => [Recent.excerpt(md).to_utf8()]
+				Err(Invalid) => []
+			}
 		41 =>
-			match Uid.from_utf8(arg(0)) {
-				Ok(me) => [Recent.json(me, Recent.rows(written(req.args, 1, [])))]
-				Err(NotAUid) => []
+			match (Uid.from_utf8(arg(0)), Recent.rows(written(req.args, 1, []))) {
+				(Ok(me), Ok(rows)) => [Recent.json(me, rows)]
+				_ => []
 			}
 		# The topics are a listing's, text (Files.list!'s door skips the rest).
 		42 => [ChatState.resume_topic(List.keep_oks(List.drop_first(req.args, 2), Str.from_utf8), arg(0), int(arg(1)))]
@@ -173,16 +192,21 @@ call = |req| {
 		45 => Conversation.dm_members(arg(0))
 		# The partner is a Uid; the door refuses any other.
 		46 =>
-			match Uid.from_utf8(arg(1)) {
-				Ok(other) => [Conversation.dm_title(arg(0), other)]
-				Err(NotAUid) => []
+			match (text(arg(0)), Uid.from_utf8(arg(1))) {
+				(Ok(name), Ok(other)) => [Conversation.dm_title(name, other).to_utf8()]
+				_ => []
 			}
-		47 => [Conversation.channel_title(arg(0))]
+		# A channel's title is made for a channel's name alone.
+		47 =>
+			match channel_of(arg(0)) {
+				Ok(name) => [Conversation.channel_title(name).to_utf8()]
+				Err(_) => []
+			}
 		# The topic is text (a TopicAt's); a topic that is not has no title.
 		48 =>
-			match Str.from_utf8(arg(1)) {
-				Ok(topic) => [Conversation.topic_title(arg(0), topic)]
-				Err(_) => []
+			match texts([arg(0), arg(1)]) {
+				Ok([title, topic]) => [Conversation.topic_title(title, topic).to_utf8()]
+				_ => []
 			}
 		# The topics and the topic are text; a topic that is not is none.
 		49 =>
@@ -231,26 +255,16 @@ call = |req| {
 			n = u64(arg(0))
 			# An id that is no Uid is asked nothing: the door refuses it.
 			ids = List.keep_oks(List.sublist(req.args, { start: 1, len: n }), Uid.from_utf8)
-			all = accounts(req.args, 1 + n, [])
-			asked = List.join(
-				List.map(
-					ids,
-					|id|
-						match Accounts.name(all, id) {
-							Ok(name) => [bool(Accounts.exists(all, id)), Str.to_utf8("ok"), name]
-							Err(why) => List.concat([bool(Accounts.exists(all, id))], unreadable(why))
-						},
-				),
-			)
-			roster = match Accounts.authorized(all) {
-				Ok(members) => List.concat([Str.to_utf8("ok")], List.join(List.map(members, |a| [a.id.to_str().to_utf8(), a.name])))
-				Err(why) => unreadable(why)
+			# Accounts that will not decode (a name not UTF-8) are refused
+			# whole, as main's accounts! door fails the request.
+			match List.map_try(accounts(req.args, 1 + n, []), Accounts.from_host) {
+				Ok(all) => account_answers(ids, all)
+				Err(_) => []
 			}
-			List.concat(asked, roster)
 		}
 		61 =>
-			match (Uid.from_utf8(arg(1)), Str.from_utf8(arg(5))) {
-				(Ok(uid), Ok(at)) => [Reaction.line({ msg: u64(arg(0)), uid, from: arg(2), emoji: arg(3), change: if arg(4) == [49] Added else Removed, at })]
+			match (Uid.from_utf8(arg(1)), Str.from_utf8(arg(5)), text(arg(2))) {
+				(Ok(uid), Ok(at), Ok(from)) => [Reaction.line({ msg: u64(arg(0)), uid, from, emoji: arg(3), change: if arg(4) == [49] Added else Removed, at })]
 				_ => []
 			}
 		# The fan-out: member `arg(0)`'s five keys; conversation `arg(0)`'s
@@ -269,16 +283,21 @@ call = |req| {
 			}
 		# The notify event: from, key, topic (a DM's or a channel's, by its key).
 		64 =>
-			match topic_at(arg(1), arg(2)) {
-				Ok(at) => [Fanout.notify_event(at, Fanout.notify_text(arg(0), at))]
-				Err(Invalid) => []
+			match (topic_at(arg(1), arg(2)), text(arg(0))) {
+				(Ok(at), Ok(from)) => [Fanout.notify_event(at, Fanout.notify_text(from, at))]
+				_ => []
 			}
 		65 =>
 			match topic_at(arg(0), arg(1)) {
 				Ok(at) => [Fanout.topic_added(at)]
 				Err(Invalid) => []
 			}
-		66 => [Recent.chat_event({ at: arg(0), url: arg(1), who: arg(2), label: arg(3), topic: arg(4), excerpt: arg(5), dm: if arg(6) == [49] Dm else Channel })]
+		# Every field of a row is text.
+		66 =>
+			match texts(List.take_first(req.args, 6)) {
+				Ok([at, url, who, label, topic, excerpt]) => [Recent.chat_event({ at, url, who, label, topic, excerpt, dm: if arg(6) == [49] Dm else Channel })]
+				_ => []
+			}
 		# An entry's header (source_id, from, conv, at), then its tags: the
 		# images.md entry and the live event.
 		67 => {
@@ -300,10 +319,10 @@ call = |req| {
 			n = u64(arg(3))
 			given = List.sublist(req.args, { start: 4, len: n })
 			members = List.keep_oks(given, Uid.from_utf8)
-			all = accounts(req.args, 4 + n, [])
+			decoded = List.map_try(accounts(req.args, 4 + n, []), Accounts.from_host)
 			key = if arg(0) == [100] Dm(valid_pair(arg(2))) else Channel(valid_channel(arg(2)))
-			match Uid.from_utf8(arg(1)) {
-				Ok(viewer) if List.len(members) == n => [Fanout.recent_where({ key, members, topic: "", index: 0, id: [], from: [], at: [], uid: viewer, accounts: all }, viewer)]
+			match (Uid.from_utf8(arg(1)), decoded) {
+				(Ok(viewer), Ok(all)) if List.len(members) == n => [Fanout.recent_where({ key, members, topic: "", index: 0, id: [], from: "", at: "", uid: viewer, accounts: all }, viewer).to_utf8()]
 				_ => []
 			}
 		}
@@ -332,6 +351,10 @@ valid_pair = |key| match pair_of(key) {
 ## no validated type takes them.
 text : List(U8) -> Try(Str, [Invalid])
 text = |bytes| Str.from_utf8(bytes).map_err(|_| Invalid)
+
+## The test's bytes as texts, when every one is.
+texts : List(List(U8)) -> Try(List(Str), [Invalid])
+texts = |all| List.map_try(all, text)
 
 ## A uid the test hands as valid; one that is not stops the twin.
 valid_uid : List(U8) -> Uid
@@ -399,12 +422,13 @@ entries = |args, i, out|
 ## Accounts as the test wrote them: `id, kind, name_read, name` from
 ## argument `i`, the kind `a` (the agent), `m` (a member), `u` (its
 ## password's stat failed) or anything else (a guest); the name read `u`
-## when it failed, anything else when it read. An id that is no Uid stops
-## the twin: the host lists only canonical ids, and main's accounts! door
-## fails any other.
-accounts : List(List(U8)), U64, List(Accounts.Account) -> List(Accounts.Account)
+## when it failed, anything else when it read: as the host hands them,
+## bytes, for Accounts.from_host to decode.
+HostAccount : { id : List(U8), kind : [Agent, Guest, Member, Unreadable], name : List(U8), name_read : [Found, Unreadable] }
+
+accounts : List(List(U8)), U64, List(HostAccount) -> List(HostAccount)
 accounts = |args, i, out|
-	match (List.get(args, i).map_ok(valid_uid), List.get(args, i + 1), List.get(args, i + 2), List.get(args, i + 3)) {
+	match (List.get(args, i), List.get(args, i + 1), List.get(args, i + 2), List.get(args, i + 3)) {
 		(Ok(id), Ok(k), Ok(r), Ok(name)) => {
 			kind = match k {
 				[97] => Agent
@@ -497,3 +521,24 @@ written = |args, i, out|
 		at = |k| List.get(args, i + k) ?? []
 		written(args, i + 9, List.append(out, { kind: if at(0) == ['1'] Doc else Message, secs: at(1), uid: at(2), name: at(3), key: at(4), label: at(5), topic: at(6), markdown: at(7), dm: if at(8) == ['1'] Dm else Channel }))
 	}
+
+## Account answers for case 60: each id's exists and name, then the
+## authorized roster.
+account_answers : List(Uid), List(Accounts.Account) -> List(List(U8))
+account_answers = |ids, all| {
+	asked = List.join(
+		List.map(
+			ids,
+			|id|
+				match Accounts.name(all, id) {
+					Ok(name) => [bool(Accounts.exists(all, id)), Str.to_utf8("ok"), name.to_utf8()]
+					Err(why) => List.concat([bool(Accounts.exists(all, id))], unreadable(why))
+				},
+		),
+	)
+	roster = match Accounts.authorized(all) {
+		Ok(members) => List.concat([Str.to_utf8("ok")], List.join(List.map(members, |a| [a.id.to_str().to_utf8(), a.name.to_utf8()])))
+		Err(why) => unreadable(why)
+	}
+	List.concat(asked, roster)
+}
