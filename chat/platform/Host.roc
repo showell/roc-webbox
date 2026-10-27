@@ -156,7 +156,7 @@ Host := [].{
 	## primitive answered it), on topic `sid` of the conversation keyed `key`.
 	## The operator's count and last failure, kept by the host for
 	## /admin/host.
-	fanout_failed! : [Code, Images, Recent], List(U8), List(U8), List(U8), U16 => {}
+	fanout_failed! : [Code, Images], List(U8), List(U8), List(U8), U16 => {}
 
 	## A request header's value, or none (read before the body).
 	header! : List(U8) => List(List(U8))

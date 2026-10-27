@@ -25,7 +25,7 @@ Fanout := [].{
 
 	## The surfaces that can fail for a member, as /admin/host names them
 	## (Host.fanout_failed!'s; a feed's append is the one that still can).
-	Surface : [Code, Images, Recent]
+	Surface : [Code, Images]
 
 	## One step of the fan-out, in the order it is taken:
 	## - `Publish`: bytes on a member's key (it cannot fail);

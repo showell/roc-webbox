@@ -167,7 +167,7 @@ pub const AppendStatus = enum(u8) { appended, failed };
 /// Host.roc's `fanout_failed!`: the fan-out's surfaces that can fail, a
 /// member at a time (chat_fanout's names for them, as /admin/host says
 /// them). Notify and sidebar are made of the Roc's bytes alone, so never.
-pub const Surface = enum(u8) { code, images, recent };
+pub const Surface = enum(u8) { code, images };
 
 /// Host.roc's `online!` answer: each id seen within the presence window of
 /// the request's time, or not (never seen is `offline`).
