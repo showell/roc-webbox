@@ -18,7 +18,7 @@ Route := [].{
 		} else {
 			match family_under(sub) {
 				Ok(r) => r
-				Err(None) =>
+				Err(NotUnderAPrefix) =>
 					match Bytes.strip_prefix(sub, Str.to_utf8("/search")) {
 						Ok(rest) => with_rest(Search, rest)
 						Err(NoMatch) =>
@@ -52,12 +52,12 @@ Route := [].{
 	under_channel = |sub| conversation(Channel, segments(sub))
 
 	## A static script: `/<name>.js` under /chat, `rest` the name.
-	asset : List(U8) -> Try(R, [None])
+	asset : List(U8) -> Try(R, [NotAnAsset])
 	asset = |sub|
 		if List.len(sub) > 1 and ends_with(sub, Str.to_utf8(".js")) {
 			Ok(with_rest(Asset, List.drop_first(sub, 1)))
 		} else {
-			Err(None)
+			Err(NotAnAsset)
 		}
 
 	## A live stream, which presence does not count: a topic's, the two
@@ -89,19 +89,19 @@ Route := [].{
 
 	## The five families under a prefix of their own, at a segment's
 	## boundary (`/docsX` is none of them).
-	family_under : List(U8) -> Try(R, [None])
+	family_under : List(U8) -> Try(R, [NotUnderAPrefix])
 	family_under = |sub| {
 		named = [("/docs", Docs), ("/recent", Recent), ("/images", Images), ("/code", Code), ("/links", Links)]
 		List.fold(
 			named,
-			Err(None),
+			Err(NotUnderAPrefix),
 			|found, (prefix, f)|
 				match found {
 					Ok(r) => Ok(r)
-					Err(None) =>
+					Err(NotUnderAPrefix) =>
 						match Bytes.strip_prefix(sub, Str.to_utf8(prefix)) {
 							Ok(rest) if rest == [] or Bytes.starts_with(rest, slash) => Ok(with_rest(f, rest))
-							_ => Err(None)
+							_ => Err(NotUnderAPrefix)
 						}
 				},
 		)

@@ -58,7 +58,7 @@ Reaction := [].{
 				emoji = found_or(e, [])
 				on_s = found_or(o, ['1'])
 				match ZigText.parse_u64(msg_s) {
-					Err(None) => Bad(Str.to_utf8("react: msg must be a message number\n"))
+					Err(NotANumber) | Err(TooBig) => Bad(Str.to_utf8("react: msg must be a message number\n"))
 					Ok(msg) =>
 						if valid_emoji(emoji) {
 							Reacted({ msg, emoji, change: if on_s == ['1'] Added else Removed })

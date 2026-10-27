@@ -16,42 +16,42 @@ Feeds := [].{
 
 	## images_store `parseHeader`: `at` after the last " at " before the first
 	## ", source MSG_", `conv` after the first " in " after it.
-	header : List(U8) -> Try(Header, [None])
+	header : List(U8) -> Try(Header, [NotAHeader])
 	header = |line|
 		match Bytes.strip_prefix(line, Str.to_utf8("Sent by ")) {
 			Ok(after) if List.last(after) == Ok(':') => {
 				inner = List.drop_last(after, 1)
 				match Bytes.cut_seq(inner, Str.to_utf8(", source MSG_")) {
-					Err(None) => Err(None)
+					Err(NotFound) => Err(NotAHeader)
 					Ok((left, right)) => {
 						at_sep = Str.to_utf8(" at ")
 						match (last_find(left, at_sep), Bytes.cut_seq(right, Str.to_utf8(" in "))) {
 							(Ok(a), Ok((source_id, conv))) => Ok({ from: List.take_first(left, a), at: List.drop_first(left, a + List.len(at_sep)), source_id, conv })
-							_ => Err(None)
+							_ => Err(NotAHeader)
 						}
 					}
 				}
 			}
-			_ => Err(None)
+			_ => Err(NotAHeader)
 		}
 
 	## Where `needle` last starts in `s`.
-	last_find : List(U8), List(U8) -> Try(U64, [None])
+	last_find : List(U8), List(U8) -> Try(U64, [NotFound])
 	last_find = |s, needle| {
 		n = List.len(needle)
 		if List.len(s) < n {
-			Err(None)
+			Err(NotFound)
 		} else {
 			last_find_from(s, needle, List.len(s) - n)
 		}
 	}
 
-	last_find_from : List(U8), List(U8), U64 -> Try(U64, [None])
+	last_find_from : List(U8), List(U8), U64 -> Try(U64, [NotFound])
 	last_find_from = |s, needle, i|
 		if List.sublist(s, { start: i, len: List.len(needle) }) == needle {
 			Ok(i)
 		} else if i == 0 {
-			Err(None)
+			Err(NotFound)
 		} else {
 			last_find_from(s, needle, i - 1)
 		}
@@ -78,11 +78,11 @@ Feeds := [].{
 			|out, block| {
 				(line, body) = match find_byte(block, '\n', 0) {
 					Ok(nl) => (List.take_first(block, nl), List.drop_first(block, nl + 1))
-					Err(None) => (block, [])
+					Err(NotFound) => (block, [])
 				}
 				match header(line) {
 					Ok(h) => List.append(out, (h, img_tags(body)))
-					Err(None) => out
+					Err(NotAHeader) => out
 				}
 			},
 		)
@@ -99,16 +99,16 @@ Feeds := [].{
 		} else if i + 4 < List.len(s) and lower(List.sublist(s, { start: i, len: 4 })) == Str.to_utf8("<img") and is_space(List.get(s, i + 4) ?? 0) {
 			match find_byte(s, '>', i + 4) {
 				Ok(gt) => img_tags_from(s, gt + 1, List.append(out, List.sublist(s, { start: i, len: gt + 1 - i })))
-				Err(None) => img_tags_from(s, i + 1, out)
+				Err(NotFound) => img_tags_from(s, i + 1, out)
 			}
 		} else {
 			img_tags_from(s, i + 1, out)
 		}
 
-	find_byte : List(U8), U8, U64 -> Try(U64, [None])
+	find_byte : List(U8), U8, U64 -> Try(U64, [NotFound])
 	find_byte = |s, b, i| match List.get(s, i) {
 		Ok(c) => if c == b Ok(i) else find_byte(s, b, i + 1)
-		Err(_) => Err(None)
+		Err(_) => Err(NotFound)
 	}
 
 	smaller : U64, U64 -> U64
@@ -131,10 +131,10 @@ Feeds := [].{
 			[],
 			|out, block|
 				match find_byte(block, '\n', 0) {
-					Err(None) => out
+					Err(NotFound) => out
 					Ok(nl) =>
 						match header(List.take_first(block, nl)) {
-							Err(None) => out
+							Err(NotAHeader) => out
 							Ok(h) => {
 								bs = code_blocks(List.drop_first(block, nl + 1))
 								if bs == [] out else List.append(out, (h, bs))
@@ -155,7 +155,7 @@ Feeds := [].{
 			Err(_) => out
 			Ok(line) =>
 				match fence_open(line) {
-					Err(None) => blocks_from(ls, i + 1, out)
+					Err(NotAFence) => blocks_from(ls, i + 1, out)
 					Ok(fo) => {
 						j = close_at(ls, fo.char, fo.count, i + 1)
 						body = Bytes.join_lines(List.sublist(ls, { start: i + 1, len: j - (i + 1) }))
@@ -173,19 +173,19 @@ Feeds := [].{
 	## markdown_fence `parseOpen`: up to three spaces, 3 to 10 of '`' or '~',
 	## and an info string whose first word is the language (no '`' in a
 	## backtick fence's).
-	fence_open : List(U8) -> Try({ char : U8, count : U64, lang : List(U8) }, [None])
+	fence_open : List(U8) -> Try({ char : U8, count : U64, lang : List(U8) }, [NotAFence])
 	fence_open = |line| {
 		indent = smaller(Bytes.leading(line, ' ', 0), 4)
 		match List.get(line, indent) {
-			Err(_) => Err(None)
+			Err(_) => Err(NotAFence)
 			Ok(f) =>
 				if indent >= 4 or (f != '`' and f != '~') {
-					Err(None)
+					Err(NotAFence)
 				} else {
 					count = Bytes.leading(List.drop_first(line, indent), f, 0)
 					info = trim_info(List.drop_first(line, indent + count))
 					if count < 3 or count > 10 or (f == '`' and List.contains(info, '`')) {
-						Err(None)
+						Err(NotAFence)
 					} else {
 						lang = List.take_first(info, count_while(info, |c| c != ' ' and c != '\t', 0))
 						Ok({ char: f, count, lang })

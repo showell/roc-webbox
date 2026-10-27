@@ -33,12 +33,12 @@ call = |req| {
 		3 =>
 			match Time.unix_from_rfc3339(arg(0)) {
 				Ok(n) => [Str.to_utf8(I64.to_str(n))]
-				Err(None) => []
+				Err(NotADate) => []
 			}
 		4 =>
 			match ZigText.parse_u64(arg(0)) {
 				Ok(n) => [Str.to_utf8(U64.to_str(n))]
-				Err(None) => []
+				Err(NotANumber) | Err(TooBig) => []
 			}
 		5 => [ZigText.json_string(arg(0))]
 		6 => [ZigText.trim(arg(0))]
@@ -63,7 +63,7 @@ call = |req| {
 			match Count.parse(arg(0)) {
 				Ok({ count, size, last: Known(l) }) => [num(count), num(size), num(l.offset), l.uid]
 				Ok({ count, size, last: Unknown }) => [num(count), num(size)]
-				Err(None) => []
+				Err(Malformed) => []
 			}
 		21 => {
 			last = if List.len(req.args) == 4 Known({ offset: u64(arg(2)), uid: arg(3) }) else Unknown
@@ -73,12 +73,12 @@ call = |req| {
 		23 =>
 			match Count.recorded_author(Count.parse(arg(0)), u64(arg(1)), u64(arg(2))) {
 				Ok(uid) => [uid]
-				Err(None) => []
+				Err(NotRecorded) => []
 			}
 		24 =>
 			match Count.window_last(u64(arg(0)), arg(1), if arg(2) == [49] Full else Partial, arg(3)) {
 				Ok(w) => [num(w.number), bool(w.record == Current), w.msg.id, w.msg.from, w.msg.at, w.msg.uid, w.msg.markdown]
-				Err(None) => []
+				Err(NotBelieved) => []
 			}
 		25 => [Frame.message({ index: u64(arg(0)), from: arg(1), from_uid: arg(2), at: arg(3), html: arg(4), markdown: arg(5), id: arg(6), cid: arg(7) })]
 		26 => [Frame.reaction(arg(0))]
@@ -120,7 +120,7 @@ call = |req| {
 		44 =>
 			match Conversation.dm_other(arg(0), Uid.from_bytes(arg(1))) {
 				Ok(other) => [Uid.bytes(other)]
-				Err(None) => []
+				Err(NotAParticipant) => []
 			}
 		45 => Conversation.dm_members(arg(0))
 		46 => [Conversation.dm_title(arg(0), arg(1))]
@@ -321,10 +321,11 @@ num = |n| Str.to_utf8(U64.to_str(n))
 u64 : List(U8) -> U64
 u64 = |digits| ZigText.parse_u64(digits) ?? 0
 
-maybe : Try(U64, [None]) -> List(List(U8))
+## A number, or nothing whatever the error said.
+maybe : Try(U64, _) -> List(List(U8))
 maybe = |t| match t {
 	Ok(n) => [num(n)]
-	Err(None) => []
+	Err(_) => []
 }
 
 ## The scripts' srcs, as `name, src` pairs from argument `from` on.

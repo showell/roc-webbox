@@ -16,7 +16,7 @@ Form := [].{
 			|pair|
 				match Bytes.cut_seq(pair, ['=']) {
 					Ok((k, v)) if k == name => Ok(v)
-					_ => Err(None)
+					_ => Err(OtherField)
 				},
 		)
 		match values {
@@ -24,17 +24,17 @@ Form := [].{
 			[raw] =>
 				match decode(raw) {
 					Ok(v) => Found(v)
-					Err(None) => Malformed
+					Err(BadEscape) => Malformed
 				}
 			_ => Malformed
 		}
 	}
 
-	## formDecode, or none for a `%` that is not two hex digits.
-	decode : List(U8) -> Try(List(U8), [None])
+	## formDecode, or `BadEscape` for a `%` that is not two hex digits.
+	decode : List(U8) -> Try(List(U8), [BadEscape])
 	decode = |raw| decode_from(raw, 0, [])
 
-	decode_from : List(U8), U64, List(U8) -> Try(List(U8), [None])
+	decode_from : List(U8), U64, List(U8) -> Try(List(U8), [BadEscape])
 	decode_from = |raw, i, out| match List.get(raw, i) {
 		Err(_) => Ok(out)
 		Ok('+') => decode_from(raw, i + 1, List.append(out, ' '))
@@ -43,19 +43,19 @@ Form := [].{
 				(Ok(h), Ok(l)) =>
 					match (hex(h), hex(l)) {
 						(Ok(hi), Ok(lo)) => decode_from(raw, i + 3, List.append(out, hi * 16 + lo))
-						_ => Err(None)
+						_ => Err(BadEscape)
 					}
-				_ => Err(None)
+				_ => Err(BadEscape)
 			}
 		Ok(c) => decode_from(raw, i + 1, List.append(out, c))
 	}
 
-	hex : U8 -> Try(U8, [None])
+	hex : U8 -> Try(U8, [NotHex])
 	hex = |c|
 		match c {
 			_ if c >= '0' and c <= '9' => Ok(c - '0')
 			_ if c >= 'a' and c <= 'f' => Ok(c - 'a' + 10)
 			_ if c >= 'A' and c <= 'F' => Ok(c - 'A' + 10)
-			_ => Err(None)
+			_ => Err(NotHex)
 		}
 }

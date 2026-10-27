@@ -17,11 +17,11 @@ Topics := [].{
 
 	## highestGeneralTopic: the `general<N>` with the largest N (an i64, as
 	## the Zig reads it), the first of equals; none when there is none.
-	highest_general : List(List(U8)) -> Try(List(U8), [None])
+	highest_general : List(List(U8)) -> Try(List(U8), [NoGeneral])
 	highest_general = |topics| {
 		(best, _) = List.fold(
 			topics,
-			(Err(None), -1),
+			(Err(NoGeneral), -1),
 			|(b, n), s|
 				match Bytes.strip_prefix(s, Str.to_utf8("general")) {
 					Ok(digits) =>

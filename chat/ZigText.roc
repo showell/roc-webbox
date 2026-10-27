@@ -6,28 +6,28 @@ ZigText := [].{
 	## angry-gopher decimal.zig `parseInt` at u64: one or more digits and
 	## nothing else, no sign, no `_`, and it fits. Never `U64.from_str`,
 	## which reads `0x10` and `1e3` too.
-	parse_u64 : List(U8) -> Try(U64, [None])
+	parse_u64 : List(U8) -> Try(U64, [NotANumber, TooBig])
 	parse_u64 = |s|
 		if s == [] {
-			Err(None)
+			Err(NotANumber)
 		} else {
 			List.fold(
 				s,
 				Ok(0),
 				|acc, c|
 					match acc {
-						Err(None) => Err(None)
+						Err(why) => Err(why)
 						Ok(n) =>
 							if c < '0' or c > '9' {
-								Err(None)
+								Err(NotANumber)
 							} else {
 								match U64.times_try(n, 10) {
 									Ok(m) =>
 										match U64.plus_try(m, U8.to_u64(c - '0')) {
 											Ok(v) => Ok(v)
-											Err(_) => Err(None)
+											Err(_) => Err(TooBig)
 										}
-									Err(_) => Err(None)
+									Err(_) => Err(TooBig)
 								}
 							}
 					},

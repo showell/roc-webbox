@@ -49,9 +49,9 @@ import Fanout
 
 handle! : Chat.Request => Chat.Answer
 handle! = |req|
-	match (if req.area == Channel Err(None) else Route.asset(req.sub)) {
+	match (if req.area == Channel Err(NotAnAsset) else Route.asset(req.sub)) {
 		Ok(route) => Chat.zig(route, Uncounted)
-		Err(None) =>
+		Err(NotAnAsset) =>
 			if !Host.member!({}) {
 				area = if req.area == Channel "/channel" else "/chat"
 				Chat.redirect(List.concat(Str.to_utf8("/login/full?next=${area}"), req.sub))
@@ -220,7 +220,7 @@ find! = |key| {
 							}
 						Err(Failed) => Err(Failed)
 					}
-				Err(None) => Err(NotYours)
+				Err(NotAParticipant) => Err(NotYours)
 			}
 		Channel(name) => {
 			members = channel_members!(name)
@@ -725,7 +725,7 @@ msg! = |id|
 	} else {
 		topic = match Paths.cut_last(id, '_') {
 			Ok((before, _)) => before
-			Err(None) => []
+			Err(NoSeparator) => []
 		}
 		me = Host.me!({})
 		at = |base, key| List.join([Str.to_utf8(base), key, ['/'], topic, Str.to_utf8("#msg-"), id])
@@ -734,20 +734,20 @@ msg! = |id|
 			Ok(members) =>
 				match find_dm!(me, members, topic, 0) {
 					Ok(conv) => Chat.found(at("/chat/c/", conv))
-					Err(None) =>
+					Err(NoSuchTopic) =>
 						match channel_rosters!({}) {
 							Err(Failed) => Chat.answered
 							Ok(rosters) =>
 								match find_channel!(Paths.member_channels(rosters, me), topic, 0) {
 									Ok(name) => Chat.found(at("/channel/", name))
-									Err(None) => Chat.not_found
+									Err(NoSuchTopic) => Chat.not_found
 								}
 						}
 				}
 		}
 	}
 
-find_dm! : List(U8), List({ id : List(U8), name : List(U8) }), List(U8), U64 => Try(List(U8), [None])
+find_dm! : List(U8), List({ id : List(U8), name : List(U8) }), List(U8), U64 => Try(List(U8), [NoSuchTopic])
 find_dm! = |me, members, topic, i|
 	match List.get(members, i) {
 		Ok({ id, name: _ }) =>
@@ -757,10 +757,10 @@ find_dm! = |me, members, topic, i|
 				pair = Paths.pair_key(Uid.from_bytes(me), Uid.from_bytes(id))
 				if List.contains(topics!(Dm(pair)), topic) Ok(Paths.pair_key_bytes(pair)) else find_dm!(me, members, topic, i + 1)
 			}
-		Err(_) => Err(None)
+		Err(_) => Err(NoSuchTopic)
 	}
 
-find_channel! : List(List(U8)), List(U8), U64 => Try(List(U8), [None])
+find_channel! : List(List(U8)), List(U8), U64 => Try(List(U8), [NoSuchTopic])
 find_channel! = |names, topic, i|
 	match List.get(names, i) {
 		# Every name here passed channel_name already (rosters! keeps no other).
@@ -769,7 +769,7 @@ find_channel! = |names, topic, i|
 				Ok(valid) if List.contains(topics!(Channel(valid)), topic) => Ok(name)
 				_ => find_channel!(names, topic, i + 1)
 			}
-		Err(_) => Err(None)
+		Err(_) => Err(NoSuchTopic)
 	}
 
 ## POST <base>/new: a topic made with a first "hi", a DM's announced in its

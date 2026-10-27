@@ -13,7 +13,7 @@ Paths := [].{
 	participant : List(U8), Uid -> Bool
 	participant = |key, user|
 		match cut_first(key, '_') {
-			Err(None) => Bool.False
+			Err(NoSeparator) => Bool.False
 			Ok((x, y)) =>
 				canonical_uid(x) and canonical_uid(y) and pair_key_bytes(pair_key(Uid.from_bytes(x), Uid.from_bytes(y))) == key and (user == Uid.from_bytes(x) or user == Uid.from_bytes(y))
 		}
@@ -82,7 +82,7 @@ Paths := [].{
 	atoi_or0 : List(U8) -> U64
 	atoi_or0 = |s| match ZigText.parse_u64(s) {
 		Ok(n) => if n <= 9223372036854775807 n else 0
-		Err(None) => 0
+		Err(NotANumber) | Err(TooBig) => 0
 	}
 
 	## **WHERE A TOPIC IS**: its conversation, then the topic within it. The
@@ -154,7 +154,7 @@ Paths := [].{
 	valid_msg_ref_id : List(U8) -> Bool
 	valid_msg_ref_id = |id|
 		match cut_last(id, '_') {
-			Err(None) => Bool.False
+			Err(NoSeparator) => Bool.False
 			Ok((left, right)) =>
 				left != [] and right != [] and List.all(left, |c| is_alnum(c) or c == '-') and List.all(right, |c| c >= '0' and c <= '9')
 		}
@@ -209,7 +209,7 @@ Paths := [].{
 	## topic "".
 	topics : List(Entry) -> List(List(U8))
 	topics = |entries|
-		Bytes.sort(List.keep_oks(entries, |e| if e.kind == Dir Err(None) else cut_suffix(e.name, Str.to_utf8(".md"))))
+		Bytes.sort(List.keep_oks(entries, |e| if e.kind == Dir Err(NoSuffix) else cut_suffix(e.name, Str.to_utf8(".md"))))
 
 	## **A FILE UNDER THE CHAT ROOT, NAMED HERE**: opaque (`::`), so only
 	## this module makes one, and Files.roc, the one module that reaches the
@@ -360,11 +360,11 @@ Paths := [].{
 		}
 
 	## `name` without `suffix`, when it ends in it.
-	cut_suffix : List(U8), List(U8) -> Try(List(U8), [None])
+	cut_suffix : List(U8), List(U8) -> Try(List(U8), [NoSuffix])
 	cut_suffix = |name, suffix| {
 		n = List.len(name)
 		k = List.len(suffix)
-		if n >= k and List.drop_first(name, n - k) == suffix Ok(List.take_first(name, n - k)) else Err(None)
+		if n >= k and List.drop_first(name, n - k) == suffix Ok(List.take_first(name, n - k)) else Err(NoSuffix)
 	}
 
 	## `std.fs.path.join` on POSIX: the non-empty parts joined by one `/`,
@@ -410,26 +410,24 @@ Paths := [].{
 	is_alnum = |c| is_alpha(c) or (c >= '0' and c <= '9')
 
 	## The bytes before and after the first `sep`.
-	cut_first : List(U8), U8 -> Try((List(U8), List(U8)), [None])
-	cut_first = |s, sep| match index_of(s, sep, 0) {
-		Ok(i) => Ok((List.take_first(s, i), List.drop_first(s, i + 1)))
-		Err(None) => Err(None)
+	cut_first : List(U8), U8 -> Try((List(U8), List(U8)), [NoSeparator])
+	cut_first = |s, sep| {
+		i = index_of(s, sep, 0)?
+		Ok((List.take_first(s, i), List.drop_first(s, i + 1)))
 	}
 
 	## The bytes before and after the last `sep`.
-	cut_last : List(U8), U8 -> Try((List(U8), List(U8)), [None])
+	cut_last : List(U8), U8 -> Try((List(U8), List(U8)), [NoSeparator])
 	cut_last = |s, sep| {
-		(last, _) = List.fold(s, (Err(None), 0), |(found, i), c| (if c == sep Ok(i) else found, i + 1))
-		match last {
-			Ok(i) => Ok((List.take_first(s, i), List.drop_first(s, i + 1)))
-			Err(None) => Err(None)
-		}
+		(last, _) = List.fold(s, (Err(NoSeparator), 0), |(found, i), c| (if c == sep Ok(i) else found, i + 1))
+		i = last?
+		Ok((List.take_first(s, i), List.drop_first(s, i + 1)))
 	}
 
-	index_of : List(U8), U8, U64 -> Try(U64, [None])
+	index_of : List(U8), U8, U64 -> Try(U64, [NoSeparator])
 	index_of = |s, sep, i| match List.get(s, i) {
 		Ok(c) => if c == sep Ok(i) else index_of(s, sep, i + 1)
-		Err(_) => Err(None)
+		Err(_) => Err(NoSeparator)
 	}
 }
 

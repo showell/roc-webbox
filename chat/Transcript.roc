@@ -82,7 +82,7 @@ Transcript := [].{
 							['u', 'i', 'd'] => { ..m, uid: v }
 							_ => m
 						}
-					Err(None) => m
+					Err(NotFound) => m
 				}
 				headers(piece, at + List.len(l) + 1, next)
 			}
@@ -92,7 +92,7 @@ Transcript := [].{
 	## is the bytes it was.
 	unescape_body : List(U8) -> List(U8)
 	unescape_body = |body|
-		if Bytes.find(body, escaped_dashes, 0) == Err(None) body else Bytes.join_lines(List.map(Bytes.split_byte(body, '\n'), unescape_line))
+		if Bytes.find(body, escaped_dashes, 0) == Err(NotFound) body else Bytes.join_lines(List.map(Bytes.split_byte(body, '\n'), unescape_line))
 
 	escaped_dashes : List(U8)
 	escaped_dashes = List.prepend(dashes, '\\')
@@ -106,7 +106,7 @@ Transcript := [].{
 	## line, the body with each line escaped.
 	encode_block : Msg -> List(U8)
 	encode_block = |m| {
-		body = if Bytes.find(m.markdown, dashes, 0) == Err(None) m.markdown else Bytes.join_lines(List.map(Bytes.split_byte(m.markdown, '\n'), escape_line))
+		body = if Bytes.find(m.markdown, dashes, 0) == Err(NotFound) m.markdown else Bytes.join_lines(List.map(Bytes.split_byte(m.markdown, '\n'), escape_line))
 		head = List.join([Str.to_utf8("MSG_"), m.id, Str.to_utf8("\nfrom: "), m.from, Str.to_utf8("\ndate: "), m.at])
 		uid = if m.uid == [] [] else List.concat(Str.to_utf8("\nuid: "), m.uid)
 		List.join([head, uid, Str.to_utf8("\n\n"), body])

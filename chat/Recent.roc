@@ -107,7 +107,7 @@ Recent := [].{
 			Err(_) => out
 			Ok(line) =>
 				match Feeds.fence_open(line) {
-					Err(None) => quotes_from(ls, i + 1, List.append(List.concat(out, line), '\n'))
+					Err(NotAFence) => quotes_from(ls, i + 1, List.append(List.concat(out, line), '\n'))
 					Ok(fo) => {
 						j = Feeds.close_at(ls, fo.char, fo.count, i + 1)
 						kept =
@@ -132,9 +132,9 @@ Recent := [].{
 			Err(_) => out
 			Ok(c) => {
 				opens = i + 4 <= List.len(s) and Feeds.lower(List.sublist(s, { start: i, len: 4 })) == Str.to_utf8("<img") and !word(List.get(s, i + 4) ?? ' ')
-				match (if opens Feeds.find_byte(s, '>', i + 4) else Err(None)) {
+				match (if opens Feeds.find_byte(s, '>', i + 4) else Err(NotFound)) {
 					Ok(gt) => html_from(s, gt + 1, List.concat(out, Str.to_utf8("[image]")))
-					Err(None) => html_from(s, i + 1, List.append(out, c))
+					Err(NotFound) => html_from(s, i + 1, List.append(out, c))
 				}
 			}
 		}
@@ -151,25 +151,25 @@ Recent := [].{
 		match List.get(s, i) {
 			Err(_) => out
 			Ok(c) => {
-				end = if c == '!' and List.get(s, i + 1) == Ok('[') md_image(s, i) else Err(None)
+				end = if c == '!' and List.get(s, i + 1) == Ok('[') md_image(s, i) else Err(NotAnImage)
 				match end {
 					Ok(e) => md_from(s, e, List.concat(out, Str.to_utf8("[image]")))
-					Err(None) => md_from(s, i + 1, List.append(out, c))
+					Err(NotAnImage) => md_from(s, i + 1, List.append(out, c))
 				}
 			}
 		}
 
-	md_image : List(U8), U64 -> Try(U64, [None])
+	md_image : List(U8), U64 -> Try(U64, [NotAnImage])
 	md_image = |s, start|
 		match Feeds.find_byte(s, ']', start + 2) {
-			Err(None) => Err(None)
+			Err(NotFound) => Err(NotAnImage)
 			Ok(alt_end) =>
 				if List.get(s, alt_end + 1) != Ok('(') {
-					Err(None)
+					Err(NotAnImage)
 				} else {
 					match Feeds.find_byte(s, ')', alt_end + 2) {
 						Ok(url_end) => Ok(url_end + 1)
-						Err(None) => Err(None)
+						Err(NotFound) => Err(NotAnImage)
 					}
 				}
 		}

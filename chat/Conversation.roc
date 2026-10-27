@@ -12,9 +12,9 @@ Conversation := [].{
 
 	## dmOther: the other of DM pair `key` when `me` is one of the pair, by
 	## chatKeyParticipant's rule (Paths.participant: a canonical pair of
-	## uids); none otherwise.
-	dm_other : List(U8), Uid -> Try(Uid, [None])
-	dm_other = |key, me| if Paths.participant(key, me) Ok(partner(key, me)) else Err(None)
+	## uids); `NotAParticipant` otherwise.
+	dm_other : List(U8), Uid -> Try(Uid, [NotAParticipant])
+	dm_other = |key, me| if Paths.participant(key, me) Ok(partner(key, me)) else Err(NotAParticipant)
 
 	## partnerName's half: the side of `key`'s first `_` that is not `me`
 	## (the second when the first is `me`, so `1_1`'s partner is `1`); the
@@ -23,7 +23,7 @@ Conversation := [].{
 	partner = |key, me|
 		match Paths.cut_first(key, '_') {
 			Ok((a, b)) => if Uid.from_bytes(a) == me Uid.from_bytes(b) else Uid.from_bytes(a)
-			Err(None) => Uid.from_bytes(key)
+			Err(NoSeparator) => Uid.from_bytes(key)
 		}
 
 	## ConvMeta.dm's members: the pair's two uids, or one in the DM with
@@ -32,7 +32,7 @@ Conversation := [].{
 	dm_members = |key|
 		match Paths.cut_first(key, '_') {
 			Ok((a, b)) => if a == b [a] else [a, b]
-			Err(None) => [key]
+			Err(NoSeparator) => [key]
 		}
 
 	## A DM's URL base.

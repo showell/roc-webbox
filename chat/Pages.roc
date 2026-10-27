@@ -94,7 +94,7 @@ Pages := [].{
 	links_around = |src, viewer|
 		match Bytes.cut_seq(Html.bytes(links(src, viewer, Held)), [0]) {
 			Ok(parts) => parts
-			Err(None) => crash "Pages.links_around: the page lost its mark"
+			Err(NotFound) => crash "Pages.links_around: the page lost its mark"
 		}
 
 	links_css : Html

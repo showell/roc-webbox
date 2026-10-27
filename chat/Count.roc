@@ -20,36 +20,36 @@ Count := [].{
 
 	## numberIn: the N of a `<topic>_<N>` id, or none when the id is not this
 	## topic's.
-	number_in : List(U8), List(U8) -> Try(U64, [None])
+	number_in : List(U8), List(U8) -> Try(U64, [NotThisTopic, NotANumber, TooBig])
 	number_in = |id, topic|
 		match Bytes.strip_prefix(id, topic) {
 			Ok(['_', .. as rest]) => ZigText.parse_u64(rest)
-			_ => Err(None)
+			_ => Err(NotThisTopic)
 		}
 
 	## indexOf: the number less one; message 0 is no message.
-	index_of : List(U8), List(U8) -> Try(U64, [None])
+	index_of : List(U8), List(U8) -> Try(U64, [NoMessage])
 	index_of = |id, topic| match number_in(id, topic) {
 		Ok(n) if n > 0 => Ok(n - 1)
-		_ => Err(None)
+		_ => Err(NoMessage)
 	}
 
 	## parseCount: whole (ending in a newline) or not at all; a first line
 	## of exactly two numbers; a second line that does not parse is no
 	## last message, the count still good.
-	parse : List(U8) -> Try(Counted, [None])
+	parse : List(U8) -> Try(Counted, [Malformed])
 	parse = |raw|
 		if List.last(raw) != Ok('\n') {
-			Err(None)
+			Err(Malformed)
 		} else {
 			lines = Bytes.split_byte(raw, '\n')
 			match tokens(List.first(lines) ?? []) {
 				[c, s] =>
 					match (ZigText.parse_u64(c), ZigText.parse_u64(s)) {
 						(Ok(count), Ok(size)) => Ok({ count, size, last: parse_last(List.get(lines, 1) ?? []) })
-						_ => Err(None)
+						_ => Err(Malformed)
 					}
-				_ => Err(None)
+				_ => Err(Malformed)
 			}
 		}
 
@@ -58,7 +58,7 @@ Count := [].{
 		[o, uid] =>
 			match ZigText.parse_u64(o) {
 				Ok(offset) => Known({ offset, uid: if uid == no_uid [] else uid })
-				Err(None) => Unknown
+				Err(NotANumber) | Err(TooBig) => Unknown
 			}
 		_ => Unknown
 	}
@@ -82,18 +82,18 @@ Count := [].{
 
 	## believedCount: the sidecar's count when the transcript is still the
 	## size it was taken at.
-	believed : Try(Counted, [None]), U64 -> Try(U64, [None])
+	believed : Try(Counted, [Malformed]), U64 -> Try(U64, [NotBelieved])
 	believed = |counted, size| match counted {
 		Ok(c) if c.size == size => Ok(c.count)
-		_ => Err(None)
+		_ => Err(NotBelieved)
 	}
 
 	## recordedAuthor: the record's author, nobody included, when it counted
 	## exactly this transcript, in blocks and in bytes.
-	recorded_author : Try(Counted, [None]), U64, U64 -> Try(List(U8), [None])
+	recorded_author : Try(Counted, [Malformed]), U64, U64 -> Try(List(U8), [NotRecorded])
 	recorded_author = |counted, blocks, size| match counted {
 		Ok({ count, size: s, last: Known(l) }) if count == blocks and s == size => Ok(l.uid)
-		_ => Err(None)
+		_ => Err(NotRecorded)
 	}
 
 	## Whether the window read filled its buffer (so its last block may be cut).
@@ -106,18 +106,18 @@ Count := [].{
 	## believed when the window was not full and the block is a message of
 	## `topic` numbered at least `count`; the record `Current` when exactly
 	## that, `Stale` when the block is past it.
-	window_last : U64, List(U8), Fill, List(U8) -> Try({ msg : Transcript.Msg, number : U64, record : Freshness }, [None])
+	window_last : U64, List(U8), Fill, List(U8) -> Try({ msg : Transcript.Msg, number : U64, record : Freshness }, [NotBelieved])
 	window_last = |count, window, fill, topic|
 		if fill == Full {
-			Err(None)
+			Err(NotBelieved)
 		} else {
 			match List.last(Transcript.decode_file(window).messages) {
 				Ok(msg) =>
 					match number_in(msg.id, topic) {
 						Ok(number) if number >= count => Ok({ msg, number, record: if number == count Current else Stale })
-						_ => Err(None)
+						_ => Err(NotBelieved)
 					}
-				Err(_) => Err(None)
+				Err(_) => Err(NotBelieved)
 			}
 		}
 }

@@ -23,52 +23,50 @@ Time := [].{
 	## What `rfc3339` wrote, read back, or none. Also a fraction of a second
 	## (dropped) and a `+hh:mm` or `-hh:mm` offset in place of `Z`, so a
 	## transcript another writer made still carries its own date.
-	unix_from_rfc3339 : List(U8) -> Try(I64, [None])
+	unix_from_rfc3339 : List(U8) -> Try(I64, [NotADate])
 	unix_from_rfc3339 = |t| {
 		at = |i| List.get(t, i) ?? 0
 		if List.len(t) < 20 or at(4) != '-' or at(7) != '-' or (at(10) != 'T' and at(10) != 't') or at(13) != ':' or at(16) != ':' {
-			Err(None)
+			Err(NotADate)
 		} else {
 			match (digits(t, 0, 4), digits(t, 5, 2), digits(t, 8, 2), digits(t, 11, 2), digits(t, 14, 2), digits(t, 17, 2)) {
 				(Ok(year), Ok(month), Ok(day), Ok(hour), Ok(minute), Ok(second)) =>
 					if month < 1 or month > 12 or day < 1 or day > 31 or hour > 23 or minute > 59 or second > 60 {
-						Err(None)
+						Err(NotADate)
 					} else {
-						match offset_of(List.drop_first(t, 19)) {
-							Ok(offset) => Ok(days_from_civil(year, month, day) * 86400 + hour * 3600 + minute * 60 + second - offset)
-							Err(None) => Err(None)
-						}
+						offset = offset_of(List.drop_first(t, 19))?
+						Ok(days_from_civil(year, month, day) * 86400 + hour * 3600 + minute * 60 + second - offset)
 					}
-				_ => Err(None)
+				_ => Err(NotADate)
 			}
 		}
 	}
 
-	offset_of : List(U8) -> Try(I64, [None])
+	offset_of : List(U8) -> Try(I64, [NotADate])
 	offset_of = |rest0| {
 		rest = match rest0 {
 			['.', .. as frac] => {
 				n = count_digits(frac, 0)
-				if n == 0 Err(None) else Ok(List.drop_first(frac, n))
+				if n == 0 Err(NotADate) else Ok(List.drop_first(frac, n))
 			}
 			_ => Ok(rest0)
 		}
 		match rest {
-			Err(None) => Err(None)
+			Err(NotADate) => Err(NotADate)
 			Ok(['Z']) | Ok(['z']) => Ok(0)
 			Ok([sign, _, _, ':', _, _]) if sign == '+' or sign == '-' => {
 				r = rest ?? []
 				match (digits(r, 1, 2), digits(r, 4, 2)) {
 					(Ok(oh), Ok(om)) =>
 						if oh > 23 or om > 59 {
-							Err(None)
+							Err(NotADate)
 						} else {
 							Ok((oh * 3600 + om * 60) * (if sign == '+' 1 else -1))
 						}
-					_ => Err(None)
+					_ => Err(NotADate)
 				}
 			}
-			_ => Err(None)
+			_ => Err(NotADate)
 		}
 	}
 
@@ -79,11 +77,11 @@ Time := [].{
 	}
 
 	## `len` decimal digits at `start`, as a number, or none.
-	digits : List(U8), U64, U64 -> Try(I64, [None])
+	digits : List(U8), U64, U64 -> Try(I64, [NotDigits])
 	digits = |t, start, len| {
 		piece = List.sublist(t, { start, len })
 		if List.len(piece) != len or !List.all(piece, |c| c >= '0' and c <= '9') {
-			Err(None)
+			Err(NotDigits)
 		} else {
 			Ok(List.fold(piece, 0, |n, c| n * 10 + U8.to_i64(c - '0')))
 		}
