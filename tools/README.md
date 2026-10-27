@@ -1,6 +1,13 @@
 # tools
 
 - `get_roc.sh` installs the Roc compiler roc-version pins.
+- **`chat_quick_gate.shale`** — the gate for a refactor of the Roc chat
+  (chat/*.roc, its platform, its seam), with angry-gopher beside this
+  checkout: zig fmt, `roc check` of the two apps, this repo's
+  `zig build test` and angry-gopher's (the twins and the router's tests).
+  `shale tools/chat_quick_gate.shale`, no arguments; one PASS or FAIL line.
+  Its header says what it leaves to the full gates, and when a step needs
+  them instead.
 
 ## Reading Roc with Roc's own parser
 

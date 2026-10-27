@@ -1,0 +1,120 @@
+-- **THE ROC CHAT'S QUICK GATE**: what a behaviour-preserving refactor of
+-- the chat's Roc (chat/*.roc), its platform (chat/platform/) or its Zig seam
+-- (src/chat_*.zig, src/twin_abi.zig) can break, and nothing else. Run from
+-- roc-webbox, with angry-gopher checked out beside it (../angry-gopher, the
+-- worktree whose zig-server builds against this one):
+--   shale tools/chat_quick_gate.shale
+-- No arguments. Cheapest first; it stops at the first part that fails, with
+-- that part's last lines, and ends with one PASS or FAIL line.
+--
+-- What it runs:
+--   1. zig fmt --check: roc-webbox's src/ and build.zig, angry-gopher's
+--      zig-server/src/ and build.zig (whole trees: a second or two).
+--   2. roc check chat/main.roc and chat/twin.roc: the type errors, said as
+--      such, before any build.
+--   3. roc-webbox's `zig build test`: the archives built (chat, twin, the
+--      planted crash), the seam's probes (src/chat_hosted.zig), a Roc crash
+--      through the seam, the twin entry (src/twin_abi.zig).
+--   4. angry-gopher's `zig build test`: the twins byte for byte
+--      (chat_twin_test.zig, its own binary on the twin archive) and the
+--      router's tests, which link the chat's archive (chat_route_twin.zig,
+--      chat_actions_twin_test.zig, router_*_test.zig). Its other ~38 test
+--      roots import no Roc and nothing of roc-webbox's: Zig's cache answers
+--      them unchanged ("cached") in milliseconds, so the step costs what the
+--      Roc chat's two binaries cost and no more.
+--
+-- What it deliberately leaves out, the full gates' (angry-gopher's
+-- ops/check_zig and ops/check, before any release):
+--   - the lints (portable, store-absence, head-access, webbox library,
+--     test roots, Caddy's limits, the doc check): they read angry-gopher's
+--     Zig, which a chat refactor does not touch;
+--   - `zig build` of the server, and the Elm, TS and wasm bundles it embeds:
+--     the server reaches the Roc chat only through router.zig, which the
+--     router's tests compile whole;
+--   - zig-webbox's and Shale's own tests: neither imports the chat;
+--   - the metal build (gopher.elf, `roc_chat_metal`, the chat's Roc for
+--     x64v1elf): the same Roc source for another target, a codegen question
+--     a refactor does not raise; the release's gates build it;
+--   - `zig build codec-bench`, which links the twin archive: run by hand;
+--   - roc_hunt's plants (tools/roc_hunt/hunt.shale self_test=1): they test
+--     the hunts against their own plants, never chat/;
+--   - roc fmt --check: the tree is not as `roc fmt` formats it (most of
+--     chat/ would be rewritten), so as a gate it would fail every run.
+--
+-- **RUN THE FULL GATES INSTEAD** when a step changes anything beyond the
+-- chat's Roc and its seam: angry-gopher's Zig other than its chat twins'
+-- and tests' (chat.zig, chat_router.zig, router.zig: the lints read those),
+-- either build.zig or build.zig.zon, roc-version (a new Roc), assets, or
+-- anything zig-webbox, Shale or the metal kernel build.
+
+-- A step's output kept to its last lines, enough for a compile error's
+-- context or a failed twin's diff.
+const tail_lines_kept = 40
+-- A cold build of the router's tests takes minutes; a warm one seconds.
+const part_ms = 1800000
+const results = {}
+const started = now()
+
+-- `path`'s folder: what comes before its last `/`.
+function folder_of(path)
+  local i = #path
+  while i > 0 and sub(path, i, i) ~= "/" do i = i - 1 end
+  if i <= 1 then fail("quick gate: " .. path .. " has no folder above it") end
+  return sub(path, 1, i - 1)
+end
+
+-- The gate's results so far, a line a part.
+function report()
+  for r in results do print(r) end
+end
+
+-- One part: `argv` run (from the root unless `opts.cwd`), timed; its
+-- result recorded, or the gate stopped with its output's tail.
+function part(name, argv, opts)
+  local t0 = now()
+  local o = {tail = tail_lines_kept, timeout_ms = part_ms}
+  if opts ~= nil and opts.cwd ~= nil then o.cwd = opts.cwd end
+  local r = run(argv, o)
+  local secs = now() - t0
+  if r.ended == "exit" and r.code == 0 then
+    push(results, "  ok    " .. name .. " (" .. tostring(secs) .. " s)")
+    return r
+  end
+  local how = "was ended by a signal"
+  if r.ended == "exit" then how = "exited " .. tostring(r.code) end
+  if r.ended == "timeout" then how = "timed out after " .. tostring(part_ms / 1000) .. " s" end
+  push(results, "  FAIL  " .. name .. " (" .. tostring(secs) .. " s): `" .. join(argv, " ") .. "` " .. how)
+  print("── " .. name .. ", its last " .. tostring(tail_lines_kept) .. " lines:")
+  print(r.out)
+  print("── the quick gate:")
+  report()
+  fail("FAIL: the Roc chat's quick gate, at " .. name .. ", " .. tostring(now() - started) .. " s")
+end
+
+-- Where both worktrees are, and what each holds.
+if not exists("chat/main.roc") or not exists("build.zig") then
+  fail("quick gate: run it from roc-webbox's root (no chat/main.roc or build.zig here)")
+end
+const here = real(".")
+const gopher = folder_of(here) .. "/angry-gopher"
+const gopher_build = gopher .. "/zig-server/build.zig"
+local found = run({"git", "-C", gopher, "rev-parse", "--abbrev-ref", "HEAD"}, {tail = 5, timeout_ms = 10000})
+if found.ended ~= "exit" or found.code ~= 0 then
+  fail("quick gate: no angry-gopher checkout beside roc-webbox, at " .. gopher .. ": " .. trim(found.out))
+end
+local branch = run({"git", "rev-parse", "--abbrev-ref", "HEAD"}, {tail = 5, timeout_ms = 10000})
+print("roc-webbox " .. trim(branch.out) .. " " .. git_head("") .. " (" .. here .. ")")
+print("angry-gopher " .. trim(found.out) .. " (" .. gopher .. ")")
+
+part("zig fmt --check, roc-webbox", {"zig", "fmt", "--check", "src", "build.zig"})
+part("zig fmt --check, angry-gopher", {"zig", "fmt", "--check", gopher .. "/zig-server/src", gopher_build})
+part("roc check chat/main.roc", {"roc", "check", "chat/main.roc"})
+part("roc check chat/twin.roc", {"roc", "check", "chat/twin.roc"})
+part("roc-webbox zig build test", {"zig", "build", "test", "--summary", "failures"})
+-- Its own build root and cache, as `cd zig-server && zig build test` has
+-- them, so the two share what each has built.
+part("angry-gopher zig build test", {"zig", "build", "test", "--summary", "failures", "--build-file", gopher_build, "--cache-dir", gopher .. "/zig-server/.zig-cache"})
+
+print("── the quick gate:")
+report()
+print("PASS: the Roc chat's quick gate, " .. tostring(now() - started) .. " s")
