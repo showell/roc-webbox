@@ -183,9 +183,9 @@ call = |req| {
 				_ => []
 			}
 		# The topics are a listing's, text (Files.list!'s door skips the rest).
-		42 => [ChatState.resume_topic(List.keep_oks(List.drop_first(req.args, 2), Str.from_utf8), arg(0), int(arg(1))).to_utf8()]
+		42 => [ChatState.resume_topic(List.keep_oks(List.drop_first(req.args, 2), Str.from_utf8), valid_text(arg(0)), int(arg(1))).to_utf8()]
 		43 =>
-			match ChatState.pinned(arg(0), arg(1), if arg(2) == [49] Pinned else Unpinned) {
+			match ChatState.pinned(valid_text(arg(0)), valid_text(arg(1)), if arg(2) == [49] Pinned else Unpinned) {
 				Write(bytes) => [bytes]
 				Remove => []
 			}
@@ -225,8 +225,8 @@ call = |req| {
 			}
 		50 => [Conversation.dm_base(arg(0)), Conversation.channel_base(arg(0))]
 		51 => List.map(Paths.member_channels(flat_rosters(req.args, 1, []), arg(0)), Str.to_utf8)
-		52 => [ChatState.bookmark(file(arg(0), arg(1)))]
-		53 => [bool(ChatState.changed(file(arg(0), arg(1)), arg(2))), ChatState.bookmark_line(arg(2))]
+		52 => [ChatState.bookmark(file(arg(0), arg(1))).to_utf8()]
+		53 => [bool(ChatState.changed(file(arg(0), arg(1)), valid_text(arg(2)))), ChatState.bookmark_line(valid_text(arg(2)))]
 		# A uid that is no Uid has no paths: the door refuses it.
 		54 =>
 			match (Uid.from_utf8(arg(0)), conv_of(arg(1))) {
@@ -235,7 +235,7 @@ call = |req| {
 			}
 		55 => List.map(Paths.topics(entries(req.args, 0, [])), Str.to_utf8)
 		56 =>
-			match Paths.channel_members(arg(0)) {
+			match Paths.channel_members(valid_text(arg(0))) {
 				Ok(members) => List.prepend(members, [79])
 				Err(Malformed) => [[77]]
 			}
@@ -373,6 +373,14 @@ text = |bytes| Str.from_utf8(bytes).map_err(|_| Invalid)
 texts : List(List(U8)) -> Try(List(Str), [Invalid])
 texts = |all| List.map_try(all, text)
 
+## Text the test hands as valid (a file's, past Files.read!'s door; a form's,
+## past its 400); bytes that are not UTF-8 stop the twin.
+valid_text : List(U8) -> Str
+valid_text = |bytes| match Str.from_utf8(bytes) {
+	Ok(t) => t
+	Err(_) => crash "twin: text that is not UTF-8"
+}
+
 ## A uid the test hands as valid; one that is not stops the twin.
 valid_uid : List(U8) -> Uid
 valid_uid = |bytes| match Uid.from_utf8(bytes) {
@@ -407,11 +415,11 @@ pair_of = |bytes| Paths.pair_key_from_str(text(bytes)?)
 channel_of : List(U8) -> Try(Paths.ChannelName, [Invalid])
 channel_of = |bytes| Paths.channel_name_from_str(text(bytes)?)
 
-## A read as the test says it went: `F` found (`bytes` the file), `M`
-## missing, anything else failed.
-file : List(U8), List(U8) -> Try(List(U8), [Missing, Failed])
+## A read as the test says it went: `F` found (`bytes` the file, text as
+## Files.read!'s door hands it), `M` missing, anything else failed.
+file : List(U8), List(U8) -> Try(Str, [Missing, Failed])
 file = |how, bytes| match how {
-	[70] => Ok(bytes)
+	[70] => Ok(valid_text(bytes))
 	[77] => Err(Missing)
 	_ => Err(Failed)
 }
@@ -476,7 +484,7 @@ pairs = |args, i, out|
 	}
 
 ## Reads as the test says they went (`file`), `how, bytes` pairs from `i`.
-reads : List(List(U8)), U64, List(Try(List(U8), [Missing, Failed])) -> List(Try(List(U8), [Missing, Failed]))
+reads : List(List(U8)), U64, List(Try(Str, [Missing, Failed])) -> List(Try(Str, [Missing, Failed]))
 reads = |args, i, out|
 	match (List.get(args, i), List.get(args, i + 1)) {
 		(Ok(how), Ok(bytes)) => reads(args, i + 2, List.append(out, file(how, bytes)))

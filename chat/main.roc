@@ -337,9 +337,9 @@ unreadable! = |why|
 ## failed it already.
 channel_members! : Paths.ChannelName => List(List(U8))
 channel_members! = |name|
-	match text_bytes!(Paths.channel_path(name)) {
-		Ok(bytes) =>
-			match Paths.channel_members(bytes) {
+	match Files.read!(Paths.channel_path(name)) {
+		Ok(text) =>
+			match Paths.channel_members(text) {
 				Ok(members) => members
 				Err(Malformed) => {
 					Host.fail!(MalformedChannel, Paths.channel_name_bytes(name))
@@ -377,7 +377,7 @@ rosters! = |names, i, out|
 		Ok(name) =>
 			match Paths.channel_name_from_str(name) {
 				Ok(valid) =>
-					match Paths.roster(name, text_bytes!(Paths.channel_path(valid))) {
+					match Paths.roster(name, Files.read!(Paths.channel_path(valid))) {
 						Listed(r) => rosters!(names, i + 1, List.append(out, r))
 						Malformed => {
 							Host.malformed_channel!(name.to_utf8())
@@ -436,18 +436,18 @@ title! = |key, who|
 pin! : Paths.ConvKey, Str, ChatState.Pin => Try({}, [Failed])
 pin! = |key, topic, pin| {
 	path = Paths.pinned_path(me!({})?, key)
-	match text_bytes!(path) {
+	match Files.read!(path) {
 		Ok(stored) => repin!(path, stored, topic, pin)
-		Err(Missing) => repin!(path, [], topic, pin)
+		Err(Missing) => repin!(path, "", topic, pin)
 		Err(Failed) => Err(Failed)
 	}
 }
 
 ## The pinned file at `path`, read as `stored`, with `topic` pinned or
 ## unpinned: written back, or, emptied, removed.
-repin! : Paths.ChatPath, List(U8), Str, ChatState.Pin => Try({}, [Failed])
+repin! : Paths.ChatPath, Str, Str, ChatState.Pin => Try({}, [Failed])
 repin! = |path, stored, topic, pin|
-	match ChatState.pinned(stored, topic.to_utf8(), pin) {
+	match ChatState.pinned(stored, topic, pin) {
 		Write(bytes) => Files.write!(path, bytes)
 		Remove => Files.remove!(path)
 	}
@@ -462,23 +462,17 @@ bookmark! = |key, topic| {
 	if topic.is_empty() {
 		Ok({})
 	} else {
-		write_if_changed!(Paths.last_session_path(me, key), topic.to_utf8())?
-		write_if_changed!(Paths.last_conv_path(me), Paths.conv_key_bytes(key))
+		write_if_changed!(Paths.last_session_path(me, key), topic)?
+		write_if_changed!(Paths.last_conv_path(me), Paths.conv_key_to_str(key))
 	}
 }
 
 ## **WRITTEN ONLY WHEN IT CHANGES** (zig-metal-unikernel 153(1)): on every
 ## send and view the value is usually the one already there, and a write is
 ## disk requests each time.
-write_if_changed! : Paths.ChatPath, List(U8) => Try({}, [Failed])
+write_if_changed! : Paths.ChatPath, Str => Try({}, [Failed])
 write_if_changed! = |path, value|
-	if ChatState.changed(text_bytes!(path), value) Files.write!(path, ChatState.bookmark_line(value)) else Ok({})
-
-## TEMPORARY DOOR: moves out in a later run. A file's text (Files.read!,
-## which refuses bytes that are not UTF-8) as bytes, for the parsers not yet
-## on Str: ChatState's, Feeds's and Paths.roster.
-text_bytes! : Paths.ChatPath => Try(List(U8), [Missing, Failed])
-text_bytes! = |path| Files.read!(path).map_ok(Str.to_utf8)
+	if ChatState.changed(Files.read!(path), value) Files.write!(path, ChatState.bookmark_line(value)) else Ok({})
 
 ## POST .../react: the form, then the reaction stored and sent live.
 react! : Chat.Conv, Who, Paths.TopicAt => Chat.Answer
@@ -714,19 +708,14 @@ resume! = |{}|
 	match me!({}) {
 		Err(Failed) => Chat.answered
 		Ok(me) => {
-			conv = ChatState.bookmark(text_bytes!(Paths.last_conv_path(me)))
-			# The bookmark's bytes are text_bytes!'s, so they decode (its door).
-			pair_of = match Str.from_utf8(conv) {
-				Ok(text) => Paths.pair_key_from_str(text)
-				Err(_) => Err(Invalid)
-			}
-			match pair_of {
+			conv = ChatState.bookmark(Files.read!(Paths.last_conv_path(me)))
+			match Paths.pair_key_from_str(conv) {
 				Ok(pair) if Paths.is_participant(pair, me) => {
 					topics = topics!(Dm(pair))
 					if Paths.first_of(topics).is_empty() {
-						Chat.redirect(List.concat(Str.to_utf8("/chat/c/"), conv))
+						Chat.redirect("/chat/c/${conv}".to_utf8())
 					} else {
-						Chat.redirect(List.join([Str.to_utf8("/chat/c/"), conv, ['/'], resume_at!(me, pair, topics).to_utf8()]))
+						Chat.redirect("/chat/c/${conv}/${resume_at!(me, pair, topics)}".to_utf8())
 					}
 				}
 				_ =>
@@ -742,7 +731,7 @@ resume! = |{}|
 ## choice ChatState's, the last-viewed topic and the clock the host's.
 resume_at! : Uid, Paths.PairKey, List(Str) => Str
 resume_at! = |me, pair, topics| {
-	last = ChatState.bookmark(text_bytes!(Paths.last_session_path(me, Dm(pair))))
+	last = ChatState.bookmark(Files.read!(Paths.last_session_path(me, Dm(pair))))
 	ChatState.resume_topic(topics, last, Host.now!({}))
 }
 

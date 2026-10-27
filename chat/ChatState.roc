@@ -10,7 +10,6 @@
 ##   users/<uid>/last-conv                  the DM last in, a line
 ##   users/<uid>/last-sessions/<conv-key>   the topic last viewed there, a line
 ##   users/<uid>/pinned-sessions/<conv-key> pinned topics, a line each
-import Bytes
 import Paths
 import Time
 import ZigText
@@ -20,12 +19,10 @@ ChatState := [].{
 	## resumeTopic: the topic the member last viewed (`last`, "" for none)
 	## while the conversation still has it; else its first topic
 	## (Paths.first_of); else the date of `now_secs`, so a conversation's
-	## first post makes today's topic. **ALWAYS TEXT**: the bookmark's
-	## bytes are taken only when a topic (text) spells them, and then the
-	## topic is the answer.
-	resume_topic : List(Str), List(U8), I64 -> Str
+	## first post makes today's topic.
+	resume_topic : List(Str), Str, I64 -> Str
 	resume_topic = |topics, last, now_secs|
-		match List.keep_if(topics, |t| last != [] and t.to_utf8() == last) {
+		match List.keep_if(topics, |t| !last.is_empty() and t == last) {
 			[t, ..] => t
 			[] => {
 				first = Paths.first_of(topics)
@@ -41,7 +38,7 @@ ChatState := [].{
 	## no pin is left (the file goes). Only `topic` is de-duplicated: a pin it
 	## adds is not added twice, an unpin drops every copy, and a line the
 	## file already repeats stays repeated, as the Zig keeps it.
-	pinned : List(U8), List(U8), Pin -> [Write(List(U8)), Remove]
+	pinned : Str, Str, Pin -> [Write(List(U8)), Remove]
 	pinned = |stored, topic, pin| {
 		cur = parse(stored)
 		kept = if pin == Pinned cur else List.drop_if(cur, |s| s == topic)
@@ -49,32 +46,30 @@ ChatState := [].{
 		if next == [] {
 			Remove
 		} else {
-			Write(List.join(List.map(Bytes.sort(next), |s| List.append(s, '\n'))))
+			Write(Str.join_with(List.map(Paths.sort_by_bytes(next), |s| "${s}\n"), "").to_utf8())
 		}
 	}
 
 	## pinnedTopics: the member's pins in a conversation, as its file
 	## `stored` lists them, sorted by bytes. A pin no longer a topic stays:
 	## the sidebar shows topics, pinned or not, so it drops out there.
-	## The lines of text cut at ASCII bytes are text, so `from_utf8` drops
-	## none.
 	pins : Str -> List(Str)
-	pins = |stored| Paths.sort_by_bytes(List.keep_oks(parse(stored.to_utf8()), Str.from_utf8))
+	pins = |stored| Paths.sort_by_bytes(parse(stored))
 
 	## parsePinned: the lines, each trimmed of spaces, tabs and CRs (ZigText's
 	## trim also takes newlines, which a line split on them has none of),
 	## blank ones dropped.
-	parse : List(U8) -> List(List(U8))
-	parse = |b| List.drop_if(List.map(Bytes.split_byte(b, '\n'), ZigText.trim), |s| s == [])
+	parse : Str -> List(Str)
+	parse = |s| List.drop_if(List.map(s.split_on("\n"), ZigText.trim_str), |line| line.is_empty())
 
 	## lastUserConv's and lastViewedTopic's reading of a bookmark: the file
 	## trimmed of spaces, tabs, CRs and newlines; "" when there is none (or
 	## it failed, the request failing with it).
-	bookmark : Try(List(U8), [Missing, Failed]) -> List(U8)
+	bookmark : Try(Str, [Missing, Failed]) -> Str
 	bookmark = |file|
 		match file {
-			Ok(bytes) => ZigText.trim(bytes)
-			Err(Missing) | Err(Failed) => []
+			Ok(text) => ZigText.trim_str(text)
+			Err(Missing) | Err(Failed) => ""
 		}
 
 	## writeIfChanged's decision: whether `value` is written over the
@@ -82,10 +77,10 @@ ChatState := [].{
 	## as `value` once trimmed. **A BOOKMARK THAT CANNOT BE READ IS WRITTEN
 	## AGAIN; THE WRITE SAYS WHETHER IT CAN BE**: a failed read, and one past
 	## the bound (which the Zig's bounded read refused), is changed.
-	changed : Try(List(U8), [Missing, Failed]), List(U8) -> Bool
+	changed : Try(Str, [Missing, Failed]), Str -> Bool
 	changed = |file, value|
 		match file {
-			Ok(bytes) => List.len(bytes) > bookmark_most or ZigText.trim(bytes) != value
+			Ok(text) => text.count_utf8_bytes() > bookmark_most or ZigText.trim_str(text) != value
 			Err(Missing) | Err(Failed) => Bool.True
 		}
 
@@ -95,8 +90,8 @@ ChatState := [].{
 	bookmark_most = 255
 
 	## A bookmark as written: the value and a newline.
-	bookmark_line : List(U8) -> List(U8)
-	bookmark_line = |value| List.append(value, '\n')
+	bookmark_line : Str -> List(U8)
+	bookmark_line = |value| "${value}\n".to_utf8()
 }
 
 # pins: each line trimmed, blank ones dropped, sorted by bytes; text past

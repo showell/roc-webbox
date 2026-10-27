@@ -311,10 +311,10 @@ Paths := [].{
 	## under (`../../x` was one), a comment after a uid (`3 # Claude`)
 	## dropped that member, and a duplicate notified twice. Never a guess at
 	## what a line meant: whoever wrote the file fixes it.
-	channel_members : List(U8) -> Try(List(List(U8)), [Malformed])
+	channel_members : Str -> Try(List(List(U8)), [Malformed])
 	channel_members = |file|
 		List.fold(
-			Bytes.split_byte(file, '\n'),
+			Bytes.split_byte(file.to_utf8(), '\n'),
 			Ok([]),
 			|acc, raw|
 				match acc {
@@ -359,7 +359,7 @@ Paths := [].{
 	## counted by the host (the operator's count), so one bad file is not
 	## every member's chat down; `Gone` since the listing, skipped; or
 	## `Failed`, and nothing past it (the request has failed).
-	roster : Str, Try(List(U8), [Missing, Failed]) -> [Listed(Roster), Malformed, Gone, Failed]
+	roster : Str, Try(Str, [Missing, Failed]) -> [Listed(Roster), Malformed, Gone, Failed]
 	roster = |name, file|
 		match file {
 			Ok(stored) =>
@@ -374,10 +374,10 @@ Paths := [].{
 	## Every roster, from the channels `channel_names` chose and their member
 	## files as read, in that order, by `roster`: the rosters, and the
 	## malformed channels' names, up to a read that failed.
-	rosters : List(Str), List(Try(List(U8), [Missing, Failed])) -> { rosters : List(Roster), malformed : List(Str) }
+	rosters : List(Str), List(Try(Str, [Missing, Failed])) -> { rosters : List(Roster), malformed : List(Str) }
 	rosters = |names, files| rosters_from(names, files, 0, { rosters: [], malformed: [] })
 
-	rosters_from : List(Str), List(Try(List(U8), [Missing, Failed])), U64, { rosters : List(Roster), malformed : List(Str) } -> { rosters : List(Roster), malformed : List(Str) }
+	rosters_from : List(Str), List(Try(Str, [Missing, Failed])), U64, { rosters : List(Roster), malformed : List(Str) } -> { rosters : List(Roster), malformed : List(Str) }
 	rosters_from = |names, files, i, got|
 		match (List.get(names, i), List.get(files, i)) {
 			(Ok(name), Ok(file)) =>
