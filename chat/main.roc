@@ -1038,7 +1038,6 @@ appended! = |conv, who, { at: topic_at, name, markdown: md, cid }|
 						# with no echo on the sender's stream, whose client then
 						# sent the message again: a duplicate.
 						key = Fanout.topic_key(topic_at)
-						frame = Frame.message({ index, from: name, from_uid: uid, at: message.at, html: rendered.html, markdown: md, id, cid })
 						# **THE FAN-OUT IS MADE BEFORE THE STORE TOO**: every
 						# member's events and feed entries, so what runs after
 						# the store only sends and appends. A DM's accounts are
@@ -1047,6 +1046,7 @@ appended! = |conv, who, { at: topic_at, name, markdown: md, cid }|
 						named = if Paths.conv_kind(topic_at.key) == Dm accounts!(who) else Ok([])
 						match (named, me!({}), members!(conv.members)) {
 							(Ok(all), Ok(me), Ok(members)) => {
+								frame = Frame.message({ index, from: name, from_uid: me, at: message.at, html: rendered.html, markdown: md, id, cid })
 								steps = Fanout.steps({ key: topic_at.key, members, topic, index, id, from: name, at: message.at, uid: me, accounts: all }, Fanout.parts_of(md))
 								if Host.store_message!(conv, topic.to_utf8(), block, index, message) {
 									# **STORED IS DONE** (metal-vmm QUEUE 172): from

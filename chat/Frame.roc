@@ -2,15 +2,16 @@
 ## the same for every viewer. The html is the caller's, rendered from the
 ## markdown; this module only lays the frame out.
 import JsonText
+import Uid
 
 Frame := [].{
 
 	## One message as its frame carries it: `index` 0-based (the SSE `id:`),
-	## `from_uid` and `cid` empty when there is none.
-	Message : { index : U64, from : List(U8), from_uid : List(U8), at : List(U8), html : List(U8), markdown : List(U8), id : List(U8), cid : List(U8) }
+	## the author's account `from_uid`, `cid` empty when there is none.
+	Message : { index : U64, from : List(U8), from_uid : Uid, at : List(U8), html : List(U8), markdown : List(U8), id : List(U8), cid : List(U8) }
 
 	## messageFrame: `id: <index>`, then one `data:` line of JSON;
-	## `from_uid` after `from` when known, `cid` last when there is one.
+	## `from_uid` after `from`, `cid` last when there is one.
 	# TEMPORARY DOOR: moves out in a later run.
 	message : Message -> List(U8)
 	message = |m| {
@@ -23,7 +24,8 @@ Frame := [].{
 			index,
 			Str.to_utf8(",\"from\":"),
 			JsonText.str_at_door(m.from),
-			if m.from_uid == [] [] else field("from_uid", m.from_uid),
+			Str.to_utf8(",\"from_uid\":"),
+			JsonText.str(m.from_uid.to_str()),
 			field("at", m.at),
 			field("html", m.html),
 			field("markdown", m.markdown),
