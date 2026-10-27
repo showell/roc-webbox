@@ -5,6 +5,7 @@
 ## can name bytes that are not UTF-8, and the parts of the path a route
 ## hands back to Zig must be the bytes that came in.
 Chat := [].{
+
 	## **THE TAGS CROSS AS ONE BYTE EACH, NUMBERED ALPHABETICALLY** (Roc's
 	## layout of a tag union with no payloads): roc-webbox src/chat_route.zig
 	## and src/chat_abi.zig list each union's names in that order, and check
@@ -21,23 +22,30 @@ Chat := [].{
 	## own remainder where it has one.
 	Family : [
 		NotFound,
+
 		## A static script, `rest` its name; served before the gate.
 		Asset,
+
 		## `/chat`, `/chat/`, `/chat/default`: the last conversation resumed.
 		Default,
+
 		## `rest` the path under `/docs` (and the four below likewise).
 		Docs,
 		Recent,
 		Images,
 		Code,
 		Links,
+
 		## `rest` the path after `/search`, with no boundary (`/searchX` is "X").
 		Search,
 		Conversations,
+
 		## `rest` the message id after `/msg/`.
 		Msg,
+
 		## A DM, `key` its pair as written.
 		Dm,
+
 		## A channel, `key` its name (already a valid one).
 		Channel,
 		Notifications,
@@ -48,10 +56,13 @@ Chat := [].{
 	Part : [
 		## No topic named: its first topic, or the page offering one.
 		Landing,
+
 		## `.../new`: a topic made.
 		New,
+
 		## A topic id that is not one: refused after the conversation's own checks.
 		Invalid,
+
 		## `sid` a valid topic id, `tail` what of it.
 		Topic,
 	]

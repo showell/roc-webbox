@@ -6,6 +6,7 @@ import Bytes
 import ZigText
 
 Topics := [].{
+
 	## std.ascii.eqlIgnoreCase: the same bytes, A-Z as a-z.
 	same_name : List(U8), List(U8) -> Bool
 	same_name = |a, b| List.map(a, lower) == List.map(b, lower)
@@ -17,15 +18,19 @@ Topics := [].{
 	## the Zig reads it), the first of equals; none when there is none.
 	highest_general : List(List(U8)) -> Try(List(U8), [None])
 	highest_general = |topics| {
-		(best, _) = List.fold(topics, (Err(None), -1), |(b, n), s|
-			match Bytes.strip_prefix(s, Str.to_utf8("general")) {
-				Ok(digits) =>
-					match ZigText.parse_u64(digits) {
-						Ok(k) if k <= 9223372036854775807 and U64.to_i128(k) > n => (Ok(s), U64.to_i128(k))
-						_ => (b, n)
-					}
-				Err(NoMatch) => (b, n)
-			})
+		(best, _) = List.fold(
+			topics,
+			(Err(None), -1),
+			|(b, n), s|
+				match Bytes.strip_prefix(s, Str.to_utf8("general")) {
+					Ok(digits) =>
+						match ZigText.parse_u64(digits) {
+							Ok(k) if k <= 9223372036854775807 and U64.to_i128(k) > n => (Ok(s), U64.to_i128(k))
+							_ => (b, n)
+						}
+					Err(NoMatch) => (b, n)
+				},
+		)
 		best
 	}
 

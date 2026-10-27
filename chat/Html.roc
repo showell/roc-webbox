@@ -3,22 +3,28 @@
 import Bytes
 
 Html := [].{
+
 	## htmlEscape: `&`, `'`, `<`, `>` and `"` as entities.
 	escape : List(U8) -> List(U8)
-	escape = |s| List.join(List.map(s, |c|
-		if c == '&' {
-			Str.to_utf8("&amp;")
-		} else if c == '\'' {
-			Str.to_utf8("&#39;")
-		} else if c == '<' {
-			Str.to_utf8("&lt;")
-		} else if c == '>' {
-			Str.to_utf8("&gt;")
-		} else if c == '"' {
-			Str.to_utf8("&#34;")
-		} else {
-			[c]
-		}))
+	escape = |s| List.join(
+		List.map(
+			s,
+			|c|
+				if c == '&' {
+					Str.to_utf8("&amp;")
+				} else if c == '\'' {
+					Str.to_utf8("&#39;")
+				} else if c == '<' {
+					Str.to_utf8("&lt;")
+				} else if c == '>' {
+					Str.to_utf8("&gt;")
+				} else if c == '"' {
+					Str.to_utf8("&#34;")
+				} else {
+					[c]
+				},
+		),
+	)
 
 	## scriptSafe: every `</` as `<\/`, the one sequence that could end the
 	## element early.

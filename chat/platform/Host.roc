@@ -3,6 +3,7 @@
 import Chat
 
 Host := [].{
+
 	## Whether the one asking may use the chat: a member, or the agent
 	## (angry-gopher's `users.principalAuthorized` of who the request's
 	## cookie or API key names). Asked after the static assets, which anyone
@@ -28,6 +29,7 @@ Host := [].{
 	## password, and each name, never a password or a key. Asked at most once
 	## a request.
 	accounts! : {} => { accounts : List({ id : List(U8), kind : [Agent, Guest, Member, Unreadable], name : List(U8), name_read : [Found, Unreadable] }), status : [Failed, Found] }
+
 	## The request's body, read to a form's limit (`which`: the react
 	## form's or a message's); not `ok` when the host answered instead (too
 	## big) or failed.

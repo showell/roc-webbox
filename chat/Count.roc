@@ -7,6 +7,7 @@ import Bytes
 import Transcript
 
 Count := [].{
+
 	## Where the last message begins and who sent it, `uid` empty for nobody.
 	Last : [Known({ offset : U64, uid : List(U8) }), Unknown]
 

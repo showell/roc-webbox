@@ -5,6 +5,7 @@
 import ZigText
 
 JsonText := [].{
+
 	## A string value.
 	str : List(U8) -> List(U8)
 	str = |s| ZigText.json_string(s)

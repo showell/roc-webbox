@@ -8,6 +8,7 @@ import Paths
 import ZigText
 
 Feeds := [].{
+
 	## The member's feed file under the chat root: users/<uid>/images.md or
 	## code.md, where images_store and code_store keep them.
 	path : List(U8), [Images, Code] -> List(U8)
@@ -83,16 +84,20 @@ Feeds := [].{
 	## its `<img` tags (none is still an entry).
 	images : List(U8) -> List((Header, List(List(U8))))
 	images = |text|
-		List.fold(blocks_of(text), [], |out, block| {
-			(line, body) = match find_byte(block, '\n', 0) {
-				Ok(nl) => (List.take_first(block, nl), List.drop_first(block, nl + 1))
-				Err(None) => (block, [])
-			}
-			match header(line) {
-				Ok(h) => List.append(out, (h, img_tags(body)))
-				Err(None) => out
-			}
-		})
+		List.fold(
+			blocks_of(text),
+			[],
+			|out, block| {
+				(line, body) = match find_byte(block, '\n', 0) {
+					Ok(nl) => (List.take_first(block, nl), List.drop_first(block, nl + 1))
+					Err(None) => (block, [])
+				}
+				match header(line) {
+					Ok(h) => List.append(out, (h, img_tags(body)))
+					Err(None) => out
+				}
+			},
+		)
 
 	## images_store `extractImageTags`: every `<img` (any case) followed by
 	## whitespace, to the next `>`.
@@ -133,18 +138,22 @@ Feeds := [].{
 	## holding at least one fence that is not a quote.
 	code : List(U8) -> List((Header, List(Block)))
 	code = |text|
-		List.fold(blocks_of(text), [], |out, block|
-			match find_byte(block, '\n', 0) {
-				Err(None) => out
-				Ok(nl) =>
-					match header(List.take_first(block, nl)) {
-						Err(None) => out
-						Ok(h) => {
-							bs = code_blocks(List.drop_first(block, nl + 1))
-							if bs == [] out else List.append(out, (h, bs))
+		List.fold(
+			blocks_of(text),
+			[],
+			|out, block|
+				match find_byte(block, '\n', 0) {
+					Err(None) => out
+					Ok(nl) =>
+						match header(List.take_first(block, nl)) {
+							Err(None) => out
+							Ok(h) => {
+								bs = code_blocks(List.drop_first(block, nl + 1))
+								if bs == [] out else List.append(out, (h, bs))
+							}
 						}
-					}
-			})
+				},
+		)
 
 	## code_store `extractCodeBlocks`: each fence's lines to the first close
 	## of its character at least as long, or to the end; a `quote` fence's

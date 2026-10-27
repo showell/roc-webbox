@@ -6,6 +6,7 @@ import Bytes
 import ZigText
 
 Paths := [].{
+
 	## chatKeyParticipant: `key` is a canonical DM pair (two uids, digits
 	## without a leading zero, the smaller first) and `user` is one of them.
 	participant : List(U8), List(U8) -> Bool
@@ -48,14 +49,18 @@ Paths := [].{
 		if n == 0 or n > 80 or List.first(sid) == Ok('-') or List.last(sid) == Ok('-') {
 			Bool.False
 		} else {
-			(ok, _) = List.fold(sid, (Bool.True, Bool.False), |(good, prev_hyphen), c|
-				if !good {
-					(Bool.False, prev_hyphen)
-				} else if c == '-' {
-					(!prev_hyphen, Bool.True)
-				} else {
-					(is_alnum(c), Bool.False)
-				})
+			(ok, _) = List.fold(
+				sid,
+				(Bool.True, Bool.False),
+				|(good, prev_hyphen), c|
+					if !good {
+						(Bool.False, prev_hyphen)
+					} else if c == '-' {
+						(!prev_hyphen, Bool.True)
+					} else {
+						(is_alnum(c), Bool.False)
+					},
+			)
 			ok
 		}
 	}
@@ -140,20 +145,24 @@ Paths := [].{
 	## what a line meant: whoever wrote the file fixes it.
 	channel_members : List(U8) -> Try(List(List(U8)), [Malformed])
 	channel_members = |file|
-		List.fold(Bytes.split_byte(file, '\n'), Ok([]), |acc, raw|
-			match acc {
-				Err(Malformed) => acc
-				Ok(out) => {
-					line = trim_line(raw)
-					if line == [] or List.first(line) == Ok('#') {
-						acc
-					} else if !canonical_uid(line) or List.contains(out, line) {
-						Err(Malformed)
-					} else {
-						Ok(List.append(out, line))
+		List.fold(
+			Bytes.split_byte(file, '\n'),
+			Ok([]),
+			|acc, raw|
+				match acc {
+					Err(Malformed) => acc
+					Ok(out) => {
+						line = trim_line(raw)
+						if line == [] or List.first(line) == Ok('#') {
+							acc
+						} else if !canonical_uid(line) or List.contains(out, line) {
+							Err(Malformed)
+						} else {
+							Ok(List.append(out, line))
+						}
 					}
-				}
-			})
+				},
+		)
 
 	## channelMembers's trim: spaces, tabs and CRs (a line split on newlines
 	## has none of those).
@@ -219,20 +228,24 @@ Paths := [].{
 	## where a part ending in `/` meeting one starting with it keeps one.
 	join : List(List(U8)) -> List(U8)
 	join = |parts|
-		List.fold(List.drop_if(parts, |p| p == []), [], |out, p|
-			if out == [] {
-				p
-			} else {
-				end = List.last(out) == Ok('/')
-				start = List.first(p) == Ok('/')
-				if end and start {
-					List.concat(out, List.drop_first(p, 1))
-				} else if end or start {
-					List.concat(out, p)
+		List.fold(
+			List.drop_if(parts, |p| p == []),
+			[],
+			|out, p|
+				if out == [] {
+					p
 				} else {
-					List.concat(List.append(out, '/'), p)
-				}
-			})
+					end = List.last(out) == Ok('/')
+					start = List.first(p) == Ok('/')
+					if end and start {
+						List.concat(out, List.drop_first(p, 1))
+					} else if end or start {
+						List.concat(out, p)
+					} else {
+						List.concat(List.append(out, '/'), p)
+					}
+				},
+		)
 
 	## A topic's transcript: {conv_dir}/sessions/<sid>.md.
 	transcript_path : List(U8), List(U8) -> List(U8)

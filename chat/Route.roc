@@ -9,6 +9,7 @@ import Bytes
 import Paths
 
 Route := [].{
+
 	## The route for `sub`, the path under /chat.
 	under_chat : List(U8) -> R
 	under_chat = |sub|
@@ -91,15 +92,19 @@ Route := [].{
 	family_under : List(U8) -> Try(R, [None])
 	family_under = |sub| {
 		named = [("/docs", Docs), ("/recent", Recent), ("/images", Images), ("/code", Code), ("/links", Links)]
-		List.fold(named, Err(None), |found, (prefix, f)|
-			match found {
-				Ok(r) => Ok(r)
-				Err(None) =>
-					match Bytes.strip_prefix(sub, Str.to_utf8(prefix)) {
-						Ok(rest) if rest == [] or Bytes.starts_with(rest, slash) => Ok(with_rest(f, rest))
-						_ => Err(None)
-					}
-			})
+		List.fold(
+			named,
+			Err(None),
+			|found, (prefix, f)|
+				match found {
+					Ok(r) => Ok(r)
+					Err(None) =>
+						match Bytes.strip_prefix(sub, Str.to_utf8(prefix)) {
+							Ok(rest) if rest == [] or Bytes.starts_with(rest, slash) => Ok(with_rest(f, rest))
+							_ => Err(None)
+						}
+				},
+		)
 	}
 
 	## A DM's or a channel's route from its path's segments.
@@ -154,18 +159,21 @@ Route := [].{
 	## The path's segments, empty ones skipped (chat.zig's SegIter).
 	segments : List(U8) -> List(List(U8))
 	segments = |path| {
-		(done, last) = List.fold(path, ([], []), |(segs, cur), b|
-			if b == '/' {
-				(if cur == [] segs else List.append(segs, cur), [])
-			} else {
-				(segs, List.append(cur, b))
-			})
+		(done, last) = List.fold(
+			path,
+			([], []),
+			|(segs, cur), b|
+				if b == '/' {
+					(if cur == [] segs else List.append(segs, cur), [])
+				} else {
+					(segs, List.append(cur, b))
+				},
+		)
 		if last == [] done else List.append(done, last)
 	}
 
 	ends_with : List(U8), List(U8) -> Bool
 	ends_with = |l, p| List.len(l) >= List.len(p) and List.take_last(l, List.len(p)) == p
-
 
 	valid_channel_name = Paths.valid_channel_name
 	valid_topic_id = Paths.valid_topic_id

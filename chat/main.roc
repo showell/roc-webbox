@@ -114,8 +114,8 @@ in_conversation! = |req, route|
 			Err(NotYours) => Chat.zig(route, Bool.False)
 			Err(Failed) => Chat.answered
 			Ok((conv, who)) =>
-				# The title before the topics, as findTopic read them: a
-				# partner whose name will not read fails every topic route.
+			# The title before the topics, as findTopic read them: a
+			# partner whose name will not read fails every topic route.
 				match title!(conv, who) {
 					Err(Failed) => Chat.answered
 					Ok(t) => {
@@ -457,7 +457,7 @@ reacted! = |conv, who, sid, r|
 			match counted.status {
 				Failed => Failed
 				Counted =>
-					# Message numbers start at 1 (the N of MSG_<sid>_N).
+				# Message numbers start at 1 (the N of MSG_<sid>_N).
 					if r.msg == 0 or r.msg > counted.count {
 						NoSuchMessage
 					} else {
@@ -827,8 +827,8 @@ send! = |req, route|
 	match find!(route) {
 		Err(Failed) => Chat.answered
 		Ok((conv, who)) =>
-			# The title before any tail, unused, as the Zig's convRoute read
-			# it: a partner whose name will not read fails a send too.
+		# The title before any tail, unused, as the Zig's convRoute read
+		# it: a partner whose name will not read fails a send too.
 			match title!(conv, who) {
 				Err(Failed) => Chat.answered
 				Ok(_) => sent!(req, route, conv, who)

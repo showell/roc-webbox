@@ -4,6 +4,7 @@
 import ZigText
 
 Frame := [].{
+
 	## One message as its frame carries it: `index` 0-based (the SSE `id:`),
 	## `from_uid` and `cid` empty when there is none.
 	Message : { index : U64, from : List(U8), from_uid : List(U8), at : List(U8), html : List(U8), markdown : List(U8), id : List(U8), cid : List(U8) }

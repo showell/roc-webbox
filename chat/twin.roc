@@ -153,11 +153,16 @@ call = |req| {
 			n = u64(arg(0))
 			ids = List.sublist(req.args, { start: 1, len: n })
 			all = accounts(req.args, 1 + n, [])
-			asked = List.join(List.map(ids, |id|
-				match Accounts.name(all, id) {
-					Ok(name) => [bool(Accounts.exists(all, id)), Str.to_utf8("ok"), name]
-					Err(why) => List.concat([bool(Accounts.exists(all, id))], unreadable(why))
-				}))
+			asked = List.join(
+				List.map(
+					ids,
+					|id|
+						match Accounts.name(all, id) {
+							Ok(name) => [bool(Accounts.exists(all, id)), Str.to_utf8("ok"), name]
+							Err(why) => List.concat([bool(Accounts.exists(all, id))], unreadable(why))
+						},
+				),
+			)
 			roster = match Accounts.authorized(all) {
 				Ok(members) => List.concat([Str.to_utf8("ok")], List.join(List.map(members, |a| [a.id, a.name])))
 				Err(why) => unreadable(why)

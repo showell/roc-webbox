@@ -12,6 +12,7 @@ import Accounts
 import JsonText
 
 Fanout := [].{
+
 	## The message's parts as the host found them, each made or failed on
 	## its own (its fault: the host's error, a number this module never
 	## reads, carried to be said).
@@ -51,34 +52,39 @@ Fanout := [].{
 		notify = notify_event(m.key, m.sid, notify_text(m.kind, m.from, m.key, m.sid), url)
 		added = topic_added(m.key, m.sid, url)
 		head = { from: m.from, at: m.at, source_id: m.id, conv: m.key }
-		List.join(List.map(m.members, |uid|
-			List.join([
-				# **THE AUTHOR IS NEVER NOTIFIED** of their own message: the
-				# favicon dot means a partner did something.
-				if uid == m.uid [] else [Publish(notify_key(uid), notify)],
-				# A topic is added to the sidebar by its first message alone.
-				if m.index == 0 [Publish(sidebar_key(uid), added)] else [],
-				# **EVERY MEMBER SEES THE ROW, THE AUTHOR AS "YOU"**.
-				match parts.excerpt {
-					Made(excerpt) => {
-						who = if uid == m.uid Str.to_utf8("You") else m.from
-						[Publish(recent_key(uid), Recent.chat_event({ at: m.at, url, who, label: recent_where(m, uid), topic: m.sid, excerpt, dm: if m.kind == Dm Dm else Channel }))]
-					}
-					Failed(fault) => [Failed(Recent, uid, fault)]
-				},
-				# The feeds only when the message has what they keep; a part
-				# that failed fails them whatever it held.
-				match parts.images {
-					Made([]) => []
-					Made(tags) => [Feed({ surface: Images, member: uid, path: Feeds.path(uid, Images), entry: Feeds.images_entry(head, tags), key: images_key(uid), event: Feeds.images_event(head, tags) })]
-					Failed(fault) => [Failed(Images, uid, fault)]
-				},
-				match parts.code {
-					Made([]) => []
-					Made(blocks) => [Feed({ surface: Code, member: uid, path: Feeds.path(uid, Code), entry: Feeds.code_entry(head, blocks), key: code_key(uid), event: Feeds.code_event(head, blocks) })]
-					Failed(fault) => [Failed(Code, uid, fault)]
-				},
-			])))
+		List.join(
+			List.map(
+				m.members,
+				|uid|
+					List.join([
+						# **THE AUTHOR IS NEVER NOTIFIED** of their own message: the
+						# favicon dot means a partner did something.
+						if uid == m.uid [] else [Publish(notify_key(uid), notify)],
+						# A topic is added to the sidebar by its first message alone.
+						if m.index == 0 [Publish(sidebar_key(uid), added)] else [],
+						# **EVERY MEMBER SEES THE ROW, THE AUTHOR AS "YOU"**.
+						match parts.excerpt {
+							Made(excerpt) => {
+								who = if uid == m.uid Str.to_utf8("You") else m.from
+								[Publish(recent_key(uid), Recent.chat_event({ at: m.at, url, who, label: recent_where(m, uid), topic: m.sid, excerpt, dm: if m.kind == Dm Dm else Channel }))]
+							}
+							Failed(fault) => [Failed(Recent, uid, fault)]
+						},
+						# The feeds only when the message has what they keep; a part
+						# that failed fails them whatever it held.
+						match parts.images {
+							Made([]) => []
+							Made(tags) => [Feed({ surface: Images, member: uid, path: Feeds.path(uid, Images), entry: Feeds.images_entry(head, tags), key: images_key(uid), event: Feeds.images_event(head, tags) })]
+							Failed(fault) => [Failed(Images, uid, fault)]
+						},
+						match parts.code {
+							Made([]) => []
+							Made(blocks) => [Feed({ surface: Code, member: uid, path: Feeds.path(uid, Code), entry: Feeds.code_entry(head, blocks), key: code_key(uid), event: Feeds.code_event(head, blocks) })]
+							Failed(fault) => [Failed(Code, uid, fault)]
+						},
+					]),
+			),
+		)
 	}
 
 	## **THE PER-MEMBER BUS KEYS** (chat_fanout `notifyBusKey`,

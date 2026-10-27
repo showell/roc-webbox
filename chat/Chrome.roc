@@ -9,6 +9,7 @@ import Bytes
 import Html
 
 Chrome := [].{
+
 	## What a page's chrome says: its tab title, its title, who is looking,
 	## the sub-nav's bold one (none for "") and where each script is.
 	Shell : { tab : List(U8), title : List(U8), viewer : List(U8), active : List(U8), src : List(U8) -> List(U8) }

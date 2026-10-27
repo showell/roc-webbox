@@ -2,6 +2,7 @@
 ## read and write exactly as the Zig chat does, so the files and frames the
 ## two make are the same bytes. Pure.
 ZigText := [].{
+
 	## angry-gopher decimal.zig `parseInt` at u64: one or more digits and
 	## nothing else, no sign, no `_`, and it fits. Never `U64.from_str`,
 	## which reads `0x10` and `1e3` too.
@@ -10,23 +11,27 @@ ZigText := [].{
 		if s == [] {
 			Err(None)
 		} else {
-			List.fold(s, Ok(0), |acc, c|
-				match acc {
-					Err(None) => Err(None)
-					Ok(n) =>
-						if c < '0' or c > '9' {
-							Err(None)
-						} else {
-							match U64.times_try(n, 10) {
-								Ok(m) =>
-									match U64.plus_try(m, U8.to_u64(c - '0')) {
-										Ok(v) => Ok(v)
-										Err(_) => Err(None)
-									}
-								Err(_) => Err(None)
+			List.fold(
+				s,
+				Ok(0),
+				|acc, c|
+					match acc {
+						Err(None) => Err(None)
+						Ok(n) =>
+							if c < '0' or c > '9' {
+								Err(None)
+							} else {
+								match U64.times_try(n, 10) {
+									Ok(m) =>
+										match U64.plus_try(m, U8.to_u64(c - '0')) {
+											Ok(v) => Ok(v)
+											Err(_) => Err(None)
+										}
+									Err(_) => Err(None)
+								}
 							}
-						}
-				})
+					},
+			)
 		}
 
 	## Zig's `std.json.fmt` of a string: in quotes, `"` and `\` escaped, the

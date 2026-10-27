@@ -57,10 +57,17 @@ handle! = |req|
 		# Each part as `<status>:<fault>:<its bytes>`, so a record laid out
 		# wrong, or a fault that crossed wrong, shows.
 		got = Host.message_parts!(List.drop_first(req.sub, 7))
-		said = |status, fault, bytes| List.join([Str.to_utf8(match status {
-			Made => "made:"
-			Failed => "failed:"
-		}), Str.to_utf8(U16.to_str(fault)), [58], bytes])
+		said = |status, fault, bytes| List.join([
+			Str.to_utf8(
+				match status {
+					Made => "made:"
+					Failed => "failed:"
+				},
+			),
+			Str.to_utf8(U16.to_str(fault)),
+			[58],
+			bytes,
+		])
 		blocks = List.join(List.map(got.code.blocks, |b| List.join([b.lang, [61], b.body, [44]])))
 		Chat.respond(200, [], List.join([said(got.excerpt.status, got.excerpt.fault, got.excerpt.bytes), [32], said(got.images.status, got.images.fault, List.join(List.intersperse(got.images.tags, [44]))), [32], said(got.code.status, got.code.fault, blocks)]))
 	} else if starts(req.sub, "/entry/") {
@@ -84,11 +91,21 @@ handle! = |req|
 			Failed => "failed"
 		}
 		# Each entry as ` <kind>:<name>`, so a record laid out wrong shows.
-		each = List.join(List.map(got.entries, |e| List.concat(Str.to_utf8(match e.kind {
-			Dir => " d:"
-			File => " f:"
-			Other => " o:"
-		}), e.name)))
+		each = List.join(
+			List.map(
+				got.entries,
+				|e| List.concat(
+					Str.to_utf8(
+						match e.kind {
+							Dir => " d:"
+							File => " f:"
+							Other => " o:"
+						},
+					),
+					e.name,
+				),
+			),
+		)
 		Chat.respond(200, [], List.concat(Str.to_utf8(said), each))
 	} else if req.sub == Str.to_utf8("/accounts") {
 		got = Host.accounts!({})
@@ -98,15 +115,29 @@ handle! = |req|
 		}
 		# Each account as ` <kind>:<id>=<name>` (`=?` for a name that would
 		# not read), so a record laid out wrong shows.
-		each = List.join(List.map(got.accounts, |a| List.join([Str.to_utf8(match a.kind {
-			Agent => " a:"
-			Guest => " g:"
-			Member => " m:"
-			Unreadable => " u:"
-		}), a.id, Str.to_utf8(match a.name_read {
-			Found => "="
-			Unreadable => "=?"
-		}), a.name])))
+		each = List.join(
+			List.map(
+				got.accounts,
+				|a| List.join([
+					Str.to_utf8(
+						match a.kind {
+							Agent => " a:"
+							Guest => " g:"
+							Member => " m:"
+							Unreadable => " u:"
+						},
+					),
+					a.id,
+					Str.to_utf8(
+						match a.name_read {
+							Found => "="
+							Unreadable => "=?"
+						},
+					),
+					a.name,
+				]),
+			),
+		)
 		Chat.respond(200, [], List.concat(Str.to_utf8(said), each))
 	} else if starts(req.sub, "/fail/") {
 		# `/fail/<reason>/<whose>`, the reason `malformed`, `kind` or `name`.
@@ -128,10 +159,19 @@ handle! = |req|
 		# ` <id>:off`, so a list that crossed short, long or shifted shows.
 		ids = split_on(List.drop_first(req.sub, 8), 44)
 		flags = Host.online!(ids)
-		said = List.map_with_index(flags, |f, i| List.join([[32], List.get(ids, i) ?? Str.to_utf8("?"), Str.to_utf8(match f {
-			Online => ":on"
-			Offline => ":off"
-		})]))
+		said = List.map_with_index(
+			flags,
+			|f, i| List.join([
+				[32],
+				List.get(ids, i) ?? Str.to_utf8("?"),
+				Str.to_utf8(
+					match f {
+						Online => ":on"
+						Offline => ":off"
+					},
+				),
+			]),
+		)
 		Chat.respond(200, [], List.concat(Str.to_utf8("flags ${U64.to_str(List.len(flags))}"), List.join(said)))
 	} else if req.sub == Str.to_utf8("/limits") {
 		# Every field its own, so a record laid out wrong shows.
@@ -167,12 +207,16 @@ starts = |l, p| {
 ## `l` cut at each `sep`.
 split_on : List(U8), U8 -> List(List(U8))
 split_on = |l, sep|
-	List.fold(l, [[]], |acc, b|
-		if b == sep {
-			List.append(acc, [])
-		} else {
-			List.update(acc, List.len(acc) - 1, |last| List.append(last, b)) ?? acc
-		})
+	List.fold(
+		l,
+		[[]],
+		|acc, b|
+			if b == sep {
+				List.append(acc, [])
+			} else {
+				List.update(acc, List.len(acc) - 1, |last| List.append(last, b)) ?? acc
+			},
+	)
 
 dm12 : Chat.Conv
 dm12 = { family: Dm, key: Str.to_utf8("1_2"), base: Str.to_utf8("/chat/c/1_2"), members: [Str.to_utf8("1"), Str.to_utf8("2")] }

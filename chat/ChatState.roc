@@ -16,6 +16,7 @@ import Time
 import ZigText
 
 ChatState := [].{
+
 	## resumeTopic: the topic the member last viewed (`last`, "" for none)
 	## while the conversation still has it; else its first topic
 	## (Paths.first_of); else the date of `now_secs`, so a conversation's

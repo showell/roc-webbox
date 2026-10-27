@@ -3,6 +3,7 @@
 ## reading back of a date another writer may have made. Howard Hinnant's
 ## civil-date algorithm, as the Zig has it. Pure.
 Time := [].{
+
 	## `2026-06-19T14:34:07Z` for `unix_secs`.
 	rfc3339 : I64 -> Str
 	rfc3339 = |unix_secs| {

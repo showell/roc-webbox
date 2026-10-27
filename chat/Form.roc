@@ -11,11 +11,14 @@ Form := [].{
 	## over.
 	field : List(U8), List(U8) -> Field
 	field = |body, name| {
-		values = List.keep_oks(Bytes.split_byte(body, '&'), |pair|
-			match Bytes.cut_seq(pair, ['=']) {
-				Ok((k, v)) if k == name => Ok(v)
-				_ => Err(None)
-			})
+		values = List.keep_oks(
+			Bytes.split_byte(body, '&'),
+			|pair|
+				match Bytes.cut_seq(pair, ['=']) {
+					Ok((k, v)) if k == name => Ok(v)
+					_ => Err(None)
+				},
+		)
 		match values {
 			[] => Missing
 			[raw] =>

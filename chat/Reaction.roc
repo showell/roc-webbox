@@ -6,6 +6,7 @@ import ZigText
 import JsonText
 
 Reaction := [].{
+
 	## **THE ONE PLACE THE SIDECAR'S LINE SHAPE IS WRITTEN** (reactionLine):
 	## `{"msg":N,"uid":…,"from":…,"emoji":…,"on":…,"at":…}`, in that order,
 	## the strings as the Zig's JSON writes them. `on` false is a retraction:

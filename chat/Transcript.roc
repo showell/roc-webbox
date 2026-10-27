@@ -7,6 +7,7 @@ import Bytes
 import ZigText
 
 Transcript := [].{
+
 	## A decoded block: every field the bytes they were, `uid` empty for a
 	## block from before it was written.
 	Msg : { id : List(U8), from : List(U8), at : List(U8), uid : List(U8), markdown : List(U8) }
@@ -16,17 +17,21 @@ Transcript := [].{
 	## no block and not counted.
 	decode_file : List(U8) -> { messages : List(Msg), refused : U64 }
 	decode_file = |data|
-		List.fold(Bytes.split_seq(data, sep), { messages: [], refused: 0 }, |acc, piece|
-			if ZigText.trim(piece) == [] {
-				acc
-			} else {
-				m = decode_block(piece)
-				if is_message(m) {
-					{ ..acc, messages: List.append(acc.messages, m) }
+		List.fold(
+			Bytes.split_seq(data, sep),
+			{ messages: [], refused: 0 },
+			|acc, piece|
+				if ZigText.trim(piece) == [] {
+					acc
 				} else {
-					{ ..acc, refused: acc.refused + 1 }
-				}
-			})
+					m = decode_block(piece)
+					if is_message(m) {
+						{ ..acc, messages: List.append(acc.messages, m) }
+					} else {
+						{ ..acc, refused: acc.refused + 1 }
+					}
+				},
+		)
 
 	is_message : Msg -> Bool
 	is_message = |m| m.id != [] and m.from != [] and m.at != []

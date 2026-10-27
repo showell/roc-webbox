@@ -10,7 +10,6 @@ platform ""
 	exposes []
 	packages {}
 	provides { "roc_twin_call": call_for_host }
-	hosted {}
 	targets: {
 		x64musl: {
 			inputs: [app],

@@ -8,6 +8,7 @@ import Paths
 import Topics
 
 Conversation := [].{
+
 	## dmOther: the other of DM pair `key` when `me` is one of the pair, by
 	## chatKeyParticipant's rule (Paths.participant: a canonical pair of
 	## uids); none otherwise.

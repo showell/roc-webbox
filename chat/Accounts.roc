@@ -15,6 +15,7 @@ import Paths
 import ZigText
 
 Accounts := [].{
+
 	## One account: its id (its folder's name), its kind, and its `name`
 	## file's bytes as stored ("" when it has none). The kind is the host's:
 	## which account is the agent is decided there, once. A kind of
@@ -83,18 +84,20 @@ Accounts := [].{
 	roster : List(Account) -> List({ id : List(U8), name : List(U8) })
 	roster = |accounts|
 		List.keep_if(accounts, |a| a.kind != Guest)
-		|> List.map_with_index(|a, i| { a, i, n: Paths.atoi_or0(a.id) })
-		|> List.sort_with(|x, y|
-			if x.n < y.n {
-				Before
-			} else if x.n > y.n {
-				After
-			} else if x.i < y.i {
-				Before
-			} else if x.i > y.i {
-				After
-			} else {
-				Same
-			})
-		|> List.map(|x| { id: x.a.id, name: stored_name(x.a.name) })
+			|> List.map_with_index(|a, i| { a, i, n: Paths.atoi_or0(a.id) })
+			|> List.sort_with(
+				|x, y|
+					if x.n < y.n {
+						Before
+					} else if x.n > y.n {
+						After
+					} else if x.i < y.i {
+						Before
+					} else if x.i > y.i {
+						After
+					} else {
+						Same
+					},
+			)
+			|> List.map(|x| { id: x.a.id, name: stored_name(x.a.name) })
 }

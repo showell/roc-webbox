@@ -9,6 +9,7 @@ import Time
 import ZigText
 
 Recent := [].{
+
 	## One gathered row (recent.zig `Row`): `key` a chat row's URL or a doc's
 	## slug, `label` its "to …"/"in …" or the doc's title.
 	Row : { doc : Bool, secs : I64, uid : List(U8), name : List(U8), key : List(U8), label : List(U8), topic : List(U8), markdown : List(U8), dm : Bool }
@@ -59,15 +60,17 @@ Recent := [].{
 	## DM. The page's backlog and the live stream (`rec:<uid>`) send it.
 	chat_event : ChatEvent -> List(U8)
 	chat_event = |e|
-		JsonText.obj(List.join([
-			[("kind", JsonText.str(Str.to_utf8("chat"))), ("at", JsonText.str(e.at))],
-			JsonText.opt("url", e.url),
-			JsonText.opt("who", e.who),
-			JsonText.opt("where", e.label),
-			JsonText.opt("topic", e.topic),
-			JsonText.opt("excerpt", e.excerpt),
-			if e.dm == Dm [("dm", JsonText.bool(Bool.True))] else [],
-		]))
+		JsonText.obj(
+			List.join([
+				[("kind", JsonText.str(Str.to_utf8("chat"))), ("at", JsonText.str(e.at))],
+				JsonText.opt("url", e.url),
+				JsonText.opt("who", e.who),
+				JsonText.opt("where", e.label),
+				JsonText.opt("topic", e.topic),
+				JsonText.opt("excerpt", e.excerpt),
+				if e.dm == Dm [("dm", JsonText.bool(Bool.True))] else [],
+			]),
+		)
 
 	## recent.zig `newestFirst`, stably, as std.mem.sort is: newest first, a
 	## tie by the URL or slug, and rows equal in both in the order gathered
@@ -75,19 +78,21 @@ Recent := [].{
 	sort : List(Row) -> List(Row)
 	sort = |rs|
 		List.map_with_index(rs, |row, i| { row, i })
-		|> List.sort_with(|a, b|
-			if before(a.row, b.row) {
-				Before
-			} else if before(b.row, a.row) {
-				After
-			} else if a.i < b.i {
-				Before
-			} else if a.i > b.i {
-				After
-			} else {
-				Same
-			})
-		|> List.map(|x| x.row)
+			|> List.sort_with(
+				|a, b|
+					if before(a.row, b.row) {
+						Before
+					} else if before(b.row, a.row) {
+						After
+					} else if a.i < b.i {
+						Before
+					} else if a.i > b.i {
+						After
+					} else {
+						Same
+					},
+			)
+			|> List.map(|x| x.row)
 
 	before : Row, Row -> Bool
 	before = |x, y| if x.secs != y.secs x.secs > y.secs else Bytes.less(x.key, y.key)
@@ -179,12 +184,16 @@ Recent := [].{
 	## either end.
 	collapse_ws : List(U8) -> List(U8)
 	collapse_ws = |s| {
-		(out, _) = List.fold(s, ([], Bool.False), |(acc, in_ws), c|
-			if Feeds.is_space(c) {
-				(acc, Bool.True)
-			} else {
-				(List.append(if in_ws and acc != [] List.append(acc, ' ') else acc, c), Bool.False)
-			})
+		(out, _) = List.fold(
+			s,
+			([], Bool.False),
+			|(acc, in_ws), c|
+				if Feeds.is_space(c) {
+					(acc, Bool.True)
+				} else {
+					(List.append(if in_ws and acc != [] List.append(acc, ' ') else acc, c), Bool.False)
+				},
+		)
 		out
 	}
 
