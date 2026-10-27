@@ -12,10 +12,13 @@
 --      zig-server/src/ and build.zig (whole trees: a second or two).
 --   2. roc check chat/main.roc and chat/twin.roc: the type errors, said as
 --      such, before any build.
---   3. roc-webbox's `zig build test`: the archives built (chat, twin, the
+--   3. roc test chat/main.roc, uncached: the top-level `expect`s of main
+--      and every chat module it imports (Paths' builders and guards, Files'
+--      three-way answer), half a second.
+--   4. roc-webbox's `zig build test`: the archives built (chat, twin, the
 --      planted crash), the seam's probes (src/chat_hosted.zig), a Roc crash
 --      through the seam, the twin entry (src/twin_abi.zig).
---   4. angry-gopher's `zig build test`: the twins byte for byte
+--   5. angry-gopher's `zig build test`: the twins byte for byte
 --      (chat_twin_test.zig, its own binary on the twin archive) and the
 --      router's tests, which link the chat's archive (chat_route_twin.zig,
 --      chat_actions_twin_test.zig, router_*_test.zig). Its other ~38 test
@@ -119,6 +122,7 @@ part("zig fmt --check, angry-gopher", {"zig", "fmt", "--check", gopher .. "/zig-
 part("roc fmt --check, the chat's Roc", roc_fmt_check)
 part("roc check chat/main.roc", {"roc", "check", "chat/main.roc"})
 part("roc check chat/twin.roc", {"roc", "check", "chat/twin.roc"})
+part("roc test chat/main.roc", {"roc", "test", "--no-cache", "chat/main.roc"})
 part("roc-webbox zig build test", {"zig", "build", "test", "--summary", "failures"})
 -- Its own build root and cache, as `cd zig-server && zig build test` has
 -- them, so the two share what each has built.
