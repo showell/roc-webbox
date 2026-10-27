@@ -2,7 +2,7 @@
 -- parser (roc-ast) for the Roc, Zig's (zig_decls, zig_imports, zig_tokens)
 -- for angry-gopher's Zig. Four reports, then one number to watch:
 --
---   - **routes**: every route chat/main.roc's `roc_serves` decides, the
+--   - **routes**: every route chat/main.roc's `served_by` decides, the
 --     families, parts and tails from chat/Route.roc, each Roc's or handed to
 --     Zig, and for Zig's the arm of chat.zig's `serve` or `topicRoute`
 --     that takes it;
@@ -202,24 +202,28 @@ function hd(tree, at)
   return trim(tree.text[at])
 end
 
--- `roc_serves`'s answer for route `r` ({family, part, tail, rest}),
+-- `served_by`'s answer for route `r` ({family, part, tail, rest}),
 -- evaluated over its tree from the node at `at`: a `match` on a field, its
--- branches' tags, `_`, `Bool.True`/`Bool.False`, and `r.rest != "<lit>"`.
--- Anything else stops the census: the rule grew a shape it cannot read.
+-- branches' tags, `_`, the tags `Roc`/`Zig`, and `if r.rest == "<lit>"`
+-- (or `!=`) choosing between two of them. Anything else stops the census:
+-- the rule grew a shape it cannot read.
 function evaluate(tree, at, r)
   local t = hd(tree, at)
   if starts_with(t, "(e-tag ") then
     local raw = between(t, "(raw \"", "\")")
-    if raw == "Bool.True" then return "Roc" end
-    if raw == "Bool.False" then return "Zig" end
+    if raw == "Roc" or raw == "Zig" then return raw end
   end
-  if starts_with(t, "(e-binop ") and contains(t, "(op \"!=\")") then
+  if starts_with(t, "(e-if-then-else") then
     local k = kids(tree, at)
-    local field = between(hd(tree, k[1] + 3), "(field \"", "\")")
-    local lit = between(hd(tree, k[2] + 1), "(raw \"", "\")")
-    if field == "rest" and lit ~= nil then
-      if r.rest ~= lit then return "Roc" end
-      return "Zig"
+    local cond = hd(tree, k[1])
+    local ck = kids(tree, k[1])
+    local field = between(hd(tree, ck[1] + 3), "(field \"", "\")")
+    local lit = between(hd(tree, ck[2] + 1), "(raw \"", "\")")
+    if starts_with(cond, "(e-binop ") and field == "rest" and lit ~= nil then
+      local equal = r.rest == lit
+      if contains(cond, "(op \"!=\")") then equal = not equal end
+      if equal then return evaluate(tree, k[2], r) end
+      return evaluate(tree, k[3], r)
     end
   end
   if starts_with(t, "(e-match") then
@@ -238,7 +242,7 @@ function evaluate(tree, at, r)
       if hit then return evaluate(tree, bk[2], r) end
     end
   end
-  fail("roc_serves: a node the census cannot read: " .. t)
+  fail("served_by: a node the census cannot read: " .. t)
 end
 
 -- A type's tags, as chat/Route.roc spells them: `Family : [A, B, ...]`.
@@ -345,17 +349,17 @@ local main = roc_tree("chat/main.roc")
 local serves_at = nil
 local i = 1
 while i < #main.text do
-  if starts_with(hd(main, i), "(s-decl ") and starts_with(hd(main, i + 1), "(p-ident ") and contains(hd(main, i + 1), "(raw \"roc_serves\")") then
+  if starts_with(hd(main, i), "(s-decl ") and starts_with(hd(main, i + 1), "(p-ident ") and contains(hd(main, i + 1), "(raw \"served_by\")") then
     serves_at = kids(main, i + 2)[2]
   end
   i = i + 1
 end
-if serves_at == nil then fail("chat/main.roc: no roc_serves") end
+if serves_at == nil then fail("chat/main.roc: no served_by") end
 local serve_arms = arms(all["chat.zig"], "serve")
 local tail_arms = arms(all["chat.zig"], "topicRoute")
 local roc_routes = 0
 local zig_routes = 0
-print("== routes (chat/main.roc roc_serves; Zig's arm in chat.zig)")
+print("== routes (chat/main.roc served_by; Zig's arm in chat.zig)")
 for fam in tags(route_text, "Family") do
   local variants = {}
   if fam == "Dm" or fam == "Channel" then

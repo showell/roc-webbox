@@ -46,7 +46,7 @@
 
 - **`roc_hunt/zig_census.shale`** — how much of the chat is still Zig,
   from angry-gopher's zig-server (`gopher=`, a mount path): each route
-  Roc's or Zig's (main.roc's `roc_serves`, evaluated over its tree), each
+  Roc's or Zig's (main.roc's `served_by`, evaluated over its tree), each
   hosted function's Zig answer sized and classed, the chat's Zig called
   from outside it, what no live root reaches (twins and tests are not
   live), and the number to watch: live chat Zig against chat Roc.
