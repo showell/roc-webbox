@@ -130,7 +130,7 @@ call = |req| {
 		51 => Paths.member_channels(flat_rosters(req.args, 1, []), arg(0))
 		52 => [ChatState.bookmark(file(arg(0), arg(1)))]
 		53 => [bool(ChatState.changed(file(arg(0), arg(1)), arg(2))), ChatState.bookmark_line(arg(2))]
-		54 => [ChatState.last_conv_path(arg(0)), ChatState.last_session_path(arg(0), arg(1)), ChatState.pinned_path(arg(0), arg(1)), Feeds.path(arg(0), Images), Feeds.path(arg(0), Code)]
+		54 => List.map([Paths.last_conv_path(arg(0)), Paths.last_session_path(arg(0), arg(1)), Paths.pinned_path(arg(0), arg(1)), Paths.feed_path(arg(0), Images), Paths.feed_path(arg(0), Code)], Paths.bytes)
 		55 => Paths.topics(entries(req.args, 0, []))
 		56 =>
 			match Paths.channel_members(arg(0)) {
@@ -146,7 +146,7 @@ call = |req| {
 			got = Paths.rosters(names, reads(req.args, 1 + n, []))
 			List.join([[num(List.len(got.malformed))], got.malformed, List.join(List.map(got.rosters, |r| List.concat([r.name, num(List.len(r.members))], r.members)))])
 		}
-		59 => [Paths.sessions_dir(Paths.dm_conv_dir(arg(0))), Paths.sessions_dir(Paths.channel_conv_dir(arg(1))), Paths.channel_path(arg(1)), Paths.reactions_path(Paths.dm_conv_dir(arg(0)), arg(2))]
+		59 => [Paths.sessions_dir(Paths.dm_conv_dir(arg(0))), Paths.sessions_dir(Paths.channel_conv_dir(arg(1))), Paths.bytes(Paths.channel_path(arg(1))), Paths.bytes(Paths.reactions_path(Paths.dm_conv_dir(arg(0)), arg(2)))]
 		60 => {
 			# The ids asked, then the accounts (`accounts`): each id's exists
 			# and its name (`ok, name`, or the failure `unreadable`), then the

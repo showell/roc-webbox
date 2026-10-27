@@ -62,18 +62,6 @@ ChatState := [].{
 	parse : List(U8) -> List(List(U8))
 	parse = |b| List.drop_if(List.map(Bytes.split_byte(b, '\n'), ZigText.trim), |s| s == [])
 
-	## The member's DM last in (lastUserConv's file).
-	last_conv_path : List(U8) -> List(U8)
-	last_conv_path = |uid| Paths.join([Str.to_utf8("users"), uid, Str.to_utf8("last-conv")])
-
-	## The topic the member last viewed in DM `conv` (lastViewedTopic's file).
-	last_session_path : List(U8), List(U8) -> List(U8)
-	last_session_path = |uid, conv| Paths.join([Str.to_utf8("users"), uid, Str.to_utf8("last-sessions"), conv])
-
-	## The member's pins in `conv` (pinnedTopics's file).
-	pinned_path : List(U8), List(U8) -> List(U8)
-	pinned_path = |uid, conv| Paths.join([Str.to_utf8("users"), uid, Str.to_utf8("pinned-sessions"), conv])
-
 	## lastUserConv's and lastViewedTopic's reading of a bookmark: the file
 	## trimmed of spaces, tabs, CRs and newlines; "" when there is none (or
 	## it failed, the request failing with it).

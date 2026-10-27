@@ -131,14 +131,48 @@ Paths := [].{
 	topics = |entries|
 		Bytes.sort(List.keep_oks(entries, |e| if e.kind == Dir Err(None) else cut_suffix(e.name, Str.to_utf8(".md"))))
 
+	## **A FILE UNDER THE CHAT ROOT, NAMED HERE**: opaque (`::`), so only
+	## this module makes one, and Files.roc, the one module that reaches the
+	## disk, takes nothing else.
+	ChatPath :: List(U8)
+
+	## The path's bytes, as the host takes them.
+	bytes : ChatPath -> List(U8)
+	bytes = |ChatPath.(b)| b
+
 	## A topic's reaction sidecar (reactionsPath):
 	## {conv_dir}/sessions/<sid>.reactions.jsonl.
-	reactions_path : List(U8), List(U8) -> List(U8)
-	reactions_path = |conv_dir, sid| join([conv_dir, Str.to_utf8("sessions"), List.concat(sid, Str.to_utf8(".reactions.jsonl"))])
+	reactions_path : List(U8), List(U8) -> ChatPath
+	reactions_path = |conv_dir, sid| ChatPath.(join([conv_dir, Str.to_utf8("sessions"), List.concat(sid, Str.to_utf8(".reactions.jsonl"))]))
 
 	## Channel `name`'s member file (channelMembers's): channels/<name>.channel.
-	channel_path : List(U8) -> List(U8)
-	channel_path = |name| join([Str.to_utf8("channels"), List.concat(name, Str.to_utf8(".channel"))])
+	channel_path : List(U8) -> ChatPath
+	channel_path = |name| ChatPath.(join([Str.to_utf8("channels"), List.concat(name, Str.to_utf8(".channel"))]))
+
+	## The member's DM last in (lastUserConv's file): users/<uid>/last-conv.
+	last_conv_path : List(U8) -> ChatPath
+	last_conv_path = |uid| ChatPath.(join([Str.to_utf8("users"), uid, Str.to_utf8("last-conv")]))
+
+	## The topic the member last viewed in DM `conv` (lastViewedTopic's
+	## file): users/<uid>/last-sessions/<conv>.
+	last_session_path : List(U8), List(U8) -> ChatPath
+	last_session_path = |uid, conv| ChatPath.(join([Str.to_utf8("users"), uid, Str.to_utf8("last-sessions"), conv]))
+
+	## The member's pins in `conv` (pinnedTopics's file):
+	## users/<uid>/pinned-sessions/<conv>.
+	pinned_path : List(U8), List(U8) -> ChatPath
+	pinned_path = |uid, conv| ChatPath.(join([Str.to_utf8("users"), uid, Str.to_utf8("pinned-sessions"), conv]))
+
+	## The member's feed file: users/<uid>/images.md or code.md, where
+	## images_store and code_store keep them.
+	feed_path : List(U8), [Images, Code] -> ChatPath
+	feed_path = |uid, which| {
+		name = match which {
+			Images => "images.md"
+			Code => "code.md"
+		}
+		ChatPath.(join([Str.to_utf8("users"), uid, Str.to_utf8(name)]))
+	}
 
 	## **A CHANNEL'S MEMBERS** (channelMembers): one uid a line, each line
 	## trimmed of spaces, tabs and CRs, blank lines and `#` lines skipped.
@@ -192,8 +226,8 @@ Paths := [].{
 	roster : List(U8), [Found(List(U8)), Missing, Failed] -> [Listed(Roster), Malformed, Gone, Failed]
 	roster = |name, file|
 		match file {
-			Found(bytes) =>
-				match channel_members(bytes) {
+			Found(stored) =>
+				match channel_members(stored) {
 					Ok(members) => Listed({ name, members })
 					Err(Malformed) => Malformed
 				}

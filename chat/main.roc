@@ -38,6 +38,7 @@ import Uid
 import Feeds
 import Recent
 import ChatState
+import Files
 import Conversation
 import Accounts
 import Frame
@@ -157,7 +158,7 @@ in_topic! = |req, route, found| {
 			} else {
 				# readReactions's: nobody has reacted yet is no events.
 				ndjson = Str.to_utf8("application/x-ndjson; charset=utf-8")
-				match read!(Paths.reactions_path(conv_dir(conv.family, conv.key), route.sid)) {
+				match Files.read!(Paths.reactions_path(conv_dir(conv.family, conv.key), route.sid)) {
 					Found(bytes) => Chat.respond(200, ndjson, bytes)
 					Missing => Chat.respond(200, ndjson, [])
 					Failed => Chat.answered
@@ -273,7 +274,7 @@ unreadable! = |why|
 ## failed it already.
 channel_members! : List(U8) => List(List(U8))
 channel_members! = |name|
-	match read!(Paths.channel_path(name)) {
+	match Files.read!(Paths.channel_path(name)) {
 		Found(bytes) =>
 			match Paths.channel_members(bytes) {
 				Ok(members) => members
@@ -307,7 +308,7 @@ rosters! = |names, i, out|
 	match List.get(names, i) {
 		Err(_) => Ok(out)
 		Ok(name) =>
-			match Paths.roster(name, read!(Paths.channel_path(name))) {
+			match Paths.roster(name, Files.read!(Paths.channel_path(name))) {
 				Listed(r) => rosters!(names, i + 1, List.append(out, r))
 				Malformed => {
 					Host.malformed_channel!(name)
@@ -370,8 +371,8 @@ title! = |conv, who|
 ## is unknown, and writing it would drop every pin. False when a step failed.
 pin! : Chat.Conv, List(U8), ChatState.Pin => Bool
 pin! = |conv, sid, pin| {
-	path = ChatState.pinned_path(Host.me!({}), conv.key)
-	match read!(path) {
+	path = Paths.pinned_path(Host.me!({}), conv.key)
+	match Files.read!(path) {
 		Found(stored) => repin!(path, stored, sid, pin)
 		Missing => repin!(path, [], sid, pin)
 		Failed => Bool.False
@@ -380,24 +381,12 @@ pin! = |conv, sid, pin| {
 
 ## The pinned file at `path`, read as `stored`, with `sid` pinned or
 ## unpinned: written back, or, emptied, removed.
-repin! : List(U8), List(U8), List(U8), ChatState.Pin => Bool
+repin! : Paths.ChatPath, List(U8), List(U8), ChatState.Pin => Bool
 repin! = |path, stored, sid, pin|
 	match ChatState.pinned(stored, sid, pin) {
-		Write(bytes) => Host.write!(path, bytes)
-		Remove => Host.remove!(path)
+		Write(bytes) => Host.write!(Paths.bytes(path), bytes)
+		Remove => Host.remove!(Paths.bytes(path))
 	}
-
-## Host.read!'s answer as one tag: the file's bytes, nothing there, or a
-## read that failed (the request has failed: what follows writes nothing).
-read! : List(U8) => [Found(List(U8)), Missing, Failed]
-read! = |path| {
-	got = Host.read!(path)
-	match got.status {
-		Found => Found(got.bytes)
-		Missing => Missing
-		Failed => Failed
-	}
-}
 
 ## **WHERE THE MEMBER RESUMES DM `conv`: TOPIC `sid`** (setLastViewedTopic):
 ## the topic last viewed there first, then the DM last in, each written
@@ -409,8 +398,8 @@ bookmark! = |conv, sid| {
 	me = Host.me!({})
 	if me == [] or sid == [] {
 		Bool.True
-	} else if write_if_changed!(ChatState.last_session_path(me, conv.key), sid) {
-		write_if_changed!(ChatState.last_conv_path(me), conv.key)
+	} else if write_if_changed!(Paths.last_session_path(me, conv.key), sid) {
+		write_if_changed!(Paths.last_conv_path(me), conv.key)
 	} else {
 		Bool.False
 	}
@@ -419,9 +408,9 @@ bookmark! = |conv, sid| {
 ## **WRITTEN ONLY WHEN IT CHANGES** (zig-metal-unikernel 153(1)): on every
 ## send and view the value is usually the one already there, and a write is
 ## disk requests each time.
-write_if_changed! : List(U8), List(U8) => Bool
+write_if_changed! : Paths.ChatPath, List(U8) => Bool
 write_if_changed! = |path, value|
-	if ChatState.changed(read!(path), value) Host.write!(path, ChatState.bookmark_line(value)) else Bool.True
+	if ChatState.changed(Files.read!(path), value) Host.write!(Paths.bytes(path), ChatState.bookmark_line(value)) else Bool.True
 
 ## POST .../react: the form, then the reaction stored and sent live.
 react! : Chat.Conv, Who, List(U8) => Chat.Answer
@@ -469,7 +458,7 @@ reacted! = |conv, who, sid, r|
 						# can fail between the append and the publish.
 						key = List.join([conv.key, ['/'], sid])
 						frame = Frame.reaction(line)
-						if Host.append_line!(Paths.reactions_path(conv_dir(conv.family, conv.key), sid), line) {
+						if Host.append_line!(Paths.bytes(Paths.reactions_path(conv_dir(conv.family, conv.key), sid)), line) {
 							# **STORED IS DONE**: the live publish cannot fail.
 							Host.publish!(key, frame)
 							Stored
@@ -534,7 +523,7 @@ feed! = |which, rest|
 			Ok(viewer) => {
 				# A feed that failed is the request's failure; the page made
 				# of nothing is not sent.
-				file = match read!(Feeds.path(Host.me!({}), which)) {
+				file = match Files.read!(Paths.feed_path(Host.me!({}), which)) {
 					Found(bytes) => bytes
 					Missing | Failed => []
 				}
@@ -616,7 +605,7 @@ sidebar! = |sid, at| {
 							match channel_rosters!({}) {
 								Err(Failed) => Err(Failed)
 								Ok(rosters) =>
-									match read!(ChatState.pinned_path(me, at.conv.key)) {
+									match Files.read!(Paths.pinned_path(me, at.conv.key)) {
 										Failed => Err(Failed)
 										Found(stored) => Ok((viewer, sidebar_of(me, sid, at, with_online(others, flags), Paths.member_channels(rosters, me), ChatState.pins(stored))))
 										Missing => Ok((viewer, sidebar_of(me, sid, at, with_online(others, flags), Paths.member_channels(rosters, me), [])))
@@ -647,7 +636,7 @@ json = Str.to_utf8("application/json; charset=utf-8")
 resume! : {} => Chat.Answer
 resume! = |{}| {
 	me = Host.me!({})
-	conv = ChatState.bookmark(read!(ChatState.last_conv_path(me)))
+	conv = ChatState.bookmark(Files.read!(Paths.last_conv_path(me)))
 	if conv == [] or !Paths.participant(conv, Uid.from_bytes(me)) {
 		match viewer!(Unasked) {
 			Ok(viewer) => Chat.respond(200, html, Pages.no_conversations(Chrome.src_in(Host.srcs!({})), viewer))
@@ -667,7 +656,7 @@ resume! = |{}| {
 ## ChatState's, the last-viewed topic and the clock the host's.
 resume_at! : List(U8), List(List(U8)) => List(U8)
 resume_at! = |conv, topics| {
-	last = ChatState.bookmark(read!(ChatState.last_session_path(Host.me!({}), conv)))
+	last = ChatState.bookmark(Files.read!(Paths.last_session_path(Host.me!({}), conv)))
 	ChatState.resume_topic(topics, last, Host.now!({}))
 }
 
