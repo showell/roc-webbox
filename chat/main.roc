@@ -1011,11 +1011,10 @@ appended! = |conv, who, { at: topic_at, name, markdown: md, cid }|
 	} else {
 		topic = topic_at.topic
 		counted = Host.message_count!(conv, topic.to_utf8())
-		match counted.status {
-			Failed => Bool.False
-			Counted => {
+		match (counted.status, me!({})) {
+			(Counted, Ok(me)) => {
 				index = counted.count
-				uid = Host.me!({})
+				uid = me.to_str().to_utf8()
 				# A count of the largest U64 has no next number: the call
 				# crashes into a 500, storing nothing.
 				id = "${topic}_${U64.to_str(index + 1)}".to_utf8()
@@ -1038,8 +1037,8 @@ appended! = |conv, who, { at: topic_at, name, markdown: md, cid }|
 						# the request's already (`find!`); asked here only were
 						# they not, before anything is stored.
 						named = if Paths.conv_kind(topic_at.key) == Dm accounts!(who) else Ok([])
-						match (named, me!({}), members!(conv.members)) {
-							(Ok(all), Ok(me), Ok(members)) => {
+						match (named, members!(conv.members)) {
+							(Ok(all), Ok(members)) => {
 								frame = Frame.message({ index, from: name, from_uid: me, at: message.at, html: rendered.html, markdown: md, id, cid })
 								steps = Fanout.steps({ key: topic_at.key, members, topic, index, id, from: name, at: message.at, uid: me, accounts: all }, Fanout.parts_of(md))
 								if Host.store_message!(conv, topic.to_utf8(), block, index, message) {
@@ -1060,6 +1059,7 @@ appended! = |conv, who, { at: topic_at, name, markdown: md, cid }|
 					}
 				}
 			}
+			_ => Bool.False
 		}
 	}
 
