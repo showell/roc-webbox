@@ -310,6 +310,50 @@ maybe = |t| match t {
 	Err(None) => []
 }
 
-## The scripts' srcs, as `name, src` pairs from argument `from` on.
-srcs : List(List(U8)), U64 -> (List(U8) -> List(U8))
-srcs = |args, from| Chrome.src_in(List.drop_first(args, from))
+## The scripts' srcs, from `name, src` pairs from argument `from` on, the
+## twin test's (one per chat asset).
+srcs : List(List(U8)), U64 -> Chrome.Srcs
+srcs = |args, from| {
+	named = List.drop_first(args, from)
+	at = |name| src_of(named, Str.to_utf8(name), 0)
+	{
+		chat: at("chat.js"),
+		chat_add_topic: at("chat_add_topic.js"),
+		chat_code_popup: at("chat_code_popup.js"),
+		chat_compose: at("chat_compose.js"),
+		chat_drag_to_pin: at("chat_drag_to_pin.js"),
+		chat_emoji: at("chat_emoji.js"),
+		chat_first_topic: at("chat_first_topic.js"),
+		chat_help: at("chat_help.js"),
+		chat_image_popup: at("chat_image_popup.js"),
+		chat_left_sidebar: at("chat_left_sidebar.js"),
+		chat_reactions: at("chat_reactions.js"),
+		chat_responsive: at("chat_responsive.js"),
+		chat_right_sidebar: at("chat_right_sidebar.js"),
+		chat_save_popup: at("chat_save_popup.js"),
+		chat_search: at("chat_search.js"),
+		chat_theme: at("chat_theme.js"),
+		chat_time_popup: at("chat_time_popup.js"),
+		chrome_drawer: at("chrome_drawer.js"),
+		code: at("code.js"),
+		colors: at("colors.js"),
+		docs: at("docs.js"),
+		images: at("images.js"),
+		message: at("message.js"),
+		message_view: at("message_view.js"),
+		middle_pane: at("middle_pane.js"),
+		nav_stack: at("nav_stack.js"),
+		notify: at("notify.js"),
+		recent: at("recent.js"),
+		styles: at("styles.js"),
+		viewport: at("viewport.js"),
+	}
+}
+
+## `name`'s src in `name, src` pairs; a name not there crashes the twin.
+src_of : List(List(U8)), List(U8), U64 -> List(U8)
+src_of = |named, name, i| match (List.get(named, i), List.get(named, i + 1)) {
+	(Ok(n), Ok(src)) if n == name => src
+	(Ok(_), Ok(_)) => src_of(named, name, i + 2)
+	_ => crash "twin: no src named in the pairs"
+}

@@ -70,6 +70,40 @@ pub const AppendRec = extern struct { fault: u16, status: route_mod.AppendStatus
 /// THEN THE LIST**, though all are 8-aligned: the pinned Roc lays it out so,
 /// and the seam's probe (`/limits`, every field its own number) holds it.
 pub const LimitsRec = extern struct { image_max: u64, search_min: u64, video_max: u64, accept: RocBytes };
+/// Host.roc's `srcs!` answer, one `List(U8)` per script: all alike, so
+/// **LAID OUT BY NAME**, as `Srcs` declares them.
+pub const SrcsRec = extern struct {
+    chat: RocBytes,
+    chat_add_topic: RocBytes,
+    chat_code_popup: RocBytes,
+    chat_compose: RocBytes,
+    chat_drag_to_pin: RocBytes,
+    chat_emoji: RocBytes,
+    chat_first_topic: RocBytes,
+    chat_help: RocBytes,
+    chat_image_popup: RocBytes,
+    chat_left_sidebar: RocBytes,
+    chat_reactions: RocBytes,
+    chat_responsive: RocBytes,
+    chat_right_sidebar: RocBytes,
+    chat_save_popup: RocBytes,
+    chat_search: RocBytes,
+    chat_theme: RocBytes,
+    chat_time_popup: RocBytes,
+    chrome_drawer: RocBytes,
+    code: RocBytes,
+    colors: RocBytes,
+    docs: RocBytes,
+    images: RocBytes,
+    message: RocBytes,
+    message_view: RocBytes,
+    middle_pane: RocBytes,
+    nav_stack: RocBytes,
+    notify: RocBytes,
+    recent: RocBytes,
+    styles: RocBytes,
+    viewport: RocBytes,
+};
 /// Host.roc's `online!` answer, `List([Offline, Online])`: its elements one
 /// byte each, so laid out as a `List(U8)` is.
 pub const PresenceList = RocBytes;
@@ -205,6 +239,58 @@ pub const Appended = union(route_mod.AppendStatus) { appended, failed: anyerror 
 /// constants, never copied into the Roc.
 pub const Limits = struct { image_max: u64, video_max: u64, accept: []const u8, search_min: u64 };
 
+/// **WHERE A PAGE NAMES EACH SCRIPT** (Host.srcs!): one field per chat
+/// script, named for its file without `.js`. **DECLARED BY NAME**, the
+/// order Roc lays the record out in (`SrcsRec`).
+pub const Srcs = struct {
+    chat: []const u8,
+    chat_add_topic: []const u8,
+    chat_code_popup: []const u8,
+    chat_compose: []const u8,
+    chat_drag_to_pin: []const u8,
+    chat_emoji: []const u8,
+    chat_first_topic: []const u8,
+    chat_help: []const u8,
+    chat_image_popup: []const u8,
+    chat_left_sidebar: []const u8,
+    chat_reactions: []const u8,
+    chat_responsive: []const u8,
+    chat_right_sidebar: []const u8,
+    chat_save_popup: []const u8,
+    chat_search: []const u8,
+    chat_theme: []const u8,
+    chat_time_popup: []const u8,
+    chrome_drawer: []const u8,
+    code: []const u8,
+    colors: []const u8,
+    docs: []const u8,
+    images: []const u8,
+    message: []const u8,
+    message_view: []const u8,
+    middle_pane: []const u8,
+    nav_stack: []const u8,
+    notify: []const u8,
+    recent: []const u8,
+    styles: []const u8,
+    viewport: []const u8,
+
+    /// Every script with no src: what a host that has none answers.
+    pub const none: Srcs = blk: {
+        var s: Srcs = undefined;
+        for (std.meta.fieldNames(Srcs)) |n| @field(s, n) = "";
+        break :blk s;
+    };
+};
+
+comptime {
+    const names = std.meta.fieldNames(Srcs);
+    for (names[1..], names[0 .. names.len - 1]) |n, prev|
+        if (std.mem.order(u8, prev, n) != .lt) @compileError("Srcs is not declared by name: Roc lays the record out so");
+    const rec = std.meta.fieldNames(SrcsRec);
+    if (rec.len != names.len) @compileError("SrcsRec and Srcs differ");
+    for (names, rec) |n, r| if (!std.mem.eql(u8, n, r)) @compileError("SrcsRec and Srcs differ at " ++ n);
+}
+
 /// Which of an account's reads a lookup needed, and failed on: its kind
 /// (the password's stat) or its name.
 pub const AccountRead = enum { kind, name };
@@ -295,7 +381,7 @@ pub const Host = struct {
     /// Host.limits!: the limits the upload and search code enforce.
     limits: *const fn (ctx: *anyopaque) Limits = noLimits,
     /// Host.srcs!: where a page names each script, as `name, src` pairs.
-    srcs: *const fn (ctx: *anyopaque) []const []const u8 = noSrcs,
+    srcs: *const fn (ctx: *anyopaque) Srcs = noSrcs,
     /// Host.me!: the member's id.
     me: *const fn (ctx: *anyopaque) []const u8 = noBytes,
     /// Host.now!: the request's time, Unix seconds.
@@ -412,7 +498,7 @@ fn noLimits(_: *anyopaque) Limits {
 fn noList(_: *anyopaque) []const []const u8 {
     @panic("a hosted list asked of a host that does not answer it");
 }
-fn noSrcs(_: *anyopaque) []const []const u8 {
+fn noSrcs(_: *anyopaque) Srcs {
     @panic("srcs asked of a host that does not answer it");
 }
 var host: ?Host = null;
@@ -437,13 +523,16 @@ pub const Routing = struct {
         h.accounts = noAccount;
         h.read = noFile;
         h.list = noFolder;
-        h.srcs = nothing;
+        h.srcs = noScripts;
         h.links = holdsNone;
         h.recent = nothing;
         return h;
     }
     fn of(ctx: *anyopaque) *Routing {
         return @ptrCast(@alignCast(ctx));
+    }
+    fn noScripts(_: *anyopaque) Srcs {
+        return .none;
     }
     fn ask(ctx: *anyopaque) bool {
         of(ctx).asked = true;
@@ -721,9 +810,12 @@ export fn roc_chat_links() callconv(.c) bool {
     return h.links(h.ctx);
 }
 
-export fn roc_chat_srcs() callconv(.c) roc.RocBytesList {
+export fn roc_chat_srcs() callconv(.c) SrcsRec {
     const h = current("srcs");
-    return .from(h.srcs(h.ctx));
+    const s = h.srcs(h.ctx);
+    var rec: SrcsRec = undefined;
+    inline for (comptime std.meta.fieldNames(Srcs)) |n| @field(rec, n) = .from(@field(s, n));
+    return rec;
 }
 
 // ── a crash is a 500 (docs/ROC-CHAT.md R3, P9) ─────────────────────────────

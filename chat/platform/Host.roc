@@ -109,9 +109,9 @@ Host := [].{
 	## them.
 	limits! : {} => { image_max : U64, video_max : U64, accept : List(U8), search_min : U64 }
 
-	## Where a page names each script, as `name, src` pairs (a src's hash is
-	## of bytes the host holds).
-	srcs! : {} => List(List(U8))
+	## Where a page names each script, a field per script named for its file
+	## without `.js` (a src's hash is of bytes the host holds).
+	srcs! : {} => { chat : List(U8), chat_add_topic : List(U8), chat_code_popup : List(U8), chat_compose : List(U8), chat_drag_to_pin : List(U8), chat_emoji : List(U8), chat_first_topic : List(U8), chat_help : List(U8), chat_image_popup : List(U8), chat_left_sidebar : List(U8), chat_reactions : List(U8), chat_responsive : List(U8), chat_right_sidebar : List(U8), chat_save_popup : List(U8), chat_search : List(U8), chat_theme : List(U8), chat_time_popup : List(U8), chrome_drawer : List(U8), code : List(U8), colors : List(U8), docs : List(U8), images : List(U8), message : List(U8), message_view : List(U8), middle_pane : List(U8), nav_stack : List(U8), notify : List(U8), recent : List(U8), styles : List(U8), viewport : List(U8) }
 
 	## **AFTER A FAILURE THE HOST DOES NOTHING MORE** for the call: a hosted
 	## function the Roc calls once one has failed answers empty, false or

@@ -12,7 +12,11 @@ Chrome := [].{
 
 	## What a page's chrome says: its tab title, its title, who is looking,
 	## the sub-nav's bold one (none for "") and where each script is.
-	Shell : { tab : List(U8), title : List(U8), viewer : List(U8), active : List(U8), src : List(U8) -> List(U8) }
+	Shell : { tab : List(U8), title : List(U8), viewer : List(U8), active : List(U8), src : Srcs }
+
+	## Where a page names each script (the host's `srcs!`), a field per
+	## script named for its file without `.js`.
+	Srcs : { chat : List(U8), chat_add_topic : List(U8), chat_code_popup : List(U8), chat_compose : List(U8), chat_drag_to_pin : List(U8), chat_emoji : List(U8), chat_first_topic : List(U8), chat_help : List(U8), chat_image_popup : List(U8), chat_left_sidebar : List(U8), chat_reactions : List(U8), chat_responsive : List(U8), chat_right_sidebar : List(U8), chat_save_popup : List(U8), chat_search : List(U8), chat_theme : List(U8), chat_time_popup : List(U8), chrome_drawer : List(U8), code : List(U8), colors : List(U8), docs : List(U8), images : List(U8), message : List(U8), message_view : List(U8), middle_pane : List(U8), nav_stack : List(U8), notify : List(U8), recent : List(U8), styles : List(U8), viewport : List(U8) }
 
 	## page() then Page.bytes(): the shell, `body`, and the shell closed.
 	page : Shell, List(U8) -> List(U8)
@@ -23,7 +27,7 @@ Chrome := [].{
 			Str.to_utf8(head_b1),
 			Str.to_utf8(top_bar_css),
 			Str.to_utf8(head_b2),
-			fill(head_scripts, [(s.src)(Str.to_utf8("colors.js")), (s.src)(Str.to_utf8("viewport.js")), (s.src)(Str.to_utf8("chat_theme.js")), (s.src)(Str.to_utf8("chrome_drawer.js"))]),
+			fill(head_scripts, [s.src.colors, s.src.viewport, s.src.chat_theme, s.src.chrome_drawer]),
 			fill(top_a, [Html.escape(s.title)]),
 			nav(s.active),
 			fill(top_b, [Html.escape(s.viewer)]),
@@ -32,9 +36,9 @@ Chrome := [].{
 			Str.to_utf8("</div></body></html>"),
 		])
 
-	## `<script src="..."></script>` for `name`.
-	script : Shell, Str -> List(U8)
-	script = |s, name| List.join([Str.to_utf8("<script src=\""), (s.src)(Str.to_utf8(name)), Str.to_utf8("\"></script>")])
+	## `<script src="..."></script>` for a script's `src`.
+	script : List(U8) -> List(U8)
+	script = |src| List.join([Str.to_utf8("<script src=\""), src, Str.to_utf8("\"></script>")])
 
 	## The sub-nav, " · " between, the `active` one bold and not a link.
 	nav : List(U8) -> List(U8)
@@ -43,17 +47,6 @@ Chrome := [].{
 		links = List.map(items, |(href, label, key)|
 			if Str.to_utf8(key) == active Str.to_utf8("<strong>${label}</strong>") else Str.to_utf8("<a href=\"${href}\">${label}</a>"))
 		List.join(List.intersperse(links, Str.to_utf8(" · ")))
-	}
-
-	## A script's src from `name, src` pairs (the host's `srcs!`), or none.
-	src_in : List(List(U8)) -> (List(U8) -> List(U8))
-	src_in = |pairs| |name| find_src(pairs, name, 0)
-
-	find_src : List(List(U8)), List(U8), U64 -> List(U8)
-	find_src = |pairs, name, i| match List.get(pairs, i) {
-		Ok(n) if n == name => List.get(pairs, i + 1) ?? []
-		Ok(_) => find_src(pairs, name, i + 2)
-		Err(_) => []
 	}
 
 	## A template with each `{s}` slot filled in turn.
