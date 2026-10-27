@@ -221,13 +221,14 @@ in_topic! = |req, route, found| {
 find! : Paths.ConvKey => Try((Chat.Conv, Who), [NotYours, Failed])
 find! = |key| {
 	bytes = Paths.conv_key_bytes(key)
+	me = me!({})?
 	match key {
 		Dm(pair) =>
-			match Conversation.dm_other(pair, Uid.from_bytes(Host.me!({}))) {
+			match Conversation.dm_other(pair, me) {
 				Ok(other) =>
 					match accounts!(Unasked) {
 						Ok(all) =>
-							if Accounts.exists(all, Uid.to_bytes(other)) {
+							if Accounts.exists(all, other) {
 								Ok(({ family: Dm, key: bytes, base: Conversation.dm_base(bytes), members: Conversation.dm_members(bytes) }, Known(all)))
 							} else {
 								Err(NotYours)
@@ -238,7 +239,7 @@ find! = |key| {
 			}
 		Channel(name) => {
 			members = channel_members!(name)
-			if List.contains(members, Host.me!({})) {
+			if List.contains(members, me.to_str().to_utf8()) {
 				Ok(({ family: Channel, key: bytes, base: Conversation.channel_base(bytes), members }, Unasked))
 			} else {
 				Err(NotYours)
@@ -273,11 +274,28 @@ accounts! = |who|
 ## The member's name (getUserName of their own id), from the accounts.
 ## `Failed` when it would not read (the request has failed with its error).
 viewer! : Who => Try(List(U8), [Failed])
-viewer! = |who|
+viewer! = |who| {
+	me = me!({})?
 	match accounts!(who) {
-		Ok(all) => named!(Accounts.name(all, Host.me!({})))
+		Ok(all) => named!(Accounts.name(all, me.to_str().to_utf8()))
 		Err(Failed) => Err(Failed)
 	}
+}
+
+## **THE MEMBER'S ID, DECODED WHERE THE HOST HANDS IT** (Host.me!): a
+## session is signed only for an id a counter made, so one that is no
+## canonical uid fails the request (NotUtf8, about the id), and `Failed`.
+me! : {} => Try(Uid, [Failed])
+me! = |{}| {
+	bytes = Host.me!({})
+	match Uid.from_str(Str.from_utf8(bytes) ?? "") {
+		Ok(uid) => Ok(uid)
+		Err(NotAUid) => {
+			Host.fail!(NotUtf8, bytes)
+			Err(Failed)
+		}
+	}
+}
 
 ## A lookup's answer, or, when it needed an account's read that failed, the
 ## request failed with that read's error (`unreadable!`) and `Failed`.
@@ -389,7 +407,7 @@ title! = |conv, who|
 	if conv.family == Dm {
 		match accounts!(who) {
 			Ok(all) => {
-				other = Uid.to_bytes(Conversation.partner(conv.key, Uid.from_bytes(Host.me!({}))))
+				other = Conversation.partner(conv.key, me!({})?)
 				match named!(Accounts.name(all, other)) {
 					Ok(name) => Ok(Conversation.dm_title(name, other))
 					Err(Failed) => Err(Failed)
@@ -407,7 +425,7 @@ title! = |conv, who|
 ## is unknown, and writing it would drop every pin. `Failed` when a step failed.
 pin! : Paths.ConvKey, Str, ChatState.Pin => Try({}, [Failed])
 pin! = |key, topic, pin| {
-	path = Paths.pinned_path(Uid.from_bytes(Host.me!({})), key)
+	path = Paths.pinned_path(me!({})?, key)
 	match text_bytes!(path) {
 		Ok(stored) => repin!(path, stored, topic, pin)
 		Err(Missing) => repin!(path, [], topic, pin)
@@ -427,15 +445,14 @@ repin! = |path, stored, topic, pin|
 ## **WHERE THE MEMBER RESUMES DM `conv`: TOPIC `topic`** (setLastViewedTopic):
 ## the topic last viewed there first, then the DM last in, each written
 ## only when it changed (ChatState.changed); `Failed` when a step failed,
-## and nothing after it is written. A member or topic with no name records
-## nothing.
+## and nothing after it is written. A topic with no name records nothing.
 bookmark! : Paths.ConvKey, Str => Try({}, [Failed])
 bookmark! = |key, topic| {
-	me = Host.me!({})
-	if me == [] or topic.is_empty() {
+	me = me!({})?
+	if topic.is_empty() {
 		Ok({})
 	} else {
-		write_if_changed!(Paths.last_session_path(Uid.from_bytes(me), key), topic.to_utf8())?
+		write_if_changed!(Paths.last_session_path(me, key), topic.to_utf8())?
 		write_if_changed!(Paths.last_conv_path(me), Paths.conv_key_bytes(key))
 	}
 }
@@ -522,11 +539,11 @@ links! = |rest|
 	if rest != [] {
 		Chat.not_found
 	} else {
-		match viewer!(Unasked) {
-			Err(Failed) => Chat.answered
-			Ok(viewer) => {
+		match (viewer!(Unasked), me!({})) {
+			(Err(Failed), _) | (Ok(_), Err(Failed)) => Chat.answered
+			(Ok(viewer), Ok(me)) => {
 				src = Chrome.src_in(Host.srcs!({}))
-				if Files.held_rendered!(Paths.links_path(Host.me!({}))) {
+				if Files.held_rendered!(Paths.links_path(me)) {
 					(before, after) = Pages.links_around(src, viewer)
 					Chat.held_html(before, after)
 				} else {
@@ -560,12 +577,12 @@ feed! = |which, rest|
 	if rest != [] {
 		Chat.not_found
 	} else {
-		match viewer!(Unasked) {
-			Err(Failed) => Chat.answered
-			Ok(viewer) => {
+		match (viewer!(Unasked), me!({})) {
+			(Err(Failed), _) | (Ok(_), Err(Failed)) => Chat.answered
+			(Ok(viewer), Ok(me)) => {
 				# A feed that failed is the request's failure; the page made
 				# of nothing is not sent.
-				file = match text_bytes!(Paths.feed_path(Host.me!({}), which)) {
+				file = match text_bytes!(Paths.feed_path(me, which)) {
 					Ok(bytes) => bytes
 					Err(Missing) | Err(Failed) => []
 				}
@@ -632,7 +649,8 @@ page! = |route, at|
 ## THAT WILL NOT READ IS NEVER NO PINS.**
 sidebar! : List(U8), AtTopic => Try((List(U8), Pages.Sidebar), [Failed])
 sidebar! = |topic, at| {
-	me = Host.me!({})
+	uid = me!({})?
+	me = uid.to_str().to_utf8()
 	match accounts!(at.who) {
 		Err(Failed) => Err(Failed)
 		Ok(all) =>
@@ -647,7 +665,7 @@ sidebar! = |topic, at| {
 							match channel_rosters!({}) {
 								Err(Failed) => Err(Failed)
 								Ok(rosters) =>
-									match text_bytes!(Paths.pinned_path(Uid.from_bytes(me), at.key)) {
+									match text_bytes!(Paths.pinned_path(uid, at.key)) {
 										Err(Failed) => Err(Failed)
 										Ok(stored) => Ok((viewer, sidebar_of(me, topic, at, with_online(others, flags), Paths.member_channels(rosters, me), ChatState.pins(stored))))
 										Err(Missing) => Ok((viewer, sidebar_of(me, topic, at, with_online(others, flags), Paths.member_channels(rosters, me), [])))
@@ -676,36 +694,39 @@ json = Str.to_utf8("application/json; charset=utf-8")
 ## /chat: the member's last DM, at the topic they resume, or its own page
 ## when it has no topic yet; with none, the empty /chat.
 resume! : {} => Chat.Answer
-resume! = |{}| {
-	me = Host.me!({})
-	conv = ChatState.bookmark(text_bytes!(Paths.last_conv_path(me)))
-	# The bookmark's bytes are text_bytes!'s, so they decode (its door).
-	pair_of = match Str.from_utf8(conv) {
-		Ok(text) => Paths.pair_key_from_str(text)
-		Err(_) => Err(Invalid)
-	}
-	match pair_of {
-		Ok(pair) if Paths.is_participant(pair, Uid.from_bytes(me)) => {
-			topics = topics!(Dm(pair))
-			if Paths.first_of(topics).is_empty() {
-				Chat.redirect(List.concat(Str.to_utf8("/chat/c/"), conv))
-			} else {
-				Chat.redirect(List.join([Str.to_utf8("/chat/c/"), conv, ['/'], resume_at!(pair, topics)]))
+resume! = |{}|
+	match me!({}) {
+		Err(Failed) => Chat.answered
+		Ok(me) => {
+			conv = ChatState.bookmark(text_bytes!(Paths.last_conv_path(me)))
+			# The bookmark's bytes are text_bytes!'s, so they decode (its door).
+			pair_of = match Str.from_utf8(conv) {
+				Ok(text) => Paths.pair_key_from_str(text)
+				Err(_) => Err(Invalid)
+			}
+			match pair_of {
+				Ok(pair) if Paths.is_participant(pair, me) => {
+					topics = topics!(Dm(pair))
+					if Paths.first_of(topics).is_empty() {
+						Chat.redirect(List.concat(Str.to_utf8("/chat/c/"), conv))
+					} else {
+						Chat.redirect(List.join([Str.to_utf8("/chat/c/"), conv, ['/'], resume_at!(me, pair, topics)]))
+					}
+				}
+				_ =>
+					match viewer!(Unasked) {
+						Ok(viewer) => Chat.respond(200, html, Html.bytes(Pages.no_conversations(Chrome.src_in(Host.srcs!({})), viewer)))
+						Err(Failed) => Chat.answered
+					}
 			}
 		}
-		_ =>
-			match viewer!(Unasked) {
-				Ok(viewer) => Chat.respond(200, html, Html.bytes(Pages.no_conversations(Chrome.src_in(Host.srcs!({})), viewer)))
-				Err(Failed) => Chat.answered
-			}
 	}
-}
 
-## Where the member resumes DM `conv`, whose topics are `topics`: the choice
-## ChatState's, the last-viewed topic and the clock the host's.
-resume_at! : Paths.PairKey, List(Str) => List(U8)
-resume_at! = |pair, topics| {
-	last = ChatState.bookmark(text_bytes!(Paths.last_session_path(Uid.from_bytes(Host.me!({})), Dm(pair))))
+## Where member `me` resumes DM `conv`, whose topics are `topics`: the
+## choice ChatState's, the last-viewed topic and the clock the host's.
+resume_at! : Uid, Paths.PairKey, List(Str) => List(U8)
+resume_at! = |me, pair, topics| {
+	last = ChatState.bookmark(text_bytes!(Paths.last_session_path(me, Dm(pair))))
 	ChatState.resume_topic(topics, last, Host.now!({}))
 }
 
@@ -713,12 +734,9 @@ resume_at! = |pair, topics| {
 ## resumes it, and its topics.
 conversations! : {} => Chat.Answer
 conversations! = |{}|
-	match roster!({}) {
-		Ok(members) => {
-			me = Host.me!({})
-			Chat.respond(200, json, Topics.conversations_json(me, entries!(me, members, 0, [])))
-		}
-		Err(Failed) => Chat.answered
+	match (roster!({}), me!({})) {
+		(Ok(members), Ok(me)) => Chat.respond(200, json, Topics.conversations_json(me.to_str().to_utf8(), entries!(me, members, 0, [])))
+		(Err(Failed), _) | (Ok(_), Err(Failed)) => Chat.answered
 	}
 
 ## The authorized roster (listAuthorized), from the accounts. `Failed` when
@@ -731,26 +749,45 @@ roster! = |{}|
 		Err(Failed) => Err(Failed)
 	}
 
-entries! : List(U8), List({ id : List(U8), name : List(U8) }), U64, List(Topics.Entry) => List(Topics.Entry)
+entries! : Uid, List({ id : List(U8), name : List(U8) }), U64, List(Topics.Entry) => List(Topics.Entry)
 entries! = |me, members, i, acc|
 	match List.get(members, i) {
 		Ok({ id, name }) =>
-			if id == me {
+			if id == me.to_str().to_utf8() {
 				entries!(me, members, i + 1, acc)
 			} else {
-				match Paths.pair_key(Uid.from_bytes(me), Uid.from_bytes(id)) {
-					Ok(pair) => {
+				match uid_of(id) {
+					Ok(other) => {
+						pair = Paths.pair_key(me, other)
 						conv = Paths.pair_key_bytes(pair)
 						listed = topics!(Dm(pair))
 						sessions = List.map(listed, Str.to_utf8)
-						default = resume_at!(pair, listed)
+						default = resume_at!(me, pair, listed)
 						entries!(me, members, i + 1, List.append(acc, { conv, id, name, default, sessions }))
 					}
 					# A member whose id is no uid has no DM.
-					Err(Invalid) => entries!(me, members, i + 1, acc)
+					Err(NotAUid) => entries!(me, members, i + 1, acc)
 				}
 			}
 		Err(_) => acc
+	}
+
+## TEMPORARY DOOR: moves out in a later run. An account's id, which the
+## accounts still hand as bytes, as a Uid.
+uid_of : List(U8) -> Try(Uid, [NotAUid])
+uid_of = |bytes| Uid.from_str(Str.from_utf8(bytes) ?? "")
+
+## A conversation's members as Uids: each is a canonical pair's half or a
+## line Paths.channel_members checked, so one that is no uid fails the
+## request (NotUtf8, about it), and `Failed`.
+members! : List(List(U8)) => Try(List(Uid), [Failed])
+members! = |all|
+	match List.keep_if(all, |m| uid_of(m).is_err()) {
+		[bad, ..] => {
+			Host.fail!(NotUtf8, bad)
+			Err(Failed)
+		}
+		[] => Ok(List.keep_oks(all, uid_of))
 	}
 
 ## /chat/msg/<id>: the topic a message id names, in the member's DMs, then
@@ -764,18 +801,17 @@ msg! = |id|
 			Ok((before, _)) => before
 			Err(NoSeparator) => []
 		}
-		me = Host.me!({})
 		at = |base, key| List.join([Str.to_utf8(base), key, ['/'], topic, Str.to_utf8("#msg-"), id])
-		match roster!({}) {
-			Err(Failed) => Chat.answered
-			Ok(members) =>
+		match (me!({}), roster!({})) {
+			(Err(Failed), _) | (Ok(_), Err(Failed)) => Chat.answered
+			(Ok(me), Ok(members)) =>
 				match find_dm!(me, members, topic, 0) {
 					Ok(conv) => Chat.found(at("/chat/c/", conv))
 					Err(NoSuchTopic) =>
 						match channel_rosters!({}) {
 							Err(Failed) => Chat.answered
 							Ok(rosters) =>
-								match find_channel!(Paths.member_channels(rosters, me), topic, 0) {
+								match find_channel!(Paths.member_channels(rosters, me.to_str().to_utf8()), topic, 0) {
 									Ok(name) => Chat.found(at("/channel/", name))
 									Err(NoSuchTopic) => Chat.not_found
 								}
@@ -784,14 +820,14 @@ msg! = |id|
 		}
 	}
 
-find_dm! : List(U8), List({ id : List(U8), name : List(U8) }), List(U8), U64 => Try(List(U8), [NoSuchTopic])
+find_dm! : Uid, List({ id : List(U8), name : List(U8) }), List(U8), U64 => Try(List(U8), [NoSuchTopic])
 find_dm! = |me, members, topic, i|
 	match List.get(members, i) {
 		Ok({ id, name: _ }) =>
-			if id == me {
+			if id == me.to_str().to_utf8() {
 				find_dm!(me, members, topic, i + 1)
 			} else {
-				match Paths.pair_key(Uid.from_bytes(me), Uid.from_bytes(id)) {
+				match uid_of(id).map_ok(|other| Paths.pair_key(me, other)) {
 					Ok(pair) if List.contains(List.map(topics!(Dm(pair)), Str.to_utf8), topic) => Ok(Paths.pair_key_bytes(pair))
 					_ => find_dm!(me, members, topic, i + 1)
 				}
@@ -1009,10 +1045,9 @@ appended! = |conv, who, { at: topic_at, name, markdown: md, cid }|
 						# the request's already (`find!`); asked here only were
 						# they not, before anything is stored.
 						named = if Paths.conv_kind(topic_at.key) == Dm accounts!(who) else Ok([])
-						match named {
-							Err(Failed) => Bool.False
-							Ok(all) => {
-								steps = Fanout.steps({ key: topic_at.key, members: conv.members, topic, index, id, from: name, at: message.at, uid, accounts: all }, Fanout.parts_of(md))
+						match (named, me!({}), members!(conv.members)) {
+							(Ok(all), Ok(me), Ok(members)) => {
+								steps = Fanout.steps({ key: topic_at.key, members, topic, index, id, from: name, at: message.at, uid: me, accounts: all }, Fanout.parts_of(md))
 								if Host.store_message!(conv, topic.to_utf8(), block, index, message) {
 									# **STORED IS DONE** (metal-vmm QUEUE 172): from
 									# here nothing fails the send, which a client
@@ -1026,6 +1061,7 @@ appended! = |conv, who, { at: topic_at, name, markdown: md, cid }|
 									Bool.False
 								}
 							}
+							_ => Bool.False
 						}
 					}
 				}

@@ -13,17 +13,18 @@ Conversation := [].{
 	## dmOther: the other of DM pair `key` when `me` is one of the pair, by
 	## chatKeyParticipant's rule (Paths.is_participant; the pair is canonical
 	## by its type); `NotAParticipant` otherwise.
-	dm_other : Paths.PairKey, Uid -> Try(Uid, [NotAParticipant])
+	## The other's id is the accounts' bytes, as Accounts looks it up.
+	dm_other : Paths.PairKey, Uid -> Try(List(U8), [NotAParticipant])
 	dm_other = |key, me| if Paths.is_participant(key, me) Ok(partner(Paths.pair_key_bytes(key), me)) else Err(NotAParticipant)
 
 	## partnerName's half: the side of `key`'s first `_` that is not `me`
 	## (the second when the first is `me`, so `1_1`'s partner is `1`); the
 	## whole key when it has no `_`.
-	partner : List(U8), Uid -> Uid
+	partner : List(U8), Uid -> List(U8)
 	partner = |key, me|
 		match Paths.cut_first(key, '_') {
-			Ok((a, b)) => if Uid.from_bytes(a) == me Uid.from_bytes(b) else Uid.from_bytes(a)
-			Err(NoSeparator) => Uid.from_bytes(key)
+			Ok((a, b)) => if a == me.to_str().to_utf8() b else a
+			Err(NoSeparator) => key
 		}
 
 	## ConvMeta.dm's members: the pair's two uids, or one in the DM with

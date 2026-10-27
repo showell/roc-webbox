@@ -436,10 +436,11 @@ pub const Routing = struct {
     pub fn host(r: *Routing) Host {
         var h = askingOnly(r, ask);
         h.presence = mark;
-        // The routes the Roc serves outright meet a member with nothing: no
-        // id (so no DM is theirs), no files (no last DM, no feed, no
+        // The routes the Roc serves outright meet a member with nothing: an
+        // id in no route's DM (so no DM is theirs; an id is always a uid,
+        // or the Roc fails the request), no files (no last DM, no feed, no
         // channel), no folders (no topics, no channels), no other members.
-        h.me = empty;
+        h.me = noDmId;
         h.accounts = noAccount;
         h.read = noFile;
         h.list = noFolder;
@@ -458,8 +459,8 @@ pub const Routing = struct {
     fn mark(ctx: *anyopaque) void {
         of(ctx).marked = true;
     }
-    fn empty(_: *anyopaque) []const u8 {
-        return "";
+    fn noDmId(_: *anyopaque) []const u8 {
+        return "999";
     }
     fn nothing(_: *anyopaque) []const RecentRow {
         return &.{};

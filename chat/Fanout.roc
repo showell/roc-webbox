@@ -11,6 +11,7 @@ import Recent
 import Accounts
 import JsonText
 import Paths
+import Uid
 
 Fanout := [].{
 
@@ -42,7 +43,7 @@ Fanout := [].{
 	## spelled it), its number `index` (0 is the topic's first), its fields,
 	## its author's account `uid`, and the accounts the request holds (a
 	## DM's; a channel names none).
-	Sent : { key : Paths.ConvKey, members : List(List(U8)), topic : Str, index : U64, id : List(U8), from : List(U8), at : List(U8), uid : List(U8), accounts : List(Accounts.Account) }
+	Sent : { key : Paths.ConvKey, members : List(Uid), topic : Str, index : U64, id : List(U8), from : List(U8), at : List(U8), uid : Uid, accounts : List(Accounts.Account) }
 
 	## **EVERY MEMBER IN THE CONVERSATION'S ORDER, EACH MEMBER'S SURFACES IN
 	## ONE ORDER: NOTIFY, SIDEBAR, RECENT, IMAGES, CODE** (fanoutCrossPage).
@@ -74,11 +75,11 @@ Fanout := [].{
 						# The feeds only when the message has what they keep.
 						match parts.images {
 							[] => []
-							tags => [Feed({ surface: Images, member: uid, path: Paths.feed_path(uid, Images), entry: Feeds.images_entry(head, tags), key: images_key(uid), event: Feeds.images_event(head, tags) })]
+							tags => [Feed({ surface: Images, member: uid.to_str().to_utf8(), path: Paths.feed_path(uid, Images), entry: Feeds.images_entry(head, tags), key: images_key(uid), event: Feeds.images_event(head, tags) })]
 						},
 						match parts.code {
 							[] => []
-							blocks => [Feed({ surface: Code, member: uid, path: Paths.feed_path(uid, Code), entry: Feeds.code_entry(head, blocks), key: code_key(uid), event: Feeds.code_event(head, blocks) })]
+							blocks => [Feed({ surface: Code, member: uid.to_str().to_utf8(), path: Paths.feed_path(uid, Code), entry: Feeds.code_entry(head, blocks), key: code_key(uid), event: Feeds.code_event(head, blocks) })]
 						},
 					]),
 			),
@@ -89,20 +90,20 @@ Fanout := [].{
 	## `sidebarBusKey`, `recentBusKey`, `imagesBusKey`, `codeBusKey`): each
 	## namespaced, so none meets a topic's `<key>/<topic>` (topic_key). The Zig streams
 	## that serve them subscribe with the Zig's own, held equal by the twins.
-	notify_key : List(U8) -> List(U8)
-	notify_key = |uid| List.concat(Str.to_utf8("ntf:"), uid)
+	notify_key : Uid -> List(U8)
+	notify_key = |uid| "ntf:${uid.to_str()}".to_utf8()
 
-	sidebar_key : List(U8) -> List(U8)
-	sidebar_key = |uid| List.concat(Str.to_utf8("sb:"), uid)
+	sidebar_key : Uid -> List(U8)
+	sidebar_key = |uid| "sb:${uid.to_str()}".to_utf8()
 
-	recent_key : List(U8) -> List(U8)
-	recent_key = |uid| List.concat(Str.to_utf8("rec:"), uid)
+	recent_key : Uid -> List(U8)
+	recent_key = |uid| "rec:${uid.to_str()}".to_utf8()
 
-	images_key : List(U8) -> List(U8)
-	images_key = |uid| List.concat(Str.to_utf8("img:"), uid)
+	images_key : Uid -> List(U8)
+	images_key = |uid| "img:${uid.to_str()}".to_utf8()
 
-	code_key : List(U8) -> List(U8)
-	code_key = |uid| List.concat(Str.to_utf8("code:"), uid)
+	code_key : Uid -> List(U8)
+	code_key = |uid| "code:${uid.to_str()}".to_utf8()
 
 	## The topic's live bus key, where its messages and reactions are
 	## published: `<key>/<topic>`.
@@ -160,12 +161,12 @@ Fanout := [].{
 	## yourself has none, so "to " and the name of no one). **A NAME THAT
 	## WILL NOT READ GIVES ""** (its absent-ok): the label only, the row is
 	## still sent.
-	recent_where : Sent, List(U8) -> List(U8)
+	recent_where : Sent, Uid -> List(U8)
 	recent_where = |m, viewer|
 		match m.key {
 			Channel(name) => List.concat(Str.to_utf8("in "), Paths.channel_name_bytes(name))
 			Dm(_) => {
-				other = List.fold(m.members, [], |found, member| if member != viewer member else found)
+				other = List.fold(m.members, [], |found, member| if member != viewer member.to_str().to_utf8() else found)
 				match Accounts.name(m.accounts, other) {
 					Ok(name) => List.concat(Str.to_utf8("to "), name)
 					Err(_) => []

@@ -14,7 +14,7 @@ Paths := [].{
 	is_participant = |PairKey.(key), user|
 		match key.split_first("_") {
 			Err(_) => Bool.False
-			Ok({ before, after }) => Uid.to_bytes(user) == before.to_utf8() or Uid.to_bytes(user) == after.to_utf8()
+			Ok({ before, after }) => user.to_str() == before or user.to_str() == after
 		}
 
 	## **A DM'S KEY**: opaque (`::`), so only `pair_key` (from two uids) and
@@ -22,24 +22,14 @@ Paths := [].{
 	PairKey :: Str
 
 	## chatPairKey: the smaller numeric id first, joined by `_` (a number
-	## past i64's counts as 0, as Zig's `atoiOr0`). **A UID IS DIGITS, THE
-	## FIRST NOT ZERO** (allocateUser's), or there is no key: the Zig's
-	## `atoiOr0` read any other half as 0 too, and no account has such an
-	## id. Uid stays bytes (the host's me! and the accounts hand it so); its
-	## digits are ASCII, so they are text.
-	pair_key : Uid, Uid -> Try(PairKey, [Invalid])
+	## past i64's counts as 0, as Zig's `atoiOr0`). A Uid is canonical by
+	## its type (Uid.from_str), so every two make a key.
+	pair_key : Uid, Uid -> PairKey
 	pair_key = |ua, ub| {
-		a = uid_text(ua)?
-		b = uid_text(ub)?
+		a = ua.to_str()
+		b = ub.to_str()
 		(small, large) = if atoi_or0(a.to_utf8()) <= atoi_or0(b.to_utf8()) (a, b) else (b, a)
-		Ok(PairKey.("${small}_${large}"))
-	}
-
-	## A canonical uid's digits, as text.
-	uid_text : Uid -> Try(Str, [Invalid])
-	uid_text = |uid| {
-		digits = Uid.to_bytes(uid)
-		if canonical_uid(digits) Str.from_utf8(digits).map_err(|_| Invalid) else Err(Invalid)
+		PairKey.("${small}_${large}")
 	}
 
 	## The key, when it is exactly the canonical `<small>_<large>` of two
@@ -48,8 +38,11 @@ Paths := [].{
 	pair_key_from_str = |key|
 		match key.split_first("_") {
 			Ok({ before, after }) =>
-				match pair_key(Uid.from_bytes(before.to_utf8()), Uid.from_bytes(after.to_utf8())) {
-					Ok(PairKey.(made)) if made == key => Ok(PairKey.(key))
+				match (Uid.from_str(before), Uid.from_str(after)) {
+					(Ok(a), Ok(b)) => {
+						PairKey.(made) = pair_key(a, b)
+						if made == key Ok(PairKey.(key)) else Err(Invalid)
+					}
 					_ => Err(Invalid)
 				}
 			Err(_) => Err(Invalid)
@@ -292,13 +285,13 @@ Paths := [].{
 	topics_folder = |key| ChatPath.(sessions_dir(conv_dir(key)))
 
 	## The member's DM last in (lastUserConv's file): users/<uid>/last-conv.
-	last_conv_path : List(U8) -> ChatPath
-	last_conv_path = |uid| ChatPath.(join([Str.to_utf8("users"), uid, Str.to_utf8("last-conv")]))
+	last_conv_path : Uid -> ChatPath
+	last_conv_path = |uid| ChatPath.(join([Str.to_utf8("users"), uid.to_str().to_utf8(), Str.to_utf8("last-conv")]))
 
 	## The topic the member last viewed in DM `key` (lastViewedTopic's
 	## file): users/<uid>/last-sessions/<conv>.
 	last_session_path : Uid, ConvKey -> ChatPath
-	last_session_path = |uid, key| last_session_path_bytes({ uid: Uid.to_bytes(uid), conv: conv_key_bytes(key) })
+	last_session_path = |uid, key| last_session_path_bytes({ uid: uid.to_str().to_utf8(), conv: conv_key_bytes(key) })
 
 	## last_session_path's core, from the uid and key as bytes: the twins
 	## feed it any (production: last_session_path).
@@ -308,7 +301,7 @@ Paths := [].{
 	## The member's pins in `key` (pinnedTopics's file):
 	## users/<uid>/pinned-sessions/<conv>.
 	pinned_path : Uid, ConvKey -> ChatPath
-	pinned_path = |uid, key| pinned_path_bytes({ uid: Uid.to_bytes(uid), conv: conv_key_bytes(key) })
+	pinned_path = |uid, key| pinned_path_bytes({ uid: uid.to_str().to_utf8(), conv: conv_key_bytes(key) })
 
 	## pinned_path's core, from the uid and key as bytes: the twins feed it
 	## any (production: pinned_path).
@@ -317,13 +310,13 @@ Paths := [].{
 
 	## The member's feed file: users/<uid>/images.md or code.md, where
 	## images_store and code_store keep them.
-	feed_path : List(U8), [Images, Code] -> ChatPath
+	feed_path : Uid, [Images, Code] -> ChatPath
 	feed_path = |uid, which| {
 		name = match which {
 			Images => "images.md"
 			Code => "code.md"
 		}
-		ChatPath.(join([Str.to_utf8("users"), uid, Str.to_utf8(name)]))
+		ChatPath.(join([Str.to_utf8("users"), uid.to_str().to_utf8(), Str.to_utf8(name)]))
 	}
 
 	## **A CHANNEL'S MEMBERS** (channelMembers): one uid a line, each line
@@ -448,8 +441,8 @@ Paths := [].{
 	transcript_path = |at| ChatPath.(transcript_path_bytes({ dir: conv_dir(at.key), topic: at.topic.to_utf8() }))
 
 	## The member's links page (the links route's file): users/<uid>/links.md.
-	links_path : List(U8) -> ChatPath
-	links_path = |uid| ChatPath.(join([Str.to_utf8("users"), uid, Str.to_utf8("links.md")]))
+	links_path : Uid -> ChatPath
+	links_path = |uid| ChatPath.(join([Str.to_utf8("users"), uid.to_str().to_utf8(), Str.to_utf8("links.md")]))
 
 	## transcript_path's core, from the conversation's folder as bytes: the
 	## twins feed it any (production: transcript_path).
@@ -505,31 +498,36 @@ expect match Paths.channel_name_from_str("general") {
 	Ok(name) => Paths.bytes(Paths.channel_path(name)) == Str.to_utf8("channels/general.channel")
 	Err(Invalid) => Bool.False
 }
-expect Paths.bytes(Paths.last_conv_path(Str.to_utf8("3"))) == Str.to_utf8("users/3/last-conv")
-expect match Paths.pair_key(Uid.from_bytes(Str.to_utf8("3")), Uid.from_bytes(Str.to_utf8("7"))) {
-	Ok(pair) => Paths.bytes(Paths.last_session_path(Uid.from_bytes(Str.to_utf8("3")), Dm(pair))) == Str.to_utf8("users/3/last-sessions/3_7")
-	Err(Invalid) => Bool.False
+expect match (Uid.from_str("3"), Uid.from_str("7")) {
+	(Ok(three), Ok(seven)) => {
+		pair = Paths.pair_key(seven, three)
+		(Paths.bytes(Paths.last_conv_path(three)) == Str.to_utf8("users/3/last-conv"))
+			and (Paths.bytes(Paths.last_session_path(three, Dm(pair))) == Str.to_utf8("users/3/last-sessions/3_7"))
+				and (Paths.bytes(Paths.pinned_path(three, Dm(pair))) == Str.to_utf8("users/3/pinned-sessions/3_7"))
+					and (Paths.bytes(Paths.feed_path(three, Images)) == Str.to_utf8("users/3/images.md"))
+						and (Paths.bytes(Paths.feed_path(three, Code)) == Str.to_utf8("users/3/code.md"))
+							and (Paths.bytes(Paths.links_path(three)) == Str.to_utf8("users/3/links.md"))
+	}
+	_ => Bool.False
 }
-expect match Paths.pair_key(Uid.from_bytes(Str.to_utf8("7")), Uid.from_bytes(Str.to_utf8("3"))) {
-	Ok(pair) => Paths.bytes(Paths.pinned_path(Uid.from_bytes(Str.to_utf8("3")), Dm(pair))) == Str.to_utf8("users/3/pinned-sessions/3_7")
-	Err(Invalid) => Bool.False
+expect match (Paths.channel_name_from_str("general"), Uid.from_str("3")) {
+	(Ok(name), Ok(three)) => Paths.bytes(Paths.pinned_path(three, Channel(name))) == Str.to_utf8("users/3/pinned-sessions/general")
+	_ => Bool.False
 }
-expect match Paths.channel_name_from_str("general") {
-	Ok(name) => Paths.bytes(Paths.pinned_path(Uid.from_bytes(Str.to_utf8("3")), Channel(name))) == Str.to_utf8("users/3/pinned-sessions/general")
-	Err(Invalid) => Bool.False
-}
-expect Paths.bytes(Paths.feed_path(Str.to_utf8("3"), Images)) == Str.to_utf8("users/3/images.md")
-expect Paths.bytes(Paths.feed_path(Str.to_utf8("3"), Code)) == Str.to_utf8("users/3/code.md")
 
-# pair_key: the smaller uid first, by number, not by bytes; a half that is
-# no canonical number makes no key.
-expect Paths.pair_key(Uid.from_bytes(Str.to_utf8("7")), Uid.from_bytes(Str.to_utf8("3"))).map_ok(Paths.pair_key_to_str) == Ok("3_7")
-expect Paths.pair_key(Uid.from_bytes(Str.to_utf8("3")), Uid.from_bytes(Str.to_utf8("7"))).map_ok(Paths.pair_key_to_str) == Ok("3_7")
-expect Paths.pair_key(Uid.from_bytes(Str.to_utf8("10")), Uid.from_bytes(Str.to_utf8("9"))).map_ok(Paths.pair_key_to_str) == Ok("9_10")
-expect Paths.pair_key(Uid.from_bytes(Str.to_utf8("5")), Uid.from_bytes(Str.to_utf8("5"))).map_ok(Paths.pair_key_to_str) == Ok("5_5")
-expect Paths.pair_key(Uid.from_bytes(Str.to_utf8("a")), Uid.from_bytes(Str.to_utf8("5"))).is_err()
-expect Paths.pair_key(Uid.from_bytes(Str.to_utf8("05")), Uid.from_bytes(Str.to_utf8("5"))).is_err()
-expect Paths.pair_key(Uid.from_bytes(Str.to_utf8("9223372036854775808")), Uid.from_bytes(Str.to_utf8("5"))).map_ok(Paths.pair_key_to_str) == Ok("9223372036854775808_5")
+# pair_key: the smaller uid first, by number, not by bytes.
+expect match (Uid.from_str("7"), Uid.from_str("3")) {
+	(Ok(seven), Ok(three)) => Paths.pair_key(seven, three).pair_key_to_str() == "3_7" and Paths.pair_key(three, seven).pair_key_to_str() == "3_7" and Paths.pair_key(three, three).pair_key_to_str() == "3_3"
+	_ => Bool.False
+}
+expect match (Uid.from_str("10"), Uid.from_str("9")) {
+	(Ok(ten), Ok(nine)) => Paths.pair_key(ten, nine).pair_key_to_str() == "9_10"
+	_ => Bool.False
+}
+expect match (Uid.from_str("9223372036854775808"), Uid.from_str("5")) {
+	(Ok(big), Ok(five)) => Paths.pair_key(big, five).pair_key_to_str() == "9223372036854775808_5"
+	_ => Bool.False
+}
 
 # pair_key_from_str: only the canonical `<small>_<large>` of two uids, or a
 # uid twice (the DM with yourself).
@@ -547,12 +545,10 @@ expect Paths.pair_key_from_str("").is_err()
 
 # is_participant: only the pair's two members.
 expect match Paths.pair_key_from_str("3_7") {
-	Ok(pair) =>
-		Paths.is_participant(pair, Uid.from_bytes(Str.to_utf8("3")))
-			and Paths.is_participant(pair, Uid.from_bytes(Str.to_utf8("7")))
-				and !Paths.is_participant(pair, Uid.from_bytes(Str.to_utf8("9")))
-					and !Paths.is_participant(pair, Uid.from_bytes(Str.to_utf8("37")))
-						and !Paths.is_participant(pair, Uid.from_bytes([]))
+	Ok(pair) => {
+		is_in = |text| Uid.from_str(text).map_ok(|uid| Paths.is_participant(pair, uid)) == Ok(Bool.True)
+		is_in("3") and is_in("7") and !is_in("9") and !is_in("37")
+	}
 	Err(Invalid) => Bool.False
 }
 
@@ -609,5 +605,3 @@ expect Paths.channel_name_from_str("").is_err()
 expect Paths.bytes(Paths.reactions_path_bytes({ dir: Str.to_utf8("channels/../.."), topic: Str.to_utf8("../x") })) == Str.to_utf8("channels/../../sessions/../x.reactions.jsonl")
 expect Paths.transcript_path_bytes({ dir: [], topic: [] }) == Str.to_utf8("sessions/.md")
 expect Paths.bytes(Paths.last_session_path_bytes({ uid: Str.to_utf8("3"), conv: Str.to_utf8("../../x") })) == Str.to_utf8("users/3/last-sessions/../../x")
-expect Paths.bytes(Paths.feed_path(Str.to_utf8("/etc"), Code)) == Str.to_utf8("users/etc/code.md")
-expect Paths.bytes(Paths.links_path(Str.to_utf8("3"))) == Str.to_utf8("users/3/links.md")

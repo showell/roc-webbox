@@ -50,15 +50,15 @@ call = |req| {
 		# A key that is no canonical pair is no PairKey, so no participant.
 		7 =>
 			match pair_of(arg(0)) {
-				Ok(pair) => [bool(Paths.is_participant(pair, Uid.from_bytes(arg(1))))]
+				Ok(pair) => [bool(decode_uid(arg(1)).map_ok(|u| Paths.is_participant(pair, u)) == Ok(Bool.True))]
 				Err(_) => [bool(Bool.False)]
 			}
 		# Two uids that are canonical numbers make a key; any other half
-		# makes none (the Zig's atoiOr0 read it as 0), and no answer.
+		# is no Uid (the Zig's atoiOr0 read it as 0), and no answer.
 		8 =>
-			match Paths.pair_key(Uid.from_bytes(arg(0)), Uid.from_bytes(arg(1))) {
-				Ok(pair) => [Paths.pair_key_bytes(pair)]
-				Err(Invalid) => []
+			match (decode_uid(arg(0)), decode_uid(arg(1))) {
+				(Ok(a), Ok(b)) => [Paths.pair_key_bytes(Paths.pair_key(a, b))]
+				_ => []
 			}
 		# Bytes that are not UTF-8 are no text, so neither a topic nor a name.
 		9 => [bool(text(arg(0)).map_ok(Paths.is_topic_id) == Ok(Bool.True))]
@@ -138,13 +138,13 @@ call = |req| {
 				Remove => []
 			}
 		44 =>
-			match pair_of(arg(0)) {
-				Ok(pair) =>
-					match Conversation.dm_other(pair, Uid.from_bytes(arg(1))) {
-						Ok(other) => [Uid.to_bytes(other)]
+			match (pair_of(arg(0)), decode_uid(arg(1))) {
+				(Ok(pair), Ok(me)) =>
+					match Conversation.dm_other(pair, me) {
+						Ok(other) => [other]
 						Err(NotAParticipant) => []
 					}
-				Err(_) => []
+				_ => []
 			}
 		45 => Conversation.dm_members(arg(0))
 		46 => [Conversation.dm_title(arg(0), arg(1))]
@@ -165,7 +165,12 @@ call = |req| {
 		51 => List.map(Paths.member_channels(flat_rosters(req.args, 1, []), arg(0)), Str.to_utf8)
 		52 => [ChatState.bookmark(file(arg(0), arg(1)))]
 		53 => [bool(ChatState.changed(file(arg(0), arg(1)), arg(2))), ChatState.bookmark_line(arg(2))]
-		54 => List.map([Paths.last_conv_path(arg(0)), Paths.last_session_path_bytes({ uid: arg(0), conv: arg(1) }), Paths.pinned_path_bytes({ uid: arg(0), conv: arg(1) }), Paths.feed_path(arg(0), Images), Paths.feed_path(arg(0), Code)], Paths.bytes)
+		# A uid that is no Uid has no paths: the door refuses it.
+		54 =>
+			match decode_uid(arg(0)) {
+				Ok(u) => List.map([Paths.last_conv_path(u), Paths.last_session_path_bytes({ uid: arg(0), conv: arg(1) }), Paths.pinned_path_bytes({ uid: arg(0), conv: arg(1) }), Paths.feed_path(u, Images), Paths.feed_path(u, Code)], Paths.bytes)
+				Err(NotAUid) => []
+			}
 		55 => List.map(Paths.topics(entries(req.args, 0, [])), Str.to_utf8)
 		56 =>
 			match Paths.channel_members(arg(0)) {
@@ -209,7 +214,12 @@ call = |req| {
 		61 => [Reaction.line({ msg: u64(arg(0)), uid: arg(1), from: arg(2), emoji: arg(3), change: if arg(4) == [49] Added else Removed, at: arg(5) })]
 		# The fan-out: member `arg(0)`'s five keys; conversation `arg(0)`'s
 		# URL root, topic `arg(1)`'s page and message `arg(2)`'s link.
-		62 => [Fanout.notify_key(arg(0)), Fanout.sidebar_key(arg(0)), Fanout.recent_key(arg(0)), Fanout.images_key(arg(0)), Fanout.code_key(arg(0))]
+		# A member that is no Uid has no keys: the door refuses it.
+		62 =>
+			match decode_uid(arg(0)) {
+				Ok(u) => [Fanout.notify_key(u), Fanout.sidebar_key(u), Fanout.recent_key(u), Fanout.images_key(u), Fanout.code_key(u)]
+				Err(NotAUid) => []
+			}
 		63 => [Feeds.base_url(arg(0)), Fanout.topic_url_bytes({ key: arg(0), topic: arg(1) }), Feeds.source_url(arg(0), arg(2))]
 		# A DM's (`d`) or a channel's notify event: from, key, topic.
 		64 => {
@@ -235,12 +245,17 @@ call = |req| {
 		}
 		# recentWhere for viewer `arg(1)` in a DM (`d`) or channel keyed
 		# `arg(2)`: the members counted by `arg(3)`, then the accounts.
+		# A viewer or member that is no Uid has no row: the door refuses it.
 		69 => {
 			n = u64(arg(3))
-			members = List.sublist(req.args, { start: 4, len: n })
+			given = List.sublist(req.args, { start: 4, len: n })
+			members = List.keep_oks(given, decode_uid)
 			all = accounts(req.args, 4 + n, [])
 			key = if arg(0) == [100] Dm(valid_pair(arg(2))) else Channel(valid_channel(arg(2)))
-			[Fanout.recent_where({ key, members, topic: "", index: 0, id: [], from: [], at: [], uid: [], accounts: all }, arg(1))]
+			match decode_uid(arg(1)) {
+				Ok(viewer) if List.len(members) == n => [Fanout.recent_where({ key, members, topic: "", index: 0, id: [], from: [], at: [], uid: viewer, accounts: all }, viewer)]
+				_ => []
+			}
 		}
 		_ => crash "twin: no function ${U8.to_str(req.which)}"
 	}
@@ -269,6 +284,10 @@ text : List(U8) -> Try(Str, [Invalid])
 text = |bytes| Str.from_utf8(bytes).map_err(|_| Invalid)
 
 ## The test's bytes as a pair key, when they are text and one.
+## A uid's bytes as a Uid: digits, the first not zero, or none.
+decode_uid : List(U8) -> Try(Uid, [NotAUid])
+decode_uid = |bytes| Uid.from_str(Str.from_utf8(bytes) ?? "")
+
 pair_of : List(U8) -> Try(Paths.PairKey, [Invalid])
 pair_of = |bytes| Paths.pair_key_from_str(text(bytes)?)
 

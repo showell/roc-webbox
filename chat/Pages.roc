@@ -195,7 +195,8 @@ Pages := [].{
 		prefixed = |prefix, s| JsonText.str_at_door(List.concat(Str.to_utf8(prefix), s))
 		# A member whose id is no uid has no DM key, so no DM to list.
 		person = |u| {
-			pk = Paths.pair_key_bytes(Paths.pair_key(Uid.from_bytes(sb.uid), Uid.from_bytes(u.id))?)
+			uid = |b| Uid.from_str(Str.from_utf8(b) ?? "")
+			pk = Paths.pair_key_bytes(Paths.pair_key(uid(sb.uid)?, uid(u.id)?))
 			online = if u.presence == Online [("online", JsonText.bool(Bool.True))] else []
 			Ok(JsonText.obj(List.concat([("id", prefixed("uid:", u.id)), ("label", JsonText.str_at_door(u.name)), ("url", prefixed("/chat/c/", pk)), ("active", JsonText.bool(sb.kind == Dm and pk == sb.key))], online)))
 		}
