@@ -76,14 +76,11 @@ Transcript := [].{
 			} else {
 				next = match Bytes.cut_seq(l, Str.to_utf8(": ")) {
 					Ok((k, v)) =>
-						if k == Str.to_utf8("from") {
-							{ ..m, from: v }
-						} else if k == Str.to_utf8("date") {
-							{ ..m, at: v }
-						} else if k == Str.to_utf8("uid") {
-							{ ..m, uid: v }
-						} else {
-							m
+						match k {
+							['f', 'r', 'o', 'm'] => { ..m, from: v }
+							['d', 'a', 't', 'e'] => { ..m, at: v }
+							['u', 'i', 'd'] => { ..m, uid: v }
+							_ => m
 						}
 					Err(None) => m
 				}
