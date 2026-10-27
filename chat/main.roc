@@ -448,7 +448,7 @@ react! = |conv, who, sid| {
 ## time, then its sidecar line appended and its frame published on the
 ## topic's key. `Failed` when a step failed (the request has, with its
 ## error), and nothing after it is done.
-reacted! : Chat.Conv, Who, List(U8), { msg : U64, emoji : List(U8), on : Bool } => [Stored, NoSuchMessage, Failed]
+reacted! : Chat.Conv, Who, List(U8), { msg : U64, emoji : List(U8), change : Reaction.Change } => [Stored, NoSuchMessage, Failed]
 reacted! = |conv, who, sid, r|
 	match viewer!(who) {
 		Err(Failed) => Failed
@@ -462,7 +462,7 @@ reacted! = |conv, who, sid, r|
 						NoSuchMessage
 					} else {
 						at = Str.to_utf8(Time.rfc3339(Host.now!({})))
-						line = Reaction.line(r.msg, Host.me!({}), name, r.emoji, r.on, at)
+						line = Reaction.line(r.msg, Host.me!({}), name, r.emoji, r.change, at)
 						# **THE ECHO IS MADE BEFORE THE STORE** (metal-vmm QUEUE
 						# 177.1), as a message's: its key and frame, so nothing
 						# can fail between the append and the publish.

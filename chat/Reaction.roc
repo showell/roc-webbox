@@ -9,21 +9,31 @@ Reaction := [].{
 
 	## **THE ONE PLACE THE SIDECAR'S LINE SHAPE IS WRITTEN** (reactionLine):
 	## `{"msg":N,"uid":…,"from":…,"emoji":…,"on":…,"at":…}`, in that order,
-	## the strings as the Zig's JSON writes them. `on` false is a retraction:
-	## the client folds by last event wins per (msg, uid, emoji), so the file
-	## stays append-only.
-	line : U64, List(U8), List(U8), List(U8), Bool, List(U8) -> List(U8)
-	line = |msg, uid, from, emoji, on, at|
+	## the strings as the Zig's JSON writes them. `Removed` (`"on":false`) is a
+	## retraction: the client folds by last event wins per (msg, uid, emoji),
+	## so the file stays append-only.
+	line : U64, List(U8), List(U8), List(U8), Change, List(U8) -> List(U8)
+	line = |msg, uid, from, emoji, change, at|
 		JsonText.obj([
 			("msg", Str.to_utf8(U64.to_str(msg))),
 			("uid", JsonText.str(uid)),
 			("from", JsonText.str(from)),
 			("emoji", JsonText.str(emoji)),
-			("on", JsonText.bool(on)),
+			("on", JsonText.bool(is_added(change))),
 			("at", JsonText.str(at)),
 		])
 
-	Answer : [Reacted({ msg : U64, emoji : List(U8), on : Bool }), Bad(List(U8)), Malformed]
+	## Whether the reactor put the glyph on the message or took it back.
+	Change : [Added, Removed]
+
+	## The wire's `on` flag for a change.
+	is_added : Change -> Bool
+	is_added = |change| match change {
+		Added => Bool.True
+		Removed => Bool.False
+	}
+
+	Answer : [Reacted({ msg : U64, emoji : List(U8), change : Change }), Bad(List(U8)), Malformed]
 
 	## Every field read before any is judged, as the Zig: a malformed one is
 	## malformed whichever it is.
@@ -39,7 +49,7 @@ Reaction := [].{
 					Err(None) => Bad(Str.to_utf8("react: msg must be a message number\n"))
 					Ok(msg) =>
 						if valid_emoji(emoji) {
-							Reacted({ msg, emoji, on: on_s == ['1'] })
+							Reacted({ msg, emoji, change: if on_s == ['1'] Added else Removed })
 						} else {
 							Bad(Str.to_utf8("react: emoji must be one glyph\n"))
 						}
