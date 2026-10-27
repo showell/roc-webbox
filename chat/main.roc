@@ -1029,9 +1029,17 @@ appended! = |conv, who, { at: topic_at, name, markdown: md, cid }|
 				message = { id: id.to_utf8(), from: name.to_utf8(), at: stamp.to_utf8(), uid, markdown: md.to_utf8() }
 				block = Transcript.stored_form(index, message)
 				rendered = Host.render!(md.to_utf8())
-				match rendered.status {
-					Failed => Bool.False
-					Rendered => {
+				# **THE HTML DECODED HERE, AT THE DOOR**: the renderer makes
+				# text of text, so html that is not UTF-8 is the host's fault,
+				# and the send fails (NotUtf8, about the message's id) before
+				# anything is stored.
+				match (rendered.status, Str.from_utf8(rendered.html)) {
+					(Failed, _) => Bool.False
+					(Rendered, Err(_)) => {
+						Host.fail!(NotUtf8, id.to_utf8())
+						Bool.False
+					}
+					(Rendered, Ok(page_html)) => {
 						# **THE ECHO IS MADE BEFORE THE STORE** (metal-vmm QUEUE
 						# 177.1): the live publish's key and frame, so nothing
 						# can fail between the store and the publish. A live
@@ -1047,7 +1055,7 @@ appended! = |conv, who, { at: topic_at, name, markdown: md, cid }|
 						named = if Paths.conv_kind(topic_at.key) == Dm accounts!(who) else Ok([])
 						match (named, members!(conv.members)) {
 							(Ok(all), Ok(members)) => {
-								frame = Frame.message({ index, from: name, from_uid: me, at: stamp, html: rendered.html, markdown: md, id, cid })
+								frame = Frame.message({ index, from: name, from_uid: me, at: stamp, html: page_html, markdown: md, id, cid })
 								steps = Fanout.steps({ key: topic_at.key, members, topic, index, id: id.to_utf8(), from: name, at: stamp, uid: me, accounts: all }, Fanout.parts_of(md))
 								if Host.store_message!(conv, topic.to_utf8(), block, index, message) {
 									# **STORED IS DONE** (metal-vmm QUEUE 172): from

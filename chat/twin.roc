@@ -102,11 +102,10 @@ call = |req| {
 				Ok(w) => [num(w.number), bool(w.record == Current), w.msg.id, w.msg.from, w.msg.at, w.msg.uid, w.msg.markdown]
 				Err(NotBelieved) => []
 			}
+		# Its author, stamp, html, markdown, id and cid are text.
 		25 =>
-		# Its author, stamp, markdown, id and cid are text; the html is the
-		# host's bytes.
-			match (Uid.from_utf8(arg(2)), texts([arg(1), arg(3), arg(5), arg(6), arg(7)])) {
-				(Ok(from_uid), Ok([from, at, markdown, id, cid])) => [Frame.message({ index: u64(arg(0)), from, from_uid, at, html: arg(4), markdown, id, cid })]
+			match (Uid.from_utf8(arg(2)), texts([arg(1), arg(3), arg(4), arg(5), arg(6), arg(7)])) {
+				(Ok(from_uid), Ok([from, at, html, markdown, id, cid])) => [Frame.message({ index: u64(arg(0)), from, from_uid, at, html, markdown, id, cid })]
 				_ => []
 			}
 		26 => [Frame.reaction(arg(0))]
