@@ -1,0 +1,13 @@
+.{
+    .name = .roc_ast,
+    .version = "0.0.0",
+    .fingerprint = 0x48aa8f9d3e30c80a,
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{
+        .roc = .{
+            .url = "https://github.com/roc-lang/roc/archive/258ab27f79bef726d501e3b79ce2e47e54e83f9d.tar.gz",
+            .hash = "roc-0.0.0-NAC9w4iswgOFD_ED5H8y4LgYeolUsxYzKDprOiMtiSxe",
+        },
+    },
+    .paths = .{ "build.zig", "build.zig.zon", "main.zig" },
+}
