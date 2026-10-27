@@ -167,7 +167,7 @@ in_topic! = |req, route, found| {
 				Chat.not_allowed(Post)
 			} else if route.tail == React {
 				react!(conv, who, route.sid)
-			} else if pin!(conv, route.sid, route.tail == Pin) {
+			} else if pin!(conv, route.sid, if route.tail == Pin Pinned else Unpinned) {
 				Chat.respond(204, [], [])
 			} else {
 				Chat.answered
@@ -367,21 +367,21 @@ title! = |conv, who|
 ## `sid` pinned or unpinned (ChatState.pinned), and the file written back or,
 ## emptied, removed. A read that failed stops here: the set is not empty, it
 ## is unknown, and writing it would drop every pin. False when a step failed.
-pin! : Chat.Conv, List(U8), Bool => Bool
-pin! = |conv, sid, on| {
+pin! : Chat.Conv, List(U8), ChatState.Pin => Bool
+pin! = |conv, sid, pin| {
 	path = ChatState.pinned_path(Host.me!({}), conv.key)
 	match read!(path) {
-		Found(stored) => repin!(path, stored, sid, on)
-		Missing => repin!(path, [], sid, on)
+		Found(stored) => repin!(path, stored, sid, pin)
+		Missing => repin!(path, [], sid, pin)
 		Failed => Bool.False
 	}
 }
 
 ## The pinned file at `path`, read as `stored`, with `sid` pinned or
 ## unpinned: written back, or, emptied, removed.
-repin! : List(U8), List(U8), List(U8), Bool => Bool
-repin! = |path, stored, sid, on|
-	match ChatState.pinned(stored, sid, on) {
+repin! : List(U8), List(U8), List(U8), ChatState.Pin => Bool
+repin! = |path, stored, sid, pin|
+	match ChatState.pinned(stored, sid, pin) {
 		Write(bytes) => Host.write!(path, bytes)
 		Remove => Host.remove!(path)
 	}

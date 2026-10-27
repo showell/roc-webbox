@@ -111,7 +111,7 @@ call = |req| {
 		41 => [Recent.json(arg(0), Recent.rows(written(req.args, 1, [])))]
 		42 => [ChatState.resume_topic(List.drop_first(req.args, 2), arg(0), int(arg(1)))]
 		43 =>
-			match ChatState.pinned(arg(0), arg(1), arg(2) == [49]) {
+			match ChatState.pinned(arg(0), arg(1), if arg(2) == [49] Pinned else Unpinned) {
 				Write(bytes) => [bytes]
 				Remove => []
 			}
