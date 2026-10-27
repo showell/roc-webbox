@@ -5,7 +5,7 @@
 ## the route, so this says only what the path says.
 ##
 ## A path is text (main.handle! checked it at the door); the route it makes
-## crosses back to the Zig as bytes (Chat.roc).
+## crosses back to the Zig as bytes (to_wire; Chat.roc's `Route`).
 import Paths
 
 Route := [].{
@@ -60,13 +60,17 @@ Route := [].{
 	is_stream = |r|
 		match r.family {
 			Notifications | SidebarStream => Bool.True
-			Recent | Images | Code => r.rest == Str.to_utf8("/stream")
+			Recent | Images | Code => r.rest == "/stream"
 			_ => r.tail == Stream
 		}
 
 	## A route, as Chat.roc's `Route` (records are structural: the same
 	## type).
-	R : { family : Family, key : List(U8), rest : List(U8), topic : List(U8), part : Part, tail : Tail }
+	R : { family : Family, key : Str, rest : Str, topic : Str, part : Part, tail : Tail }
+
+	## The route as it crosses back to the Zig: Chat.roc's `Route`, bytes.
+	to_wire : R -> { family : Family, key : List(U8), rest : List(U8), topic : List(U8), part : Part, tail : Tail }
+	to_wire = |r| { family: r.family, key: r.key.to_utf8(), rest: r.rest.to_utf8(), topic: r.topic.to_utf8(), part: r.part, tail: r.tail }
 
 	## Chat.roc's, spelled again (aliases are structural: the same types).
 	Family : [NotFound, Asset, Default, Docs, Recent, Images, Code, Links, Search, Conversations, Msg, Dm, Channel, Notifications, SidebarStream]
@@ -75,7 +79,7 @@ Route := [].{
 
 	## A route of `family` with nothing else.
 	family : Family -> R
-	family = |f| { family: f, key: [], rest: [], topic: [], part: Landing, tail: Page }
+	family = |f| { family: f, key: "", rest: "", topic: "", part: Landing, tail: Page }
 
 	## The five families under a prefix of their own, at a segment's
 	## boundary (`/docsX` is none of them).
@@ -107,7 +111,7 @@ Route := [].{
 			if f == Channel and !Paths.is_channel_name(key) {
 				family(NotFound)
 			} else {
-				base = { ..family(f), key: key.to_utf8() }
+				base = { ..family(f), key }
 				match more {
 					[] => base
 					[first, .. as after] =>
@@ -116,7 +120,7 @@ Route := [].{
 						} else if !Paths.is_topic_id(first) {
 							{ ..base, part: Invalid }
 						} else {
-							tail_of({ ..base, part: Topic, topic: first.to_utf8() }, after)
+							tail_of({ ..base, part: Topic, topic: first }, after)
 						}
 				}
 			}
@@ -130,7 +134,7 @@ Route := [].{
 			[] => r
 			[first, ..] if first == "uploads" =>
 				match segs {
-					[_, file] => { ..r, tail: Uploads, rest: file.to_utf8() }
+					[_, file] => { ..r, tail: Uploads, rest: file }
 					_ => { ..r, tail: Invalid }
 				}
 			[first] => { ..r, tail: named_tail(first) }
@@ -146,7 +150,7 @@ Route := [].{
 	}
 
 	with_rest : Family, Str -> R
-	with_rest = |f, rest| { ..family(f), rest: rest.to_utf8() }
+	with_rest = |f, rest| { ..family(f), rest }
 
 	## The path's segments, empty ones skipped (chat.zig's SegIter).
 	segments : Str -> List(Str)

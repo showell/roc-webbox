@@ -60,16 +60,20 @@ handle! = |req|
 routed! : Chat.Request, Str => Chat.Answer
 routed! = |req, sub|
 	match (if req.area == Channel Err(NotAnAsset) else Route.asset(sub)) {
-		Ok(route) => Chat.zig(route, Uncounted)
+		Ok(route) => zig(route, Uncounted)
 		Err(NotAnAsset) =>
 			if !Host.member!({}) {
 				area = if req.area == Channel "/channel" else "/chat"
 				Chat.redirect(List.concat(Str.to_utf8("/login/full?next=${area}"), req.sub))
 			} else {
 				route = if req.area == Channel Route.under_channel(sub) else Route.under_chat(sub)
-				if roc_serves(route) act!(req, route) else Chat.zig(route, if Route.is_stream(route) Uncounted else Counted)
+				if roc_serves(route) act!(req, route) else zig(route, if Route.is_stream(route) Uncounted else Counted)
 			}
 	}
+
+## The route handed back to the Zig, as the seam's bytes.
+zig : Route.R, Chat.Counting -> Chat.Answer
+zig = |route, counting| Chat.zig(Route.to_wire(route), counting)
 
 ## The routes the Roc serves itself: /chat and /chat/default, the recent,
 ## images and code pages (not their streams), /chat/links,
@@ -80,7 +84,7 @@ roc_serves : Route.R -> Bool
 roc_serves = |r|
 	match r.family {
 		Default | Links | Conversations | Msg => Bool.True
-		Recent | Images | Code => r.rest != Str.to_utf8("/stream")
+		Recent | Images | Code => r.rest != "/stream"
 		Dm | Channel =>
 			match r.part {
 				Landing | New => Bool.True
@@ -101,11 +105,11 @@ act! = |req, route| {
 	match route.family {
 		Default => resume!({})
 		Conversations => if req.method != Get Chat.not_allowed(Get) else conversations!({})
-		Msg => msg!(route.rest)
-		Links => links!(route.rest)
-		Recent => recent!(route.rest)
-		Images => feed!(Images, route.rest)
-		Code => feed!(Code, route.rest)
+		Msg => msg!(route.rest.to_utf8())
+		Links => links!(route.rest.to_utf8())
+		Recent => recent!(route.rest.to_utf8())
+		Images => feed!(Images, route.rest.to_utf8())
+		Code => feed!(Code, route.rest.to_utf8())
 		_ => in_conversation!(req, route)
 	}
 }
@@ -119,7 +123,7 @@ in_conversation! = |req, route|
 	match conv_key(route) {
 		# **A KEY THAT NAMES NO CONVERSATION IS THE ZIG'S 404**, as find!
 		# answered it: no pair (Paths.participant's rule), no valid name.
-		Err(Invalid) => Chat.zig(route, Uncounted)
+		Err(Invalid) => zig(route, Uncounted)
 		Ok(key) =>
 			if route.part == New {
 				new_topic!(req, route, key)
@@ -129,7 +133,7 @@ in_conversation! = |req, route|
 				landing!(route, key)
 			} else {
 				match find!(key) {
-					Err(NotYours) => Chat.zig(route, Uncounted)
+					Err(NotYours) => zig(route, Uncounted)
 					Err(Failed) => Chat.answered
 					Ok((conv, who)) =>
 					# The title before the topics, as findTopic read them: a
@@ -138,10 +142,10 @@ in_conversation! = |req, route|
 							Err(Failed) => Chat.answered
 							Ok(t) => {
 								topics = topics!(key)
-								if Conversation.has_topic(topics, route.topic) {
-									in_topic!(req, route, { key, conv, who, title: Conversation.topic_title(t, route.topic), topics })
+								if Conversation.has_topic(topics, route.topic.to_utf8()) {
+									in_topic!(req, route, { key, conv, who, title: Conversation.topic_title(t, route.topic.to_utf8()), topics })
 								} else {
-									Chat.zig(route, Uncounted)
+									zig(route, Uncounted)
 								}
 							}
 						}
@@ -155,11 +159,9 @@ in_conversation! = |req, route|
 ## it.
 conv_key : Route.R -> Try(Paths.ConvKey, [Invalid])
 conv_key = |route|
-	# TEMPORARY DOOR: moves out in a later run. The key is bytes in a Route
-	# until its fields are Str; it is a segment of the path handle! checked.
-	match (route.family, Str.from_utf8(route.key)) {
-		(Dm, Ok(key)) => Paths.pair_key_from_str(key).map_ok(|pair| Dm(pair))
-		(Channel, Ok(key)) => Paths.channel_name_from_str(key).map_ok(|name| Channel(name))
+	match route.family {
+		Dm => Paths.pair_key_from_str(route.key).map_ok(|pair| Dm(pair))
+		Channel => Paths.channel_name_from_str(route.key).map_ok(|name| Channel(name))
 		_ => Err(Invalid)
 	}
 
@@ -178,7 +180,7 @@ in_topic! = |req, route, found| {
 				Chat.not_allowed(Get)
 			} else if route.tail == Page {
 				page!(route, found)
-			} else if Files.held_raw!(Paths.transcript_path({ key: found.key, topic: route.topic })) {
+			} else if Files.held_raw!(Paths.transcript_path({ key: found.key, topic: route.topic.to_utf8() })) {
 				Chat.held_plain
 			} else {
 				Chat.not_found
@@ -189,7 +191,7 @@ in_topic! = |req, route, found| {
 			} else {
 				# readReactions's: nobody has reacted yet is no events.
 				ndjson = Str.to_utf8("application/x-ndjson; charset=utf-8")
-				match Files.read!(Paths.reactions_path({ key: found.key, topic: route.topic })) {
+				match Files.read!(Paths.reactions_path({ key: found.key, topic: route.topic.to_utf8() })) {
 					Ok(text) => Chat.respond(200, ndjson, Str.to_utf8(text))
 					Err(Missing) => Chat.respond(200, ndjson, [])
 					Err(Failed) => Chat.answered
@@ -199,9 +201,9 @@ in_topic! = |req, route, found| {
 			if req.method != Post {
 				Chat.not_allowed(Post)
 			} else if route.tail == React {
-				react!(conv, who, { key: found.key, topic: route.topic })
+				react!(conv, who, { key: found.key, topic: route.topic.to_utf8() })
 			} else {
-				match pin!(found.key, route.topic, if route.tail == Pin Pinned else Unpinned) {
+				match pin!(found.key, route.topic.to_utf8(), if route.tail == Pin Pinned else Unpinned) {
 					Ok({}) => Chat.respond(204, [], [])
 					Err(Failed) => Chat.answered
 				}
@@ -582,7 +584,7 @@ feed! = |which, rest|
 landing! : Route.R, Paths.ConvKey => Chat.Answer
 landing! = |route, key|
 	match find!(key) {
-		Err(NotYours) => Chat.zig(route, Uncounted)
+		Err(NotYours) => zig(route, Uncounted)
 		Err(Failed) => Chat.answered
 		Ok((conv, who)) => {
 			first = Paths.first_of(topics!(key))
@@ -607,13 +609,13 @@ landing! = |route, key|
 ## the limits the server enforces (Host.limits!).
 page! : Route.R, AtTopic => Chat.Answer
 page! = |route, at|
-	if at.conv.family == Dm and bookmark!(at.key, route.topic).is_err() {
+	if at.conv.family == Dm and bookmark!(at.key, route.topic.to_utf8()).is_err() {
 		Chat.answered
 	} else {
-		match sidebar!(route.topic, at) {
+		match sidebar!(route.topic.to_utf8(), at) {
 			Err(Failed) => Chat.answered
 			Ok((viewer, sb)) => {
-				view = { key: route.key, base: sb.base, topic: route.topic, title: at.title, uid: sb.uid, viewer, sidebar_json: Pages.sidebar_json(sb) }
+				view = { key: route.key.to_utf8(), base: sb.base, topic: route.topic.to_utf8(), title: at.title, uid: sb.uid, viewer, sidebar_json: Pages.sidebar_json(sb) }
 				Chat.respond(200, html, Html.bytes(Pages.conversation(Chrome.src_in(Host.srcs!({})), Host.limits!({}), view)))
 			}
 		}
@@ -829,7 +831,7 @@ new_topic! = |req, route, key|
 					}
 				}
 			}
-		Err(NotYours) => Chat.zig(route, Uncounted)
+		Err(NotYours) => zig(route, Uncounted)
 		Err(Failed) => Chat.answered
 	}
 
@@ -887,9 +889,9 @@ send! = |req, route, key|
 		# it: a partner whose name will not read fails a send too.
 			match title!(conv, who) {
 				Err(Failed) => Chat.answered
-				Ok(_) => sent!(req, route, { key, topic: route.topic }, conv, who)
+				Ok(_) => sent!(req, route, { key, topic: route.topic.to_utf8() }, conv, who)
 			}
-		Err(NotYours) => Chat.zig(route, Uncounted)
+		Err(NotYours) => zig(route, Uncounted)
 	}
 
 ## A send in `conv`, found and titled: the tail, the method, the header,
