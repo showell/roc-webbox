@@ -1018,7 +1018,8 @@ appended! = |conv, who, { at: topic_at, name, markdown: md, cid }|
 				# A count of the largest U64 has no next number: the call
 				# crashes into a 500, storing nothing.
 				id = "${topic}_${U64.to_str(index + 1)}".to_utf8()
-				message = { id, from: name, at: Str.to_utf8(Time.rfc3339(Host.now!({}))), uid, markdown: md }
+				stamp = Time.rfc3339(Host.now!({}))
+				message = { id, from: name, at: stamp.to_utf8(), uid, markdown: md }
 				block = Transcript.stored_form(index, message)
 				rendered = Host.render!(md)
 				match rendered.status {
@@ -1039,7 +1040,7 @@ appended! = |conv, who, { at: topic_at, name, markdown: md, cid }|
 						named = if Paths.conv_kind(topic_at.key) == Dm accounts!(who) else Ok([])
 						match (named, members!(conv.members)) {
 							(Ok(all), Ok(members)) => {
-								frame = Frame.message({ index, from: name, from_uid: me, at: message.at, html: rendered.html, markdown: md, id, cid })
+								frame = Frame.message({ index, from: name, from_uid: me, at: stamp, html: rendered.html, markdown: md, id, cid })
 								steps = Fanout.steps({ key: topic_at.key, members, topic, index, id, from: name, at: message.at, uid: me, accounts: all }, Fanout.parts_of(md))
 								if Host.store_message!(conv, topic.to_utf8(), block, index, message) {
 									# **STORED IS DONE** (metal-vmm QUEUE 172): from

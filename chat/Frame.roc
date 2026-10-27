@@ -8,7 +8,7 @@ Frame := [].{
 
 	## One message as its frame carries it: `index` 0-based (the SSE `id:`),
 	## the author's account `from_uid`, `cid` empty when there is none.
-	Message : { index : U64, from : List(U8), from_uid : Uid, at : List(U8), html : List(U8), markdown : List(U8), id : List(U8), cid : List(U8) }
+	Message : { index : U64, from : List(U8), from_uid : Uid, at : Str, html : List(U8), markdown : List(U8), id : List(U8), cid : List(U8) }
 
 	## messageFrame: `id: <index>`, then one `data:` line of JSON;
 	## `from_uid` after `from`, `cid` last when there is one.
@@ -26,7 +26,8 @@ Frame := [].{
 			JsonText.str_at_door(m.from),
 			Str.to_utf8(",\"from_uid\":"),
 			JsonText.str(m.from_uid.to_str()),
-			field("at", m.at),
+			Str.to_utf8(",\"at\":"),
+			JsonText.str(m.at),
 			field("html", m.html),
 			field("markdown", m.markdown),
 			field("id", m.id),

@@ -103,9 +103,9 @@ call = |req| {
 				Err(NotBelieved) => []
 			}
 		25 =>
-			match Uid.from_utf8(arg(2)) {
-				Ok(from_uid) => [Frame.message({ index: u64(arg(0)), from: arg(1), from_uid, at: arg(3), html: arg(4), markdown: arg(5), id: arg(6), cid: arg(7) })]
-				Err(NotAUid) => []
+			match (Uid.from_utf8(arg(2)), Str.from_utf8(arg(3))) {
+				(Ok(from_uid), Ok(at)) => [Frame.message({ index: u64(arg(0)), from: arg(1), from_uid, at, html: arg(4), markdown: arg(5), id: arg(6), cid: arg(7) })]
+				_ => []
 			}
 		26 => [Frame.reaction(arg(0))]
 		27 =>
