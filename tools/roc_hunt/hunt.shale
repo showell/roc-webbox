@@ -191,7 +191,7 @@ function magic_numbers(tree)
 end
 
 -- **A BOOL WHERE A TAG WOULD SAY WHICH**: a `Bool` argument, or a record
--- field of type `Bool`. A return of `Bool` (a question) is fine.
+-- field of type `Bool`. A return of `Bool` is `bool_returns`' to judge.
 function bools(tree)
   local found = {}
   for f in annotated_functions(tree) do
@@ -403,13 +403,32 @@ function html_trusted_nonliteral(tree)
   return found
 end
 
-const hunts = {"same_typed_args", "magic_numbers", "bools", "positional_lists", "if_chains", "long_definitions", "fs_bypass", "bytes_core_outside_twin", "html_trusted_nonliteral"}
+-- **A BOOL ANSWER THAT ISN'T A QUESTION'S**: a function that returns
+-- `Bool` is answering a question, and its name says so (`is_`, `has_`,
+-- `can_`: `is_topic_id`, `channel_is_open`). Any other Bool return is a
+-- decision that wants a tag (`[Roc, Zig]`, not "true: the Roc serves it")
+-- or a failure that wants a `Try` (`appended!` answering false when the
+-- store failed).
+function bool_returns(tree)
+  local found = {}
+  for f in annotated_functions(tree) do
+    local kids = children(tree, f.at + 1)
+    local name = between(head(tree, f.at), "(name \"", "\")") or ""
+    if #kids > 0 and render(tree, kids[#kids]) == "Bool" and re_find(name, "^is_|_is_|^has_|_has_|^can_|_can_") == nil then
+      push(found, where(tree, f.at) .. ": returns a Bool, and `" .. name .. "` is not a question's name")
+    end
+  end
+  return found
+end
+
+const hunts = {"same_typed_args", "magic_numbers", "bools", "bool_returns", "positional_lists", "if_chains", "long_definitions", "fs_bypass", "bytes_core_outside_twin", "html_trusted_nonliteral"}
 
 -- The hunt named `name`, over `tree`.
 function hunt(name, tree)
   if name == "same_typed_args" then return same_typed_args(tree) end
   if name == "magic_numbers" then return magic_numbers(tree) end
   if name == "bools" then return bools(tree) end
+  if name == "bool_returns" then return bool_returns(tree) end
   if name == "positional_lists" then return positional_lists(tree) end
   if name == "if_chains" then return if_chains(tree) end
   if name == "long_definitions" then return long_definitions(tree) end

@@ -27,6 +27,9 @@
   - `magic_numbers` — integer literals but 0 and 1; one that is a printable
     byte is marked `'?` (a character literal, `'_'`, says which).
   - `bools` — `Bool` arguments and record fields (a tag says which).
+  - `bool_returns`: a function returning `Bool` whose name is not a
+    question's (`is_`, `has_`, `can_`): a decision that wants a tag, or a
+    failure that wants a `Try`.
   - `positional_lists` — a `List(List(U8))` read with `get`: parts known
     only by position (a record names them).
   - `if_chains` — `else if` three or more deep (often a `match` on a tag).
