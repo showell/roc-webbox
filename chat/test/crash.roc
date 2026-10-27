@@ -9,8 +9,8 @@
 ## (`/publish/<key>`), counts (`/count/<topic>`), renders (`/render/<md>`),
 ## stores a message (`/store/<topic>`), appends a feed's entry and says one that failed (`/entry/<path>`), and asks
 ## `fail!` (`/fail/<reason>/<whose>`),
-## `malformed_channel!` (`/malformed/<name>`), `accounts!` (`/accounts`),
-## `online!` (`/online/<id>,<id>`) and `limits!` (`/limits`). Never linked
+## `count_malformed_channel!` (`/malformed/<name>`), `list_accounts!` (`/accounts`),
+## `check_online!` (`/online/<id>,<id>`) and `limits!` (`/limits`). Never linked
 ## into a server.
 app [handle!] { pf: platform "../platform/main.roc" }
 
@@ -60,14 +60,14 @@ handle! = |req|
 		match got.status {
 			Appended => Chat.respond(200, [], Str.to_utf8("appended"))
 			Failed => {
-				Host.fanout_failed!(Images, Str.to_utf8("2"), Str.to_utf8("1_2"), Str.to_utf8("Plans"), got.fault)
+				Host.report_fanout_failure!(Images, Str.to_utf8("2"), Str.to_utf8("1_2"), Str.to_utf8("Plans"), got.fault)
 				Chat.respond(200, [], Str.to_utf8("said"))
 			}
 		}
 	} else if starts(req.sub, "/raw/") {
-		Chat.respond(200, [], done(Host.raw!(List.drop_first(req.sub, 5))))
+		Chat.respond(200, [], served(Host.serve_file!(List.drop_first(req.sub, 5))))
 	} else if starts(req.sub, "/links/") {
-		Chat.respond(200, [], done(Host.links!(List.drop_first(req.sub, 7))))
+		Chat.respond(200, [], served(Host.serve_rendered!(List.drop_first(req.sub, 7))))
 	} else if starts(req.sub, "/remove/") {
 		Chat.respond(200, [], done(Host.remove!(List.drop_first(req.sub, 8))))
 	} else if starts(req.sub, "/list/") {
@@ -95,7 +95,7 @@ handle! = |req|
 		)
 		Chat.respond(200, [], List.concat(Str.to_utf8(said), each))
 	} else if req.sub == Str.to_utf8("/accounts") {
-		got = Host.accounts!({})
+		got = Host.list_accounts!({})
 		said = match got.status {
 			Found => "found"
 			Failed => "failed"
@@ -145,7 +145,7 @@ handle! = |req|
 		# `/online/<id>,<id>,...`: each id's flag in its place, ` <id>:on` or
 		# ` <id>:off`, so a list that crossed short, long or shifted shows.
 		ids = split_on(List.drop_first(req.sub, 8), 44)
-		flags = Host.online!(ids)
+		flags = Host.check_online!(ids)
 		said = List.map_with_index(
 			flags,
 			|f, i| List.join([
@@ -165,12 +165,12 @@ handle! = |req|
 		l = Host.limits!({})
 		Chat.respond(200, [], List.concat(Str.to_utf8("image=${U64.to_str(l.image_max)} video=${U64.to_str(l.video_max)} search=${U64.to_str(l.search_min)} accept="), l.accept))
 	} else if starts(req.sub, "/malformed/") {
-		Host.malformed_channel!(List.drop_first(req.sub, 11))
+		Host.count_malformed_channel!(List.drop_first(req.sub, 11))
 		Chat.respond(200, [], Str.to_utf8("counted"))
 	} else if req.sub == Str.to_utf8("/crash") {
 		crash "a planted crash"
 	} else if req.sub == Str.to_utf8("/crash-after-asking") {
-		if Host.member!({}) crash "a planted crash, after asking" else Chat.zig(Chat.family(NotFound), Uncounted)
+		if Host.check_member!({}) == Member crash "a planted crash, after asking" else Chat.zig(Chat.family(NotFound), Uncounted)
 	} else if req.sub == Str.to_utf8("/crash-after-asking-big") {
 		# A list grown a byte at a time, through many allocations, then a
 		# crash: each allocation is one a test can make fail. Bytes, said:
@@ -180,7 +180,7 @@ handle! = |req|
 		# happens to put it on a 16-byte boundary).
 		big : List(U8)
 		big = List.fold(List.repeat(7, 20000), [], |acc, b| List.append(acc, b))
-		if Host.member!({}) and List.len(big) == 20000 crash "a planted crash, after a big list" else Chat.zig(Chat.family(NotFound), Uncounted)
+		if Host.check_member!({}) == Member and List.len(big) == 20000 crash "a planted crash, after a big list" else Chat.zig(Chat.family(NotFound), Uncounted)
 	} else {
 		Chat.zig(Chat.family(Default), Counted)
 	}
@@ -211,5 +211,14 @@ dm12 = { family: Dm, key: Str.to_utf8("1_2"), base: Str.to_utf8("/chat/c/1_2"), 
 probe_message : Chat.Message
 probe_message = { id: Str.to_utf8("Plans_9"), from: Str.to_utf8("Steve"), at: Str.to_utf8("2026-10-26T00:00:00Z"), uid: Str.to_utf8("1"), markdown: Str.to_utf8("**hi**") }
 
-done : Bool -> List(U8)
-done = |ok| Str.to_utf8(if ok "done" else "failed")
+done : Try({}, [Failed]) -> List(U8)
+done = |got|
+	Str.to_utf8(
+		match got {
+			Ok({}) => "done"
+			Err(Failed) => "failed"
+		},
+	)
+
+served : [Serving, NotServing] -> List(U8)
+served = |got| Str.to_utf8(if got == Serving "done" else "failed")

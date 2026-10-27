@@ -18,7 +18,7 @@
 ## through `store_message!` (the append, the count cache, the search index),
 ## and its fan-out (Fanout.roc: every member's surfaces, their keys, events
 ## and feed entries) through `publish!`, `append_entry!` and
-## `fanout_failed!`, the message's parts its own (Fanout.parts_of). The files and folders it reads by name (the member's own, a
+## `report_fanout_failure!`, the message's parts its own (Fanout.parts_of). The files and folders it reads by name (the member's own, a
 ## conversation's topics, a channel's members, the rosters, a topic's
 ## reactions) it reads through the file primitives, the names and formats
 ## its own.
@@ -62,7 +62,7 @@ dispatch! = |req, sub|
 	match (if req.area == Channel Err(NotAnAsset) else Route.asset(sub)) {
 		Ok(route) => zig(route, Uncounted)
 		Err(NotAnAsset) =>
-			if !Host.member!({}) {
+			if Host.check_member!({}) == Outsider {
 				area = if req.area == Channel "/channel" else "/chat"
 				Chat.redirect(List.concat(Str.to_utf8("/login/full?next=${area}"), req.sub))
 			} else {
@@ -104,7 +104,7 @@ served_by = |r|
 ## The Roc's own routes: presence, then the route's own work.
 act! : Chat.Request, Route.R => Chat.Answer
 act! = |req, route| {
-	Host.presence!({})
+	Host.count_presence!({})
 	match route.family {
 		Default => resume!({})
 		Conversations => if req.method != Get Chat.not_allowed(Get) else serve_conversations!({})
@@ -253,7 +253,7 @@ find! = |key| {
 }
 
 ## **THE ACCOUNTS ARE ASKED OF THE HOST AT MOST ONCE A REQUEST**
-## (Host.accounts! lists every one, two reads each): `Known` once asked,
+## (Host.list_accounts! lists every one, two reads each): `Known` once asked,
 ## handed down to whatever looks one up next; `Unasked` until a route first
 ## needs them.
 Who : [Known(List(Accounts.Account)), Unasked]
@@ -267,7 +267,7 @@ load_accounts! = |who|
 	match who {
 		Known(all) => Ok(all)
 		Unasked => {
-			got = Host.accounts!({})
+			got = Host.list_accounts!({})
 			match got.status {
 				# **EACH ID AND NAME DECODED HERE, AT THE DOOR**
 				# (Accounts.from_host): one that is no uid, or a name that is
@@ -356,7 +356,7 @@ load_channel_members! = |name|
 ## **EVERY CHANNEL'S ROSTER** (channelRosters): channels/ listed
 ## (Paths.channel_names), then each member file read and judged in the
 ## listing's order (Paths.roster), a malformed one counted as it is met
-## (Host.malformed_channel!), as the Zig counted it, before any read after
+## (Host.count_malformed_channel!), as the Zig counted it, before any read after
 ## it can fail. `Failed` when the listing or a member file would not read
 ## (the request has failed with its error): **NEVER THE ROSTERS THAT READ
 ## BEFORE IT**, which would leave the rest out.
@@ -366,7 +366,7 @@ load_channel_rosters! = |{}| {
 		Ok(listed) => {
 			# A channel whose name is not UTF-8 is skipped, and counted as a
 			# malformed one is.
-			List.for_each!(Paths.channel_names_not_utf8(listed.not_utf8), |name| Host.malformed_channel!(name))
+			List.for_each!(Paths.channel_names_not_utf8(listed.not_utf8), |name| Host.count_malformed_channel!(name))
 			load_rosters_from!(Paths.channel_names(listed.entries), 0, [])
 		}
 		Err(Missing) => Ok([])
@@ -384,14 +384,14 @@ load_rosters_from! = |names, i, out|
 					match Paths.roster(name, Files.read!(Paths.channel_path(valid))) {
 						Listed(r) => load_rosters_from!(names, i + 1, List.append(out, r))
 						Malformed => {
-							Host.malformed_channel!(name.to_utf8())
+							Host.count_malformed_channel!(name.to_utf8())
 							load_rosters_from!(names, i + 1, out)
 						}
 						Gone => load_rosters_from!(names, i + 1, out)
 						Failed => Err(Failed)
 					}
 				Err(Invalid) => {
-					Host.malformed_channel!(name.to_utf8())
+					Host.count_malformed_channel!(name.to_utf8())
 					load_rosters_from!(names, i + 1, out)
 				}
 			}
@@ -481,7 +481,7 @@ write_if_changed! = |path, value|
 ## POST .../react: the form, then the reaction stored and sent live.
 react! : Chat.Conv, Who, Paths.TopicAt => Chat.Answer
 react! = |conv, who, at| {
-	body = Host.body!(Reaction)
+	body = Host.read_body!(Reaction)
 	if body.status == Answered {
 		Chat.answered
 	} else {
@@ -573,7 +573,7 @@ serve_recent! = |rest|
 			(Ok(viewer), Ok(me)) => {
 				# A row whose text is not UTF-8 is stored data gone bad: the
 				# request fails (NotUtf8, about the field's bytes).
-				match Recent.rows(Host.recent!({})) {
+				match Recent.rows(Host.gather_recent!({})) {
 					Ok(rows) => Chat.respond(200, html, Html.bytes(Pages.recent(Chrome.src_in(Host.srcs!({})), { viewer, json: Recent.json(me, rows) })))
 					Err(NotUtf8(bad)) => {
 						Host.fail!(NotUtf8, bad)
@@ -656,7 +656,7 @@ serve_topic_page! = |route, at|
 ## **THE VIEWER AND THE SIDEBAR, READ IN THE ZIG'S ORDER** (conversationPage's
 ## getUserName, then sidebarOf): the viewer's name; every other authorized
 ## member (listAuthorized: an account it reads that will not read fails
-## it), each online or not at the request's time (Host.online!, one asking
+## it), each online or not at the request's time (Host.check_online!, one asking
 ## for all); the member's channels (listUserChannels: a malformed one
 ## skipped and counted); their pins in this conversation (pinnedTopics,
 ## sorted); its topics as they were listed to find `topic`. `Failed`
@@ -675,7 +675,7 @@ load_sidebar! = |topic, at| {
 						Err(Failed) => Err(Failed)
 						Ok(roster) => {
 							others = List.drop_if(roster, |u| u.id == uid)
-							flags = Host.online!(List.map(others, |u| u.id.to_str().to_utf8()))
+							flags = Host.check_online!(List.map(others, |u| u.id.to_str().to_utf8()))
 							match load_channel_rosters!({}) {
 								Err(Failed) => Err(Failed)
 								Ok(rosters) =>
@@ -691,7 +691,7 @@ load_sidebar! = |topic, at| {
 	}
 }
 
-## The other members, each beside its own flag (Host.online! answers one
+## The other members, each beside its own flag (Host.check_online! answers one
 ## per id, in their order).
 with_online : List({ id : Uid, name : Str }), List([Offline, Online]) -> List({ id : Uid, name : Str, presence : [Online, Offline] })
 with_online = |others, flags|
@@ -851,7 +851,7 @@ create_topic! = |req, route, key|
 			if req.method != Post {
 				Chat.not_allowed(Post)
 			} else {
-				body = Host.body!(Message)
+				body = Host.read_body!(Message)
 				if body.status == Answered {
 					Chat.answered
 				} else {
@@ -931,8 +931,8 @@ receive_message! = |req, route, at, conv, who|
 		Chat.not_allowed(Post)
 	} else {
 		# The header before the body: reading the body moves past it.
-		send = if Host.header!(Str.to_utf8("x-chat-async")) == [['1']] Async else Sync
-		body = Host.body!(Message)
+		send = if Host.read_header!(Str.to_utf8("x-chat-async")) == [['1']] Async else Sync
+		body = Host.read_body!(Message)
 		if body.status == Answered {
 			Chat.answered
 		} else {
@@ -965,7 +965,7 @@ store! : Paths.TopicAt, Chat.Conv, Who, [Async, Sync], Posted => Chat.Answer
 store! = |at, conv, who, send, { markdown: md, cid }|
 	if ZigText.trim(md.to_utf8()) == [] {
 		refuse("not sent: the message is empty\n")
-	} else if Host.hostile!(md.to_utf8()) != Fine {
+	} else if Host.check_hostile!(md.to_utf8()) != Fine {
 		Chat.answered
 	} else {
 		match load_viewer!(who) {
@@ -1052,18 +1052,15 @@ append_message! = |conv, who, { at: topic_at, name, markdown: md, cid }|
 							(Ok(all), Ok(members)) => {
 								frame = Frame.message({ index, from: name, from_uid: me, at: stamp, html: page_html, markdown: md, id, cid })
 								steps = Fanout.steps({ key: topic_at.key, members, topic, index, id, from: name, at: stamp, uid: me, accounts: all }, Fanout.parts_of(md))
-								if Host.store_message!(conv, topic.to_utf8(), block, index, stored) {
-									# **STORED IS DONE** (metal-vmm QUEUE 172): from
-									# here nothing fails the send, which a client
-									# would answer by sending it again. The publish
-									# cannot fail; the fan-out is best-effort, each
-									# failure counted and said.
-									Host.publish!(key, frame)
-									fan_out!(topic_at, steps)
-									Ok({})
-								} else {
-									Err(Failed)
-								}
+								Host.store_message!(conv, topic.to_utf8(), block, index, stored)?
+								# **STORED IS DONE** (metal-vmm QUEUE 172): from
+								# here nothing fails the send, which a client
+								# would answer by sending it again. The publish
+								# cannot fail; the fan-out is best-effort, each
+								# failure counted and said.
+								Host.publish!(key, frame)
+								fan_out!(topic_at, steps)
+								Ok({})
 							}
 							_ => Err(Failed)
 						}
@@ -1076,7 +1073,7 @@ append_message! = |conv, who, { at: topic_at, name, markdown: md, cid }|
 
 ## **THE FAN-OUT, CARRIED OUT IN ITS ORDER** (Fanout.steps): each publish
 ## sent; each feed's entry appended and only then its event sent; each
-## surface that failed for a member counted and said (`fanout_failed!`),
+## surface that failed for a member counted and said (`report_fanout_failure!`),
 ## on the topic `at`. **A FAILURE NEVER STOPS
 ## THE STEPS AFTER IT, NOR FAILS THE SEND.**
 fan_out! : Paths.TopicAt, List(Fanout.Step) => {}
@@ -1090,7 +1087,7 @@ fan_out! = |at, steps|
 					got = Files.append_entry!(f.path, Feeds.sep, f.entry)
 					match got.status {
 						Appended => Host.publish!(f.key, f.event)
-						Failed => Host.fanout_failed!(f.surface, f.member, Paths.conv_key_bytes(at.key), at.topic.to_utf8(), got.fault)
+						Failed => Host.report_fanout_failure!(f.surface, f.member, Paths.conv_key_bytes(at.key), at.topic.to_utf8(), got.fault)
 					}
 				}
 			}

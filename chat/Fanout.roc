@@ -25,7 +25,7 @@ Fanout := [].{
 	parts_of = |md| { excerpt: Recent.excerpt(md), images: Feeds.img_tags(md), code: Feeds.code_blocks(md) }
 
 	## The surfaces that can fail for a member, as /admin/host names them
-	## (Host.fanout_failed!'s; a feed's append is the one that still can).
+	## (Host.report_fanout_failure!'s; a feed's append is the one that still can).
 	Surface : [Code, Images]
 
 	## One step of the fan-out, in the order it is taken:

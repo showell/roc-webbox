@@ -1,6 +1,6 @@
 ## WHO HAS AN ACCOUNT, AND WHAT THEY ARE CALLED (angry-gopher users.zig
 ## `principalExists`, `getUserName`, `listAuthorized`): the lookups over
-## every account as the host hands them (Host.accounts!, asked at most once
+## every account as the host hands them (Host.list_accounts!, asked at most once
 ## a request). Pure: angry-gopher's chat_twin_test.zig holds each to its Zig
 ## over account trees on disk.
 ##

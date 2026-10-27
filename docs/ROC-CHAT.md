@@ -52,7 +52,7 @@ route (`chat/Route.roc`, pure, by the old Zig dispatch's rules) and runs the
 prelude in Zig's order:
 1. a static script under `/chat` (`/<name>.js`) goes to Zig, before the gate;
 2. anyone not a member or the agent gets a 303 to `/login/full?next=`
-   (`Host.member!`, asked only after the scripts, so a script's request does
+   (`Host.check_member!`, asked only after the scripts, so a script's request does
    no identity reads);
 3. every other request counts as presence, but a stream (judged by its
    route, not the path's spelling).
@@ -295,7 +295,7 @@ viewer; only the sending tab shows "sent".
 `chat/main.roc` `send!` and `store!`: the conversation (`Host.send_conv!`;
 a miss is Zig's); the method; the `X-Chat-Async` header (before the body);
 the body to a message's limit; the form (`markdown`, `cid`); empty,
-not-UTF-8 and hostile messages refused (`Host.hostile!`, whose 400 and
+not-UTF-8 and hostile messages refused (`Host.check_hostile!`, whose 400 and
 edge count are the host's); a DM's bookmark; then `Host.append!`, which is
 Zig's `appendMessage`: number, date, block, `.count`, search, publish and
 fan-out, building everything that can fail before it stores and failing
@@ -326,7 +326,7 @@ visitor.
 - **On the box's `box/roc-cleanup`, not yet merged:** C5's fan-out and the
   message's store (C8a/C8b: `append_message!` over `render!` and
   `store_message!`; a fan-out failure counted, never failing the send), the
-  member's files, channels and topics, identity (`accounts!`) and the page's
+  member's files, channels and topics, identity (`list_accounts!`) and the page's
   data (`serve_topic_page!`) are the Roc's. `git log` there says what each did; the
   table below is as of `72d235c`.
 

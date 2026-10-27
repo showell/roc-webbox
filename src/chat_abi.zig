@@ -32,7 +32,7 @@ pub const Request = extern struct { sub: RocBytes, area: route_mod.Area, method:
 pub const RouteRec = extern struct { key: RocBytes, rest: RocBytes, topic: RocBytes, family: Family, part: route_mod.Part, tail: route_mod.Tail };
 /// Chat.roc's `Answer`.
 pub const Answer = extern struct { body: RocBytes, content_type: RocBytes, location: RocBytes, route: RouteRec, status: u16, allow: Method, kind: route_mod.Kind, presence: route_mod.Counting, sniff: route_mod.Sniff };
-/// Host.roc's `body!` answer: `{ bytes : List(U8), status : [Answered, Read] }`.
+/// Host.roc's `read_body!` answer: `{ bytes : List(U8), status : [Answered, Read] }`.
 pub const Got = extern struct { bytes: RocBytes, status: route_mod.BodyStatus };
 /// Chat.roc's `Conv`, as Roc hands it to a hosted function.
 pub const ConvRec = extern struct { base: RocBytes, key: RocBytes, members: roc.RocBytesList, family: Family };
@@ -44,12 +44,12 @@ pub const EntryRec = extern struct { name: RocBytes, kind: route_mod.EntryKind }
 pub const ListRec = extern struct { entries: EntryList, status: route_mod.ReadStatus };
 /// One of Host.roc's `srcs!` scripts: `{ name : List(U8), src : List(U8) }`.
 pub const SrcRec = extern struct { name: RocBytes, src: RocBytes };
-/// One of Host.roc's `recent!` rows: seven `List(U8)` fields by name, then
+/// One of Host.roc's `gather_recent!` rows: seven `List(U8)` fields by name, then
 /// its two tags, `dm : [Channel, Dm]` and `kind : [Doc, Message]`, by name.
 pub const RecentRec = extern struct { key: RocBytes, label: RocBytes, markdown: RocBytes, name: RocBytes, secs: RocBytes, topic: RocBytes, uid: RocBytes, dm: route_mod.RowConv, kind: route_mod.RowKind };
-/// One of Host.roc's `accounts!` accounts: `{ id : List(U8), kind : [Agent, Guest, Member, Unreadable], name : List(U8), name_read : [Found, Unreadable] }`.
+/// One of Host.roc's `list_accounts!` accounts: `{ id : List(U8), kind : [Agent, Guest, Member, Unreadable], name : List(U8), name_read : [Found, Unreadable] }`.
 pub const AccountRec = extern struct { id: RocBytes, name: RocBytes, kind: route_mod.AccountKind, name_read: route_mod.NameRead };
-/// Host.roc's `accounts!` answer: `{ accounts : List(...), status : [Failed, Found] }`.
+/// Host.roc's `list_accounts!` answer: `{ accounts : List(...), status : [Failed, Found] }`.
 pub const AccountsRec = extern struct { accounts: AccountList, status: route_mod.AccountsStatus };
 /// Host.roc's `message_count!` answer: `{ count : U64, status : [Counted, Failed] }`.
 pub const CountRec = extern struct { count: u64, status: route_mod.CountStatus };
@@ -65,7 +65,7 @@ pub const AppendRec = extern struct { fault: u16, status: route_mod.AppendStatus
 /// THEN THE LIST**, though all are 8-aligned: the pinned Roc lays it out so,
 /// and the seam's probe (`/limits`, every field its own number) holds it.
 pub const LimitsRec = extern struct { image_max: u64, search_min: u64, video_max: u64, accept: RocBytes };
-/// Host.roc's `online!` answer, `List([Offline, Online])`: its elements one
+/// Host.roc's `check_online!` answer, `List([Offline, Online])`: its elements one
 /// byte each, so laid out as a `List(U8)` is.
 pub const PresenceList = RocBytes;
 
@@ -228,35 +228,35 @@ extern fn roc_chat_handle(req: Request) callconv(.c) Answer;
 /// are the host's, copied into the call here.
 pub const Host = struct {
     ctx: *anyopaque,
-    /// Host.member!.
-    member: *const fn (ctx: *anyopaque) bool,
-    /// Host.presence!.
-    presence: *const fn (ctx: *anyopaque) void,
-    /// Host.accounts!: every account (canonical folders, in the disk's
+    /// Host.check_member!.
+    check_member: *const fn (ctx: *anyopaque) route_mod.Membership,
+    /// Host.count_presence!.
+    count_presence: *const fn (ctx: *anyopaque) void,
+    /// Host.list_accounts!: every account (canonical folders, in the disk's
     /// order), its kind and its name file's bytes; the Roc does every
     /// lookup. **NEVER A READ OF THE AUTH ROOT'S SECRETS**: the folders,
     /// whether each has a password, each name. An account whose own read
     /// failed is listed as unreadable there, and the host keeps the error
     /// for `fail_account`; only a listing of the auth root that failed is
     /// `.failed` (and fails the request).
-    accounts: *const fn (ctx: *anyopaque) Accounts = noAccounts,
+    list_accounts: *const fn (ctx: *anyopaque) Accounts = noAccounts,
     /// Host.fail! for an account a lookup needed: fail the request with the
     /// error account `id`'s `read` failed with when `accounts` listed it,
     /// as the host kept it. An id whose read did not fail is the Roc's bug,
     /// and fails the request all the same.
     fail_account: *const fn (ctx: *anyopaque, read: AccountRead, id: []const u8) void = noFailAccount,
-    /// Host.body!: read to `which` form's limit; null
+    /// Host.read_body!: read to `which` form's limit; null
     /// when the host answered (too big) or failed.
-    body: *const fn (ctx: *anyopaque, which: route_mod.Form) ?[]const u8,
+    read_body: *const fn (ctx: *anyopaque, which: route_mod.Form) ?[]const u8,
     /// Host.publish!: webbox's bus.publish, `bytes` to every subscriber on
     /// `key` (each its own copy, so the call's bytes may go with it). It
     /// cannot fail.
     publish: *const fn (ctx: *anyopaque, key: []const u8, bytes: []const u8) void = noPublish,
     /// Host.append_line!: `line` and a newline appended to the file at
     /// `path` under the chat root (checked here first, as the file
-    /// primitives' are), a newline first when the file ends mid-line. False
+    /// primitives' are), a newline first when the file ends mid-line. `.failed`
     /// when it failed (the host has failed the request).
-    append_line: *const fn (ctx: *anyopaque, path: []const u8, line: []const u8) bool = noAppendLine,
+    append_line: *const fn (ctx: *anyopaque, path: []const u8, line: []const u8) route_mod.Done = noAppendLine,
     /// Host.message_count!: topic `sid` of `conv`'s message count, or
     /// `.failed` (the host has failed the request).
     message_count: *const fn (ctx: *anyopaque, conv: Conv, sid: []const u8) Count = noCount,
@@ -264,11 +264,11 @@ pub const Host = struct {
     /// file under the chat root, `path` relative to it, its bytes and its
     /// name the Roc's. Every path is checked here first (`inRoot`); the host
     /// sees only one that stays under the root. `write` makes the folders;
-    /// `remove` of a file not there succeeds. False, or `.failed`, when it
+    /// `remove` of a file not there succeeds. `.failed` when it
     /// failed (the host has failed the request).
     read: *const fn (ctx: *anyopaque, path: []const u8) Read = noRead,
-    write: *const fn (ctx: *anyopaque, path: []const u8, bytes: []const u8) bool = noWrite,
-    remove: *const fn (ctx: *anyopaque, path: []const u8) bool = noRemove,
+    write: *const fn (ctx: *anyopaque, path: []const u8, bytes: []const u8) route_mod.Done = noWrite,
+    remove: *const fn (ctx: *anyopaque, path: []const u8) route_mod.Done = noRemove,
     /// Host.list!: a folder under the chat root, its entries in the disk's
     /// order (`.missing` when it is not there), its path checked as the
     /// others'.
@@ -282,13 +282,13 @@ pub const Host = struct {
     /// as bytes that are not UTF-8, which the Roc refuses at its door. The
     /// host fails the request (error.NotUtf8), saying the path.
     fail_text: *const fn (ctx: *anyopaque, path: []const u8) void = noFailText,
-    /// Host.malformed_channel!: channel `name`'s member file skipped by a
+    /// Host.count_malformed_channel!: channel `name`'s member file skipped by a
     /// listing as malformed, counted for the operator.
-    malformed_channel: *const fn (ctx: *anyopaque, name: []const u8) void = noMalformed,
-    /// Host.online!, asked by the seam once for each of the Roc's ids:
+    count_malformed_channel: *const fn (ctx: *anyopaque, name: []const u8) void = noMalformed,
+    /// Host.check_online!, asked by the seam once for each of the Roc's ids:
     /// whether `id` was seen within the presence window of the request's
     /// time. A read of process-lifetime state; it cannot fail.
-    online: *const fn (ctx: *anyopaque, id: []const u8) route_mod.Presence = noOnline,
+    check_online: *const fn (ctx: *anyopaque, id: []const u8) route_mod.Presence = noOnline,
     /// Host.limits!: the limits the upload and search code enforce.
     limits: *const fn (ctx: *anyopaque) Limits = noLimits,
     /// Host.srcs!: where a page names each script, by its name.
@@ -302,55 +302,55 @@ pub const Host = struct {
     render: *const fn (ctx: *anyopaque, markdown: []const u8) Rendered = noRender,
     /// Host.store_message!: `block`, message `index` of topic `sid` in
     /// `conv`, appended to its transcript, then the count cache and the
-    /// search index told of `message`. False when the append failed (the
+    /// search index told of `message`. `.failed` when the append failed (the
     /// host has failed the request; nothing stored).
-    store_message: *const fn (ctx: *anyopaque, conv: Conv, sid: []const u8, block: []const u8, index: u64, message: Message) bool = noStoreMessage,
+    store_message: *const fn (ctx: *anyopaque, conv: Conv, sid: []const u8, block: []const u8, index: u64, message: Message) route_mod.Done = noStoreMessage,
     /// Host.append_entry!: `entry` appended to the feed file at `path`
     /// under the chat root (the seam has checked it), `separator` first
     /// when the file is not empty. **IT NEVER FAILS THE REQUEST**: a write
     /// that failed is the fan-out's, its error handed back to be said.
     append_entry: *const fn (ctx: *anyopaque, path: []const u8, separator: []const u8, entry: []const u8) Appended = noAppendEntry,
-    /// Host.fanout_failed!: `surface` failed for `member` with `e`, on
+    /// Host.report_fanout_failure!: `surface` failed for `member` with `e`, on
     /// topic `sid` of the conversation keyed `key`: counted and said, the
     /// operator's (/admin/host). **NEVER THE REQUEST'S FAILURE.**
-    fanout_failed: *const fn (ctx: *anyopaque, surface: route_mod.Surface, member: []const u8, key: []const u8, sid: []const u8, e: anyerror) void = noFanoutFailed,
-    /// Host.header!: a request header's value, or none.
-    header: *const fn (ctx: *anyopaque, name: []const u8) []const []const u8 = noHeader,
-    /// Host.hostile!.
-    hostile: *const fn (ctx: *anyopaque, markdown: []const u8) route_mod.Hostility = noHostile,
-    /// Host.raw!: whether the host holds the bytes of the file at `path`
+    report_fanout_failure: *const fn (ctx: *anyopaque, surface: route_mod.Surface, member: []const u8, key: []const u8, sid: []const u8, e: anyerror) void = noFanoutFailed,
+    /// Host.read_header!: a request header's value, or none.
+    read_header: *const fn (ctx: *anyopaque, name: []const u8) []const []const u8 = noHeader,
+    /// Host.check_hostile!.
+    check_hostile: *const fn (ctx: *anyopaque, markdown: []const u8) route_mod.Hostility = noHostile,
+    /// Host.serve_file!: `.serving` when the host holds the bytes of the file at `path`
     /// under the chat root (the seam has checked it), for a `held` answer.
-    raw: *const fn (ctx: *anyopaque, path: []const u8) bool = noRaw,
-    /// Host.links!: whether the host holds the file at `path` under the
+    serve_file: *const fn (ctx: *anyopaque, path: []const u8) route_mod.Serving = noServeFile,
+    /// Host.serve_rendered!: `.serving` when the host holds the file at `path` under the
     /// chat root (the seam has checked it) rendered as the server's own
     /// markdown, for a `held` answer.
-    links: *const fn (ctx: *anyopaque, path: []const u8) bool = noHeld,
-    /// Host.recent!: the member's recent rows, or none.
-    recent: *const fn (ctx: *anyopaque) []const RecentRow = noRecent,
+    serve_rendered: *const fn (ctx: *anyopaque, path: []const u8) route_mod.Serving = noServeRendered,
+    /// Host.gather_recent!: the member's recent rows, or none.
+    gather_recent: *const fn (ctx: *anyopaque) []const RecentRow = noRecent,
 };
 
 fn noPublish(_: *anyopaque, _: []const u8, _: []const u8) void {
     @panic("publish asked of a host that does not answer it");
 }
-fn noAppendLine(_: *anyopaque, _: []const u8, _: []const u8) bool {
+fn noAppendLine(_: *anyopaque, _: []const u8, _: []const u8) route_mod.Done {
     @panic("append_line asked of a host that does not answer it");
 }
 fn noCount(_: *anyopaque, _: Conv, _: []const u8) Count {
     @panic("message_count asked of a host that does not answer it");
 }
-fn noHeld(_: *anyopaque, _: []const u8) bool {
-    @panic("links asked of a host that does not answer it");
+fn noServeRendered(_: *anyopaque, _: []const u8) route_mod.Serving {
+    @panic("serve_rendered asked of a host that does not answer it");
 }
-fn noRaw(_: *anyopaque, _: []const u8) bool {
-    @panic("raw asked of a host that does not answer it");
+fn noServeFile(_: *anyopaque, _: []const u8) route_mod.Serving {
+    @panic("serve_file asked of a host that does not answer it");
 }
 fn noRead(_: *anyopaque, _: []const u8) Read {
     @panic("read asked of a host that does not answer it");
 }
-fn noWrite(_: *anyopaque, _: []const u8, _: []const u8) bool {
+fn noWrite(_: *anyopaque, _: []const u8, _: []const u8) route_mod.Done {
     @panic("write asked of a host that does not answer it");
 }
-fn noRemove(_: *anyopaque, _: []const u8) bool {
+fn noRemove(_: *anyopaque, _: []const u8) route_mod.Done {
     @panic("remove asked of a host that does not answer it");
 }
 fn noListing(_: *anyopaque, _: []const u8) Listing {
@@ -363,19 +363,19 @@ fn noFailText(_: *anyopaque, path: []const u8) void {
     std.debug.panic("a host that cannot fail a request was asked to, for {s}, not UTF-8", .{path});
 }
 fn noMalformed(_: *anyopaque, _: []const u8) void {
-    @panic("malformed_channel asked of a host that does not answer it");
+    @panic("count_malformed_channel asked of a host that does not answer it");
 }
 fn noAccounts(_: *anyopaque) Accounts {
-    @panic("accounts asked of a host that does not answer it");
+    @panic("list_accounts asked of a host that does not answer it");
 }
 fn noFailAccount(_: *anyopaque, read: AccountRead, id: []const u8) void {
     std.debug.panic("a host that listed no account was asked to fail on account {s}'s {t}", .{ id, read });
 }
 fn noHeader(_: *anyopaque, _: []const u8) []const []const u8 {
-    @panic("header asked of a host that does not answer it");
+    @panic("read_header asked of a host that does not answer it");
 }
 fn noHostile(_: *anyopaque, _: []const u8) route_mod.Hostility {
-    @panic("hostile asked of a host that does not answer it");
+    @panic("check_hostile asked of a host that does not answer it");
 }
 
 fn noBytes(_: *anyopaque) []const u8 {
@@ -387,24 +387,24 @@ fn noNow(_: *anyopaque) i64 {
 fn noRender(_: *anyopaque, _: []const u8) Rendered {
     @panic("render asked of a host that does not answer it");
 }
-fn noStoreMessage(_: *anyopaque, _: Conv, _: []const u8, _: []const u8, _: u64, _: Message) bool {
+fn noStoreMessage(_: *anyopaque, _: Conv, _: []const u8, _: []const u8, _: u64, _: Message) route_mod.Done {
     @panic("store_message asked of a host that does not answer it");
 }
 fn noAppendEntry(_: *anyopaque, _: []const u8, _: []const u8, _: []const u8) Appended {
     @panic("append_entry asked of a host that does not answer it");
 }
 fn noFanoutFailed(_: *anyopaque, _: route_mod.Surface, _: []const u8, _: []const u8, _: []const u8, _: anyerror) void {
-    @panic("fanout_failed asked of a host that does not answer it");
+    @panic("report_fanout_failure asked of a host that does not answer it");
 }
 
 fn noOnline(_: *anyopaque, _: []const u8) route_mod.Presence {
-    @panic("online asked of a host that does not answer it");
+    @panic("check_online asked of a host that does not answer it");
 }
 fn noLimits(_: *anyopaque) Limits {
     @panic("limits asked of a host that does not answer it");
 }
 fn noRecent(_: *anyopaque) []const RecentRow {
-    @panic("recent asked of a host that does not answer it");
+    @panic("gather_recent asked of a host that does not answer it");
 }
 fn noSrcs(_: *anyopaque) []const Src {
     @panic("srcs asked of a host that does not answer it");
@@ -435,26 +435,26 @@ pub const Routing = struct {
 
     pub fn host(r: *Routing) Host {
         var h = askingOnly(r, ask);
-        h.presence = mark;
+        h.count_presence = mark;
         // The routes the Roc serves outright meet a member with nothing: an
         // id in no route's DM (so no DM is theirs; an id is always a uid,
         // or the Roc fails the request), no files (no last DM, no feed, no
         // channel), no folders (no topics, no channels), no other members.
         h.me = noDmId;
-        h.accounts = noAccount;
+        h.list_accounts = noAccount;
         h.read = noFile;
         h.list = noFolder;
         h.srcs = everyScript;
-        h.links = holdsNone;
-        h.recent = nothing;
+        h.serve_rendered = holdsNone;
+        h.gather_recent = nothing;
         return h;
     }
     fn of(ctx: *anyopaque) *Routing {
         return @ptrCast(@alignCast(ctx));
     }
-    fn ask(ctx: *anyopaque) bool {
+    fn ask(ctx: *anyopaque) route_mod.Membership {
         of(ctx).asked = true;
-        return of(ctx).member;
+        return if (of(ctx).member) .member else .outsider;
     }
     fn mark(ctx: *anyopaque) void {
         of(ctx).marked = true;
@@ -465,8 +465,8 @@ pub const Routing = struct {
     fn nothing(_: *anyopaque) []const RecentRow {
         return &.{};
     }
-    fn holdsNone(_: *anyopaque, _: []const u8) bool {
-        return false;
+    fn holdsNone(_: *anyopaque, _: []const u8) route_mod.Serving {
+        return .not_serving;
     }
     fn noFile(_: *anyopaque, _: []const u8) Read {
         return .missing;
@@ -481,16 +481,16 @@ pub const Routing = struct {
 
 /// A host that answers who is asking and nothing else, for a test of the
 /// router alone: any other hosted call is a panic.
-pub fn askingOnly(ctx: *anyopaque, ask: *const fn (ctx: *anyopaque) bool) Host {
+pub fn askingOnly(ctx: *anyopaque, ask: *const fn (ctx: *anyopaque) route_mod.Membership) Host {
     const No = struct {
         fn presence(_: *anyopaque) void {
-            @panic("presence asked of a host that only answers who is asking");
+            @panic("count_presence asked of a host that only answers who is asking");
         }
         fn body(_: *anyopaque, _: route_mod.Form) ?[]const u8 {
-            @panic("body asked of a host that only answers who is asking");
+            @panic("read_body asked of a host that only answers who is asking");
         }
     };
-    return .{ .ctx = ctx, .member = ask, .presence = No.presence, .body = No.body };
+    return .{ .ctx = ctx, .check_member = ask, .count_presence = No.presence, .read_body = No.body };
 }
 
 /// The call's host, or a panic for a hosted function Roc ran outside one.
@@ -504,27 +504,27 @@ fn got(bytes: ?[]const u8) Got {
     return .{ .bytes = .from(b), .status = .read };
 }
 
-export fn roc_chat_member() callconv(.c) bool {
-    const h = current("member");
-    return h.member(h.ctx);
+export fn roc_chat_check_member() callconv(.c) route_mod.Membership {
+    const h = current("check_member");
+    return h.check_member(h.ctx);
 }
 
-export fn roc_chat_presence() callconv(.c) void {
-    const h = current("presence");
-    h.presence(h.ctx);
+export fn roc_chat_count_presence() callconv(.c) void {
+    const h = current("count_presence");
+    h.count_presence(h.ctx);
 }
 
-export fn roc_chat_accounts() callconv(.c) AccountsRec {
-    const h = current("accounts");
-    return switch (h.accounts(h.ctx)) {
+export fn roc_chat_list_accounts() callconv(.c) AccountsRec {
+    const h = current("list_accounts");
+    return switch (h.list_accounts(h.ctx)) {
         .found => |all| .{ .accounts = .from(all), .status = .found },
         .failed => .{ .accounts = .from(&.{}), .status = .failed },
     };
 }
 
-export fn roc_chat_body(which: route_mod.Form) callconv(.c) Got {
-    const h = current("body");
-    return got(h.body(h.ctx, which));
+export fn roc_chat_read_body(which: route_mod.Form) callconv(.c) Got {
+    const h = current("read_body");
+    return got(h.read_body(h.ctx, which));
 }
 
 export fn roc_chat_publish(key: RocBytes, bytes: RocBytes) callconv(.c) void {
@@ -561,21 +561,21 @@ export fn roc_chat_read(path: RocBytes) callconv(.c) ReadRec {
     };
 }
 
-export fn roc_chat_write(path: RocBytes, bytes: RocBytes) callconv(.c) bool {
+export fn roc_chat_write(path: RocBytes, bytes: RocBytes) callconv(.c) route_mod.Done {
     const h = current("write");
-    if (!underRoot(h, path.slice())) return false;
+    if (!underRoot(h, path.slice())) return .failed;
     return h.write(h.ctx, path.slice(), bytes.slice());
 }
 
-export fn roc_chat_remove(path: RocBytes) callconv(.c) bool {
+export fn roc_chat_remove(path: RocBytes) callconv(.c) route_mod.Done {
     const h = current("remove");
-    if (!underRoot(h, path.slice())) return false;
+    if (!underRoot(h, path.slice())) return .failed;
     return h.remove(h.ctx, path.slice());
 }
 
-export fn roc_chat_append_line(path: RocBytes, line: RocBytes) callconv(.c) bool {
+export fn roc_chat_append_line(path: RocBytes, line: RocBytes) callconv(.c) route_mod.Done {
     const h = current("append_line");
-    if (!underRoot(h, path.slice())) return false;
+    if (!underRoot(h, path.slice())) return .failed;
     return h.append_line(h.ctx, path.slice(), line.slice());
 }
 
@@ -614,19 +614,19 @@ export fn roc_chat_fail(reason: route_mod.FailReason, whose: RocBytes) callconv(
     }
 }
 
-export fn roc_chat_malformed_channel(name: RocBytes) callconv(.c) void {
-    const h = current("malformed_channel");
-    h.malformed_channel(h.ctx, name.slice());
+export fn roc_chat_count_malformed_channel(name: RocBytes) callconv(.c) void {
+    const h = current("count_malformed_channel");
+    h.count_malformed_channel(h.ctx, name.slice());
 }
 
 /// **ONE FLAG FOR EACH ID, IN ITS PLACE**: the Roc asks once for the whole
 /// roster, and the seam asks the host id by id, so the answer is exactly as
 /// long as the ids and never out of their order.
-export fn roc_chat_online(ids: roc.RocBytesList) callconv(.c) PresenceList {
-    const h = current("online");
+export fn roc_chat_check_online(ids: roc.RocBytesList) callconv(.c) PresenceList {
+    const h = current("check_online");
     const items = ids.slice();
     const flags = roc.alloc().alloc(u8, items.len) catch @panic("roc_chat: out of memory for the presence flags");
-    for (items, flags) |*id, *f| f.* = @backingInt(h.online(h.ctx, id.slice()));
+    for (items, flags) |*id, *f| f.* = @backingInt(h.check_online(h.ctx, id.slice()));
     return .from(flags);
 }
 
@@ -654,7 +654,7 @@ export fn roc_chat_render(markdown: RocBytes) callconv(.c) RenderRec {
     };
 }
 
-export fn roc_chat_store_message(conv: ConvRec, sid: RocBytes, block: RocBytes, index: u64, message: MessageRec) callconv(.c) bool {
+export fn roc_chat_store_message(conv: ConvRec, sid: RocBytes, block: RocBytes, index: u64, message: MessageRec) callconv(.c) route_mod.Done {
     const h = current("store_message");
     return h.store_message(h.ctx, .of(conv), sid.slice(), block.slice(), index, .of(message));
 }
@@ -678,38 +678,38 @@ export fn roc_chat_append_entry(path: RocBytes, separator: RocBytes, entry: RocB
     };
 }
 
-export fn roc_chat_fanout_failed(surface: route_mod.Surface, member: RocBytes, key: RocBytes, sid: RocBytes, fault: u16) callconv(.c) void {
+export fn roc_chat_report_fanout_failure(surface: route_mod.Surface, member: RocBytes, key: RocBytes, sid: RocBytes, fault: u16) callconv(.c) void {
     comptime if (@typeInfo(route_mod.Surface).@"enum".field_names.len < 2)
-        @compileError("Host.fanout_failed!'s surface of one tag crosses as nothing: roc_chat_fanout_failed must not take it");
-    const h = current("fanout_failed");
-    h.fanout_failed(h.ctx, surface, member.slice(), key.slice(), sid.slice(), @errorFromInt(fault));
+        @compileError("Host.report_fanout_failure!'s surface of one tag crosses as nothing: roc_chat_report_fanout_failure must not take it");
+    const h = current("report_fanout_failure");
+    h.report_fanout_failure(h.ctx, surface, member.slice(), key.slice(), sid.slice(), @errorFromInt(fault));
 }
 
-export fn roc_chat_header(name: RocBytes) callconv(.c) roc.RocBytesList {
-    const h = current("header");
-    return .from(h.header(h.ctx, name.slice()));
+export fn roc_chat_read_header(name: RocBytes) callconv(.c) roc.RocBytesList {
+    const h = current("read_header");
+    return .from(h.read_header(h.ctx, name.slice()));
 }
 
-export fn roc_chat_hostile(markdown: RocBytes) callconv(.c) route_mod.Hostility {
-    const h = current("hostile");
-    return h.hostile(h.ctx, markdown.slice());
+export fn roc_chat_check_hostile(markdown: RocBytes) callconv(.c) route_mod.Hostility {
+    const h = current("check_hostile");
+    return h.check_hostile(h.ctx, markdown.slice());
 }
 
-export fn roc_chat_raw(path: RocBytes) callconv(.c) bool {
-    const h = current("raw");
-    if (!underRoot(h, path.slice())) return false;
-    return h.raw(h.ctx, path.slice());
+export fn roc_chat_serve_file(path: RocBytes) callconv(.c) route_mod.Serving {
+    const h = current("serve_file");
+    if (!underRoot(h, path.slice())) return .not_serving;
+    return h.serve_file(h.ctx, path.slice());
 }
 
-export fn roc_chat_recent() callconv(.c) RecentList {
-    const h = current("recent");
-    return .from(h.recent(h.ctx));
+export fn roc_chat_gather_recent() callconv(.c) RecentList {
+    const h = current("gather_recent");
+    return .from(h.gather_recent(h.ctx));
 }
 
-export fn roc_chat_links(path: RocBytes) callconv(.c) bool {
-    const h = current("links");
-    if (!underRoot(h, path.slice())) return false;
-    return h.links(h.ctx, path.slice());
+export fn roc_chat_serve_rendered(path: RocBytes) callconv(.c) route_mod.Serving {
+    const h = current("serve_rendered");
+    if (!underRoot(h, path.slice())) return .not_serving;
+    return h.serve_rendered(h.ctx, path.slice());
 }
 
 export fn roc_chat_srcs() callconv(.c) SrcList {

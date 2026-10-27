@@ -16,7 +16,7 @@ Recent := [].{
 	## ChatEvent's.
 	Row : { kind : [Doc, Message], secs : I64, uid : Str, name : Str, key : Str, label : Str, topic : Str, markdown : Str, dm : [Dm, Channel] }
 
-	## A row as the host writes it (Host.recent!): `secs` a signed decimal.
+	## A row as the host writes it (Host.gather_recent!): `secs` a signed decimal.
 	Written : { kind : [Doc, Message], secs : List(U8), uid : List(U8), name : List(U8), key : List(U8), label : List(U8), topic : List(U8), markdown : List(U8), dm : [Dm, Channel] }
 
 	## The host's rows, read. **EACH ROW'S TEXT DECODED HERE, AT THE

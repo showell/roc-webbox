@@ -4,15 +4,15 @@ import Chat
 
 Host := [].{
 
-	## Whether the one asking may use the chat: a member, or the agent
+	## Whether the one asking may use the chat (`Member`): a member, or the agent
 	## (angry-gopher's `users.principalAuthorized` of who the request's
 	## cookie or API key names). Asked after the static assets, which anyone
 	## may fetch, so a request for one does no identity reads.
-	member! : {} => Bool
+	check_member! : {} => [Member, Outsider]
 
 	## Count this request as the member's presence, now (the prelude's, for
 	## a request the Roc serves itself).
-	presence! : {} => {}
+	count_presence! : {} => {}
 
 	## **EVERY ACCOUNT, THE ONE IDENTITY PRIMITIVE**: each account folder
 	## named as a counter names one (a canonical id), in the disk's order,
@@ -28,12 +28,12 @@ Host := [].{
 	## ROOT ITSELF**: the host reads only the folders, whether each has a
 	## password, and each name, never a password or a key. Asked at most once
 	## a request.
-	accounts! : {} => { accounts : List({ id : List(U8), kind : [Agent, Guest, Member, Unreadable], name : List(U8), name_read : [Found, Unreadable] }), status : [Failed, Found] }
+	list_accounts! : {} => { accounts : List({ id : List(U8), kind : [Agent, Guest, Member, Unreadable], name : List(U8), name_read : [Found, Unreadable] }), status : [Failed, Found] }
 
 	## The request's body, read to a form's limit (`which`: the react
 	## form's or a message's): `Read`, its bytes beside it; `Answered` when
 	## the host answered instead (too big) or failed.
-	body! : [Reaction, Message] => { bytes : List(U8), status : [Answered, Read] }
+	read_body! : [Reaction, Message] => { bytes : List(U8), status : [Answered, Read] }
 
 	## **THE BUS, AS A PRIMITIVE** (webbox's `bus.publish`): `bytes` to every
 	## subscriber on `key`, each its own copy, as the stream writes it. It
@@ -44,9 +44,9 @@ Host := [].{
 	## (checked as `read!`'s is), its folders made as needed: `line`, then a
 	## newline. **A TORN LINE STAYS ITS OWN LINE**: a file that does not end
 	## in a newline gets one first, the host reading its last byte before it
-	## stores, so a read that fails stores nothing. False when it failed (the
-	## request has failed).
-	append_line! : List(U8), List(U8) => Bool
+	## stores, so a read that fails stores nothing. `Err(Failed)` when it
+	## failed (the request has failed).
+	append_line! : List(U8), List(U8) => Try({}, [Failed])
 
 	## Topic `sid` of `conv`'s message count (the store's count cache,
 	## believed only while the transcript is the size it was counted at, or
@@ -67,12 +67,13 @@ Host := [].{
 	## as "no file" would write over what could not be seen.
 	read! : List(U8) => { bytes : List(U8), status : [Failed, Found, Missing] }
 
-	## Write the whole file as `bytes`, its folders made as needed; false
+	## Write the whole file as `bytes`, its folders made as needed; `Err(Failed)`
 	## when it failed.
-	write! : List(U8), List(U8) => Bool
+	write! : List(U8), List(U8) => Try({}, [Failed])
 
-	## Remove the file (one not there is gone already); false when it failed.
-	remove! : List(U8) => Bool
+	## Remove the file (one not there is gone already); `Err(Failed)` when
+	## it failed.
+	remove! : List(U8) => Try({}, [Failed])
 
 	## The folder at `path` (checked as a file's is), each entry's name and
 	## kind in the order the disk gives them (`Found`); nothing there
@@ -85,7 +86,7 @@ Host := [].{
 	## the Zig it replaced failed it with: channel `whose`'s member file the
 	## Roc found malformed, on the channel's own route
 	## (channelMembers's error.MalformedChannel); account `whose`'s kind or
-	## name, which a lookup needed and which `accounts!` listed as
+	## name, which a lookup needed and which `list_accounts!` listed as
 	## unreadable (the error that read failed with, as the host kept it); a
 	## message with no author's name (appendMessage's error.NoAuthor, `whose`
 	## unused); a file at path `whose` whose bytes are not UTF-8 (Files.read!'s
@@ -94,14 +95,14 @@ Host := [].{
 
 	## Count channel `name` as one a listing skipped as malformed: the
 	## operator's count, kept by the host for /admin/host.
-	malformed_channel! : List(U8) => {}
+	count_malformed_channel! : List(U8) => {}
 
 	## **WHO IS ONLINE, AT THE REQUEST'S TIME** (angry-gopher presence.zig
 	## `isOnline`): for each of `ids`, in their order, whether it was seen
 	## within the presence window of the request's `now`. A read of the
 	## host's process-lifetime map, one call for the whole roster. It cannot
 	## fail; an id never seen is `Offline`.
-	online! : List(List(U8)) => List([Offline, Online])
+	check_online! : List(List(U8)) => List([Offline, Online])
 
 	## **THE LIMITS THE SERVER ENFORCES**, as the page tells its client: the
 	## largest image and video an upload takes, the types it accepts, the
@@ -115,8 +116,9 @@ Host := [].{
 	srcs! : {} => List({ name : List(U8), src : List(U8) })
 
 	## **AFTER A FAILURE THE HOST DOES NOTHING MORE** for the call: a hosted
-	## function the Roc calls once one has failed answers empty, false or
-	## "failed", writes nothing, and the host returns the failure.
+	## function the Roc calls once one has failed answers empty,
+	## `Err(Failed)`, `NotServing` or "failed", writes nothing, and the host
+	## returns the failure.
 
 	## The member's own id.
 	me! : {} => List(U8)
@@ -134,15 +136,15 @@ Host := [].{
 	## `index` of topic `sid` in `conv`) appended to the topic's transcript,
 	## then the store's infrastructure told: the count cache (`index` + 1,
 	## the transcript's new size, the block's offset and its author) and the
-	## search index (`message`, as it lands). False when the append failed
+	## search index (`message`, as it lands). `Err(Failed)` when the append failed
 	## (the request has failed, and nothing was stored). **STORED IS DONE**:
 	## the count and the search are best-effort and never fail it.
-	store_message! : Chat.Conv, List(U8), List(U8), U64, Chat.Message => Bool
+	store_message! : Chat.Conv, List(U8), List(U8), U64, Chat.Message => Try({}, [Failed])
 
 	## **THE FAN-OUT'S PRIMITIVES NEVER FAIL THE REQUEST** (metal-vmm QUEUE
 	## 172, 156(c)): the fan-out runs after the store, and **STORED IS DONE**.
 	## Each that can fail answers its `fault`, the host's error as a number
-	## the Roc never reads, carried to `fanout_failed!` to be counted and
+	## the Roc never reads, carried to `report_fanout_failure!` to be counted and
 	## said; a member's other surfaces, and every other member's, go on.
 
 	## **A FEED'S ENTRY APPENDED** to the file at `path` under the chat root
@@ -157,29 +159,29 @@ Host := [].{
 	## primitive answered it), on topic `sid` of the conversation keyed `key`.
 	## The operator's count and last failure, kept by the host for
 	## /admin/host.
-	fanout_failed! : [Code, Images], List(U8), List(U8), List(U8), U16 => {}
+	report_fanout_failure! : [Code, Images], List(U8), List(U8), List(U8), U16 => {}
 
 	## A request header's value, or none (read before the body).
-	header! : List(U8) => List(List(U8))
+	read_header! : List(U8) => List(List(U8))
 
-	## Whether the file at `path` under the chat root (checked as `read!`'s
-	## is) is there: the host reads it and holds its bytes for the answer
-	## (Chat.served_plain), never handing them to Roc (false when the read
-	## failed, too).
-	raw! : List(U8) => Bool
+	## **THE HOST SERVES THE FILE** at `path` under the chat root (checked as
+	## `read!`'s is) as the answer, `Serving` when it is there: the host reads
+	## it and holds its bytes (Chat.served_plain), never handing them to Roc
+	## (`NotServing` when the read failed, too).
+	serve_file! : List(U8) => [Serving, NotServing]
 
-	## Whether the file at `path` under the chat root (checked as `read!`'s
-	## is) is there: the host renders it as the server's own markdown and
-	## holds it for the answer (Chat.served_html) (false when the read failed,
-	## too).
-	links! : List(U8) => Bool
+	## **THE HOST SERVES THE FILE RENDERED** at `path` under the chat root
+	## (checked as `read!`'s is) as the answer, `Serving` when it is there: the
+	## host renders it as the server's own markdown and holds it
+	## (Chat.served_html) (`NotServing` when the read failed, too).
+	serve_rendered! : List(U8) => [Serving, NotServing]
 
 	## The member's recent feed as gathered (angry-gopher recent.zig
 	## `gatherRows`), each field as the host writes it: `secs` a signed
 	## decimal. None when it failed.
-	recent! : {} => List({ kind : [Doc, Message], secs : List(U8), uid : List(U8), name : List(U8), key : List(U8), label : List(U8), topic : List(U8), markdown : List(U8), dm : [Dm, Channel] })
+	gather_recent! : {} => List({ kind : [Doc, Message], secs : List(U8), uid : List(U8), name : List(U8), key : List(U8), label : List(U8), topic : List(U8), markdown : List(U8), dm : [Dm, Channel] })
 
 	## Whether markdown is hostile: `Fine`; `Refused`, the host having refused it
 	## (webbox's edge counter and its 400); or `Failed`, the check itself.
-	hostile! : List(U8) => [Fine, Refused, Failed]
+	check_hostile! : List(U8) => [Fine, Refused, Failed]
 }

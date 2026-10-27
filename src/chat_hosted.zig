@@ -41,6 +41,9 @@ pub const AccountKind = route.AccountKind;
 pub const AccountRead = abi.AccountRead;
 pub const Limits = abi.Limits;
 pub const Presence = route.Presence;
+pub const Membership = route.Membership;
+pub const Done = route.Done;
+pub const Serving = route.Serving;
 
 /// roc_abi.zig's arena, from `base`, once, as the host starts.
 pub fn use(base: std.mem.Allocator) void {
@@ -60,11 +63,11 @@ const testing = std.testing;
 
 fn answer(member: bool) Host {
     const S = struct {
-        fn yes(_: *anyopaque) bool {
-            return true;
+        fn yes(_: *anyopaque) route.Membership {
+            return .member;
         }
-        fn no(_: *anyopaque) bool {
-            return false;
+        fn no(_: *anyopaque) route.Membership {
+            return .outsider;
         }
         var dummy: u8 = 0;
     };
@@ -120,7 +123,7 @@ test "the router: a topic's tails, a channel, an asset before the gate, the gate
 /// A host whose answers a test sets, and which records what it was asked:
 /// the member is 1, Steve, in channel ops with 3; account 2 is Debbie.
 const Scripted = struct {
-    /// Every account, as Host.accounts! hands them; null when the read
+    /// Every account, as Host.list_accounts! hands them; null when the read
     /// failed.
     accounts: ?[]const abi.Account = &.{ steve, .{ .id = "2", .name = .{ .found = "Debbie" }, .kind = .member } },
     /// Every channel, in the listing's order: `channels/` lists each as
@@ -157,7 +160,7 @@ const Scripted = struct {
     const Channel = struct { name: []const u8, read: abi.Read };
 
     fn host(self: *Scripted) Host {
-        return .{ .ctx = self, .member = member, .presence = presence, .accounts = accountsOf, .me = meId, .now = nowOf, .body = bodyOf, .publish = publish, .append_line = appendLine, .message_count = messageCount, .read = readOf, .write = writeOf, .remove = removeOf, .list = listOf, .fail = failOf, .fail_text = failTextOf, .fail_account = failAccountOf, .malformed_channel = malformed, .online = onlineOf, .limits = limitsOf, .header = header, .hostile = hostile, .render = render, .store_message = storeMessage, .append_entry = appendEntry, .fanout_failed = fanoutFailed, .raw = raw, .links = links, .srcs = srcs };
+        return .{ .ctx = self, .check_member = member, .count_presence = presence, .list_accounts = accountsOf, .me = meId, .now = nowOf, .read_body = bodyOf, .publish = publish, .append_line = appendLine, .message_count = messageCount, .read = readOf, .write = writeOf, .remove = removeOf, .list = listOf, .fail = failOf, .fail_text = failTextOf, .fail_account = failAccountOf, .count_malformed_channel = malformed, .check_online = onlineOf, .limits = limitsOf, .read_header = header, .check_hostile = hostile, .render = render, .store_message = storeMessage, .append_entry = appendEntry, .report_fanout_failure = fanoutFailed, .serve_file = raw, .serve_rendered = links, .srcs = srcs };
     }
     fn me(ctx: *anyopaque) *Scripted {
         return @ptrCast(@alignCast(ctx));
@@ -174,9 +177,9 @@ const Scripted = struct {
         for (conv.members, 0..) |m, i| s.asked.print(s.alloc, "{s}{s}", .{ if (i == 0) "" else ",", m }) catch @panic("oom");
         s.asked.appendSlice(s.alloc, "]") catch @panic("oom");
     }
-    fn member(ctx: *anyopaque) bool {
+    fn member(ctx: *anyopaque) route.Membership {
         say(ctx, "member", .{});
-        return true;
+        return .member;
     }
     fn presence(ctx: *anyopaque) void {
         say(ctx, "presence", .{});
@@ -196,9 +199,9 @@ const Scripted = struct {
     fn publish(ctx: *anyopaque, key: []const u8, bytes: []const u8) void {
         say(ctx, "publish {s} {f}", .{ key, std.zig.fmtString(bytes) });
     }
-    fn appendLine(ctx: *anyopaque, path: []const u8, line: []const u8) bool {
+    fn appendLine(ctx: *anyopaque, path: []const u8, line: []const u8) route.Done {
         say(ctx, "append_line {s} {s}", .{ path, line });
-        return me(ctx).append_line_ok;
+        return if (me(ctx).append_line_ok) .ok else .failed;
     }
     fn messageCount(ctx: *anyopaque, conv: Conv, sid: []const u8) abi.Count {
         sayConv(ctx, "count", conv);
@@ -232,13 +235,13 @@ const Scripted = struct {
     fn malformed(ctx: *anyopaque, channel: []const u8) void {
         say(ctx, "malformed {s}", .{channel});
     }
-    fn writeOf(ctx: *anyopaque, path: []const u8, bytes: []const u8) bool {
+    fn writeOf(ctx: *anyopaque, path: []const u8, bytes: []const u8) route.Done {
         say(ctx, "write {s} {s}", .{ path, bytes });
-        return me(ctx).write_ok;
+        return if (me(ctx).write_ok) .ok else .failed;
     }
-    fn removeOf(ctx: *anyopaque, path: []const u8) bool {
+    fn removeOf(ctx: *anyopaque, path: []const u8) route.Done {
         say(ctx, "remove {s}", .{path});
-        return me(ctx).write_ok;
+        return if (me(ctx).write_ok) .ok else .failed;
     }
     fn failOf(ctx: *anyopaque, e: anyerror) void {
         say(ctx, "fail {t}", .{e});
@@ -267,13 +270,13 @@ const Scripted = struct {
         say(ctx, "hostile {s}", .{markdown});
         return me(ctx).hostile_answer;
     }
-    fn raw(ctx: *anyopaque, path: []const u8) bool {
+    fn raw(ctx: *anyopaque, path: []const u8) route.Serving {
         say(ctx, "raw {s}", .{path});
-        return me(ctx).transcript;
+        return if (me(ctx).transcript) .serving else .not_serving;
     }
-    fn links(ctx: *anyopaque, path: []const u8) bool {
+    fn links(ctx: *anyopaque, path: []const u8) route.Serving {
         say(ctx, "links {s}", .{path});
-        return me(ctx).linked;
+        return if (me(ctx).linked) .serving else .not_serving;
     }
     fn srcs(ctx: *anyopaque) []const abi.Src {
         say(ctx, "srcs", .{});
@@ -287,10 +290,10 @@ const Scripted = struct {
     }
     /// The block escaped and every field of the message in Chat.Message's
     /// order, so a record laid out wrong across the seam shows.
-    fn storeMessage(ctx: *anyopaque, conv: Conv, sid: []const u8, block: []const u8, index: u64, m: abi.Message) bool {
+    fn storeMessage(ctx: *anyopaque, conv: Conv, sid: []const u8, block: []const u8, index: u64, m: abi.Message) route.Done {
         sayConv(ctx, "store", conv);
         say(ctx, " {s} {f} {d} {s}|{s}|{s}|{s}|{s}", .{ sid, std.zig.fmtString(block), index, m.id, m.from, m.at, m.uid, m.markdown });
-        return me(ctx).store_ok;
+        return if (me(ctx).store_ok) .ok else .failed;
     }
     /// The separator and the entry escaped, so their every byte shows.
     fn appendEntry(ctx: *anyopaque, path: []const u8, separator: []const u8, entry: []const u8) abi.Appended {

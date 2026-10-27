@@ -7,6 +7,7 @@ const std = @import("std");
 const testing = std.testing;
 const abi = @import("chat_abi.zig");
 const roc = @import("roc_abi.zig");
+const route = @import("chat_route.zig");
 
 const Asker = struct {
     member: bool = true,
@@ -14,13 +15,13 @@ const Asker = struct {
     nest: bool = false,
     nested: ?anyerror = null,
 
-    fn ask(ctx: *anyopaque) bool {
+    fn ask(ctx: *anyopaque) route.Membership {
         const self: *Asker = @ptrCast(@alignCast(ctx));
         if (self.nest) {
             var inner: Asker = .{};
             if (abi.decide(testing.allocator, "/ok", false, .GET, inner.member_())) |_| {} else |e| self.nested = e;
         }
-        return self.member;
+        return if (self.member) .member else .outsider;
     }
 
     fn member_(self: *Asker) abi.Host {
@@ -41,20 +42,20 @@ const Files = struct {
         h.read = read;
         h.write = write;
         h.remove = remove;
-        h.raw = raw;
-        h.links = links;
+        h.serve_file = raw;
+        h.serve_rendered = links;
         h.list = list;
         h.fail = fail;
         h.fail_account = failAccount;
-        h.malformed_channel = malformed;
+        h.count_malformed_channel = malformed;
         h.append_line = appendLine;
         h.publish = publish;
         h.message_count = count;
         h.render = render;
         h.store_message = storeMessage;
         h.append_entry = appendEntry;
-        h.fanout_failed = fanoutFailed;
-        h.online = online;
+        h.report_fanout_failure = fanoutFailed;
+        h.check_online = online;
         h.limits = limits;
         return h;
     }
@@ -88,22 +89,22 @@ const Files = struct {
         return .{ .rendered = "<p>html</p>" };
     }
     /// Topic `Broken` will not store.
-    fn storeMessage(ctx: *anyopaque, conv: abi.Conv, sid: []const u8, block: []const u8, index: u64, m: abi.Message) bool {
+    fn storeMessage(ctx: *anyopaque, conv: abi.Conv, sid: []const u8, block: []const u8, index: u64, m: abi.Message) route.Done {
         of(ctx).asked.print(testing.allocator, "store {t} {s} {s} {s},{s} {s} {s} {d} id={s} from={s} at={s} uid={s} md={s};", .{ conv.family, conv.key, conv.base, conv.members[0], conv.members[1], sid, block, index, m.id, m.from, m.at, m.uid, m.markdown }) catch @panic("oom");
         if (std.mem.eql(u8, sid, "Broken")) {
             fail(ctx, error.IsDir);
-            return false;
+            return .failed;
         }
-        return true;
+        return .ok;
     }
     /// `users/1/broken` will not take a line; any other path does.
-    fn appendLine(ctx: *anyopaque, path: []const u8, line: []const u8) bool {
+    fn appendLine(ctx: *anyopaque, path: []const u8, line: []const u8) route.Done {
         of(ctx).asked.print(testing.allocator, "append_line {s} {s};", .{ path, line }) catch @panic("oom");
         if (std.mem.eql(u8, path, "users/1/broken")) {
             fail(ctx, error.IsDir);
-            return false;
+            return .failed;
         }
-        return true;
+        return .ok;
     }
     fn publish(ctx: *anyopaque, key: []const u8, bytes: []const u8) void {
         of(ctx).asked.print(testing.allocator, "publish {s} {f};", .{ key, std.zig.fmtString(bytes) }) catch @panic("oom");
@@ -143,8 +144,8 @@ const Files = struct {
     fn of(ctx: *anyopaque) *Files {
         return @ptrCast(@alignCast(ctx));
     }
-    fn yes(_: *anyopaque) bool {
-        return true;
+    fn yes(_: *anyopaque) route.Membership {
+        return .member;
     }
     fn say(ctx: *anyopaque, what: []const u8, path: []const u8) void {
         of(ctx).asked.print(testing.allocator, "{s} {s};", .{ what, path }) catch @panic("oom");
@@ -158,21 +159,21 @@ const Files = struct {
         }
         return .missing;
     }
-    fn write(ctx: *anyopaque, path: []const u8, _: []const u8) bool {
+    fn write(ctx: *anyopaque, path: []const u8, _: []const u8) route.Done {
         say(ctx, "write", path);
-        return true;
+        return .ok;
     }
-    fn remove(ctx: *anyopaque, path: []const u8) bool {
+    fn remove(ctx: *anyopaque, path: []const u8) route.Done {
         say(ctx, "remove", path);
-        return true;
+        return .ok;
     }
-    fn raw(ctx: *anyopaque, path: []const u8) bool {
+    fn raw(ctx: *anyopaque, path: []const u8) route.Serving {
         say(ctx, "raw", path);
-        return true;
+        return .serving;
     }
-    fn links(ctx: *anyopaque, path: []const u8) bool {
+    fn links(ctx: *anyopaque, path: []const u8) route.Serving {
         say(ctx, "links", path);
-        return true;
+        return .serving;
     }
     fn fail(ctx: *anyopaque, e: anyerror) void {
         if (of(ctx).failed == null) of(ctx).failed = e;
@@ -311,7 +312,7 @@ test "every account crosses with its id, kind and name, in the host's order, one
         var f: Files = .{};
         defer f.asked.deinit(testing.allocator);
         var h = f.host();
-        h.accounts = S.accounts;
+        h.list_accounts = S.accounts;
         const got = try abi.decide(arena.allocator(), "/accounts", false, .GET, h);
         try testing.expectEqualStrings(if (fails) "failed" else "found m:10=Ten\r\n a:3=Claude g:9= u:7=Sev m:12=? u:13=?", got.respond.body);
         try testing.expectEqualStrings("accounts ;", f.asked.items);

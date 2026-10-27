@@ -316,7 +316,7 @@ end
 -- the seam itself). Files.roc takes only a Paths.ChatPath, which only
 -- Paths.roc can make (`::`, opaque), so a path through it is one Paths
 -- named. The platform's table names the primitives without calling them.
-const file_primitives = " read! write! remove! list! append_line! append_entry! raw! links! "
+const file_primitives = " read! write! remove! list! append_line! append_entry! serve_file! serve_rendered! "
 
 function fs_bypass(tree)
   local found = {}

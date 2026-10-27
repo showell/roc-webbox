@@ -105,10 +105,10 @@ pub const Sniff = enum(u8) { allow, forbid };
 /// Chat.roc's `Kind`: what an answer is (Chat.roc says each).
 pub const Kind = enum(u8) { answered, found, held, malformed, not_allowed, not_found, redirect, respond, serve };
 
-/// Host.roc's `body!` argument: whose limit the body is read to.
+/// Host.roc's `read_body!` argument: whose limit the body is read to.
 pub const Form = enum(u8) { message, reaction };
 
-/// Host.roc's `body!` answer's `status`: the body read (its bytes beside
+/// Host.roc's `read_body!` answer's `status`: the body read (its bytes beside
 /// it), or answered by the host instead (too big) or failed.
 pub const BodyStatus = enum(u8) { answered, read };
 
@@ -118,7 +118,7 @@ pub const BodyStatus = enum(u8) { answered, read };
 /// judged against it would be refused as no such message.
 pub const CountStatus = enum(u8) { counted, failed };
 
-/// Host.roc's `hostile!` answer: `refused` when the host has answered the
+/// Host.roc's `check_hostile!` answer: `refused` when the host has answered the
 /// request (webbox's edge counter and its 400), `failed` when the check did.
 pub const Hostility = enum(u8) { failed, fine, refused };
 
@@ -131,18 +131,18 @@ pub const ReadStatus = enum(u8) { failed, found, missing };
 /// tells them (`directory` is `dir`; a link, a device or the like `other`).
 pub const EntryKind = enum(u8) { dir, file, other };
 
-/// Host.roc's `accounts!`: each account's kind (the agent, which the host
+/// Host.roc's `list_accounts!`: each account's kind (the agent, which the host
 /// alone decides; a member, who has a password; a guest, who has neither),
 /// or `unreadable` when its password's stat failed (the host keeps the
 /// error; the request fails only when a lookup needs the kind).
 pub const AccountKind = enum(u8) { agent, guest, member, unreadable };
 
-/// Host.roc's `accounts!`: whether each account's `name` file read (its
+/// Host.roc's `list_accounts!`: whether each account's `name` file read (its
 /// bytes beside it, "" when it has none) or failed (the host keeps the
 /// error).
 pub const NameRead = enum(u8) { found, unreadable };
 
-/// Host.roc's `accounts!` answer's `status`: every account listed, or a
+/// Host.roc's `list_accounts!` answer's `status`: every account listed, or a
 /// listing of the auth root that failed (the host has failed the request,
 /// and the list is no answer). An auth root not there is no accounts, as
 /// store.list holds it. One account that will not read is not this.
@@ -165,19 +165,34 @@ pub const RenderStatus = enum(u8) { failed, rendered };
 /// fault beside it): the fan-out's failure, counted, never the request's.
 pub const AppendStatus = enum(u8) { appended, failed };
 
-/// Host.roc's `fanout_failed!`: the fan-out's surfaces that can fail, a
+/// Host.roc's `report_fanout_failure!`: the fan-out's surfaces that can fail, a
 /// member at a time (chat_fanout's names for them, as /admin/host says
 /// them). Notify and sidebar are made of the Roc's bytes alone, so never.
 pub const Surface = enum(u8) { code, images };
 
-/// Host.roc's `online!` answer: each id seen within the presence window of
+/// Host.roc's `check_online!` answer: each id seen within the presence window of
 /// the request's time, or not (never seen is `offline`).
 pub const Presence = enum(u8) { offline, online };
 
-/// Host.roc's `recent!`: each row's `kind`, a doc or a chat message.
+/// Host.roc's `check_member!` answer: whether the one asking may use the
+/// chat (a member, or the agent).
+pub const Membership = enum(u8) { member, outsider };
+
+/// Host.roc's `Try({}, [Failed])` answer (`append_line!`, `write!`,
+/// `remove!`, `store_message!`): `Err(Failed)` or `Ok({})`, both payloads
+/// empty, so the tag alone crosses (`Err` first, as Roc sorts them).
+/// `failed` means the host has failed the request.
+pub const Done = enum(u8) { failed, ok };
+
+/// Host.roc's `serve_file!` and `serve_rendered!` answer: the host holds
+/// the file's bytes for a `held` answer, or it is not there (or its read
+/// failed).
+pub const Serving = enum(u8) { not_serving, serving };
+
+/// Host.roc's `gather_recent!`: each row's `kind`, a doc or a chat message.
 pub const RowKind = enum(u8) { doc, message };
 
-/// Host.roc's `recent!`: each row's `dm`, a DM's or a channel's.
+/// Host.roc's `gather_recent!`: each row's `dm`, a DM's or a channel's.
 pub const RowConv = enum(u8) { channel, dm };
 
 comptime {

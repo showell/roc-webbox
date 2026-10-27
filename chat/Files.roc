@@ -28,33 +28,33 @@ Files := [].{
 
 	## Host.write!: the whole file as `bytes`.
 	write! : Paths.ChatPath, List(U8) => Try({}, [Failed])
-	write! = |path, bytes| if Host.write!(Paths.bytes(path), bytes) Ok({}) else Err(Failed)
+	write! = |path, bytes| Host.write!(Paths.bytes(path), bytes)
 
 	## Host.remove!: the file gone.
 	remove! : Paths.ChatPath => Try({}, [Failed])
-	remove! = |path| if Host.remove!(Paths.bytes(path)) Ok({}) else Err(Failed)
+	remove! = |path| Host.remove!(Paths.bytes(path))
 
 	## Host.append_line!: `line` and a newline appended.
 	append_line! : Paths.ChatPath, List(U8) => Try({}, [Failed])
-	append_line! = |path, line| if Host.append_line!(Paths.bytes(path), line) Ok({}) else Err(Failed)
+	append_line! = |path, line| Host.append_line!(Paths.bytes(path), line)
 
 	## Host.append_entry!: a feed's entry appended, or failed with its fault.
 	append_entry! : Paths.ChatPath, List(U8), List(U8) => { fault : U16, status : [Appended, Failed] }
 	append_entry! = |path, separator, entry| Host.append_entry!(Paths.bytes(path), separator, entry)
 
-	## Host.raw!: the host loads the file and serves its bytes as the answer
+	## Host.serve_file!: the host loads the file and serves its bytes as the answer
 	## (Chat.served_plain), so Roc never copies a large transcript. `Serving`
 	## when it loaded; `NotServing` when the file is not there or the read
 	## failed: the host answers both as one.
 	serve_file! : Paths.ChatPath => [Serving, NotServing]
-	serve_file! = |path| if Host.raw!(Paths.bytes(path)) Serving else NotServing
+	serve_file! = |path| Host.serve_file!(Paths.bytes(path))
 
-	## Host.links!: the host loads the file, renders it as the server's own
+	## Host.serve_rendered!: the host loads the file, renders it as the server's own
 	## markdown, and serves that inside the page (Chat.served_html). `Serving`
 	## when it did; `NotServing` when the file is not there, or the read or
 	## the render failed: the host answers them as one.
 	serve_rendered! : Paths.ChatPath => [Serving, NotServing]
-	serve_rendered! = |path| if Host.links!(Paths.bytes(path)) Serving else NotServing
+	serve_rendered! = |path| Host.serve_rendered!(Paths.bytes(path))
 
 	## Host.list!'s answer as one tag: the folder's entries, nothing there,
 	## or a listing that failed (the request has failed). **MISSING AND
