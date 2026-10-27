@@ -381,13 +381,6 @@ valid_text = |bytes| match Str.from_utf8(bytes) {
 	Err(_) => crash "twin: text that is not UTF-8"
 }
 
-## A uid the test hands as valid; one that is not stops the twin.
-valid_uid : List(U8) -> Uid
-valid_uid = |bytes| match Uid.from_utf8(bytes) {
-	Ok(uid) => uid
-	Err(NotAUid) => crash "twin: an invalid uid"
-}
-
 ## The test's bytes as a conversation's key: a pair key, else a channel's
 ## name, when they are text and one.
 conv_of : List(U8) -> Try(Paths.ConvKey, [Invalid])
