@@ -17,7 +17,7 @@ Pages := [].{
 
 	## What the conversation page shows: the conversation's key and URL base,
 	## the topic, its title, the viewer, and the sidebar's JSON.
-	View : { key : List(U8), base : List(U8), topic : List(U8), title : List(U8), uid : List(U8), viewer : List(U8), sidebar_json : List(U8) }
+	View : { key : List(U8), base : List(U8), topic : List(U8), title : List(U8), uid : List(U8), viewer : List(U8), sidebar_json : Html.ScriptJson }
 
 	## What the sidebar shows: the viewer, the conversation (its kind), the
 	## topic, every other member (each online or not), the viewer's channels,
@@ -28,8 +28,8 @@ Pages := [].{
 	## `active`. Named fields because all three are byte lists.
 	Heading : { title : List(U8), viewer : List(U8), active : List(U8) }
 
-	shell : (List(U8) -> List(U8)), Heading -> Chrome.Shell
-	shell = |src, { title, viewer, active }| { tab: Str.to_utf8("Chat"), title, viewer, active, src }
+	shell : (List(U8) -> Html), Heading -> Chrome.Shell
+	shell = |src, { title, viewer, active }| { tab: Html.trusted("Chat"), title, viewer, active, src }
 
 	## A conversation with no topics yet: the `viewer`, its URL `base`, and
 	## its `title`.
@@ -37,15 +37,15 @@ Pages := [].{
 
 	## noTopicsHtml: an addressable conversation with no topics, its
 	## first-topic widget mounted on `base`.
-	no_topics : (List(U8) -> List(U8)), Topicless -> List(U8)
+	no_topics : (List(U8) -> Html), Topicless -> Html
 	no_topics = |src, { viewer, base, title }| {
 		s = shell(src, { title, viewer, active: Str.to_utf8("chat") })
 		Chrome.page(
 			s,
-			List.join([
-				Str.to_utf8("<div id=\"chat-first-topic\" data-conv-base=\""),
+			Html.join([
+				Html.trusted("<div id=\"chat-first-topic\" data-conv-base=\""),
 				Html.escape(base),
-				Str.to_utf8("\"></div>"),
+				Html.trusted("\"></div>"),
 				Chrome.script(s, "chat_add_topic.js"),
 				Chrome.script(s, "chat_first_topic.js"),
 			]),
@@ -57,62 +57,67 @@ Pages := [].{
 	NotHere : { viewer : List(U8), what : List(U8), back : List(U8) }
 
 	## notFoundHtml: `what` is not here, and `back` is where to go.
-	not_found : (List(U8) -> List(U8)), NotHere -> List(U8)
+	not_found : (List(U8) -> Html), NotHere -> Html
 	not_found = |src, { viewer, what, back }|
 		Chrome.page(
 			shell(src, { title: Str.to_utf8("Not here"), viewer, active: Str.to_utf8("chat") }),
-			List.join([
-				Str.to_utf8("<p>"),
+			Html.join([
+				Html.trusted("<p>"),
 				Html.escape(what),
-				Str.to_utf8("</p><p><a href=\""),
+				Html.trusted("</p><p><a href=\""),
 				Html.escape(back),
-				Str.to_utf8("\">Go back</a></p>"),
+				Html.trusted("\">Go back</a></p>"),
 			]),
 		)
 
-	## chat_links.zig's /chat/links: the member's curated links, `rendered`
-	## (none when they have none: a stub that says who curates them), in a
-	## readable column of its own.
-	links : (List(U8) -> List(U8)), List(U8), List(List(U8)) -> List(U8)
+	## chat_links.zig's /chat/links: the member's curated links where the
+	## host holds them (`Held`, a mark the host fills), or the stub that says
+	## who curates them, in a readable column of its own.
+	links : (List(U8) -> Html), List(U8), [Held, NoLinks] -> Html
 	links = |src, viewer, rendered|
 		Chrome.page(
-			{ tab: Str.to_utf8("Links"), title: Str.to_utf8("Links"), viewer, active: Str.to_utf8("links"), src },
-			List.join([
-				Str.to_utf8(links_css),
-				Str.to_utf8("<div class=\"links-page\">"),
+			{ tab: Html.trusted("Links"), title: Str.to_utf8("Links"), viewer, active: Str.to_utf8("links"), src },
+			Html.join([
+				links_css,
+				Html.trusted("<div class=\"links-page\">"),
 				match rendered {
-					[html] => html
-					_ => Str.to_utf8("<p>No links yet — ask Steve to curate links.</p>")
+					Held => Html.trusted("\u(0)")
+					NoLinks => Html.trusted("<p>No links yet — ask Steve to curate links.</p>")
 				},
-				Str.to_utf8("</div>"),
+				Html.trusted("</div>"),
 			]),
 		)
 
 	## The links page cut where the rendered links go: the host holds them
 	## (a curated page can be long), and answers before, them, after.
-	links_around : (List(U8) -> List(U8)), List(U8) -> (List(U8), List(U8))
+	links_around : (List(U8) -> Html), List(U8) -> (List(U8), List(U8))
 	links_around = |src, viewer|
-		match Bytes.cut_seq(links(src, viewer, [[0]]), [0]) {
+		match Bytes.cut_seq(Html.bytes(links(src, viewer, Held)), [0]) {
 			Ok(parts) => parts
 			Err(None) => crash "Pages.links_around: the page lost its mark"
 		}
 
-	links_css : Str
-	links_css = "<style>\n.links-page { max-width: 46rem; margin: 0 auto; line-height: 1.55; }\n.links-page h2 { margin-top: 1.6rem; }\n.links-page li { margin: 3px 0; }\n</style>"
+	links_css : Html
+	links_css = Html.trusted("<style>\n.links-page { max-width: 46rem; margin: 0 auto; line-height: 1.55; }\n.links-page h2 { margin-top: 1.6rem; }\n.links-page li { margin: 3px 0; }\n</style>")
 
 	## images.zig's and code.zig's pages: the attention strip, the feed's
 	## mount, its JSON (`json`, script-safe) and its scripts.
-	feed : (List(U8) -> List(U8)), List(U8), Str, List(U8), List(Str) -> List(U8)
-	feed = |src, viewer, name, json, scripts| {
-		title = Str.to_utf8(if name == "images" "Images" else "Code")
-		s = { tab: title, title, viewer, active: Str.to_utf8(name), src }
+	feed : (List(U8) -> Html), List(U8), [Images, Code], List(U8), List(Str) -> Html
+	feed = |src, viewer, which, json, scripts| {
+		(name, title) = match which {
+			Images => ("images", "Images")
+			Code => ("code", "Code")
+		}
+		s = { tab: Html.escape(Str.to_utf8(title)), title: Str.to_utf8(title), viewer, active: Str.to_utf8(name), src }
+		id = Html.escape(Str.to_utf8(name))
 		Chrome.page(
 			s,
-			List.join([
-				Str.to_utf8("<div class=\"chat-notify\" id=\"chat-notify\"></div><div id=\"${name}-mount\"></div><script id=\"${name}-data\" type=\"application/json\">"),
-				Html.script_safe(json),
-				Str.to_utf8("</script>"),
-				List.join(List.map(scripts, |js| Chrome.script(s, js))),
+			Html.join([
+				Html.trusted("<div class=\"chat-notify\" id=\"chat-notify\"></div><div id=\""),
+				id,
+				Html.trusted("-mount\"></div>"),
+				Html.json_script(Html.join([Html.trusted("<script id=\""), id, Html.trusted("-data\" type=\"application/json\">")]), Html.script_safe(json)),
+				Html.join(List.map(scripts, |js| Chrome.script(s, js))),
 			]),
 		)
 	}
@@ -122,15 +127,14 @@ Pages := [].{
 
 	## recent.zig's /chat/recent: the attention strip, the feed's mount, its
 	## JSON (script-safe) and its two scripts.
-	recent : (List(U8) -> List(U8)), FeedView -> List(U8)
+	recent : (List(U8) -> Html), FeedView -> Html
 	recent = |src, { viewer, json }| {
-		s = { tab: Str.to_utf8("Recent"), title: Str.to_utf8("Recent"), viewer, active: Str.to_utf8("recent"), src }
+		s = { tab: Html.trusted("Recent"), title: Str.to_utf8("Recent"), viewer, active: Str.to_utf8("recent"), src }
 		Chrome.page(
 			s,
-			List.join([
-				Str.to_utf8("<div class=\"chat-notify\" id=\"chat-notify\"></div><div id=\"recent-mount\"></div><script id=\"recent-data\" type=\"application/json\">"),
-				Html.script_safe(json),
-				Str.to_utf8("</script>"),
+			Html.join([
+				Html.trusted("<div class=\"chat-notify\" id=\"chat-notify\"></div><div id=\"recent-mount\"></div>"),
+				Html.json_script(Html.trusted("<script id=\"recent-data\" type=\"application/json\">"), Html.script_safe(json)),
 				Chrome.script(s, "recent.js"),
 				Chrome.script(s, "notify.js"),
 			]),
@@ -138,29 +142,29 @@ Pages := [].{
 	}
 
 	## /chat/images: the newest entries of the member's images.md.
-	images : (List(U8) -> List(U8)), FeedView -> List(U8)
-	images = |src, { viewer, json }| feed(src, viewer, "images", json, ["styles.js", "chat_image_popup.js", "images.js", "notify.js"])
+	images : (List(U8) -> Html), FeedView -> Html
+	images = |src, { viewer, json }| feed(src, viewer, Images, json, ["styles.js", "chat_image_popup.js", "images.js", "notify.js"])
 
 	## /chat/code: every entry of the member's code.md.
-	code : (List(U8) -> List(U8)), FeedView -> List(U8)
-	code = |src, { viewer, json }| feed(src, viewer, "code", json, ["styles.js", "chat_code_popup.js", "code.js", "notify.js"])
+	code : (List(U8) -> Html), FeedView -> Html
+	code = |src, { viewer, json }| feed(src, viewer, Code, json, ["styles.js", "chat_code_popup.js", "code.js", "notify.js"])
 
 	## noConversationsHtml: /chat for a viewer with nothing to resume.
-	no_conversations : (List(U8) -> List(U8)), List(U8) -> List(U8)
+	no_conversations : (List(U8) -> Html), List(U8) -> Html
 	no_conversations = |src, viewer|
-		Chrome.page(shell(src, { title: Str.to_utf8("Chat"), viewer, active: Str.to_utf8("chat") }), Str.to_utf8("<p>You do not have any conversations.</p>"))
+		Chrome.page(shell(src, { title: Str.to_utf8("Chat"), viewer, active: Str.to_utf8("chat") }), Html.trusted("<p>You do not have any conversations.</p>"))
 
 	## conversationHtml: the page that boots the chat's client.
-	conversation : (List(U8) -> List(U8)), Limits, View -> List(U8)
+	conversation : (List(U8) -> Html), Limits, View -> Html
 	conversation = |src, limits, v| {
 		s = shell(src, { title: v.title, viewer: v.viewer, active: [] })
-		attr = |name, value| List.join([Str.to_utf8(" ${name}=\""), value, ['"']])
-		num = |n| Str.to_utf8(U64.to_str(n))
+		attr = |name, value| Html.join([Html.trusted(" "), Html.escape(Str.to_utf8(name)), Html.trusted("=\""), value, Html.trusted("\"")])
+		num = |n| Html.escape(Str.to_utf8(U64.to_str(n)))
 		Chrome.page(
 			s,
-			List.join([
-				Str.to_utf8(Chrome.chat_css),
-				Str.to_utf8("<div id=\"chat-root\""),
+			Html.join([
+				Chrome.chat_css,
+				Html.trusted("<div id=\"chat-root\""),
 				attr("data-conv", Html.escape(v.key)),
 				attr("data-conv-base", Html.escape(v.base)),
 				attr("data-session", Html.escape(v.topic)),
@@ -168,12 +172,12 @@ Pages := [].{
 				attr("data-me-name", Html.escape(v.viewer)),
 				attr("data-upload-image-max", num(limits.image_max)),
 				attr("data-upload-video-max", num(limits.video_max)),
-				attr("data-upload-accept", limits.accept),
+				attr("data-upload-accept", Html.escape(limits.accept)),
 				attr("data-search-min", num(limits.search_min)),
-				Str.to_utf8("><div class=\"chat-notify\" id=\"chat-notify\"></div><div class=\"chat-layout\"><div id=\"chat-left-sidebar\"></div><script type=\"application/json\" id=\"chat-sidebar-data\">"),
-				v.sidebar_json,
-				Str.to_utf8("</script><div id=\"chat-feed\"></div><div id=\"chat-right-sidebar\"></div></div></div>"),
-				List.join(List.map(page_scripts, |name| Chrome.script(s, name))),
+				Html.trusted("><div class=\"chat-notify\" id=\"chat-notify\"></div><div class=\"chat-layout\"><div id=\"chat-left-sidebar\"></div>"),
+				Html.json_script(Html.trusted("<script type=\"application/json\" id=\"chat-sidebar-data\">"), v.sidebar_json),
+				Html.trusted("<div id=\"chat-feed\"></div><div id=\"chat-right-sidebar\"></div></div></div>"),
+				Html.join(List.map(page_scripts, |name| Chrome.script(s, name))),
 			]),
 		)
 	}
@@ -185,7 +189,7 @@ Pages := [].{
 	## sidebarJSON: every other member (a DM each) and the viewer's channels,
 	## then this conversation's topics, pinned and not; made safe inside the
 	## page's `<script>`.
-	sidebar_json : Sidebar -> List(U8)
+	sidebar_json : Sidebar -> Html.ScriptJson
 	sidebar_json = |sb| {
 		prefixed = |prefix, s| List.concat(Str.to_utf8(prefix), s)
 		person = |u| {

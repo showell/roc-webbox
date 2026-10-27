@@ -95,18 +95,18 @@ call = |req| {
 				Malformed => [[77]]
 			}
 		29 => [bool(Reaction.valid_emoji(arg(0)))]
-		30 => [Chrome.page({ tab: arg(0), title: arg(1), viewer: arg(2), active: arg(3), src: srcs(req.args, 5) }, arg(4))]
-		31 => [Pages.not_found(srcs(req.args, 3), { viewer: arg(0), what: arg(1), back: arg(2) })]
-		32 => [Pages.no_topics(srcs(req.args, 3), { viewer: arg(0), base: arg(1), title: arg(2) })]
-		33 => [Pages.no_conversations(srcs(req.args, 1), arg(0))]
-		34 => [Pages.sidebar_json(Pages.decode_sidebar(req.args))]
+		30 => [Html.bytes(Chrome.page({ tab: Html.host_markup(arg(0)), title: arg(1), viewer: arg(2), active: arg(3), src: srcs(req.args, 5) }, Html.host_markup(arg(4))))]
+		31 => [Html.bytes(Pages.not_found(srcs(req.args, 3), { viewer: arg(0), what: arg(1), back: arg(2) }))]
+		32 => [Html.bytes(Pages.no_topics(srcs(req.args, 3), { viewer: arg(0), base: arg(1), title: arg(2) }))]
+		33 => [Html.bytes(Pages.no_conversations(srcs(req.args, 1), arg(0)))]
+		34 => [Html.script_json_bytes(Pages.sidebar_json(Pages.decode_sidebar(req.args)))]
 		35 => {
 			limits = { image_max: u64(arg(7)), video_max: u64(arg(8)), accept: arg(9), search_min: u64(arg(10)) }
-			view = { key: arg(0), base: arg(1), topic: arg(2), title: arg(3), uid: arg(4), viewer: arg(5), sidebar_json: arg(6) }
-			[Pages.conversation(srcs(req.args, 11), limits, view)]
+			view = { key: arg(0), base: arg(1), topic: arg(2), title: arg(3), uid: arg(4), viewer: arg(5), sidebar_json: Html.twin_script_json(arg(6)) }
+			[Html.bytes(Pages.conversation(srcs(req.args, 11), limits, view))]
 		}
-		36 => [Html.escape(arg(0))]
-		37 => [Html.script_safe(arg(0))]
+		36 => [Html.bytes(Html.escape(arg(0)))]
+		37 => [Html.script_json_bytes(Html.script_safe(arg(0)))]
 		38 => [Feeds.images_json(Feeds.images(arg(0)), u64(arg(1)))]
 		39 => [Feeds.code_json(Feeds.code(arg(0)))]
 		40 => [Recent.excerpt(arg(0))]
@@ -328,7 +328,7 @@ maybe = |t| match t {
 }
 
 ## The scripts' srcs, as `name, src` pairs from argument `from` on.
-srcs : List(List(U8)), U64 -> (List(U8) -> List(U8))
+srcs : List(List(U8)), U64 -> (List(U8) -> Html)
 srcs = |args, from| Chrome.src_in(scripts(args, from, []))
 
 scripts : List(List(U8)), U64, List({ name : List(U8), src : List(U8) }) -> List({ name : List(U8), src : List(U8) })
