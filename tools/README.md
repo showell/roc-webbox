@@ -31,6 +31,10 @@
     only by position (a record names them).
   - `if_chains` — `else if` three or more deep (often a `match` on a tag).
   - `long_definitions` — definitions over 40 lines, longest first.
+  - `fs_bypass` — a call to Host's file primitives (`read!`, `write!`,
+    `remove!`, `list!`, `append_line!`, `append_entry!`) outside
+    `chat/Files.roc` and `chat/test/` (Files.roc takes only the
+    `Paths.ChatPath` that Paths.roc alone can make).
 
 A hunt worth running again is saved here, with plants; a one-off question is
 asked inline and not kept.

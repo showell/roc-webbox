@@ -310,7 +310,29 @@ function long_definitions(tree)
   return out
 end
 
-const hunts = {"same_typed_args", "magic_numbers", "bools", "positional_lists", "if_chains", "long_definitions"}
+-- **THE DISK REACHED AROUND FILES.ROC**: a call to one of Host's file
+-- primitives anywhere but chat/Files.roc (and chat/test/, whose probes test
+-- the seam itself). Files.roc takes only a Paths.ChatPath, which only
+-- Paths.roc can make (`::`, opaque), so a path through it is one Paths
+-- named. The platform's table names the primitives without calling them.
+const file_primitives = " read! write! remove! list! append_line! append_entry! "
+
+function fs_bypass(tree)
+  local found = {}
+  local i = 1
+  while i < #tree.text do
+    if starts_with(head(tree, i), "(e-apply ") and tree.file[i] ~= "chat/Files.roc" and not starts_with(tree.file[i], "chat/test/") then
+      local callee = between(head(tree, i + 1), "(raw \"", "\")")
+      if callee ~= nil and starts_with(callee, "Host.") and contains(file_primitives, " " .. sub(callee, 6) .. " ") then
+        push(found, where(tree, i) .. ": " .. callee .. " outside Files.roc")
+      end
+    end
+    i = i + 1
+  end
+  return found
+end
+
+const hunts = {"same_typed_args", "magic_numbers", "bools", "positional_lists", "if_chains", "long_definitions", "fs_bypass"}
 
 -- The hunt named `name`, over `tree`.
 function hunt(name, tree)
@@ -320,6 +342,7 @@ function hunt(name, tree)
   if name == "positional_lists" then return positional_lists(tree) end
   if name == "if_chains" then return if_chains(tree) end
   if name == "long_definitions" then return long_definitions(tree) end
+  if name == "fs_bypass" then return fs_bypass(tree) end
   fail("no hunt named " .. name)
 end
 
