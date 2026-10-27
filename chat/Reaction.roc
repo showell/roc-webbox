@@ -24,15 +24,16 @@ Reaction := [].{
 	## the strings as the Zig's JSON writes them. `Removed` (`"on":false`) is a
 	## retraction: the client folds by last event wins per (msg, uid, emoji),
 	## so the file stays append-only.
+	# TEMPORARY DOOR: moves out in a later run.
 	line : Event -> List(U8)
 	line = |{ msg, uid, from, emoji, change, at }|
 		JsonText.obj([
 			("msg", Str.to_utf8(U64.to_str(msg))),
-			("uid", JsonText.str(uid)),
-			("from", JsonText.str(from)),
-			("emoji", JsonText.str(emoji)),
+			("uid", JsonText.str_at_door(uid)),
+			("from", JsonText.str_at_door(from)),
+			("emoji", JsonText.str_at_door(emoji)),
 			("on", JsonText.bool(is_added(change))),
-			("at", JsonText.str(at)),
+			("at", JsonText.str_at_door(at)),
 		])
 
 	## Whether the reactor put the glyph on the message or took it back.

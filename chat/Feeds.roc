@@ -254,8 +254,9 @@ Feeds := [].{
 	}
 
 	## The fields every feed entry starts with, from its header.
+	# TEMPORARY DOOR: moves out in a later run.
 	head_fields : Header -> List((Str, List(U8)))
-	head_fields = |h| [("source_id", JsonText.str(h.source_id)), ("from", JsonText.str(h.from)), ("conv", JsonText.str(h.conv)), ("at", JsonText.str(h.at))]
+	head_fields = |h| [("source_id", JsonText.str_at_door(h.source_id)), ("from", JsonText.str_at_door(h.from)), ("conv", JsonText.str_at_door(h.conv)), ("at", JsonText.str_at_door(h.at))]
 
 	## The Images page's JSON: the newest `most` entries, each as
 	## images_store `encodeImagesEvent` writes it.
@@ -272,16 +273,18 @@ Feeds := [].{
 
 	## images_store `encodeImagesEvent`: one entry as its page and its live
 	## stream (`img:<uid>`) send it, fields in its order, none left out.
+	# TEMPORARY DOOR: moves out in a later run.
 	images_event : Header, List(List(U8)) -> List(U8)
 	images_event = |h, tags|
-		JsonText.obj(List.concat(head_fields(h), [("images", JsonText.arr(List.map(tags, JsonText.str))), ("source_url", JsonText.str(source_url(h.conv, h.source_id)))]))
+		JsonText.obj(List.concat(head_fields(h), [("images", JsonText.arr(List.map(tags, JsonText.str_at_door))), ("source_url", JsonText.str_at_door(source_url(h.conv, h.source_id)))]))
 
 	## code_store `encodeCodeEvent`: one entry as its page and its live
 	## stream (`code:<uid>`) send it.
+	# TEMPORARY DOOR: moves out in a later run.
 	code_event : Header, List(Block) -> List(U8)
 	code_event = |h, bs| {
-		blocks = JsonText.arr(List.map(bs, |b| JsonText.obj([("lang", JsonText.str(b.lang)), ("body", JsonText.str(b.body))])))
-		JsonText.obj(List.concat(head_fields(h), [("blocks", blocks), ("source_url", JsonText.str(source_url(h.conv, h.source_id)))]))
+		blocks = JsonText.arr(List.map(bs, |b| JsonText.obj([("lang", JsonText.str_at_door(b.lang)), ("body", JsonText.str_at_door(b.body))])))
+		JsonText.obj(List.concat(head_fields(h), [("blocks", blocks), ("source_url", JsonText.str_at_door(source_url(h.conv, h.source_id)))]))
 	}
 
 	## The header line every entry starts with, as `header` reads it back.

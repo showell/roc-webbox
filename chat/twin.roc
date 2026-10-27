@@ -40,7 +40,12 @@ call = |req| {
 				Ok(n) => [Str.to_utf8(U64.to_str(n))]
 				Err(NotANumber) | Err(TooBig) => []
 			}
-		5 => [ZigText.json_string(arg(0))]
+		5 =>
+		# Text only: bytes that are not UTF-8 are refused, no answer.
+			match Str.from_utf8(arg(0)) {
+				Ok(t) => [ZigText.json_string(t)]
+				Err(_) => []
+			}
 		6 => [ZigText.trim(arg(0))]
 		7 => [bool(Paths.participant(arg(0), Uid.from_bytes(arg(1))))]
 		8 => [Paths.pair_key_bytes(Paths.pair_key(Uid.from_bytes(arg(0)), Uid.from_bytes(arg(1))))]

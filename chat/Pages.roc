@@ -189,18 +189,19 @@ Pages := [].{
 	## sidebarJSON: every other member (a DM each) and the viewer's channels,
 	## then this conversation's topics, pinned and not; made safe inside the
 	## page's `<script>`.
+	# TEMPORARY DOOR: moves out in a later run.
 	sidebar_json : Sidebar -> Html.ScriptJson
 	sidebar_json = |sb| {
-		prefixed = |prefix, s| List.concat(Str.to_utf8(prefix), s)
+		prefixed = |prefix, s| JsonText.str_at_door(List.concat(Str.to_utf8(prefix), s))
 		person = |u| {
 			pk = Paths.pair_key_bytes(Paths.pair_key(Uid.from_bytes(sb.uid), Uid.from_bytes(u.id)))
 			online = if u.presence == Online [("online", JsonText.bool(Bool.True))] else []
-			JsonText.obj(List.concat([("id", JsonText.str(prefixed("uid:", u.id))), ("label", JsonText.str(u.name)), ("url", JsonText.str(prefixed("/chat/c/", pk))), ("active", JsonText.bool(sb.kind == Dm and pk == sb.key))], online))
+			JsonText.obj(List.concat([("id", prefixed("uid:", u.id)), ("label", JsonText.str_at_door(u.name)), ("url", prefixed("/chat/c/", pk)), ("active", JsonText.bool(sb.kind == Dm and pk == sb.key))], online))
 		}
 		room = |name|
-			JsonText.obj([("id", JsonText.str(prefixed("ch:", name))), ("label", JsonText.str(prefixed("# ", name))), ("url", JsonText.str(prefixed("/channel/", name))), ("active", JsonText.bool(sb.kind == Channel and name == sb.key))])
+			JsonText.obj([("id", prefixed("ch:", name)), ("label", prefixed("# ", name)), ("url", prefixed("/channel/", name)), ("active", JsonText.bool(sb.kind == Channel and name == sb.key))])
 		topic = |s|
-			JsonText.obj([("id", JsonText.str(s)), ("label", JsonText.str(s)), ("url", JsonText.str(List.join([sb.base, ['/'], s]))), ("active", JsonText.bool(s == sb.topic))])
+			JsonText.obj([("id", JsonText.str_at_door(s)), ("label", JsonText.str_at_door(s)), ("url", JsonText.str_at_door(List.join([sb.base, ['/'], s]))), ("active", JsonText.bool(s == sb.topic))])
 		pinned = List.keep_if(sb.topics, |s| List.contains(sb.pins, s))
 		rest = List.drop_if(sb.topics, |s| List.contains(sb.pins, s))
 		Html.script_safe(

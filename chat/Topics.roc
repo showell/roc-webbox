@@ -38,21 +38,23 @@ Topics := [].{
 	Entry : { conv : List(U8), id : List(U8), name : List(U8), default : List(U8), sessions : List(List(U8)) }
 
 	## chatConversations' JSON: the member, then a DM with every other.
+	# TEMPORARY DOOR: moves out in a later run.
 	conversations_json : List(U8), List(Entry) -> List(U8)
 	conversations_json = |me, entries| {
 		one = |e|
 			JsonText.obj([
-				("conv", JsonText.str(e.conv)),
-				("partner", JsonText.obj([("id", JsonText.str(e.id)), ("name", JsonText.str(e.name))])),
-				("default", JsonText.str(e.default)),
-				("sessions", JsonText.arr(List.map(e.sessions, JsonText.str))),
+				("conv", JsonText.str_at_door(e.conv)),
+				("partner", JsonText.obj([("id", JsonText.str_at_door(e.id)), ("name", JsonText.str_at_door(e.name))])),
+				("default", JsonText.str_at_door(e.default)),
+				("sessions", JsonText.arr(List.map(e.sessions, JsonText.str_at_door))),
 			])
-		JsonText.obj([("me", JsonText.str(me)), ("conversations", JsonText.arr(List.map(entries, one)))])
+		JsonText.obj([("me", JsonText.str_at_door(me)), ("conversations", JsonText.arr(List.map(entries, one)))])
 	}
 
 	## newTopic's answer: the conversation and the topic made.
+	# TEMPORARY DOOR: moves out in a later run.
 	made_json : Paths.TopicAt -> List(U8)
-	made_json = |{ key, topic }| JsonText.obj([("conv", JsonText.str(Paths.conv_key_bytes(key))), ("sid", JsonText.str(topic))])
+	made_json = |{ key, topic }| JsonText.obj([("conv", JsonText.str_at_door(Paths.conv_key_bytes(key))), ("sid", JsonText.str_at_door(topic))])
 }
 
 # same_name: ASCII case folds, nothing past ASCII does.

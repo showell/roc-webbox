@@ -1,7 +1,7 @@
 ## A TOPIC STREAM'S SSE FRAMES (angry-gopher chat_frame.zig): built once,
 ## the same for every viewer. The html is the caller's, rendered from the
 ## markdown; this module only lays the frame out.
-import ZigText
+import JsonText
 
 Frame := [].{
 
@@ -11,17 +11,18 @@ Frame := [].{
 
 	## messageFrame: `id: <index>`, then one `data:` line of JSON;
 	## `from_uid` after `from` when known, `cid` last when there is one.
+	# TEMPORARY DOOR: moves out in a later run.
 	message : Message -> List(U8)
 	message = |m| {
 		index = Str.to_utf8(U64.to_str(m.index))
-		field = |name, value| List.join([Str.to_utf8(",\"${name}\":"), ZigText.json_string(value)])
+		field = |name, value| List.join([Str.to_utf8(",\"${name}\":"), JsonText.str_at_door(value)])
 		List.join([
 			Str.to_utf8("id: "),
 			index,
 			Str.to_utf8("\ndata: {\"index\":"),
 			index,
 			Str.to_utf8(",\"from\":"),
-			ZigText.json_string(m.from),
+			JsonText.str_at_door(m.from),
 			if m.from_uid == [] [] else field("from_uid", m.from_uid),
 			field("at", m.at),
 			field("html", m.html),

@@ -35,11 +35,12 @@ Recent := [].{
 	json = |me, rs| JsonText.arr(List.map(sort(rs), |r| event(me, r)))
 
 	## A row as recent_feed's encoders write it: empty fields left out.
+	# TEMPORARY DOOR: moves out in a later run.
 	event : List(U8), Row -> List(U8)
 	event = |me, r| {
-		at = JsonText.str(Str.to_utf8(Time.rfc3339(r.secs)))
+		at = JsonText.str(Time.rfc3339(r.secs))
 		if r.kind == Doc {
-			JsonText.obj(List.join([[("kind", JsonText.str(Str.to_utf8("doc"))), ("at", at)], JsonText.opt("who", Str.to_utf8("You")), JsonText.opt("slug", r.key), JsonText.opt("title", r.label)]))
+			JsonText.obj(List.join([[("kind", JsonText.str("doc")), ("at", at)], JsonText.opt("who", "You"), JsonText.opt_at_door("slug", r.key), JsonText.opt_at_door("title", r.label)]))
 		} else {
 			who = if r.uid == [] [] else if r.uid == me Str.to_utf8("You") else r.name
 			chat_event({ at: Str.to_utf8(Time.rfc3339(r.secs)), url: r.key, who, label: r.label, topic: r.topic, excerpt: excerpt(r.markdown), dm: r.dm })
@@ -52,16 +53,17 @@ Recent := [].{
 	## recent_feed `encodeChatEvent`: `kind` and `at`, then url, who, where,
 	## topic and excerpt each left out when empty, then `"dm":true` for a
 	## DM. The page's backlog and the live stream (`rec:<uid>`) send it.
+	# TEMPORARY DOOR: moves out in a later run.
 	chat_event : ChatEvent -> List(U8)
 	chat_event = |e|
 		JsonText.obj(
 			List.join([
-				[("kind", JsonText.str(Str.to_utf8("chat"))), ("at", JsonText.str(e.at))],
-				JsonText.opt("url", e.url),
-				JsonText.opt("who", e.who),
-				JsonText.opt("where", e.label),
-				JsonText.opt("topic", e.topic),
-				JsonText.opt("excerpt", e.excerpt),
+				[("kind", JsonText.str("chat")), ("at", JsonText.str_at_door(e.at))],
+				JsonText.opt_at_door("url", e.url),
+				JsonText.opt_at_door("who", e.who),
+				JsonText.opt_at_door("where", e.label),
+				JsonText.opt_at_door("topic", e.topic),
+				JsonText.opt_at_door("excerpt", e.excerpt),
 				if e.dm == Dm [("dm", JsonText.bool(Bool.True))] else [],
 			]),
 		)

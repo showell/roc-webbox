@@ -143,15 +143,17 @@ Fanout := [].{
 	notify_event : Paths.TopicAt, List(U8) -> List(U8)
 	notify_event = |at, text| notify_event_bytes(unwrapped(at), text)
 
+	# TEMPORARY DOOR: moves out in a later run.
 	notify_event_bytes : TopicBytes, List(U8) -> List(U8)
-	notify_event_bytes = |at, text| JsonText.obj([("conv", JsonText.str(at.key)), ("session", JsonText.str(at.topic)), ("text", JsonText.str(text)), ("link_url", JsonText.str(topic_url_bytes(at)))])
+	notify_event_bytes = |at, text| JsonText.obj([("conv", JsonText.str_at_door(at.key)), ("session", JsonText.str_at_door(at.topic)), ("text", JsonText.str_at_door(text)), ("link_url", JsonText.str_at_door(topic_url_bytes(at)))])
 
 	## The sidebar stream's topic-added: kind, conv, sid, url (topic_url).
 	topic_added : Paths.TopicAt -> List(U8)
 	topic_added = |at| topic_added_bytes(unwrapped(at))
 
+	# TEMPORARY DOOR: moves out in a later run.
 	topic_added_bytes : TopicBytes -> List(U8)
-	topic_added_bytes = |at| JsonText.obj([("kind", JsonText.str(Str.to_utf8("topic-added"))), ("conv", JsonText.str(at.key)), ("sid", JsonText.str(at.topic)), ("url", JsonText.str(topic_url_bytes(at)))])
+	topic_added_bytes = |at| JsonText.obj([("kind", JsonText.str("topic-added")), ("conv", JsonText.str_at_door(at.key)), ("sid", JsonText.str_at_door(at.topic)), ("url", JsonText.str_at_door(topic_url_bytes(at)))])
 
 	## chat_fanout `recentWhere`, for `viewer`: a channel names itself ("in
 	## <key>"); a DM names the other member ("to <name>"; the DM with

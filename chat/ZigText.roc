@@ -36,18 +36,10 @@ ZigText := [].{
 
 	## Zig's `std.json.fmt` of a string: in quotes, `"` and `\` escaped, the
 	## bytes below 0x20 as `\u00xx` but for the five with short forms, DEL,
-	## `/` and the rest as they are. Bytes that are not UTF-8 are no string
-	## to Zig: it writes them as an array of byte numbers.
-	json_string : List(U8) -> List(U8)
-	json_string = |s|
-		match Str.from_utf8(s) {
-			Ok(_) => List.concat(List.append(List.fold(s, ['"'], |out, c| List.concat(out, escaped(c))), '"'), [])
-			Err(_) => {
-				(out, _) = List.fold(s, (['['], Bool.True), |(acc, first), c|
-					(List.concat(if first acc else List.append(acc, ','), Str.to_utf8(U8.to_str(c))), Bool.False))
-				List.append(out, ']')
-			}
-		}
+	## `/` and the rest, a character past ASCII included, as they are. The
+	## escapes are all ASCII, so they go byte by byte over the UTF-8.
+	json_string : Str -> List(U8)
+	json_string = |s| List.append(List.fold(Str.to_utf8(s), ['"'], |out, c| List.concat(out, escaped(c))), '"')
 
 	## Backspace (8) and form feed (12) stay numbers: Roc's character
 	## literals have no escape for either.
