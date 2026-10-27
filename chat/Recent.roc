@@ -211,7 +211,13 @@ Recent := [].{
 			List.concat(List.drop_last(head, Feeds.count_back(head, |c| c == ' ', 0)), Str.to_utf8("…"))
 		} else {
 			b = List.get(s, i) ?? 0
-			n = if b < 128 1 else if b >= 192 and b < 224 2 else if b >= 224 and b < 240 3 else if b >= 240 and b < 248 4 else 1
+			n = match b {
+				_ if b < 128 => 1
+				_ if b >= 192 and b < 224 => 2
+				_ if b >= 224 and b < 240 => 3
+				_ if b >= 240 and b < 248 => 4
+				_ => 1
+			}
 			cap_from(s, most, i + n, count + 1)
 		}
 }
