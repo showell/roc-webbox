@@ -54,5 +54,5 @@ Topics := [].{
 
 	## newTopic's answer: the conversation and the topic made.
 	made_json : Paths.TopicAt -> List(U8)
-	made_json = |{ key, topic }| JsonText.obj([("conv", JsonText.str(key)), ("sid", JsonText.str(topic))])
+	made_json = |{ key, topic }| JsonText.obj([("conv", JsonText.str(Paths.conv_key_bytes(key))), ("sid", JsonText.str(topic))])
 }

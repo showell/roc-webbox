@@ -36,11 +36,11 @@ Paths := [].{
 	}
 
 	## The key, when it is exactly the canonical `<small>_<large>` of two
-	## different valid uids.
+	## valid uids, or `<uid>_<uid>`: the DM with yourself (`1_1`) is one.
 	pair_key_of : List(U8) -> Try(PairKey, [Invalid])
 	pair_key_of = |key|
 		match cut_first(key, '_') {
-			Ok((x, y)) if canonical_uid(x) and canonical_uid(y) and x != y and pair_key_bytes(pair_key(Uid.from_bytes(x), Uid.from_bytes(y))) == key => Ok(PairKey.(key))
+			Ok((x, y)) if canonical_uid(x) and canonical_uid(y) and pair_key_bytes(pair_key(Uid.from_bytes(x), Uid.from_bytes(y))) == key => Ok(PairKey.(key))
 			_ => Err(Invalid)
 		}
 
@@ -63,6 +63,14 @@ Paths := [].{
 			Channel(name) => channel_name_bytes(name)
 		}
 
+	## The key's family: a DM's or a channel's.
+	conv_kind : ConvKey -> [Dm, Channel]
+	conv_kind = |key|
+		match key {
+			Dm(_) => Dm
+			Channel(_) => Channel
+		}
+
 	## A uid as allocateUser writes one: digits, the first not zero.
 	canonical_uid : List(U8) -> Bool
 	canonical_uid = |s| match s {
@@ -82,12 +90,12 @@ Paths := [].{
 	## key, and its page is the conversation's URL root then `/<topic>`
 	## (/chat/c/<key>/<topic> for a DM, /channel/<key>/<topic> for a channel).
 	TopicAt : {
-		## The conversation: a DM's canonical pair key, two uids joined by
-		## `_`, the smaller first (`3_7`; pair_key); or a channel's name, a
-		## letter then letters, digits and hyphens (`general`). Only a DM's
-		## has a `_`. On disk, the conversation's folder is `<key>` or
-		## `channels/<key>`.
-		key : List(U8),
+		## The conversation (ConvKey): a DM's pair key or a channel's name,
+		## each validated where the request came in. Its bytes (`3_7`,
+		## `general`; conv_key_bytes) are the bus key's and URL's; on disk,
+		## the conversation's folder is `<key>` or `channels/<key>`
+		## (conv_dir).
+		key : ConvKey,
 
 		## The topic's id, which is also its name as shown: letters and
 		## digits joined by single hyphens (`ChitChat`, `road-trip`;
@@ -182,11 +190,11 @@ Paths := [].{
 
 	## A DM's or a channel's folder under the chat root: dm_conv_dir or
 	## channel_conv_dir of its key.
-	conv_dir : [Dm, Channel], List(U8) -> List(U8)
-	conv_dir = |kind, key|
-		match kind {
-			Dm => dm_conv_dir(key)
-			Channel => channel_conv_dir(key)
+	conv_dir : ConvKey -> List(U8)
+	conv_dir = |key|
+		match key {
+			Dm(pair) => dm_conv_dir(pair_key_bytes(pair))
+			Channel(name) => channel_conv_dir(channel_name_bytes(name))
 		}
 
 	## Where a conversation's topics are (listTopics's folder):
@@ -214,8 +222,13 @@ Paths := [].{
 
 	## A topic's reaction sidecar (reactionsPath):
 	## {conv_dir}/sessions/<topic>.reactions.jsonl.
-	reactions_path : [Dm, Channel], TopicAt -> ChatPath
-	reactions_path = |kind, at| ChatPath.(join([conv_dir(kind, at.key), Str.to_utf8("sessions"), List.concat(at.topic, Str.to_utf8(".reactions.jsonl"))]))
+	reactions_path : TopicAt -> ChatPath
+	reactions_path = |at| reactions_path_bytes({ dir: conv_dir(at.key), topic: at.topic })
+
+	## reactions_path's core, from the conversation's folder as bytes: the
+	## twins feed it any (production: reactions_path).
+	reactions_path_bytes : { dir : List(U8), topic : List(U8) } -> ChatPath
+	reactions_path_bytes = |{ dir, topic }| ChatPath.(join([dir, Str.to_utf8("sessions"), List.concat(topic, Str.to_utf8(".reactions.jsonl"))]))
 
 	## Channel `name`'s member file (channelMembers's): channels/<name>.channel.
 	channel_path : ChannelName -> ChatPath
@@ -228,8 +241,8 @@ Paths := [].{
 
 	## A conversation's topics folder (listTopics's listing): sessions_dir
 	## of its folder.
-	topics_folder : [Dm, Channel], List(U8) -> ChatPath
-	topics_folder = |kind, key| ChatPath.(sessions_dir(conv_dir(kind, key)))
+	topics_folder : ConvKey -> ChatPath
+	topics_folder = |key| ChatPath.(sessions_dir(conv_dir(key)))
 
 	## The member's DM last in (lastUserConv's file): users/<uid>/last-conv.
 	last_conv_path : List(U8) -> ChatPath
@@ -368,8 +381,13 @@ Paths := [].{
 		)
 
 	## A topic's transcript: {conv_dir}/sessions/<topic>.md.
-	transcript_path : [Dm, Channel], TopicAt -> List(U8)
-	transcript_path = |kind, at| join([conv_dir(kind, at.key), Str.to_utf8("sessions"), List.concat(at.topic, Str.to_utf8(".md"))])
+	transcript_path : TopicAt -> List(U8)
+	transcript_path = |at| transcript_path_bytes({ dir: conv_dir(at.key), topic: at.topic })
+
+	## transcript_path's core, from the conversation's folder as bytes: the
+	## twins feed it any (production: transcript_path).
+	transcript_path_bytes : { dir : List(U8), topic : List(U8) } -> List(U8)
+	transcript_path_bytes = |{ dir, topic }| join([dir, Str.to_utf8("sessions"), List.concat(topic, Str.to_utf8(".md"))])
 
 	is_alpha : U8 -> Bool
 	is_alpha = |c| (c >= 'A' and c <= 'Z') or (c >= 'a' and c <= 'z')
@@ -402,14 +420,21 @@ Paths := [].{
 }
 
 # The builders' exact bytes, for a DM (`3_7`) and a channel (`general`).
-expect Paths.bytes(Paths.topics_folder(Dm, Str.to_utf8("3_7"))) == Str.to_utf8("3_7/sessions")
-expect Paths.bytes(Paths.topics_folder(Channel, Str.to_utf8("general"))) == Str.to_utf8("channels/general/sessions")
-expect Paths.bytes(Paths.reactions_path(Dm, { key: Str.to_utf8("3_7"), topic: Str.to_utf8("ChitChat") })) == Str.to_utf8("3_7/sessions/ChitChat.reactions.jsonl")
-expect Paths.bytes(Paths.reactions_path(Channel, { key: Str.to_utf8("general"), topic: Str.to_utf8("road-trip") })) == Str.to_utf8("channels/general/sessions/road-trip.reactions.jsonl")
-expect Paths.transcript_path(Dm, { key: Str.to_utf8("3_7"), topic: Str.to_utf8("ChitChat") }) == Str.to_utf8("3_7/sessions/ChitChat.md")
-expect Paths.transcript_path(Channel, { key: Str.to_utf8("general"), topic: Str.to_utf8("road-trip") }) == Str.to_utf8("channels/general/sessions/road-trip.md")
-expect Paths.conv_dir(Dm, Str.to_utf8("3_7")) == Str.to_utf8("3_7")
-expect Paths.conv_dir(Channel, Str.to_utf8("general")) == Str.to_utf8("channels/general")
+expect match (Paths.pair_key_of(Str.to_utf8("3_7")), Paths.channel_name(Str.to_utf8("general"))) {
+	(Ok(pair), Ok(name)) => {
+		dm = Dm(pair)
+		channel = Channel(name)
+		(Paths.bytes(Paths.topics_folder(dm)) == Str.to_utf8("3_7/sessions"))
+			and (Paths.bytes(Paths.topics_folder(channel)) == Str.to_utf8("channels/general/sessions"))
+				and (Paths.bytes(Paths.reactions_path({ key: dm, topic: Str.to_utf8("ChitChat") })) == Str.to_utf8("3_7/sessions/ChitChat.reactions.jsonl"))
+					and (Paths.bytes(Paths.reactions_path({ key: channel, topic: Str.to_utf8("road-trip") })) == Str.to_utf8("channels/general/sessions/road-trip.reactions.jsonl"))
+						and (Paths.transcript_path({ key: dm, topic: Str.to_utf8("ChitChat") }) == Str.to_utf8("3_7/sessions/ChitChat.md"))
+							and (Paths.transcript_path({ key: channel, topic: Str.to_utf8("road-trip") }) == Str.to_utf8("channels/general/sessions/road-trip.md"))
+								and (Paths.conv_dir(dm) == Str.to_utf8("3_7"))
+									and (Paths.conv_dir(channel) == Str.to_utf8("channels/general"))
+	}
+	_ => Bool.False
+}
 expect Paths.bytes(Paths.channels_folder) == Str.to_utf8("channels")
 expect match Paths.channel_name(Str.to_utf8("general")) {
 	Ok(name) => Paths.bytes(Paths.channel_path(name)) == Str.to_utf8("channels/general.channel")
@@ -428,13 +453,17 @@ expect Paths.pair_key_bytes(Paths.pair_key(Uid.from_bytes(Str.to_utf8("3")), Uid
 expect Paths.pair_key_bytes(Paths.pair_key(Uid.from_bytes(Str.to_utf8("10")), Uid.from_bytes(Str.to_utf8("9")))) == Str.to_utf8("9_10")
 expect Paths.pair_key_bytes(Paths.pair_key(Uid.from_bytes(Str.to_utf8("5")), Uid.from_bytes(Str.to_utf8("5")))) == Str.to_utf8("5_5")
 
-# pair_key_of: only the canonical `<small>_<large>` of two different uids.
+# pair_key_of: only the canonical `<small>_<large>` of two uids, or a uid
+# twice (the DM with yourself).
 expect match Paths.pair_key_of(Str.to_utf8("3_7")) {
 	Ok(key) => Paths.pair_key_bytes(key) == Str.to_utf8("3_7")
 	Err(Invalid) => Bool.False
 }
+expect match Paths.pair_key_of(Str.to_utf8("3_3")) {
+	Ok(key) => Paths.pair_key_bytes(key) == Str.to_utf8("3_3")
+	Err(Invalid) => Bool.False
+}
 expect Paths.pair_key_of(Str.to_utf8("7_3")).is_err()
-expect Paths.pair_key_of(Str.to_utf8("3_3")).is_err()
 expect Paths.pair_key_of(Str.to_utf8("3_")).is_err()
 expect Paths.pair_key_of(Str.to_utf8("_7")).is_err()
 expect Paths.pair_key_of(Str.to_utf8("a_b")).is_err()
@@ -503,16 +532,14 @@ expect match Paths.channel_name([]) {
 	Err(Invalid) => Bool.True
 }
 
-# **THE BUILDERS REFUSE NOTHING BUT A CHANNEL'S MEMBER FILE**: they join
-# what they are handed, so a hostile key or topic makes a path out of the
-# chat root; channel_path takes only a ChannelName, which channel_name
-# alone makes. What keeps the rest out is upstream: Route.conversation
-# passes a channel's key and a topic
-# only through valid_channel_name and valid_topic_id, a DM's key reaches a
-# builder only past find!'s Paths.participant, make! checks a new topic's
+# **A CONVERSATION'S PATHS ARE BUILT FROM A ConvKey ALONE**, which only
+# pair_key_of (or pair_key) and channel_name make; the `_bytes` cores join
+# what they are handed, so a hostile folder or topic makes a path out of
+# the chat root, and only the twins call them (the hunt
+# bytes_core_outside_twin). The rest is upstream: Route.conversation
+# passes a topic only through valid_topic_id, make! checks a new topic's
 # id, and a uid is the host's (Host.me!) or a canonical pair's half.
-expect Paths.bytes(Paths.topics_folder(Dm, Str.to_utf8(".."))) == Str.to_utf8("../sessions")
-expect Paths.bytes(Paths.reactions_path(Channel, { key: Str.to_utf8("../.."), topic: Str.to_utf8("../x") })) == Str.to_utf8("channels/../../sessions/../x.reactions.jsonl")
+expect Paths.bytes(Paths.reactions_path_bytes({ dir: Str.to_utf8("channels/../.."), topic: Str.to_utf8("../x") })) == Str.to_utf8("channels/../../sessions/../x.reactions.jsonl")
+expect Paths.transcript_path_bytes({ dir: [], topic: [] }) == Str.to_utf8("sessions/.md")
 expect Paths.bytes(Paths.last_session_path(Str.to_utf8("3"), Str.to_utf8("../../x"))) == Str.to_utf8("users/3/last-sessions/../../x")
 expect Paths.bytes(Paths.feed_path(Str.to_utf8("/etc"), Code)) == Str.to_utf8("users/etc/code.md")
-expect Paths.bytes(Paths.topics_folder(Dm, [])) == Str.to_utf8("sessions")

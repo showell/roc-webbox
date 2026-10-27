@@ -333,7 +333,36 @@ function fs_bypass(tree)
   return found
 end
 
-const hunts = {"same_typed_args", "magic_numbers", "bools", "positional_lists", "if_chains", "long_definitions", "fs_bypass"}
+-- **A BYTES CORE CALLED BY PRODUCTION**: the `<fn>_bytes` cores (Paths's
+-- transcript_path_bytes, Fanout's topic_url_bytes, ...) take raw bytes so
+-- the twins can feed them hostile ones; production calls the typed layer,
+-- which takes a ConvKey and unwraps it. A core's own module calls it
+-- unqualified, or qualified in its expects (chat/<Module>.roc), so any
+-- other qualified call is from outside. chat/twin.roc is never in the tree. The unwrappers and Uid's
+-- constructor end in `_bytes` too, and are no cores.
+const bytes_unwrappers = " from_bytes pair_key_bytes conv_key_bytes channel_name_bytes "
+
+function bytes_core_outside_twin(tree)
+  local found = {}
+  local i = 1
+  while i < #tree.text do
+    if starts_with(head(tree, i), "(e-apply ") then
+      local callee = between(head(tree, i + 1), "(raw \"", "\")")
+      if callee ~= nil and contains(callee, ".") then
+        local parts = split(callee, ".")
+        local fn = parts[#parts]
+        local own = tree.file[i] == "chat/" .. parts[1] .. ".roc"
+        if ends_with(fn, "_bytes") and not own and not contains(bytes_unwrappers, " " .. fn .. " ") then
+          push(found, where(tree, i) .. ": " .. callee .. " outside twin.roc")
+        end
+      end
+    end
+    i = i + 1
+  end
+  return found
+end
+
+const hunts = {"same_typed_args", "magic_numbers", "bools", "positional_lists", "if_chains", "long_definitions", "fs_bypass", "bytes_core_outside_twin"}
 
 -- The hunt named `name`, over `tree`.
 function hunt(name, tree)
@@ -344,6 +373,7 @@ function hunt(name, tree)
   if name == "if_chains" then return if_chains(tree) end
   if name == "long_definitions" then return long_definitions(tree) end
   if name == "fs_bypass" then return fs_bypass(tree) end
+  if name == "bytes_core_outside_twin" then return bytes_core_outside_twin(tree) end
   fail("no hunt named " .. name)
 end
 

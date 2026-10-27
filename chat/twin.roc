@@ -50,7 +50,7 @@ call = |req| {
 		12 => [Paths.join(req.args)]
 		13 => [Paths.first_of(req.args)]
 		# A DM's folder is its key as joined, so any `arg(0)` stands for a folder.
-		14 => [Paths.transcript_path(Dm, { key: arg(0), topic: arg(1) })]
+		14 => [Paths.transcript_path_bytes({ dir: Paths.dm_conv_dir(arg(0)), topic: arg(1) })]
 		15 => {
 			d = Transcript.decode_file(arg(0))
 			List.fold(d.messages, [Str.to_utf8(U64.to_str(d.refused))], |out, m| List.concat(out, [m.id, m.from, m.at, m.uid, m.markdown]))
@@ -147,7 +147,7 @@ call = |req| {
 			got = Paths.rosters(names, reads(req.args, 1 + n, []))
 			List.join([[num(List.len(got.malformed))], got.malformed, List.join(List.map(got.rosters, |r| List.concat([r.name, num(List.len(r.members))], r.members)))])
 		}
-		59 => [Paths.sessions_dir(Paths.dm_conv_dir(arg(0))), Paths.sessions_dir(Paths.channel_conv_dir(arg(1))), Paths.bytes(Paths.channel_path(valid_channel(arg(1)))), Paths.bytes(Paths.reactions_path(Dm, { key: arg(0), topic: arg(2) }))]
+		59 => [Paths.sessions_dir(Paths.dm_conv_dir(arg(0))), Paths.sessions_dir(Paths.channel_conv_dir(arg(1))), Paths.bytes(Paths.channel_path(valid_channel(arg(1)))), Paths.bytes(Paths.reactions_path_bytes({ dir: Paths.dm_conv_dir(arg(0)), topic: arg(2) }))]
 		60 => {
 			# The ids asked, then the accounts (`accounts`): each id's exists
 			# and its name (`ok, name`, or the failure `unreadable`), then the
@@ -175,14 +175,14 @@ call = |req| {
 		# The fan-out: member `arg(0)`'s five keys; conversation `arg(0)`'s
 		# URL root, topic `arg(1)`'s page and message `arg(2)`'s link.
 		62 => [Fanout.notify_key(arg(0)), Fanout.sidebar_key(arg(0)), Fanout.recent_key(arg(0)), Fanout.images_key(arg(0)), Fanout.code_key(arg(0))]
-		63 => [Feeds.base_url(arg(0)), Fanout.topic_url({ key: arg(0), topic: arg(1) }), Feeds.source_url(arg(0), arg(2))]
+		63 => [Feeds.base_url(arg(0)), Fanout.topic_url_bytes({ key: arg(0), topic: arg(1) }), Feeds.source_url(arg(0), arg(2))]
 		# A DM's (`d`) or a channel's notify event: from, key, topic.
 		64 => {
 			kind = if arg(0) == [100] Dm else Channel
 			at = { key: arg(2), topic: arg(3) }
-			[Fanout.notify_event(at, Fanout.notify_text(kind, arg(1), at))]
+			[Fanout.notify_event_bytes(at, Fanout.notify_text_bytes(kind, arg(1), at))]
 		}
-		65 => [Fanout.topic_added({ key: arg(0), topic: arg(1) })]
+		65 => [Fanout.topic_added_bytes({ key: arg(0), topic: arg(1) })]
 		66 => [Recent.chat_event({ at: arg(0), url: arg(1), who: arg(2), label: arg(3), topic: arg(4), excerpt: arg(5), dm: if arg(6) == [49] Dm else Channel })]
 		# An entry's header (source_id, from, conv, at), then its tags: the
 		# images.md entry and the live event.
@@ -204,8 +204,8 @@ call = |req| {
 			n = u64(arg(3))
 			members = List.sublist(req.args, { start: 4, len: n })
 			all = accounts(req.args, 4 + n, [])
-			kind = if arg(0) == [100] Dm else Channel
-			[Fanout.recent_where({ kind, key: arg(2), members, topic: [], index: 0, id: [], from: [], at: [], uid: [], accounts: all }, arg(1))]
+			key = if arg(0) == [100] Dm(valid_pair(arg(2))) else Channel(valid_channel(arg(2)))
+			[Fanout.recent_where({ key, members, topic: [], index: 0, id: [], from: [], at: [], uid: [], accounts: all }, arg(1))]
 		}
 		_ => crash "twin: no function ${U8.to_str(req.which)}"
 	}
@@ -219,6 +219,13 @@ valid_channel : List(U8) -> Paths.ChannelName
 valid_channel = |name| match Paths.channel_name(name) {
 	Ok(valid) => valid
 	Err(Invalid) => crash "twin: an invalid channel name"
+}
+
+## A DM's pair key the test hands as valid; one that is not stops the twin.
+valid_pair : List(U8) -> Paths.PairKey
+valid_pair = |key| match Paths.pair_key_of(key) {
+	Ok(valid) => valid
+	Err(Invalid) => crash "twin: an invalid pair key"
 }
 
 ## A read as the test says it went: `F` found (`bytes` the file), `M`
