@@ -29,6 +29,7 @@ import pf.Host
 import Route
 import Reaction
 import Pages
+import Chrome
 import Paths
 import Topics
 import Form
@@ -492,7 +493,7 @@ links! = |rest|
 		match viewer!(Unasked) {
 			Err(Failed) => Chat.answered
 			Ok(viewer) => {
-				src = Host.srcs!({})
+				src = Chrome.src_in(Host.srcs!({}))
 				if Host.links!({}) {
 					(before, after) = Pages.links_around(src, viewer)
 					Chat.held_html(before, after)
@@ -515,7 +516,7 @@ recent! = |rest|
 			Ok(viewer) => {
 				rows = Recent.rows(Host.recent!({}))
 				me = Host.me!({})
-				Chat.respond(200, html, Pages.recent(Host.srcs!({}), viewer, Recent.json(me, rows)))
+				Chat.respond(200, html, Pages.recent(Chrome.src_in(Host.srcs!({})), viewer, Recent.json(me, rows)))
 			}
 		}
 	}
@@ -536,7 +537,7 @@ feed! = |which, rest|
 					Found(bytes) => bytes
 					Missing | Failed => []
 				}
-				src = Host.srcs!({})
+				src = Chrome.src_in(Host.srcs!({}))
 				page = match which {
 					Images => Pages.images(src, viewer, Feeds.images_json(Feeds.images(file), 20))
 					Code => Pages.code(src, viewer, Feeds.code_json(Feeds.code(file)))
@@ -562,7 +563,7 @@ landing! = |route|
 					Err(Failed) => Chat.answered
 					Ok(title) =>
 						match viewer!(who) {
-							Ok(viewer) => Chat.respond(200, html, Pages.no_topics(Host.srcs!({}), viewer, conv.base, title))
+							Ok(viewer) => Chat.respond(200, html, Pages.no_topics(Chrome.src_in(Host.srcs!({})), viewer, conv.base, title))
 							Err(Failed) => Chat.answered
 						}
 				}
@@ -583,7 +584,7 @@ page! = |route, at|
 			Err(Failed) => Chat.answered
 			Ok((viewer, sb)) => {
 				view = { key: route.key, base: sb.base, sid: route.sid, title: at.title, uid: sb.uid, viewer, sidebar_json: Pages.sidebar_json(sb) }
-				Chat.respond(200, html, Pages.conversation(Host.srcs!({}), Host.limits!({}), view))
+				Chat.respond(200, html, Pages.conversation(Chrome.src_in(Host.srcs!({})), Host.limits!({}), view))
 			}
 		}
 	}
@@ -648,7 +649,7 @@ resume! = |{}| {
 	conv = ChatState.bookmark(read!(ChatState.last_conv_path(me)))
 	if conv == [] or !Paths.participant(conv, me) {
 		match viewer!(Unasked) {
-			Ok(viewer) => Chat.respond(200, html, Pages.no_conversations(Host.srcs!({}), viewer))
+			Ok(viewer) => Chat.respond(200, html, Pages.no_conversations(Chrome.src_in(Host.srcs!({})), viewer))
 			Err(Failed) => Chat.answered
 		}
 	} else {

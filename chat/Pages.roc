@@ -23,12 +23,12 @@ Pages := [].{
 	## their pins in this conversation, and its topics.
 	Sidebar : { uid : List(U8), dm : Bool, key : List(U8), base : List(U8), sid : List(U8), others : List({ id : List(U8), name : List(U8), online : Bool }), channels : List(List(U8)), pins : List(List(U8)), topics : List(List(U8)) }
 
-	shell : Chrome.Srcs, List(U8), List(U8), List(U8) -> Chrome.Shell
+	shell : (List(U8) -> List(U8)), List(U8), List(U8), List(U8) -> Chrome.Shell
 	shell = |src, title, viewer, active| { tab: Str.to_utf8("Chat"), title, viewer, active, src }
 
 	## noTopicsHtml: an addressable conversation with no topics, its
 	## first-topic widget mounted on `base`.
-	no_topics : Chrome.Srcs, List(U8), List(U8), List(U8) -> List(U8)
+	no_topics : (List(U8) -> List(U8)), List(U8), List(U8), List(U8) -> List(U8)
 	no_topics = |src, viewer, base, title| {
 		s = shell(src, title, viewer, Str.to_utf8("chat"))
 		Chrome.page(
@@ -37,14 +37,14 @@ Pages := [].{
 				Str.to_utf8("<div id=\"chat-first-topic\" data-conv-base=\""),
 				Html.escape(base),
 				Str.to_utf8("\"></div>"),
-				Chrome.script(src.chat_add_topic),
-				Chrome.script(src.chat_first_topic),
+				Chrome.script(s, "chat_add_topic.js"),
+				Chrome.script(s, "chat_first_topic.js"),
 			]),
 		)
 	}
 
 	## notFoundHtml: `what` is not here, and `back` is where to go.
-	not_found : Chrome.Srcs, List(U8), List(U8), List(U8) -> List(U8)
+	not_found : (List(U8) -> List(U8)), List(U8), List(U8), List(U8) -> List(U8)
 	not_found = |src, viewer, what, back|
 		Chrome.page(
 			shell(src, Str.to_utf8("Not here"), viewer, Str.to_utf8("chat")),
@@ -60,7 +60,7 @@ Pages := [].{
 	## chat_links.zig's /chat/links: the member's curated links, `rendered`
 	## (none when they have none: a stub that says who curates them), in a
 	## readable column of its own.
-	links : Chrome.Srcs, List(U8), List(List(U8)) -> List(U8)
+	links : (List(U8) -> List(U8)), List(U8), List(List(U8)) -> List(U8)
 	links = |src, viewer, rendered|
 		Chrome.page(
 			{ tab: Str.to_utf8("Links"), title: Str.to_utf8("Links"), viewer, active: Str.to_utf8("links"), src },
@@ -77,7 +77,7 @@ Pages := [].{
 
 	## The links page cut where the rendered links go: the host holds them
 	## (a curated page can be long), and answers before, them, after.
-	links_around : Chrome.Srcs, List(U8) -> (List(U8), List(U8))
+	links_around : (List(U8) -> List(U8)), List(U8) -> (List(U8), List(U8))
 	links_around = |src, viewer|
 		match Bytes.cut_seq(links(src, viewer, [[0]]), [0]) {
 			Ok(parts) => parts
@@ -89,7 +89,7 @@ Pages := [].{
 
 	## images.zig's and code.zig's pages: the attention strip, the feed's
 	## mount, its JSON (`json`, script-safe) and its scripts.
-	feed : Chrome.Srcs, List(U8), Str, List(U8), List(List(U8)) -> List(U8)
+	feed : (List(U8) -> List(U8)), List(U8), Str, List(U8), List(Str) -> List(U8)
 	feed = |src, viewer, name, json, scripts| {
 		title = Str.to_utf8(if name == "images" "Images" else "Code")
 		s = { tab: title, title, viewer, active: Str.to_utf8(name), src }
@@ -99,14 +99,14 @@ Pages := [].{
 				Str.to_utf8("<div class=\"chat-notify\" id=\"chat-notify\"></div><div id=\"${name}-mount\"></div><script id=\"${name}-data\" type=\"application/json\">"),
 				Html.script_safe(json),
 				Str.to_utf8("</script>"),
-				List.join(List.map(scripts, Chrome.script)),
+				List.join(List.map(scripts, |js| Chrome.script(s, js))),
 			]),
 		)
 	}
 
 	## recent.zig's /chat/recent: the attention strip, the feed's mount, its
 	## JSON (script-safe) and its two scripts.
-	recent : Chrome.Srcs, List(U8), List(U8) -> List(U8)
+	recent : (List(U8) -> List(U8)), List(U8), List(U8) -> List(U8)
 	recent = |src, viewer, json| {
 		s = { tab: Str.to_utf8("Recent"), title: Str.to_utf8("Recent"), viewer, active: Str.to_utf8("recent"), src }
 		Chrome.page(
@@ -115,27 +115,27 @@ Pages := [].{
 				Str.to_utf8("<div class=\"chat-notify\" id=\"chat-notify\"></div><div id=\"recent-mount\"></div><script id=\"recent-data\" type=\"application/json\">"),
 				Html.script_safe(json),
 				Str.to_utf8("</script>"),
-				Chrome.script(src.recent),
-				Chrome.script(src.notify),
+				Chrome.script(s, "recent.js"),
+				Chrome.script(s, "notify.js"),
 			]),
 		)
 	}
 
 	## /chat/images: the newest entries of the member's images.md.
-	images : Chrome.Srcs, List(U8), List(U8) -> List(U8)
-	images = |src, viewer, json| feed(src, viewer, "images", json, [src.styles, src.chat_image_popup, src.images, src.notify])
+	images : (List(U8) -> List(U8)), List(U8), List(U8) -> List(U8)
+	images = |src, viewer, json| feed(src, viewer, "images", json, ["styles.js", "chat_image_popup.js", "images.js", "notify.js"])
 
 	## /chat/code: every entry of the member's code.md.
-	code : Chrome.Srcs, List(U8), List(U8) -> List(U8)
-	code = |src, viewer, json| feed(src, viewer, "code", json, [src.styles, src.chat_code_popup, src.code, src.notify])
+	code : (List(U8) -> List(U8)), List(U8), List(U8) -> List(U8)
+	code = |src, viewer, json| feed(src, viewer, "code", json, ["styles.js", "chat_code_popup.js", "code.js", "notify.js"])
 
 	## noConversationsHtml: /chat for a viewer with nothing to resume.
-	no_conversations : Chrome.Srcs, List(U8) -> List(U8)
+	no_conversations : (List(U8) -> List(U8)), List(U8) -> List(U8)
 	no_conversations = |src, viewer|
 		Chrome.page(shell(src, Str.to_utf8("Chat"), viewer, Str.to_utf8("chat")), Str.to_utf8("<p>You do not have any conversations.</p>"))
 
 	## conversationHtml: the page that boots the chat's client.
-	conversation : Chrome.Srcs, Limits, View -> List(U8)
+	conversation : (List(U8) -> List(U8)), Limits, View -> List(U8)
 	conversation = |src, limits, v| {
 		s = shell(src, v.title, v.viewer, [])
 		attr = |name, value| List.join([Str.to_utf8(" ${name}=\""), value, ['"']])
@@ -157,14 +157,14 @@ Pages := [].{
 				Str.to_utf8("><div class=\"chat-notify\" id=\"chat-notify\"></div><div class=\"chat-layout\"><div id=\"chat-left-sidebar\"></div><script type=\"application/json\" id=\"chat-sidebar-data\">"),
 				v.sidebar_json,
 				Str.to_utf8("</script><div id=\"chat-feed\"></div><div id=\"chat-right-sidebar\"></div></div></div>"),
-				List.join(List.map(page_scripts(src), Chrome.script)),
+				List.join(List.map(page_scripts, |name| Chrome.script(s, name))),
 			]),
 		)
 	}
 
 	## The bundles the conversation page loads, in document order.
-	page_scripts : Chrome.Srcs -> List(List(U8))
-	page_scripts = |s| [s.chat_image_popup, s.chat_code_popup, s.chat_time_popup, s.chat_save_popup, s.message, s.message_view, s.nav_stack, s.middle_pane, s.chat_search, s.chat_drag_to_pin, s.chat_add_topic, s.chat_left_sidebar, s.chat_right_sidebar, s.chat_emoji, s.chat_reactions, s.chat_compose, s.chat_help, s.chat_responsive, s.chat, s.notify]
+	page_scripts : List(Str)
+	page_scripts = ["chat_image_popup.js", "chat_code_popup.js", "chat_time_popup.js", "chat_save_popup.js", "message.js", "message_view.js", "nav_stack.js", "middle_pane.js", "chat_search.js", "chat_drag_to_pin.js", "chat_add_topic.js", "chat_left_sidebar.js", "chat_right_sidebar.js", "chat_emoji.js", "chat_reactions.js", "chat_compose.js", "chat_help.js", "chat_responsive.js", "chat.js", "notify.js"]
 
 	## sidebarJSON: every other member (a DM each) and the viewer's channels,
 	## then this conversation's topics, pinned and not; made safe inside the

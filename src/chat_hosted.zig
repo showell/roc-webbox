@@ -41,7 +41,6 @@ pub const Accounts = abi.Accounts;
 pub const AccountKind = route.AccountKind;
 pub const AccountRead = abi.AccountRead;
 pub const Limits = abi.Limits;
-pub const Srcs = abi.Srcs;
 pub const Presence = route.Presence;
 
 /// roc_abi.zig's arena, from `base`, once, as the host starts.
@@ -271,9 +270,9 @@ const Scripted = struct {
         say(ctx, "links", .{});
         return me(ctx).linked;
     }
-    fn srcs(ctx: *anyopaque) abi.Srcs {
+    fn srcs(ctx: *anyopaque) []const []const u8 {
         say(ctx, "srcs", .{});
-        return .none;
+        return &.{};
     }
     fn render(ctx: *anyopaque, markdown: []const u8) abi.Rendered {
         say(ctx, "render {s}", .{markdown});
