@@ -68,8 +68,12 @@ call = |req| {
 		# A topic is text: a listing's names (Files.list!'s door skips one
 		# that is not UTF-8).
 		13 => [Paths.first_of(List.keep_oks(req.args, Str.from_utf8)).to_utf8()]
-		# A DM's folder is its key as joined, so any `arg(0)` stands for a folder.
-		14 => [Paths.transcript_path_bytes({ dir: Paths.dm_conv_dir(arg(0)), topic: arg(1) })]
+		# A conversation's key and a topic id; the door refuses any other.
+		14 =>
+			match topic_at(arg(0), arg(1)) {
+				Ok(at) => [Paths.bytes(Paths.transcript_path(at))]
+				Err(Invalid) => []
+			}
 		15 => {
 			d = Transcript.decode_file(arg(0))
 			List.fold(d.messages, [Str.to_utf8(U64.to_str(d.refused))], |out, m| List.concat(out, [m.id, m.from, m.at, m.uid, m.markdown]))
@@ -167,9 +171,9 @@ call = |req| {
 		53 => [bool(ChatState.changed(file(arg(0), arg(1)), arg(2))), ChatState.bookmark_line(arg(2))]
 		# A uid that is no Uid has no paths: the door refuses it.
 		54 =>
-			match decode_uid(arg(0)) {
-				Ok(u) => List.map([Paths.last_conv_path(u), Paths.last_session_path_bytes({ uid: arg(0), conv: arg(1) }), Paths.pinned_path_bytes({ uid: arg(0), conv: arg(1) }), Paths.feed_path(u, Images), Paths.feed_path(u, Code)], Paths.bytes)
-				Err(NotAUid) => []
+			match (decode_uid(arg(0)), conv_of(arg(1))) {
+				(Ok(u), Ok(key)) => List.map([Paths.last_conv_path(u), Paths.last_session_path(u, key), Paths.pinned_path(u, key), Paths.feed_path(u, Images), Paths.feed_path(u, Code)], Paths.bytes)
+				_ => []
 			}
 		55 => List.map(Paths.topics(entries(req.args, 0, [])), Str.to_utf8)
 		56 =>
@@ -187,7 +191,14 @@ call = |req| {
 			got = Paths.rosters(names, reads(req.args, 1 + n, []))
 			List.join([[num(List.len(got.malformed))], List.map(got.malformed, Str.to_utf8), List.join(List.map(got.rosters, |r| List.concat([r.name.to_utf8(), num(List.len(r.members))], r.members)))])
 		}
-		59 => [Paths.sessions_dir(Paths.dm_conv_dir(arg(0))), Paths.sessions_dir(Paths.channel_conv_dir(arg(1))), Paths.bytes(Paths.channel_path(valid_channel(arg(1)))), Paths.bytes(Paths.reactions_path_bytes({ dir: Paths.dm_conv_dir(arg(0)), topic: arg(2) }))]
+		59 => {
+			dm = Dm(valid_pair(arg(0)))
+			channel = valid_channel(arg(1))
+			match topic_at(arg(0), arg(2)) {
+				Ok(at) => List.map([Paths.topics_folder(dm), Paths.topics_folder(Channel(channel)), Paths.channel_path(channel), Paths.reactions_path(at)], Paths.bytes)
+				Err(Invalid) => []
+			}
+		}
 		60 => {
 			# The ids asked, then the accounts (`accounts`): each id's exists
 			# and its name (`ok, name`, or the failure `unreadable`), then the
@@ -220,14 +231,23 @@ call = |req| {
 				Ok(u) => [Fanout.notify_key(u), Fanout.sidebar_key(u), Fanout.recent_key(u), Fanout.images_key(u), Fanout.code_key(u)]
 				Err(NotAUid) => []
 			}
-		63 => [Feeds.base_url(arg(0)), Fanout.topic_url_bytes({ key: arg(0), topic: arg(1) }), Feeds.source_url(arg(0), arg(2))]
-		# A DM's (`d`) or a channel's notify event: from, key, topic.
-		64 => {
-			kind = if arg(0) == [100] Dm else Channel
-			at = { key: arg(2), topic: arg(3) }
-			[Fanout.notify_event_bytes(at, Fanout.notify_text_bytes(kind, arg(1), at))]
-		}
-		65 => [Fanout.topic_added_bytes({ key: arg(0), topic: arg(1) })]
+		# A conversation's key and a topic id; the door refuses any other.
+		63 =>
+			match topic_at(arg(0), arg(1)) {
+				Ok(at) => [Feeds.base_url(arg(0)), Fanout.topic_url(at), Feeds.source_url(arg(0), arg(2))]
+				Err(Invalid) => []
+			}
+		# The notify event: from, key, topic (a DM's or a channel's, by its key).
+		64 =>
+			match topic_at(arg(1), arg(2)) {
+				Ok(at) => [Fanout.notify_event(at, Fanout.notify_text(arg(0), at))]
+				Err(Invalid) => []
+			}
+		65 =>
+			match topic_at(arg(0), arg(1)) {
+				Ok(at) => [Fanout.topic_added(at)]
+				Err(Invalid) => []
+			}
 		66 => [Recent.chat_event({ at: arg(0), url: arg(1), who: arg(2), label: arg(3), topic: arg(4), excerpt: arg(5), dm: if arg(6) == [49] Dm else Channel })]
 		# An entry's header (source_id, from, conv, at), then its tags: the
 		# images.md entry and the live event.
@@ -283,11 +303,30 @@ valid_pair = |key| match pair_of(key) {
 text : List(U8) -> Try(Str, [Invalid])
 text = |bytes| Str.from_utf8(bytes).map_err(|_| Invalid)
 
-## The test's bytes as a pair key, when they are text and one.
 ## A uid's bytes as a Uid: digits, the first not zero, or none.
 decode_uid : List(U8) -> Try(Uid, [NotAUid])
 decode_uid = |bytes| Uid.from_str(Str.from_utf8(bytes) ?? "")
 
+## The test's bytes as a conversation's key: a pair key, else a channel's
+## name, when they are text and one.
+conv_of : List(U8) -> Try(Paths.ConvKey, [Invalid])
+conv_of = |bytes|
+	match pair_of(bytes) {
+		Ok(pair) => Ok(Dm(pair))
+		Err(Invalid) => channel_of(bytes).map_ok(|name| Channel(name))
+	}
+
+## A topic's address from the test's key and topic, when the key is one
+## (conv_of) and the topic a topic id. **THE DOOR REFUSES ANY OTHER**, so no
+## twin feeds a path or an event hostile bytes; roc test covers the door.
+topic_at : List(U8), List(U8) -> Try(Paths.TopicAt, [Invalid])
+topic_at = |key, topic| {
+	conv = conv_of(key)?
+	t = text(topic)?
+	if Paths.is_topic_id(t) Ok({ key: conv, topic: t }) else Err(Invalid)
+}
+
+## The test's bytes as a pair key, when they are text and one.
 pair_of : List(U8) -> Try(Paths.PairKey, [Invalid])
 pair_of = |bytes| Paths.pair_key_from_str(text(bytes)?)
 

@@ -110,51 +110,29 @@ Fanout := [].{
 	topic_key : Paths.TopicAt -> List(U8)
 	topic_key = |{ key, topic }| "${Paths.conv_key_to_str(key)}/${topic}".to_utf8()
 
-	## **THE TYPED LAYER AND ITS BYTES CORES**: production calls topic_url,
-	## notify_text, notify_event and topic_added on a TopicAt; each unwraps
-	## its key and calls its `_bytes` core, which the twins feed any bytes
-	## (`""`, `\xff`, `../x`) to hold it to the Zig. Only the twins call a
-	## core (the hunt bytes_core_outside_twin).
-	TopicBytes : { key : List(U8), topic : List(U8) }
-
-	unwrapped : Paths.TopicAt -> TopicBytes
-	unwrapped = |at| { key: Paths.conv_key_bytes(at.key), topic: at.topic.to_utf8() }
-
 	## The topic's page: the conversation's URL root (Feeds.base_url,
 	## convKeyBaseURL), then the topic.
 	topic_url : Paths.TopicAt -> List(U8)
-	topic_url = |at| topic_url_bytes(unwrapped(at))
-
-	topic_url_bytes : TopicBytes -> List(U8)
-	topic_url_bytes = |{ key, topic }| List.join([Feeds.base_url(key), ['/'], topic])
+	topic_url = |at| List.join([Feeds.base_url(Paths.conv_key_bytes(at.key)), ['/'], at.topic.to_utf8()])
 
 	## The status strip's line: a DM's "X sent you a message on <topic>.", a
 	## channel's "X posted to <key> > <topic>.".
 	notify_text : List(U8), Paths.TopicAt -> List(U8)
-	notify_text = |from, at| notify_text_bytes(Paths.conv_kind(at.key), from, unwrapped(at))
-
-	notify_text_bytes : [Dm, Channel], List(U8), TopicBytes -> List(U8)
-	notify_text_bytes = |kind, from, { key, topic }|
-		match kind {
-			Dm => List.join([from, Str.to_utf8(" sent you a message on "), topic, ['.']])
-			Channel => List.join([from, Str.to_utf8(" posted to "), key, Str.to_utf8(" > "), topic, ['.']])
+	notify_text = |from, at|
+		match at.key {
+			Dm(_) => List.join([from, " sent you a message on ${at.topic}.".to_utf8()])
+			Channel(name) => List.join([from, " posted to ${Paths.channel_name_to_str(name)} > ${at.topic}.".to_utf8()])
 		}
 
 	## The notify stream's event: conv, session, text, link_url (topic_url).
-	notify_event : Paths.TopicAt, List(U8) -> List(U8)
-	notify_event = |at, text| notify_event_bytes(unwrapped(at), text)
-
 	# TEMPORARY DOOR: moves out in a later run.
-	notify_event_bytes : TopicBytes, List(U8) -> List(U8)
-	notify_event_bytes = |at, text| JsonText.obj([("conv", JsonText.str_at_door(at.key)), ("session", JsonText.str_at_door(at.topic)), ("text", JsonText.str_at_door(text)), ("link_url", JsonText.str_at_door(topic_url_bytes(at)))])
+	notify_event : Paths.TopicAt, List(U8) -> List(U8)
+	notify_event = |at, text| JsonText.obj([("conv", JsonText.str(Paths.conv_key_to_str(at.key))), ("session", JsonText.str(at.topic)), ("text", JsonText.str_at_door(text)), ("link_url", JsonText.str_at_door(topic_url(at)))])
 
 	## The sidebar stream's topic-added: kind, conv, sid, url (topic_url).
-	topic_added : Paths.TopicAt -> List(U8)
-	topic_added = |at| topic_added_bytes(unwrapped(at))
-
 	# TEMPORARY DOOR: moves out in a later run.
-	topic_added_bytes : TopicBytes -> List(U8)
-	topic_added_bytes = |at| JsonText.obj([("kind", JsonText.str("topic-added")), ("conv", JsonText.str_at_door(at.key)), ("sid", JsonText.str_at_door(at.topic)), ("url", JsonText.str_at_door(topic_url_bytes(at)))])
+	topic_added : Paths.TopicAt -> List(U8)
+	topic_added = |at| JsonText.obj([("kind", JsonText.str("topic-added")), ("conv", JsonText.str(Paths.conv_key_to_str(at.key))), ("sid", JsonText.str(at.topic)), ("url", JsonText.str_at_door(topic_url(at)))])
 
 	## chat_fanout `recentWhere`, for `viewer`: a channel names itself ("in
 	## <key>"); a DM names the other member ("to <name>"; the DM with

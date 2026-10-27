@@ -38,12 +38,6 @@
     `remove!`, `list!`, `append_line!`, `append_entry!`) outside
     `chat/Files.roc` and `chat/test/` (Files.roc takes only the
     `Paths.ChatPath` that Paths.roc alone can make).
-  - `bytes_core_outside_twin` — a qualified call to a `<fn>_bytes` core
-    (`Fanout.topic_url_bytes`, `Paths.transcript_path_bytes`): those take
-    raw bytes for the twins (`chat/twin.roc`, outside the tree), and
-    production calls the typed layer. The unwrappers (`conv_key_bytes`,
-    `pair_key_bytes`, `channel_name_bytes`) and `Uid.from_bytes` are not
-    cores.
   - `html_trusted_nonliteral` — a call to `Html.trusted` whose argument is
     not a string literal free of interpolation, or `Html.trusted` passed as
     a value; `Html.host_markup` outside `chat/Chrome.roc` (the host's script

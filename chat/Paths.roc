@@ -263,12 +263,7 @@ Paths := [].{
 	## A topic's reaction sidecar (reactionsPath):
 	## {conv_dir}/sessions/<topic>.reactions.jsonl.
 	reactions_path : TopicAt -> ChatPath
-	reactions_path = |at| reactions_path_bytes({ dir: conv_dir(at.key), topic: at.topic.to_utf8() })
-
-	## reactions_path's core, from the conversation's folder as bytes: the
-	## twins feed it any (production: reactions_path).
-	reactions_path_bytes : { dir : List(U8), topic : List(U8) } -> ChatPath
-	reactions_path_bytes = |{ dir, topic }| ChatPath.(join([dir, Str.to_utf8("sessions"), List.concat(topic, Str.to_utf8(".reactions.jsonl"))]))
+	reactions_path = |at| ChatPath.(join([conv_dir(at.key), Str.to_utf8("sessions"), "${at.topic}.reactions.jsonl".to_utf8()]))
 
 	## Channel `name`'s member file (channelMembers's): channels/<name>.channel.
 	channel_path : ChannelName -> ChatPath
@@ -291,22 +286,12 @@ Paths := [].{
 	## The topic the member last viewed in DM `key` (lastViewedTopic's
 	## file): users/<uid>/last-sessions/<conv>.
 	last_session_path : Uid, ConvKey -> ChatPath
-	last_session_path = |uid, key| last_session_path_bytes({ uid: uid.to_str().to_utf8(), conv: conv_key_bytes(key) })
-
-	## last_session_path's core, from the uid and key as bytes: the twins
-	## feed it any (production: last_session_path).
-	last_session_path_bytes : { uid : List(U8), conv : List(U8) } -> ChatPath
-	last_session_path_bytes = |{ uid, conv }| ChatPath.(join([Str.to_utf8("users"), uid, Str.to_utf8("last-sessions"), conv]))
+	last_session_path = |uid, key| ChatPath.(join([Str.to_utf8("users"), uid.to_str().to_utf8(), Str.to_utf8("last-sessions"), conv_key_bytes(key)]))
 
 	## The member's pins in `key` (pinnedTopics's file):
 	## users/<uid>/pinned-sessions/<conv>.
 	pinned_path : Uid, ConvKey -> ChatPath
-	pinned_path = |uid, key| pinned_path_bytes({ uid: uid.to_str().to_utf8(), conv: conv_key_bytes(key) })
-
-	## pinned_path's core, from the uid and key as bytes: the twins feed it
-	## any (production: pinned_path).
-	pinned_path_bytes : { uid : List(U8), conv : List(U8) } -> ChatPath
-	pinned_path_bytes = |{ uid, conv }| ChatPath.(join([Str.to_utf8("users"), uid, Str.to_utf8("pinned-sessions"), conv]))
+	pinned_path = |uid, key| ChatPath.(join([Str.to_utf8("users"), uid.to_str().to_utf8(), Str.to_utf8("pinned-sessions"), conv_key_bytes(key)]))
 
 	## The member's feed file: users/<uid>/images.md or code.md, where
 	## images_store and code_store keep them.
@@ -438,16 +423,11 @@ Paths := [].{
 
 	## A topic's transcript: {conv_dir}/sessions/<topic>.md.
 	transcript_path : TopicAt -> ChatPath
-	transcript_path = |at| ChatPath.(transcript_path_bytes({ dir: conv_dir(at.key), topic: at.topic.to_utf8() }))
+	transcript_path = |at| ChatPath.(join([conv_dir(at.key), Str.to_utf8("sessions"), "${at.topic}.md".to_utf8()]))
 
 	## The member's links page (the links route's file): users/<uid>/links.md.
 	links_path : Uid -> ChatPath
 	links_path = |uid| ChatPath.(join([Str.to_utf8("users"), uid.to_str().to_utf8(), Str.to_utf8("links.md")]))
-
-	## transcript_path's core, from the conversation's folder as bytes: the
-	## twins feed it any (production: transcript_path).
-	transcript_path_bytes : { dir : List(U8), topic : List(U8) } -> List(U8)
-	transcript_path_bytes = |{ dir, topic }| join([dir, Str.to_utf8("sessions"), List.concat(topic, Str.to_utf8(".md"))])
 
 	is_alpha : U8 -> Bool
 	is_alpha = |c| (c >= 'A' and c <= 'Z') or (c >= 'a' and c <= 'z')
@@ -595,13 +575,8 @@ expect Paths.channel_name_from_str("a-1-").map_ok(Paths.channel_name_to_str) == 
 expect Paths.channel_name_from_str("../x").is_err()
 expect Paths.channel_name_from_str("").is_err()
 
-# **A CONVERSATION'S PATHS ARE BUILT FROM A ConvKey ALONE**, which only
-# pair_key_from_str (or pair_key) and channel_name_from_str make; the
-# `_bytes` cores join what they are handed, so a hostile folder or topic
-# makes a path out of the chat root, and only the twins call them (the hunt
-# bytes_core_outside_twin). The rest is upstream: Route.conversation
-# passes a topic only through is_topic_id, make! checks a new topic's
-# id, and a uid is the host's (Host.me!) or a canonical pair's half.
-expect Paths.bytes(Paths.reactions_path_bytes({ dir: Str.to_utf8("channels/../.."), topic: Str.to_utf8("../x") })) == Str.to_utf8("channels/../../sessions/../x.reactions.jsonl")
-expect Paths.transcript_path_bytes({ dir: [], topic: [] }) == Str.to_utf8("sessions/.md")
-expect Paths.bytes(Paths.last_session_path_bytes({ uid: Str.to_utf8("3"), conv: Str.to_utf8("../../x") })) == Str.to_utf8("users/3/last-sessions/../../x")
+# **A CONVERSATION'S PATHS ARE BUILT FROM A ConvKey AND A Uid ALONE**,
+# which only pair_key_from_str (or pair_key), channel_name_from_str and
+# Uid.from_str make, so no path leaves the chat root. The topic is
+# upstream's: Route.conversation passes one only through is_topic_id, and
+# make! checks a new topic's id.
