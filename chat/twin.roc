@@ -22,6 +22,7 @@ import ChatState
 import Conversation
 import Accounts
 import Fanout
+import Uid
 
 call : { which : U8, args : List(List(U8)) } -> List(List(U8))
 call = |req| {
@@ -41,8 +42,8 @@ call = |req| {
 			}
 		5 => [ZigText.json_string(arg(0))]
 		6 => [ZigText.trim(arg(0))]
-		7 => [bool(Paths.participant(arg(0), arg(1)))]
-		8 => [Paths.pair_key(arg(0), arg(1))]
+		7 => [bool(Paths.participant(arg(0), Uid.from_bytes(arg(1))))]
+		8 => [Paths.pair_key(Uid.from_bytes(arg(0)), Uid.from_bytes(arg(1)))]
 		9 => [bool(Paths.valid_topic_id(arg(0)))]
 		10 => [bool(Paths.valid_channel_name(arg(0)))]
 		11 => [bool(Paths.valid_msg_ref_id(arg(0)))]
@@ -116,8 +117,8 @@ call = |req| {
 				Remove => []
 			}
 		44 =>
-			match Conversation.dm_other(arg(0), arg(1)) {
-				Ok(other) => [other]
+			match Conversation.dm_other(arg(0), Uid.from_bytes(arg(1))) {
+				Ok(other) => [Uid.bytes(other)]
 				Err(None) => []
 			}
 		45 => Conversation.dm_members(arg(0))

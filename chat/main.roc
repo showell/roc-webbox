@@ -34,6 +34,7 @@ import Paths
 import Topics
 import Form
 import ZigText
+import Uid
 import Feeds
 import Recent
 import ChatState
@@ -186,11 +187,11 @@ find! : Route.R => Try((Chat.Conv, Who), [NotYours, Failed])
 find! = |route|
 	match route.family {
 		Dm =>
-			match Conversation.dm_other(route.key, Host.me!({})) {
+			match Conversation.dm_other(route.key, Uid.from_bytes(Host.me!({}))) {
 				Ok(other) =>
 					match accounts!(Unasked) {
 						Ok(all) =>
-							if Accounts.exists(all, other) {
+							if Accounts.exists(all, Uid.bytes(other)) {
 								Ok(({ family: Dm, key: route.key, base: Conversation.dm_base(route.key), members: Conversation.dm_members(route.key) }, Known(all)))
 							} else {
 								Err(NotYours)
@@ -351,7 +352,7 @@ title! = |conv, who|
 	if conv.family == Dm {
 		match accounts!(who) {
 			Ok(all) => {
-				other = Conversation.partner(conv.key, Host.me!({}))
+				other = Uid.bytes(Conversation.partner(conv.key, Uid.from_bytes(Host.me!({}))))
 				match named!(Accounts.name(all, other)) {
 					Ok(name) => Ok(Conversation.dm_title(name, other))
 					Err(Failed) => Err(Failed)
@@ -647,7 +648,7 @@ resume! : {} => Chat.Answer
 resume! = |{}| {
 	me = Host.me!({})
 	conv = ChatState.bookmark(read!(ChatState.last_conv_path(me)))
-	if conv == [] or !Paths.participant(conv, me) {
+	if conv == [] or !Paths.participant(conv, Uid.from_bytes(me)) {
 		match viewer!(Unasked) {
 			Ok(viewer) => Chat.respond(200, html, Pages.no_conversations(Chrome.src_in(Host.srcs!({})), viewer))
 			Err(Failed) => Chat.answered
@@ -699,7 +700,7 @@ entries! = |me, members, i, acc|
 			if id == me {
 				entries!(me, members, i + 1, acc)
 			} else {
-				conv = Paths.pair_key(me, id)
+				conv = Paths.pair_key(Uid.from_bytes(me), Uid.from_bytes(id))
 				sessions = topics!(Dm, conv)
 				default = resume_at!(conv, sessions)
 				entries!(me, members, i + 1, List.append(acc, { conv, id, name, default, sessions }))
@@ -745,7 +746,7 @@ find_dm! = |me, members, sid, i|
 			if id == me {
 				find_dm!(me, members, sid, i + 1)
 			} else {
-				conv = Paths.pair_key(me, id)
+				conv = Paths.pair_key(Uid.from_bytes(me), Uid.from_bytes(id))
 				if List.contains(topics!(Dm, conv), sid) Ok(conv) else find_dm!(me, members, sid, i + 1)
 			}
 		Err(_) => Err(None)

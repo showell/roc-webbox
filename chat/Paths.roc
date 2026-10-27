@@ -3,29 +3,33 @@
 ## canonical key, and paths joined as Zig's `std.fs.path.join` joins them.
 ## Pure.
 import Bytes
+import Uid
 import ZigText
 
 Paths := [].{
 
 	## chatKeyParticipant: `key` is a canonical DM pair (two uids, digits
 	## without a leading zero, the smaller first) and `user` is one of them.
-	participant : List(U8), List(U8) -> Bool
+	participant : List(U8), Uid -> Bool
 	participant = |key, user|
 		match cut_first(key, '_') {
 			Err(None) => Bool.False
 			Ok((x, y)) =>
-				canonical_uid(x) and canonical_uid(y) and pair_key(x, y) == key and (user == x or user == y)
+				canonical_uid(x) and canonical_uid(y) and pair_key(Uid.from_bytes(x), Uid.from_bytes(y)) == key and (user == Uid.from_bytes(x) or user == Uid.from_bytes(y))
 		}
 
 	## chatPairKey: the smaller numeric id first, joined by `_` (a half that
 	## is no number counts as 0, as Zig's `atoiOr0`).
-	pair_key : List(U8), List(U8) -> List(U8)
-	pair_key = |a, b|
+	pair_key : Uid, Uid -> List(U8)
+	pair_key = |ua, ub| {
+		a = Uid.bytes(ua)
+		b = Uid.bytes(ub)
 		if atoi_or0(a) <= atoi_or0(b) {
 			List.concat(List.append(a, '_'), b)
 		} else {
 			List.concat(List.append(b, '_'), a)
 		}
+	}
 
 	## A uid as allocateUser writes one: digits, the first not zero.
 	canonical_uid : List(U8) -> Bool

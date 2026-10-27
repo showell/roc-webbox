@@ -6,23 +6,24 @@
 ## the topics; angry-gopher's chat_twin_test.zig holds each to its Zig.
 import Paths
 import Topics
+import Uid
 
 Conversation := [].{
 
 	## dmOther: the other of DM pair `key` when `me` is one of the pair, by
 	## chatKeyParticipant's rule (Paths.participant: a canonical pair of
 	## uids); none otherwise.
-	dm_other : List(U8), List(U8) -> Try(List(U8), [None])
+	dm_other : List(U8), Uid -> Try(Uid, [None])
 	dm_other = |key, me| if Paths.participant(key, me) Ok(partner(key, me)) else Err(None)
 
 	## partnerName's half: the side of `key`'s first `_` that is not `me`
 	## (the second when the first is `me`, so `1_1`'s partner is `1`); the
 	## whole key when it has no `_`.
-	partner : List(U8), List(U8) -> List(U8)
+	partner : List(U8), Uid -> Uid
 	partner = |key, me|
 		match Paths.cut_first(key, '_') {
-			Ok((a, b)) => if a == me b else a
-			Err(None) => key
+			Ok((a, b)) => if Uid.from_bytes(a) == me Uid.from_bytes(b) else Uid.from_bytes(a)
+			Err(None) => Uid.from_bytes(key)
 		}
 
 	## ConvMeta.dm's members: the pair's two uids, or one in the DM with
