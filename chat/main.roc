@@ -67,7 +67,10 @@ routed! = |req, sub|
 				Chat.redirect(List.concat(Str.to_utf8("/login/full?next=${area}"), req.sub))
 			} else {
 				route = if req.area == Channel Route.under_channel(sub) else Route.under_chat(sub)
-				if roc_serves(route) act!(req, route) else zig(route, if Route.is_stream(route) Uncounted else Counted)
+				match served_by(route) {
+					Roc => act!(req, route)
+					Zig => zig(route, if Route.is_stream(route) Uncounted else Counted)
+				}
 			}
 	}
 
@@ -75,27 +78,27 @@ routed! = |req, sub|
 zig : Route.R, Chat.Counting -> Chat.Answer
 zig = |route, counting| Chat.zig(Route.to_wire(route), counting)
 
-## The routes the Roc serves itself: /chat and /chat/default, the recent,
+## Which side serves a route. The Roc serves: /chat and /chat/default, the recent,
 ## images and code pages (not their streams), /chat/links,
 ## /chat/conversations, /chat/msg/<id>; and in a DM or a channel its
 ## landing, a new topic, and a topic's page, raw transcript, send,
 ## reactions, react, pin and unpin. Every other route is Zig's.
-roc_serves : Route.R -> Bool
-roc_serves = |r|
+served_by : Route.R -> [Roc, Zig]
+served_by = |r|
 	match r.family {
-		Default | Links | Conversations | Msg => Bool.True
-		Recent | Images | Code => r.rest != "/stream"
+		Default | Links | Conversations | Msg => Roc
+		Recent | Images | Code => if r.rest == "/stream" Zig else Roc
 		Dm | Channel =>
 			match r.part {
-				Landing | New => Bool.True
-				Invalid => Bool.False
+				Landing | New => Roc
+				Invalid => Zig
 				Topic =>
 					match r.tail {
-						Page | Raw | Send | InvalidSend | Reactions | React | Pin | Unpin => Bool.True
-						_ => Bool.False
+						Page | Raw | Send | InvalidSend | Reactions | React | Pin | Unpin => Roc
+						_ => Zig
 					}
 			}
-		_ => Bool.False
+		_ => Zig
 	}
 
 ## The Roc's own routes: presence, then the route's own work.
@@ -180,10 +183,11 @@ in_topic! = |req, route, found| {
 				Chat.not_allowed(Get)
 			} else if route.tail == Page {
 				page!(route, found)
-			} else if Files.held_raw!(Paths.transcript_path({ key: found.key, topic: route.topic })) {
-				Chat.held_plain
 			} else {
-				Chat.not_found
+				match Files.held_raw!(Paths.transcript_path({ key: found.key, topic: route.topic })) {
+					Held => Chat.held_plain
+					NotHeld => Chat.not_found
+				}
 			}
 		Reactions =>
 			if req.method != Get {
@@ -547,11 +551,12 @@ links! = |rest|
 			(Err(Failed), _) | (Ok(_), Err(Failed)) => Chat.answered
 			(Ok(viewer), Ok(me)) => {
 				src = Chrome.src_in(Host.srcs!({}))
-				if Files.held_rendered!(Paths.links_path(me)) {
-					(before, after) = Pages.links_around(src, viewer)
-					Chat.held_html(before, after)
-				} else {
-					Chat.respond(200, html, Html.bytes(Pages.links(src, viewer, NoLinks)))
+				match Files.held_rendered!(Paths.links_path(me)) {
+					Held => {
+						(before, after) = Pages.links_around(src, viewer)
+						Chat.held_html(before, after)
+					}
+					NotHeld => Chat.respond(200, html, Html.bytes(Pages.links(src, viewer, NoLinks)))
 				}
 			}
 		}
@@ -877,9 +882,9 @@ make! = |key, conv, who, topic| {
 				# The bookmark first, as a send's: one that fails makes no topic.
 				if dm and bookmark!(key, topic).is_err() {
 					Chat.answered
-				} else if !appended!(conv, who, { at: { key, topic }, name, markdown: "hi", cid: "" }) {
+				} else if appended!(conv, who, { at: { key, topic }, name, markdown: "hi", cid: "" }).is_err() {
 					Chat.answered
-				} else if dm and !announce!(key, conv, who, topic, name) {
+				} else if dm and announce!(key, conv, who, topic, name).is_err() {
 					Chat.answered
 				} else {
 					Chat.respond(200, json, Topics.made_json({ key, topic }))
@@ -891,12 +896,12 @@ make! = |key, conv, who, topic| {
 
 ## A DM's new topic, said where the partner already watches: its highest
 ## general<N>, unless that is the topic made.
-announce! : Paths.ConvKey, Chat.Conv, Who, Str, Str => Bool
+announce! : Paths.ConvKey, Chat.Conv, Who, Str, Str => Try({}, [Failed])
 announce! = |key, conv, who, topic, name|
 	match Topics.highest_general(topics!(key)) {
 		Ok(gen) if gen != topic =>
 			appended!(conv, who, { at: { key, topic: gen }, name, markdown: "New topic: [${topic}](${Paths.conv_base(key)}/${topic})", cid: "" })
-		_ => Bool.True
+		_ => Ok({})
 	}
 
 ## POST .../<topic>/send: docs/ROC-CHAT.md §6.2's steps, the store's append
@@ -968,7 +973,7 @@ store! = |at, conv, who, send, { markdown: md, cid }|
 			Ok(name) =>
 				if conv.family == Dm and bookmark!(at.key, at.topic).is_err() {
 					Chat.answered
-				} else if !appended!(conv, who, { at, name, markdown: md, cid }) {
+				} else if appended!(conv, who, { at, name, markdown: md, cid }).is_err() {
 					Chat.answered
 				} else if send == Async {
 					Chat.respond(204, [], [])
@@ -993,16 +998,16 @@ Draft : { at : Paths.TopicAt, name : Str, markdown : Str, cid : Str }
 ## the append, the count cache, the search index), then the frame published
 ## on the topic's key, then the fan-out (`fanned!`, its steps Fanout.roc's,
 ## made before the store too). `who` holds a DM's accounts (the fan-out
-## names the other member). False when a step before the store failed (the
+## names the other member). `Err(Failed)` when a step before the store failed (the
 ## request has, with its error), and nothing was stored.
-appended! : Chat.Conv, Who, Draft => Bool
+appended! : Chat.Conv, Who, Draft => Try({}, [Failed])
 appended! = |conv, who, { at: topic_at, name, markdown: md, cid }|
 	# **NO MESSAGE WITHOUT AN AUTHOR** (the review of 156): the decoder
 	# refuses such a block on every read, so it would go out live and be
 	# gone on reload. A nameless member (a release cut short) cannot post.
 	if name == "" {
 		Host.fail!(NoAuthor, [])
-		Bool.False
+		Err(Failed)
 	} else {
 		topic = topic_at.topic
 		counted = Host.message_count!(conv, topic.to_utf8())
@@ -1024,10 +1029,10 @@ appended! = |conv, who, { at: topic_at, name, markdown: md, cid }|
 				# and the send fails (NotUtf8, about the message's id) before
 				# anything is stored.
 				match (rendered.status, Str.from_utf8(rendered.html)) {
-					(Failed, _) => Bool.False
+					(Failed, _) => Err(Failed)
 					(Rendered, Err(_)) => {
 						Host.fail!(NotUtf8, id.to_utf8())
-						Bool.False
+						Err(Failed)
 					}
 					(Rendered, Ok(page_html)) => {
 						# **THE ECHO IS MADE BEFORE THE STORE** (metal-vmm QUEUE
@@ -1055,17 +1060,17 @@ appended! = |conv, who, { at: topic_at, name, markdown: md, cid }|
 									# failure counted and said.
 									Host.publish!(key, frame)
 									fanned!(topic_at, steps)
-									Bool.True
+									Ok({})
 								} else {
-									Bool.False
+									Err(Failed)
 								}
 							}
-							_ => Bool.False
+							_ => Err(Failed)
 						}
 					}
 				}
 			}
-			_ => Bool.False
+			_ => Err(Failed)
 		}
 	}
 

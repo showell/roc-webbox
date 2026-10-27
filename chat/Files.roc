@@ -67,16 +67,18 @@ Files := [].{
 	append_entry! : Paths.ChatPath, List(U8), List(U8) => { fault : U16, status : [Appended, Failed] }
 	append_entry! = |path, separator, entry| Host.append_entry!(Paths.bytes(path), separator, entry)
 
-	## Host.raw!: whether the file is there, the host holding its bytes for
-	## the answer (Chat.held_plain); false when the read failed, too.
-	held_raw! : Paths.ChatPath => Bool
-	held_raw! = |path| Host.raw!(Paths.bytes(path))
+	## Host.raw!: `Held` when the file is there, the host holding its bytes for
+	## the answer (Chat.held_plain); `NotHeld` when it is not, or the read
+	## failed: the host answers both as one.
+	held_raw! : Paths.ChatPath => [Held, NotHeld]
+	held_raw! = |path| if Host.raw!(Paths.bytes(path)) Held else NotHeld
 
-	## Host.links!: whether the file is there, the host holding it rendered
-	## as the server's own markdown for the answer (Chat.held_html); false
-	## when the read or the render failed, too.
-	held_rendered! : Paths.ChatPath => Bool
-	held_rendered! = |path| Host.links!(Paths.bytes(path))
+	## Host.links!: `Held` when the file is there, the host holding it rendered
+	## as the server's own markdown for the answer (Chat.held_html); `NotHeld`
+	## when it is not, or the read or the render failed: the host answers
+	## them as one.
+	held_rendered! : Paths.ChatPath => [Held, NotHeld]
+	held_rendered! = |path| if Host.links!(Paths.bytes(path)) Held else NotHeld
 
 	## Host.list!'s answer as one tag: the folder's entries, nothing there,
 	## or a listing that failed (the request has failed). **MISSING AND
