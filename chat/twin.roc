@@ -147,7 +147,7 @@ call = |req| {
 			got = Paths.rosters(names, reads(req.args, 1 + n, []))
 			List.join([[num(List.len(got.malformed))], got.malformed, List.join(List.map(got.rosters, |r| List.concat([r.name, num(List.len(r.members))], r.members)))])
 		}
-		59 => [Paths.sessions_dir(Paths.dm_conv_dir(arg(0))), Paths.sessions_dir(Paths.channel_conv_dir(arg(1))), Paths.bytes(Paths.channel_path(arg(1))), Paths.bytes(Paths.reactions_path(Dm, { key: arg(0), topic: arg(2) }))]
+		59 => [Paths.sessions_dir(Paths.dm_conv_dir(arg(0))), Paths.sessions_dir(Paths.channel_conv_dir(arg(1))), Paths.bytes(Paths.channel_path(valid_channel(arg(1)))), Paths.bytes(Paths.reactions_path(Dm, { key: arg(0), topic: arg(2) }))]
 		60 => {
 			# The ids asked, then the accounts (`accounts`): each id's exists
 			# and its name (`ok, name`, or the failure `unreadable`), then the
@@ -213,6 +213,13 @@ call = |req| {
 
 bool : Bool -> List(U8)
 bool = |b| if b [49] else [48]
+
+## A channel's name the test hands as valid; one that is not stops the twin.
+valid_channel : List(U8) -> Paths.ChannelName
+valid_channel = |name| match Paths.channel_name(name) {
+	Ok(valid) => valid
+	Err(Invalid) => crash "twin: an invalid channel name"
+}
 
 ## A read as the test says it went: `F` found (`bytes` the file), `M`
 ## missing, anything else failed.

@@ -201,14 +201,18 @@ find! = |route|
 					}
 				Err(None) => Err(NotYours)
 			}
-		Channel => {
-			members = channel_members!(route.key)
-			if List.contains(members, Host.me!({})) {
-				Ok(({ family: Channel, key: route.key, base: Conversation.channel_base(route.key), members }, Unasked))
-			} else {
-				Err(NotYours)
+		Channel =>
+			match Paths.channel_name(route.key) {
+				Ok(name) => {
+					members = channel_members!(name)
+					if List.contains(members, Host.me!({})) {
+						Ok(({ family: Channel, key: route.key, base: Conversation.channel_base(route.key), members }, Unasked))
+					} else {
+						Err(NotYours)
+					}
+				}
+				Err(Invalid) => Err(NotYours)
 			}
-		}
 		_ => Err(NotYours)
 	}
 
@@ -272,14 +276,14 @@ unreadable! = |why|
 ## REQUEST** on its own route (channelMembers's error.MalformedChannel), never
 ## the 404 of a channel that is not the member's; a read that failed has
 ## failed it already.
-channel_members! : List(U8) => List(List(U8))
+channel_members! : Paths.ChannelName => List(List(U8))
 channel_members! = |name|
 	match Files.read!(Paths.channel_path(name)) {
 		Found(bytes) =>
 			match Paths.channel_members(bytes) {
 				Ok(members) => members
 				Err(Malformed) => {
-					Host.fail!(MalformedChannel, name)
+					Host.fail!(MalformedChannel, Paths.channel_name_bytes(name))
 					[]
 				}
 			}
@@ -307,14 +311,21 @@ rosters! = |names, i, out|
 	match List.get(names, i) {
 		Err(_) => Ok(out)
 		Ok(name) =>
-			match Paths.roster(name, Files.read!(Paths.channel_path(name))) {
-				Listed(r) => rosters!(names, i + 1, List.append(out, r))
-				Malformed => {
+			match Paths.channel_name(name) {
+				Ok(valid) =>
+					match Paths.roster(name, Files.read!(Paths.channel_path(valid))) {
+						Listed(r) => rosters!(names, i + 1, List.append(out, r))
+						Malformed => {
+							Host.malformed_channel!(name)
+							rosters!(names, i + 1, out)
+						}
+						Gone => rosters!(names, i + 1, out)
+						Failed => Err(Failed)
+					}
+				Err(Invalid) => {
 					Host.malformed_channel!(name)
 					rosters!(names, i + 1, out)
 				}
-				Gone => rosters!(names, i + 1, out)
-				Failed => Err(Failed)
 			}
 	}
 

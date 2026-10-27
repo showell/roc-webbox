@@ -933,10 +933,10 @@ test "/chat/msg: every channel's roster, which are the member's, and their order
     // sorted: the member is in ops, Zed and a name that sorts high, not in
     // zeta. Every topic list has Plans, so the first of the member's by
     // bytes (`Z` before `o`) is the one.
-    const four = "member;presence;accounts;list channels;read channels/ops.channel;read channels/zeta.channel;read channels/\xffhigh.channel;read channels/Zed.channel;";
+    const four = "member;presence;accounts;list channels;read channels/ops.channel;read channels/zeta.channel;read channels/zzhigh.channel;read channels/Zed.channel;";
     try expectAct("/msg/Plans_1", false, .GET, blk: {
         var s = a;
-        s.channels = &.{ .{ .name = "ops", .read = .{ .found = "1\n3\n" } }, .{ .name = "zeta", .read = .{ .found = "2" } }, .{ .name = "\xffhigh", .read = .{ .found = "1" } }, .{ .name = "Zed", .read = .{ .found = "# us\r\n 1\t\n" } } };
+        s.channels = &.{ .{ .name = "ops", .read = .{ .found = "1\n3\n" } }, .{ .name = "zeta", .read = .{ .found = "2" } }, .{ .name = "zzhigh", .read = .{ .found = "1" } }, .{ .name = "Zed", .read = .{ .found = "# us\r\n 1\t\n" } } };
         break :blk s;
     }, .{ .found = "/channel/Zed/Plans#msg-Plans_1" }, four ++ "list channels/Zed/sessions;");
     // In none: nothing to search.
@@ -946,13 +946,13 @@ test "/chat/msg: every channel's roster, which are the member's, and their order
         break :blk s;
     }, .not_found, "member;presence;accounts;list channels;read channels/zeta.channel;read channels/ops.channel;");
     // **A MALFORMED CHANNEL IS SKIPPED AND COUNTED** as it is met (Abad
-    // would be first by bytes); one gone since the listing is skipped,
-    // uncounted.
+    // would be first by bytes), and so is one whose name is no channel
+    // name, never read; one gone since the listing is skipped, uncounted.
     try expectAct("/msg/Plans_1", false, .GET, blk: {
         var s = a;
-        s.channels = &.{ .{ .name = "Abad", .read = .{ .found = "1\nnot a uid\n" } }, .{ .name = "Agone", .read = .missing }, .{ .name = "ops", .read = .{ .found = "1\n" } }, .{ .name = "Adup", .read = .{ .found = "1\n1\n" } } };
+        s.channels = &.{ .{ .name = "Abad", .read = .{ .found = "1\nnot a uid\n" } }, .{ .name = "Agone", .read = .missing }, .{ .name = "\xffhigh", .read = .{ .found = "1\n" } }, .{ .name = "ops", .read = .{ .found = "1\n" } }, .{ .name = "Adup", .read = .{ .found = "1\n1\n" } } };
         break :blk s;
-    }, .{ .found = "/channel/ops/Plans#msg-Plans_1" }, "member;presence;accounts;list channels;read channels/Abad.channel;malformed Abad;read channels/Agone.channel;read channels/ops.channel;read channels/Adup.channel;malformed Adup;list channels/ops/sessions;");
+    }, .{ .found = "/channel/ops/Plans#msg-Plans_1" }, "member;presence;accounts;list channels;read channels/Abad.channel;malformed Abad;read channels/Agone.channel;malformed \xffhigh;read channels/ops.channel;read channels/Adup.channel;malformed Adup;list channels/ops/sessions;");
     // A member file that will not read: nothing past it is read, and no
     // channel searched (the host has failed the request), never "no such
     // topic"; one malformed before it was counted already, as the Zig

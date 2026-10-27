@@ -97,6 +97,18 @@ Paths := [].{
 		[] => Bool.False
 	}
 
+	## **A CHANNEL'S NAME, VALIDATED**: opaque (`::`), so only `channel_name`
+	## makes one, and a channel's path is built from nothing else.
+	ChannelName :: List(U8)
+
+	## The name, when valid_channel_name passes it.
+	channel_name : List(U8) -> Try(ChannelName, [Invalid])
+	channel_name = |name| if valid_channel_name(name) Ok(ChannelName.(name)) else Err(Invalid)
+
+	## The name's bytes.
+	channel_name_bytes : ChannelName -> List(U8)
+	channel_name_bytes = |ChannelName.(b)| b
+
 	## validMsgRefID: a topic slug (letters, digits, hyphens), `_`, and a
 	## message's decimal number, cut at the last `_`.
 	valid_msg_ref_id : List(U8) -> Bool
@@ -174,8 +186,8 @@ Paths := [].{
 	reactions_path = |kind, at| ChatPath.(join([conv_dir(kind, at.key), Str.to_utf8("sessions"), List.concat(at.topic, Str.to_utf8(".reactions.jsonl"))]))
 
 	## Channel `name`'s member file (channelMembers's): channels/<name>.channel.
-	channel_path : List(U8) -> ChatPath
-	channel_path = |name| ChatPath.(join([Str.to_utf8("channels"), List.concat(name, Str.to_utf8(".channel"))]))
+	channel_path : ChannelName -> ChatPath
+	channel_path = |ChannelName.(name)| ChatPath.(join([Str.to_utf8("channels"), List.concat(name, Str.to_utf8(".channel"))]))
 
 	## The folder of every channel's member file (channelRosters's listing):
 	## channels.
@@ -367,7 +379,10 @@ expect Paths.transcript_path(Channel, { key: Str.to_utf8("general"), topic: Str.
 expect Paths.conv_dir(Dm, Str.to_utf8("3_7")) == Str.to_utf8("3_7")
 expect Paths.conv_dir(Channel, Str.to_utf8("general")) == Str.to_utf8("channels/general")
 expect Paths.bytes(Paths.channels_folder) == Str.to_utf8("channels")
-expect Paths.bytes(Paths.channel_path(Str.to_utf8("general"))) == Str.to_utf8("channels/general.channel")
+expect match Paths.channel_name(Str.to_utf8("general")) {
+	Ok(name) => Paths.bytes(Paths.channel_path(name)) == Str.to_utf8("channels/general.channel")
+	Err(Invalid) => Bool.False
+}
 expect Paths.bytes(Paths.last_conv_path(Str.to_utf8("3"))) == Str.to_utf8("users/3/last-conv")
 expect Paths.bytes(Paths.last_session_path(Str.to_utf8("3"), Str.to_utf8("3_7"))) == Str.to_utf8("users/3/last-sessions/3_7")
 expect Paths.bytes(Paths.pinned_path(Str.to_utf8("3"), Str.to_utf8("3_7"))) == Str.to_utf8("users/3/pinned-sessions/3_7")
@@ -423,15 +438,31 @@ expect !Paths.valid_channel_name(Str.to_utf8("a/b"))
 expect !Paths.valid_channel_name(Str.to_utf8("a_b"))
 expect !Paths.valid_channel_name(Str.to_utf8("a.channel"))
 
-# **THE BUILDERS REFUSE NOTHING**: they join what they are handed, so a
-# hostile key or topic makes a path out of the chat root. What keeps one
-# out is upstream: Route.conversation passes a channel's key and a topic
+# channel_name: a valid name round-trips; nothing else is a ChannelName, so
+# no channel path is built from it.
+expect match Paths.channel_name(Str.to_utf8("a-1-")) {
+	Ok(name) => Paths.channel_name_bytes(name) == Str.to_utf8("a-1-")
+	Err(Invalid) => Bool.False
+}
+expect match Paths.channel_name(Str.to_utf8("../x")) {
+	Ok(_) => Bool.False
+	Err(Invalid) => Bool.True
+}
+expect match Paths.channel_name([]) {
+	Ok(_) => Bool.False
+	Err(Invalid) => Bool.True
+}
+
+# **THE BUILDERS REFUSE NOTHING BUT A CHANNEL'S MEMBER FILE**: they join
+# what they are handed, so a hostile key or topic makes a path out of the
+# chat root; channel_path takes only a ChannelName, which channel_name
+# alone makes. What keeps the rest out is upstream: Route.conversation
+# passes a channel's key and a topic
 # only through valid_channel_name and valid_topic_id, a DM's key reaches a
 # builder only past find!'s Paths.participant, make! checks a new topic's
 # id, and a uid is the host's (Host.me!) or a canonical pair's half.
 expect Paths.bytes(Paths.topics_folder(Dm, Str.to_utf8(".."))) == Str.to_utf8("../sessions")
 expect Paths.bytes(Paths.reactions_path(Channel, { key: Str.to_utf8("../.."), topic: Str.to_utf8("../x") })) == Str.to_utf8("channels/../../sessions/../x.reactions.jsonl")
-expect Paths.bytes(Paths.channel_path(Str.to_utf8("../x"))) == Str.to_utf8("channels/../x.channel")
 expect Paths.bytes(Paths.last_session_path(Str.to_utf8("3"), Str.to_utf8("../../x"))) == Str.to_utf8("users/3/last-sessions/../../x")
 expect Paths.bytes(Paths.feed_path(Str.to_utf8("/etc"), Code)) == Str.to_utf8("users/etc/code.md")
 expect Paths.bytes(Paths.topics_folder(Dm, [])) == Str.to_utf8("sessions")
