@@ -35,6 +35,7 @@ pub const Read = abi.Read;
 pub const Listing = abi.Listing;
 pub const Entry = abi.Entry;
 pub const Src = abi.Src;
+pub const RecentRow = abi.RecentRow;
 pub const EntryKind = route.EntryKind;
 pub const Conv = abi.Conv;
 pub const Account = abi.Account;

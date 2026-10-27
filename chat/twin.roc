@@ -108,7 +108,7 @@ call = |req| {
 		38 => [Feeds.images_json(Feeds.images(arg(0)), u64(arg(1)))]
 		39 => [Feeds.code_json(Feeds.code(arg(0)))]
 		40 => [Recent.excerpt(arg(0))]
-		41 => [Recent.json(arg(0), Recent.rows(List.drop_first(req.args, 1)))]
+		41 => [Recent.json(arg(0), Recent.rows(written(req.args, 1, [])))]
 		42 => [ChatState.resume_topic(List.drop_first(req.args, 2), arg(0), int(arg(1)))]
 		43 =>
 			match ChatState.pinned(arg(0), arg(1), arg(2) == [49]) {
@@ -319,4 +319,15 @@ scripts = |args, i, out|
 	match (List.get(args, i), List.get(args, i + 1)) {
 		(Ok(name), Ok(src)) => scripts(args, i + 2, List.append(out, { name, src }))
 		_ => out
+	}
+
+## The recent rows as the host writes them, nine arguments each from `i` on:
+## doc, secs, uid, name, key, label, topic, markdown, dm.
+written : List(List(U8)), U64, List(Recent.Written) -> List(Recent.Written)
+written = |args, i, out|
+	if i + 9 > List.len(args) {
+		out
+	} else {
+		at = |k| List.get(args, i + k) ?? []
+		written(args, i + 9, List.append(out, { doc: at(0), secs: at(1), uid: at(2), name: at(3), key: at(4), label: at(5), topic: at(6), markdown: at(7), dm: at(8) }))
 	}

@@ -180,9 +180,9 @@ Host := [].{
 	links! : {} => Bool
 
 	## The member's recent feed as gathered (angry-gopher recent.zig
-	## `gatherRows`), nine fields a row: doc, secs, uid, name, key, label,
-	## topic, markdown, dm. None when it failed.
-	recent! : {} => List(List(U8))
+	## `gatherRows`), each field as the host writes it: `doc` and `dm` "1" or
+	## "0", `secs` a signed decimal. None when it failed.
+	recent! : {} => List({ doc : List(U8), secs : List(U8), uid : List(U8), name : List(U8), key : List(U8), label : List(U8), topic : List(U8), markdown : List(U8), dm : List(U8) })
 
 	## Whether markdown is hostile: `Fine`; `Refused`, the host having refused it
 	## (webbox's edge counter and its 400); or `Failed`, the check itself.

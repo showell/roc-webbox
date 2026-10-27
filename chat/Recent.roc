@@ -14,19 +14,13 @@ Recent := [].{
 	## slug, `label` its "to …"/"in …" or the doc's title.
 	Row : { doc : Bool, secs : I64, uid : List(U8), name : List(U8), key : List(U8), label : List(U8), topic : List(U8), markdown : List(U8), dm : Bool }
 
-	## The host's rows, nine fields each: doc, secs, uid, name, key, label,
-	## topic, markdown, dm.
-	rows : List(List(U8)) -> List(Row)
-	rows = |fields| rows_from(fields, 0, [])
+	## A row as the host writes it (Host.recent!): `doc` and `dm` "1" or "0",
+	## `secs` a signed decimal.
+	Written : { doc : List(U8), secs : List(U8), uid : List(U8), name : List(U8), key : List(U8), label : List(U8), topic : List(U8), markdown : List(U8), dm : List(U8) }
 
-	rows_from : List(List(U8)), U64, List(Row) -> List(Row)
-	rows_from = |f, i, out|
-		if i + 9 > List.len(f) {
-			out
-		} else {
-			at = |k| List.get(f, i + k) ?? []
-			rows_from(f, i + 9, List.append(out, { doc: at(0) == ['1'], secs: signed(at(1)), uid: at(2), name: at(3), key: at(4), label: at(5), topic: at(6), markdown: at(7), dm: at(8) == ['1'] }))
-		}
+	## The host's rows, read.
+	rows : List(Written) -> List(Row)
+	rows = |ws| List.map(ws, |w| { doc: w.doc == ['1'], secs: signed(w.secs), uid: w.uid, name: w.name, key: w.key, label: w.label, topic: w.topic, markdown: w.markdown, dm: w.dm == ['1'] })
 
 	## A signed decimal, as the host writes one.
 	signed : List(U8) -> I64
