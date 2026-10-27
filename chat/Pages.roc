@@ -185,13 +185,13 @@ Pages := [].{
 	## channels, the pins, the topics. The chat's own page reads its sidebar
 	## itself (chat/main.roc `sidebar!`). **ITS UIDS AND TEXT ARE DECODED
 	## HERE, AT THE DOOR**: one that is no uid is `NotAUid`, text that is not
-	## UTF-8 `NotUtf8`.
-	decode_sidebar : List(List(U8)) -> Try(Sidebar, [NotAUid, NotUtf8])
+	## UTF-8 `NotUtf8`, a count that is no number `NotACount`.
+	decode_sidebar : List(List(U8)) -> Try(Sidebar, [NotAUid, NotUtf8, NotACount])
 	decode_sidebar = |fields| {
 		at = |i| List.get(fields, i) ?? []
 		text_at = |i| Str.from_utf8(at(i)).map_err(|_| NotUtf8)
 		uid_at = |i| Uid.from_utf8(at(i))
-		n_others = ZigText.parse_u64(at(5)) ?? 0
+		n_others = ZigText.parse_u64(at(5)).map_err(|_| NotACount)?
 		others = List.sublist(fields, { start: 6, len: n_others }) |> List.map_with_index(|_, k| Ok({ id: uid_at(6 + 3 * k)?, name: text_at(7 + 3 * k)?, presence: if at(8 + 3 * k) == ['1'] Online else Offline }))
 		(channels, after_channels) = counted(fields, 6 + 3 * n_others)?
 		(pins, after_pins) = counted(fields, after_channels)?
@@ -233,10 +233,10 @@ page_scripts : List(Str)
 page_scripts = ["chat_image_popup.js", "chat_code_popup.js", "chat_time_popup.js", "chat_save_popup.js", "message.js", "message_view.js", "nav_stack.js", "middle_pane.js", "chat_search.js", "chat_drag_to_pin.js", "chat_add_topic.js", "chat_left_sidebar.js", "chat_right_sidebar.js", "chat_emoji.js", "chat_reactions.js", "chat_compose.js", "chat_help.js", "chat_responsive.js", "chat.js", "notify.js"]
 
 ## A count at `i`, then that many texts, and where the next begins;
-## `NotUtf8` when one is not text.
-counted : List(List(U8)), U64 -> Try((List(Str), U64), [NotUtf8])
+## `NotUtf8` when one is not text, `NotACount` when the count is no number.
+counted : List(List(U8)), U64 -> Try((List(Str), U64), [NotUtf8, NotACount])
 counted = |fields, i| {
-	n = ZigText.parse_u64(List.get(fields, i) ?? []) ?? 0
+	n = ZigText.parse_u64(List.get(fields, i) ?? []).map_err(|_| NotACount)?
 	items = List.sublist(fields, { start: i + 1, len: n })
 	texts = List.keep_oks(items, Str.from_utf8)
 	if List.len(texts) == List.len(items) Ok((texts, i + 1 + n)) else Err(NotUtf8)

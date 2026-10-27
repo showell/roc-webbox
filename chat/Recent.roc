@@ -213,21 +213,22 @@ cap = |s, most| cap_from(s, most, 0, 0)
 
 cap_from : List(U8), U64, U64, U64 -> List(U8)
 cap_from = |s, most, i, count|
-	if i >= List.len(s) {
-		s
-	} else if count == most {
-		head = List.take_first(s, i)
-		List.concat(List.drop_last(head, Feeds.count_back(head, |c| c == ' ', 0)), Str.to_utf8("…"))
-	} else {
-		b = List.get(s, i) ?? 0
-		n = match b {
-			_ if b < 128 => 1
-			_ if b >= 192 and b < 224 => 2
-			_ if b >= 224 and b < 240 => 3
-			_ if b >= 240 and b < 248 => 4
-			_ => 1
+	match List.get(s, i) {
+		Err(OutOfBounds) => s
+		Ok(_) if count == most => {
+			head = List.take_first(s, i)
+			List.concat(List.drop_last(head, Feeds.count_back(head, |c| c == ' ', 0)), Str.to_utf8("…"))
 		}
-		cap_from(s, most, i + n, count + 1)
+		Ok(b) => {
+			n = match b {
+				_ if b < 128 => 1
+				_ if b >= 192 and b < 224 => 2
+				_ if b >= 224 and b < 240 => 3
+				_ if b >= 240 and b < 248 => 4
+				_ => 1
+			}
+			cap_from(s, most, i + n, count + 1)
+		}
 	}
 
 # excerpt cuts at a codepoint: a multi-byte character at and past the cut

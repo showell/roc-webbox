@@ -156,7 +156,7 @@ call = |req| {
 		34 =>
 			match Pages.decode_sidebar(req.args) {
 				Ok(sb) => [Html.script_json_bytes(Pages.sidebar_json(sb))]
-				Err(NotAUid) | Err(NotUtf8) => []
+				Err(NotAUid) | Err(NotUtf8) | Err(NotACount) => []
 			}
 		35 => {
 			limits = { image_max: u64(arg(7)), video_max: u64(arg(8)), accept: arg(9), search_min: u64(arg(10)) }
@@ -522,7 +522,10 @@ num : U64 -> List(U8)
 num = |n| Str.to_utf8(U64.to_str(n))
 
 u64 : List(U8) -> U64
-u64 = |digits| ZigText.parse_u64(digits) ?? 0
+u64 = |digits| match ZigText.parse_u64(digits) {
+	Ok(n) => n
+	Err(_) => crash "twin: a numeric argument is no U64; the Zig twin test sent a malformed request"
+}
 
 ## A number, or nothing whatever the error said.
 maybe : Try(U64, _) -> List(List(U8))

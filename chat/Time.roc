@@ -24,23 +24,21 @@ Time := [].{
 	## (dropped) and a `+hh:mm` or `-hh:mm` offset in place of `Z`, so a
 	## transcript another writer made still carries its own date.
 	unix_from_rfc3339 : List(U8) -> Try(I64, [NotADate])
-	unix_from_rfc3339 = |t| {
-		at = |i| List.get(t, i) ?? 0
-		if List.len(t) < 20 or at(4) != '-' or at(7) != '-' or (at(10) != 'T' and at(10) != 't') or at(13) != ':' or at(16) != ':' {
-			Err(NotADate)
-		} else {
-			match (digits(t, 0, 4), digits(t, 5, 2), digits(t, 8, 2), digits(t, 11, 2), digits(t, 14, 2), digits(t, 17, 2)) {
-				(Ok(year), Ok(month), Ok(day), Ok(hour), Ok(minute), Ok(second)) =>
-					if month < 1 or month > 12 or day < 1 or day > 31 or hour > 23 or minute > 59 or second > 60 {
-						Err(NotADate)
-					} else {
-						offset = offset_of(List.drop_first(t, 19))?
-						Ok(days_from_civil(year, month, day) * 86400 + hour * 3600 + minute * 60 + second - offset)
-					}
-				_ => Err(NotADate)
-			}
+	unix_from_rfc3339 = |t|
+		match t {
+			[_, _, _, _, '-', _, _, '-', _, _, sep, _, _, ':', _, _, ':', _, _, _, ..] if sep == 'T' or sep == 't' =>
+				match (digits(t, 0, 4), digits(t, 5, 2), digits(t, 8, 2), digits(t, 11, 2), digits(t, 14, 2), digits(t, 17, 2)) {
+					(Ok(year), Ok(month), Ok(day), Ok(hour), Ok(minute), Ok(second)) =>
+						if month < 1 or month > 12 or day < 1 or day > 31 or hour > 23 or minute > 59 or second > 60 {
+							Err(NotADate)
+						} else {
+							offset = offset_of(List.drop_first(t, 19))?
+							Ok(days_from_civil(year, month, day) * 86400 + hour * 3600 + minute * 60 + second - offset)
+						}
+					_ => Err(NotADate)
+				}
+			_ => Err(NotADate)
 		}
-	}
 
 	Civil : { year : I64, month : I64, day : I64 }
 }

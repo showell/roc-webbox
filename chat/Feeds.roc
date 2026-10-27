@@ -229,13 +229,15 @@ img_tags_from : List(U8), U64, List(List(U8)) -> List(List(U8))
 img_tags_from = |s, i, out|
 	if i >= List.len(s) {
 		out
-	} else if i + 4 < List.len(s) and Feeds.lower(List.sublist(s, { start: i, len: 4 })) == Str.to_utf8("<img") and Feeds.is_space(List.get(s, i + 4) ?? 0) {
-		match Feeds.find_byte(s, '>', i + 4) {
-			Ok(gt) => img_tags_from(s, gt + 1, List.append(out, List.sublist(s, { start: i, len: gt + 1 - i })))
-			Err(NotFound) => img_tags_from(s, i + 1, out)
-		}
 	} else {
-		img_tags_from(s, i + 1, out)
+		match List.sublist(s, { start: i, len: 5 }) {
+			[a, b, c, d, e] if Feeds.lower([a, b, c, d]) == Str.to_utf8("<img") and Feeds.is_space(e) =>
+				match Feeds.find_byte(s, '>', i + 4) {
+					Ok(gt) => img_tags_from(s, gt + 1, List.append(out, List.sublist(s, { start: i, len: gt + 1 - i })))
+					Err(NotFound) => img_tags_from(s, i + 1, out)
+				}
+			_ => img_tags_from(s, i + 1, out)
+		}
 	}
 
 smaller : U64, U64 -> U64
