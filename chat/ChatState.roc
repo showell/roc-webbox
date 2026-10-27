@@ -65,11 +65,11 @@ ChatState := [].{
 	## lastUserConv's and lastViewedTopic's reading of a bookmark: the file
 	## trimmed of spaces, tabs, CRs and newlines; "" when there is none (or
 	## it failed, the request failing with it).
-	bookmark : [Found(List(U8)), Missing, Failed] -> List(U8)
+	bookmark : Try(List(U8), [Missing, Failed]) -> List(U8)
 	bookmark = |file|
 		match file {
-			Found(bytes) => ZigText.trim(bytes)
-			Missing | Failed => []
+			Ok(bytes) => ZigText.trim(bytes)
+			Err(Missing) | Err(Failed) => []
 		}
 
 	## writeIfChanged's decision: whether `value` is written over the
@@ -77,11 +77,11 @@ ChatState := [].{
 	## as `value` once trimmed. **A BOOKMARK THAT CANNOT BE READ IS WRITTEN
 	## AGAIN; THE WRITE SAYS WHETHER IT CAN BE**: a failed read, and one past
 	## the bound (which the Zig's bounded read refused), is changed.
-	changed : [Found(List(U8)), Missing, Failed], List(U8) -> Bool
+	changed : Try(List(U8), [Missing, Failed]), List(U8) -> Bool
 	changed = |file, value|
 		match file {
-			Found(bytes) => List.len(bytes) > bookmark_most or ZigText.trim(bytes) != value
-			Missing | Failed => Bool.True
+			Ok(bytes) => List.len(bytes) > bookmark_most or ZigText.trim(bytes) != value
+			Err(Missing) | Err(Failed) => Bool.True
 		}
 
 	## The most of a bookmark the Zig read: setLastViewedTopic's

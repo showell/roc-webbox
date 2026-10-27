@@ -230,11 +230,11 @@ valid_pair = |key| match Paths.pair_key_of(key) {
 
 ## A read as the test says it went: `F` found (`bytes` the file), `M`
 ## missing, anything else failed.
-file : List(U8), List(U8) -> [Found(List(U8)), Missing, Failed]
+file : List(U8), List(U8) -> Try(List(U8), [Missing, Failed])
 file = |how, bytes| match how {
-	[70] => Found(bytes)
-	[77] => Missing
-	_ => Failed
+	[70] => Ok(bytes)
+	[77] => Err(Missing)
+	_ => Err(Failed)
 }
 
 ## A folder's entries as the test wrote them: `kind, name` pairs from
@@ -290,7 +290,7 @@ pairs = |args, i, out|
 	}
 
 ## Reads as the test says they went (`file`), `how, bytes` pairs from `i`.
-reads : List(List(U8)), U64, List([Found(List(U8)), Missing, Failed]) -> List([Found(List(U8)), Missing, Failed])
+reads : List(List(U8)), U64, List(Try(List(U8), [Missing, Failed])) -> List(Try(List(U8), [Missing, Failed]))
 reads = |args, i, out|
 	match (List.get(args, i), List.get(args, i + 1)) {
 		(Ok(how), Ok(bytes)) => reads(args, i + 2, List.append(out, file(how, bytes)))

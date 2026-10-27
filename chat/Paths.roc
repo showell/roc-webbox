@@ -328,25 +328,25 @@ Paths := [].{
 	## counted by the host (the operator's count), so one bad file is not
 	## every member's chat down; `Gone` since the listing, skipped; or
 	## `Failed`, and nothing past it (the request has failed).
-	roster : List(U8), [Found(List(U8)), Missing, Failed] -> [Listed(Roster), Malformed, Gone, Failed]
+	roster : List(U8), Try(List(U8), [Missing, Failed]) -> [Listed(Roster), Malformed, Gone, Failed]
 	roster = |name, file|
 		match file {
-			Found(stored) =>
+			Ok(stored) =>
 				match channel_members(stored) {
 					Ok(members) => Listed({ name, members })
 					Err(Malformed) => Malformed
 				}
-			Missing => Gone
-			Failed => Failed
+			Err(Missing) => Gone
+			Err(Failed) => Failed
 		}
 
 	## Every roster, from the channels `channel_names` chose and their member
 	## files as read, in that order, by `roster`: the rosters, and the
 	## malformed channels' names, up to a read that failed.
-	rosters : List(List(U8)), List([Found(List(U8)), Missing, Failed]) -> { rosters : List(Roster), malformed : List(List(U8)) }
+	rosters : List(List(U8)), List(Try(List(U8), [Missing, Failed])) -> { rosters : List(Roster), malformed : List(List(U8)) }
 	rosters = |names, files| rosters_from(names, files, 0, { rosters: [], malformed: [] })
 
-	rosters_from : List(List(U8)), List([Found(List(U8)), Missing, Failed]), U64, { rosters : List(Roster), malformed : List(List(U8)) } -> { rosters : List(Roster), malformed : List(List(U8)) }
+	rosters_from : List(List(U8)), List(Try(List(U8), [Missing, Failed])), U64, { rosters : List(Roster), malformed : List(List(U8)) } -> { rosters : List(Roster), malformed : List(List(U8)) }
 	rosters_from = |names, files, i, got|
 		match (List.get(names, i), List.get(files, i)) {
 			(Ok(name), Ok(file)) =>

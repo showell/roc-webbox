@@ -178,9 +178,9 @@ in_topic! = |req, route, found| {
 				# readReactions's: nobody has reacted yet is no events.
 				ndjson = Str.to_utf8("application/x-ndjson; charset=utf-8")
 				match Files.read!(Paths.reactions_path({ key: found.key, topic: route.topic })) {
-					Found(bytes) => Chat.respond(200, ndjson, bytes)
-					Missing => Chat.respond(200, ndjson, [])
-					Failed => Chat.answered
+					Ok(bytes) => Chat.respond(200, ndjson, bytes)
+					Err(Missing) => Chat.respond(200, ndjson, [])
+					Err(Failed) => Chat.answered
 				}
 			}
 		_ =>
@@ -188,10 +188,11 @@ in_topic! = |req, route, found| {
 				Chat.not_allowed(Post)
 			} else if route.tail == React {
 				react!(conv, who, { key: found.key, topic: route.topic })
-			} else if pin!(found.key, route.topic, if route.tail == Pin Pinned else Unpinned) {
-				Chat.respond(204, [], [])
 			} else {
-				Chat.answered
+				match pin!(found.key, route.topic, if route.tail == Pin Pinned else Unpinned) {
+					Ok({}) => Chat.respond(204, [], [])
+					Err(Failed) => Chat.answered
+				}
 			}
 	}
 }
@@ -295,7 +296,7 @@ unreadable! = |why|
 channel_members! : Paths.ChannelName => List(List(U8))
 channel_members! = |name|
 	match Files.read!(Paths.channel_path(name)) {
-		Found(bytes) =>
+		Ok(bytes) =>
 			match Paths.channel_members(bytes) {
 				Ok(members) => members
 				Err(Malformed) => {
@@ -303,7 +304,7 @@ channel_members! = |name|
 					[]
 				}
 			}
-		Missing | Failed => []
+		Err(Missing) | Err(Failed) => []
 	}
 
 ## **EVERY CHANNEL'S ROSTER** (channelRosters): channels/ listed
@@ -316,9 +317,9 @@ channel_members! = |name|
 channel_rosters! : {} => Try(List(Paths.Roster), [Failed])
 channel_rosters! = |{}| {
 	match Files.list!(Paths.channels_folder) {
-		Found(entries) => rosters!(Paths.channel_names(entries), 0, [])
-		Missing => Ok([])
-		Failed => Err(Failed)
+		Ok(entries) => rosters!(Paths.channel_names(entries), 0, [])
+		Err(Missing) => Ok([])
+		Err(Failed) => Err(Failed)
 	}
 }
 
@@ -356,8 +357,8 @@ topics! = |key| Paths.topics(list!(Paths.topics_folder(key)))
 list! : Paths.ChatPath => List(Paths.Entry)
 list! = |path|
 	match Files.list!(path) {
-		Found(entries) => entries
-		Missing | Failed => []
+		Ok(entries) => entries
+		Err(Missing) | Err(Failed) => []
 	}
 
 ## `conv`'s title (convTitle): a DM's partner's name (its accounts known
@@ -383,20 +384,20 @@ title! = |conv, who|
 ## POST .../pin and .../unpin: the member's pins in the conversation read,
 ## `topic` pinned or unpinned (ChatState.pinned), and the file written back or,
 ## emptied, removed. A read that failed stops here: the set is not empty, it
-## is unknown, and writing it would drop every pin. False when a step failed.
-pin! : Paths.ConvKey, List(U8), ChatState.Pin => Bool
+## is unknown, and writing it would drop every pin. `Failed` when a step failed.
+pin! : Paths.ConvKey, List(U8), ChatState.Pin => Try({}, [Failed])
 pin! = |key, topic, pin| {
 	path = Paths.pinned_path(Uid.from_bytes(Host.me!({})), key)
 	match Files.read!(path) {
-		Found(stored) => repin!(path, stored, topic, pin)
-		Missing => repin!(path, [], topic, pin)
-		Failed => Bool.False
+		Ok(stored) => repin!(path, stored, topic, pin)
+		Err(Missing) => repin!(path, [], topic, pin)
+		Err(Failed) => Err(Failed)
 	}
 }
 
 ## The pinned file at `path`, read as `stored`, with `topic` pinned or
 ## unpinned: written back, or, emptied, removed.
-repin! : Paths.ChatPath, List(U8), List(U8), ChatState.Pin => Bool
+repin! : Paths.ChatPath, List(U8), List(U8), ChatState.Pin => Try({}, [Failed])
 repin! = |path, stored, topic, pin|
 	match ChatState.pinned(stored, topic, pin) {
 		Write(bytes) => Files.write!(path, bytes)
@@ -405,27 +406,26 @@ repin! = |path, stored, topic, pin|
 
 ## **WHERE THE MEMBER RESUMES DM `conv`: TOPIC `topic`** (setLastViewedTopic):
 ## the topic last viewed there first, then the DM last in, each written
-## only when it changed (ChatState.changed); false when a step failed, and
-## nothing after it is written. A member or topic with no name records
+## only when it changed (ChatState.changed); `Failed` when a step failed,
+## and nothing after it is written. A member or topic with no name records
 ## nothing.
-bookmark! : Paths.ConvKey, List(U8) => Bool
+bookmark! : Paths.ConvKey, List(U8) => Try({}, [Failed])
 bookmark! = |key, topic| {
 	me = Host.me!({})
 	if me == [] or topic == [] {
-		Bool.True
-	} else if write_if_changed!(Paths.last_session_path(Uid.from_bytes(me), key), topic) {
-		write_if_changed!(Paths.last_conv_path(me), Paths.conv_key_bytes(key))
+		Ok({})
 	} else {
-		Bool.False
+		write_if_changed!(Paths.last_session_path(Uid.from_bytes(me), key), topic)?
+		write_if_changed!(Paths.last_conv_path(me), Paths.conv_key_bytes(key))
 	}
 }
 
 ## **WRITTEN ONLY WHEN IT CHANGES** (zig-metal-unikernel 153(1)): on every
 ## send and view the value is usually the one already there, and a write is
 ## disk requests each time.
-write_if_changed! : Paths.ChatPath, List(U8) => Bool
+write_if_changed! : Paths.ChatPath, List(U8) => Try({}, [Failed])
 write_if_changed! = |path, value|
-	if ChatState.changed(Files.read!(path), value) Files.write!(path, ChatState.bookmark_line(value)) else Bool.True
+	if ChatState.changed(Files.read!(path), value) Files.write!(path, ChatState.bookmark_line(value)) else Ok({})
 
 ## POST .../react: the form, then the reaction stored and sent live.
 react! : Chat.Conv, Who, Paths.TopicAt => Chat.Answer
@@ -473,12 +473,13 @@ reacted! = |conv, who, topic_at, r|
 						# can fail between the append and the publish.
 						key = Fanout.topic_key(topic_at)
 						frame = Frame.reaction(line)
-						if Files.append_line!(Paths.reactions_path(topic_at), line) {
-							# **STORED IS DONE**: the live publish cannot fail.
-							Host.publish!(key, frame)
-							Stored
-						} else {
-							Failed
+						match Files.append_line!(Paths.reactions_path(topic_at), line) {
+							Ok({}) => {
+								# **STORED IS DONE**: the live publish cannot fail.
+								Host.publish!(key, frame)
+								Stored
+							}
+							Err(Failed) => Failed
 						}
 					}
 			}
@@ -539,8 +540,8 @@ feed! = |which, rest|
 				# A feed that failed is the request's failure; the page made
 				# of nothing is not sent.
 				file = match Files.read!(Paths.feed_path(Host.me!({}), which)) {
-					Found(bytes) => bytes
-					Missing | Failed => []
+					Ok(bytes) => bytes
+					Err(Missing) | Err(Failed) => []
 				}
 				src = Chrome.src_in(Host.srcs!({}))
 				page = match which {
@@ -582,7 +583,7 @@ landing! = |route, key|
 ## the limits the server enforces (Host.limits!).
 page! : Route.R, AtTopic => Chat.Answer
 page! = |route, at|
-	if at.conv.family == Dm and !bookmark!(at.key, route.topic) {
+	if at.conv.family == Dm and bookmark!(at.key, route.topic).is_err() {
 		Chat.answered
 	} else {
 		match sidebar!(route.topic, at) {
@@ -621,9 +622,9 @@ sidebar! = |topic, at| {
 								Err(Failed) => Err(Failed)
 								Ok(rosters) =>
 									match Files.read!(Paths.pinned_path(Uid.from_bytes(me), at.key)) {
-										Failed => Err(Failed)
-										Found(stored) => Ok((viewer, sidebar_of(me, topic, at, with_online(others, flags), Paths.member_channels(rosters, me), ChatState.pins(stored))))
-										Missing => Ok((viewer, sidebar_of(me, topic, at, with_online(others, flags), Paths.member_channels(rosters, me), [])))
+										Err(Failed) => Err(Failed)
+										Ok(stored) => Ok((viewer, sidebar_of(me, topic, at, with_online(others, flags), Paths.member_channels(rosters, me), ChatState.pins(stored))))
+										Err(Missing) => Ok((viewer, sidebar_of(me, topic, at, with_online(others, flags), Paths.member_channels(rosters, me), [])))
 									}
 							}
 						}
@@ -809,7 +810,7 @@ make! = |key, conv, who, topic|
 			Ok(name) => {
 				dm = conv.family == Dm
 				# The bookmark first, as a send's: one that fails makes no topic.
-				if dm and !bookmark!(key, topic) {
+				if dm and bookmark!(key, topic).is_err() {
 					Chat.answered
 				} else if !appended!(conv, who, { at: { key, topic }, name, markdown: Str.to_utf8("hi"), cid: [] }) {
 					Chat.answered
@@ -900,7 +901,7 @@ store! = |at, conv, who, send, { markdown: md, cid }|
 		match viewer!(who) {
 			Err(Failed) => Chat.answered
 			Ok(name) =>
-				if conv.family == Dm and !bookmark!(at.key, at.topic) {
+				if conv.family == Dm and bookmark!(at.key, at.topic).is_err() {
 					Chat.answered
 				} else if !appended!(conv, who, { at, name, markdown: md, cid }) {
 					Chat.answered
