@@ -45,6 +45,25 @@ Paths := [].{
 		Err(None) => 0
 	}
 
+	## **WHERE A TOPIC IS**: its conversation, then the topic within it. The
+	## pair is the topic's whole address: `<key>/<topic>` is its live bus
+	## key, and its page is the conversation's URL root then `/<topic>`
+	## (/chat/c/<key>/<topic> for a DM, /channel/<key>/<topic> for a channel).
+	TopicAt : {
+		## The conversation: a DM's canonical pair key, two uids joined by
+		## `_`, the smaller first (`3_7`; pair_key); or a channel's name, a
+		## letter then letters, digits and hyphens (`general`). Only a DM's
+		## has a `_`. On disk, the conversation's folder is `<key>` or
+		## `channels/<key>`.
+		key : List(U8),
+
+		## The topic's id, which is also its name as shown: letters and
+		## digits joined by single hyphens (`ChitChat`, `road-trip`;
+		## valid_topic_id). On disk it is the transcript's stem,
+		## `<conv folder>/sessions/<topic>.md`.
+		topic : List(U8),
+	}
+
 	## validTopicID: letters and digits joined by single hyphens, none at
 	## either end, 1 to 80 bytes.
 	valid_topic_id : List(U8) -> Bool
