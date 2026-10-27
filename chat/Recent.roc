@@ -11,8 +11,9 @@ import ZigText
 Recent := [].{
 
 	## One gathered row (recent.zig `Row`): `key` a chat row's URL or a doc's
-	## slug, `label` its "to …"/"in …" or the doc's title.
-	Row : { doc : Bool, secs : I64, uid : List(U8), name : List(U8), key : List(U8), label : List(U8), topic : List(U8), markdown : List(U8), dm : Bool }
+	## slug, `label` its "to …"/"in …" or the doc's title; `dm` as
+	## ChatEvent's.
+	Row : { kind : [Doc, Message], secs : I64, uid : List(U8), name : List(U8), key : List(U8), label : List(U8), topic : List(U8), markdown : List(U8), dm : [Dm, Channel] }
 
 	## A row as the host writes it (Host.recent!): `doc` and `dm` "1" or "0",
 	## `secs` a signed decimal.
@@ -20,7 +21,7 @@ Recent := [].{
 
 	## The host's rows, read.
 	rows : List(Written) -> List(Row)
-	rows = |ws| List.map(ws, |w| { doc: w.doc == ['1'], secs: signed(w.secs), uid: w.uid, name: w.name, key: w.key, label: w.label, topic: w.topic, markdown: w.markdown, dm: w.dm == ['1'] })
+	rows = |ws| List.map(ws, |w| { kind: if w.doc == ['1'] Doc else Message, secs: signed(w.secs), uid: w.uid, name: w.name, key: w.key, label: w.label, topic: w.topic, markdown: w.markdown, dm: if w.dm == ['1'] Dm else Channel })
 
 	## A signed decimal, as the host writes one.
 	signed : List(U8) -> I64
@@ -38,11 +39,11 @@ Recent := [].{
 	event : List(U8), Row -> List(U8)
 	event = |me, r| {
 		at = JsonText.str(Str.to_utf8(Time.rfc3339(r.secs)))
-		if r.doc {
+		if r.kind == Doc {
 			JsonText.obj(List.join([[("kind", JsonText.str(Str.to_utf8("doc"))), ("at", at)], JsonText.opt("who", Str.to_utf8("You")), JsonText.opt("slug", r.key), JsonText.opt("title", r.label)]))
 		} else {
 			who = if r.uid == [] [] else if r.uid == me Str.to_utf8("You") else r.name
-			chat_event({ at: Str.to_utf8(Time.rfc3339(r.secs)), url: r.key, who, label: r.label, topic: r.topic, excerpt: excerpt(r.markdown), dm: if r.dm Dm else Channel })
+			chat_event({ at: Str.to_utf8(Time.rfc3339(r.secs)), url: r.key, who, label: r.label, topic: r.topic, excerpt: excerpt(r.markdown), dm: r.dm })
 		}
 	}
 
