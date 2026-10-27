@@ -1010,13 +1010,15 @@ appended! = |conv, who, { at: topic_at, name, markdown: md, cid }|
 		match (counted.status, me!({})) {
 			(Counted, Ok(me)) => {
 				index = counted.count
-				uid = me.to_str().to_utf8()
 				# A count of the largest U64 has no next number: the call
 				# crashes into a 500, storing nothing.
 				id = "${topic}_${U64.to_str(index + 1)}"
 				stamp = Time.rfc3339(Host.now!({}))
-				message = { id: id.to_utf8(), from: name.to_utf8(), at: stamp.to_utf8(), uid, markdown: md.to_utf8() }
+				message = { id: id.to_utf8(), from: name.to_utf8(), at: stamp.to_utf8(), uid: By(me), markdown: md.to_utf8() }
 				block = Transcript.stored_form(index, message)
+				# The store's record (Chat.Message, which the host reads): the
+				# same message, its author's digits.
+				stored = { id: message.id, from: message.from, at: message.at, uid: me.to_str().to_utf8(), markdown: message.markdown }
 				rendered = Host.render!(md.to_utf8())
 				# **THE HTML DECODED HERE, AT THE DOOR**: the renderer makes
 				# text of text, so html that is not UTF-8 is the host's fault,
@@ -1046,7 +1048,7 @@ appended! = |conv, who, { at: topic_at, name, markdown: md, cid }|
 							(Ok(all), Ok(members)) => {
 								frame = Frame.message({ index, from: name, from_uid: me, at: stamp, html: page_html, markdown: md, id, cid })
 								steps = Fanout.steps({ key: topic_at.key, members, topic, index, id, from: name, at: stamp, uid: me, accounts: all }, Fanout.parts_of(md))
-								if Host.store_message!(conv, topic.to_utf8(), block, index, message) {
+								if Host.store_message!(conv, topic.to_utf8(), block, index, stored) {
 									# **STORED IS DONE** (metal-vmm QUEUE 172): from
 									# here nothing fails the send, which a client
 									# would answer by sending it again. The publish

@@ -74,10 +74,18 @@ call = |req| {
 				Err(Invalid) => []
 			}
 		15 => {
-			d = Transcript.decode_file(arg(0))
-			List.fold(d.messages, [Str.to_utf8(U64.to_str(d.refused))], |out, m| List.concat(out, [m.id, m.from, m.at, m.uid, m.markdown]))
+			match Transcript.decode_file(arg(0)) {
+				Ok(d) => List.fold(d.messages, [Str.to_utf8(U64.to_str(d.refused))], |out, m| List.concat(out, [m.id, m.from, m.at, author_bytes(m.uid), m.markdown]))
+				Err(CorruptUid(_)) => []
+			}
 		}
-		16 => [Transcript.stored_form(u64(arg(0)), { id: arg(1), from: arg(2), at: arg(3), uid: arg(4), markdown: arg(5) })]
+		# An empty uid is nobody; any other that is no canonical uid is no
+		# message, and no answer.
+		16 =>
+			match author_of(arg(4)) {
+				Ok(uid) => [Transcript.stored_form(u64(arg(0)), { id: arg(1), from: arg(2), at: arg(3), uid, markdown: arg(5) })]
+				Err(NotAUid) => []
+			}
 		17 => [num(Count.count_blocks(arg(0)))]
 		18 => maybe(Count.number_in(arg(0), arg(1)))
 		19 => maybe(Count.index_of(arg(0), arg(1)))
@@ -99,8 +107,9 @@ call = |req| {
 			}
 		24 =>
 			match Count.window_last(u64(arg(0)), arg(1), if arg(2) == [49] Full else Partial, arg(3)) {
-				Ok(w) => [num(w.number), bool(w.record == Current), w.msg.id, w.msg.from, w.msg.at, w.msg.uid, w.msg.markdown]
+				Ok(w) => [num(w.number), bool(w.record == Current), w.msg.id, w.msg.from, w.msg.at, author_bytes(w.msg.uid), w.msg.markdown]
 				Err(NotBelieved) => []
+				Err(CorruptUid(_)) => [Str.to_utf8("CorruptUid")]
 			}
 		# Its author, stamp, html, markdown, id and cid are text.
 		25 =>
@@ -560,3 +569,14 @@ account_answers = |ids, all| {
 	}
 	List.concat(asked, roster)
 }
+
+## A message's author as the Zig holds it: its digits, or empty for nobody.
+author_bytes : Transcript.Author -> List(U8)
+author_bytes = |author| match author {
+	By(u) => u.to_str().to_utf8()
+	Unattributed => []
+}
+
+## The test's author bytes: empty is nobody, else a canonical uid or none.
+author_of : List(U8) -> Try(Transcript.Author, [NotAUid])
+author_of = |bytes| if bytes == [] Ok(Unattributed) else Uid.from_utf8(bytes).map_ok(|u| By(u))

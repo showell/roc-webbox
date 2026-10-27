@@ -105,13 +105,14 @@ Count := [].{
 	## windowLast: the last block of the window read at the record's offset,
 	## believed when the window was not full and the block is a message of
 	## `topic` numbered at least `count`; the record `Current` when exactly
-	## that, `Stale` when the block is past it.
-	window_last : U64, List(U8), Fill, List(U8) -> Try({ msg : Transcript.Msg, number : U64, record : Freshness }, [NotBelieved])
+	## that, `Stale` when the block is past it. A window whose decode fails
+	## (`CorruptUid`) fails with it: damaged data is never passed over.
+	window_last : U64, List(U8), Fill, List(U8) -> Try({ msg : Transcript.Msg, number : U64, record : Freshness }, [NotBelieved, CorruptUid(List(U8))])
 	window_last = |count, window, fill, topic|
 		if fill == Full {
 			Err(NotBelieved)
 		} else {
-			match List.last(Transcript.decode_file(window).messages) {
+			match List.last(Transcript.decode_file(window)?.messages) {
 				Ok(msg) =>
 					match number_in(msg.id, topic) {
 						Ok(number) if number >= count => Ok({ msg, number, record: if number == count Current else Stale })

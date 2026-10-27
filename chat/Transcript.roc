@@ -5,42 +5,60 @@
 ## backslash. Pure, on bytes.
 import Bytes
 import ZigText
+import Uid
 
 Transcript := [].{
 
-	## A decoded block: every field the bytes they were, `uid` empty for a
-	## block from before it was written.
-	Msg : { id : List(U8), from : List(U8), at : List(U8), uid : List(U8), markdown : List(U8) }
+	## A message: every field but its author the bytes they were.
+	Msg : { id : List(U8), from : List(U8), at : List(U8), uid : Author, markdown : List(U8) }
+
+	## Who sent a message: a block from before `uid:` was written, or one
+	## whose `uid:` line is empty, is `Unattributed`.
+	Author : [By(Uid), Unattributed]
+
+	## A block as it reads, its `uid:` the bytes after it, empty when none.
+	Block : { id : List(U8), from : List(U8), at : List(U8), uid : List(U8), markdown : List(U8) }
 
 	## decodeChatFile: the messages, and how many blocks were refused (not
 	## messages: no id, author or date). A piece that is only whitespace is
-	## no block and not counted.
-	decode_file : List(U8) -> { messages : List(Msg), refused : U64 }
+	## no block and not counted. **A MESSAGE WHOSE `uid:` IS NOT EMPTY AND
+	## NOT A CANONICAL UID FAILS THE FILE** (`CorruptUid`, its bytes): the
+	## store writes only canonical uids, so such a line is damaged data, and
+	## skipping its block would renumber every message after it.
+	decode_file : List(U8) -> Try({ messages : List(Msg), refused : U64 }, [CorruptUid(List(U8))])
 	decode_file = |data|
-		List.fold(
+		List.fold_try(
 			Bytes.split_seq(data, sep),
 			{ messages: [], refused: 0 },
 			|acc, piece|
 				if ZigText.trim(piece) == [] {
-					acc
+					Ok(acc)
 				} else {
-					m = decode_block(piece)
-					if is_message(m) {
-						{ ..acc, messages: List.append(acc.messages, m) }
+					b = decode_block(piece)
+					if is_message(b) {
+						m = message_of(b)?
+						Ok({ ..acc, messages: List.append(acc.messages, m) })
 					} else {
-						{ ..acc, refused: acc.refused + 1 }
+						Ok({ ..acc, refused: acc.refused + 1 })
 					}
 				},
 		)
 
-	is_message : Msg -> Bool
+	## A message block with its author decoded: an empty `uid:` is nobody.
+	message_of : Block -> Try(Msg, [CorruptUid(List(U8))])
+	message_of = |b| {
+		uid = if b.uid == [] Unattributed else By(Uid.from_utf8(b.uid).map_err(|_| CorruptUid(b.uid))?)
+		Ok({ id: b.id, from: b.from, at: b.at, uid, markdown: b.markdown })
+	}
+
+	is_message : Block -> Bool
 	is_message = |m| m.id != [] and m.from != [] and m.at != []
 
 	## One block: an optional `MSG_` line, headers to the first blank line
 	## (`from`, `date`, `uid` kept, the last of each, the rest passed over),
 	## then the body, each line unescaped. Lines are found by offset and
 	## kept as slices of the piece: nothing is copied but an escaped body.
-	decode_block : List(U8) -> Msg
+	decode_block : List(U8) -> Block
 	decode_block = |piece| {
 		first = line_at(piece, 0)
 		(id, start) = match Bytes.strip_prefix(first, msg_prefix) {
@@ -65,7 +83,7 @@ Transcript := [].{
 
 	## The header lines from offset `at` to the blank one, then the body:
 	## everything after the blank line (none when there is no blank line).
-	headers : List(U8), U64, Msg -> Msg
+	headers : List(U8), U64, Block -> Block
 	headers = |piece, at, m|
 		if at > List.len(piece) {
 			m
@@ -108,7 +126,10 @@ Transcript := [].{
 	encode_block = |m| {
 		body = if Bytes.find(m.markdown, dashes, 0) == Err(NotFound) m.markdown else Bytes.join_lines(List.map(Bytes.split_byte(m.markdown, '\n'), escape_line))
 		head = List.join([Str.to_utf8("MSG_"), m.id, Str.to_utf8("\nfrom: "), m.from, Str.to_utf8("\ndate: "), m.at])
-		uid = if m.uid == [] [] else List.concat(Str.to_utf8("\nuid: "), m.uid)
+		uid = match m.uid {
+			By(u) => Str.to_utf8("\nuid: ${u.to_str()}")
+			Unattributed => []
+		}
 		List.join([head, uid, Str.to_utf8("\n\n"), body])
 	}
 
@@ -134,3 +155,10 @@ Transcript := [].{
 	}
 
 }
+
+# An empty `uid:` line is nobody; a canonical one its author; any other
+# fails the file, never skipped.
+expect Transcript.decode_file(Str.to_utf8("MSG_t_1\nfrom: S\ndate: d\nuid: \n\nhi")).map_ok(|d| d.messages.map(|m| m.uid)) == Ok([Unattributed])
+expect Transcript.decode_file(Str.to_utf8("MSG_t_1\nfrom: S\ndate: d\n\nhi")).map_ok(|d| d.messages.map(|m| m.uid)) == Ok([Unattributed])
+expect Transcript.decode_file(Str.to_utf8("MSG_t_1\nfrom: S\ndate: d\nuid: 17\n\nhi")).map_ok(|d| d.messages.map(|m| m.uid)) == Uid.from_str("17").map_ok(|u| [By(u)]).map_err(|_| CorruptUid([]))
+expect Transcript.decode_file(Str.to_utf8("MSG_t_1\nfrom: S\ndate: d\nuid: 07\n\nhi")) == Err(CorruptUid(Str.to_utf8("07")))
