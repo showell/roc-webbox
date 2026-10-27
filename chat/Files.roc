@@ -28,19 +28,15 @@ Files := [].{
 
 	## Host.write!: the whole file as `bytes`.
 	write! : Paths.ChatPath, List(U8) => Try({}, [Failed])
-	write! = |path, bytes| done(Host.write!(Paths.bytes(path), bytes))
+	write! = |path, bytes| if Host.write!(Paths.bytes(path), bytes) Ok({}) else Err(Failed)
 
 	## Host.remove!: the file gone.
 	remove! : Paths.ChatPath => Try({}, [Failed])
-	remove! = |path| done(Host.remove!(Paths.bytes(path)))
+	remove! = |path| if Host.remove!(Paths.bytes(path)) Ok({}) else Err(Failed)
 
 	## Host.append_line!: `line` and a newline appended.
 	append_line! : Paths.ChatPath, List(U8) => Try({}, [Failed])
-	append_line! = |path, line| done(Host.append_line!(Paths.bytes(path), line))
-
-	## The host's Bool for a write as a Try: false is `Failed`.
-	done : Bool -> Try({}, [Failed])
-	done = |ok| if ok Ok({}) else Err(Failed)
+	append_line! = |path, line| if Host.append_line!(Paths.bytes(path), line) Ok({}) else Err(Failed)
 
 	## Host.append_entry!: a feed's entry appended, or failed with its fault.
 	append_entry! : Paths.ChatPath, List(U8), List(U8) => { fault : U16, status : [Appended, Failed] }
@@ -82,7 +78,3 @@ expect Files.answer(Found, [{ kind: File, name: Str.to_utf8("a.md") }]) == Ok([{
 expect Files.answer(Found, List.drop_first([{ kind: Dir, name: [] }], 1)) == Ok(List.drop_first([{ kind: Dir, name: [] }], 1))
 expect Files.answer(Missing, [{ kind: Dir, name: Str.to_utf8("x") }]) == Err(Missing)
 expect Files.answer(Failed, [{ kind: Dir, name: Str.to_utf8("x") }]) == Err(Failed)
-
-# A write's Bool: false is Failed, never success.
-expect Files.done(Bool.True) == Ok({})
-expect Files.done(Bool.False) == Err(Failed)
