@@ -64,7 +64,6 @@ call = |req| {
 		9 => [bool(text(arg(0)).map_ok(Paths.is_topic_id) == Ok(Bool.True))]
 		10 => [bool(text(arg(0)).map_ok(Paths.is_channel_name) == Ok(Bool.True))]
 		11 => [bool(Paths.valid_msg_ref_id(arg(0)))]
-		12 => [Paths.join(req.args)]
 		# A topic is text: a listing's names (Files.list!'s door skips one
 		# that is not UTF-8).
 		13 => [Paths.first_of(List.keep_oks(req.args, Str.from_utf8)).to_utf8()]

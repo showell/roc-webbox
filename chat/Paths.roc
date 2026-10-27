@@ -217,27 +217,14 @@ Paths := [].{
 	## A channel and its members, as its member file lists them.
 	Roster : { name : Str, members : List(List(U8)) }
 
-	## A DM's folder under the chat root (dmConvDir): its pair key.
-	dm_conv_dir : List(U8) -> List(U8)
-	dm_conv_dir = |key| join([key])
-
-	## A channel's (channelConvDir): channels/<name>.
-	channel_conv_dir : List(U8) -> List(U8)
-	channel_conv_dir = |name| join([Str.to_utf8("channels"), name])
-
-	## A DM's or a channel's folder under the chat root: dm_conv_dir or
-	## channel_conv_dir of its key.
-	conv_dir : ConvKey -> List(U8)
+	## A DM's or a channel's folder under the chat root: a DM's pair key
+	## (dmConvDir), a channel's channels/<name> (channelConvDir).
+	conv_dir : ConvKey -> Str
 	conv_dir = |key|
 		match key {
-			Dm(pair) => dm_conv_dir(pair_key_bytes(pair))
-			Channel(name) => channel_conv_dir(channel_name_bytes(name))
+			Dm(PairKey.(pair)) => pair
+			Channel(ChannelName.(name)) => "channels/${name}"
 		}
-
-	## Where a conversation's topics are (listTopics's folder):
-	## {conv_dir}/sessions.
-	sessions_dir : List(U8) -> List(U8)
-	sessions_dir = |dir| join([dir, Str.to_utf8("sessions")])
 
 	## **A CONVERSATION'S TOPICS** (listTopics): of its sessions folder's
 	## entries, every one that is not a folder (a file, or a link: only a
@@ -253,45 +240,47 @@ Paths := [].{
 
 	## **A FILE UNDER THE CHAT ROOT, NAMED HERE**: opaque (`::`), so only
 	## this module makes one, and Files.roc, the one module that reaches the
-	## disk, takes nothing else.
-	ChatPath :: List(U8)
+	## disk, takes nothing else. **ITS PARTS ARE A ConvKey, A Uid, A TOPIC
+	## AND LITERALS**: none empty, none with a `/`, so joined by one `/` they
+	## are std.fs.path.join's path.
+	ChatPath :: Str
 
 	## The path's bytes, as the host takes them.
 	bytes : ChatPath -> List(U8)
-	bytes = |ChatPath.(b)| b
+	bytes = |ChatPath.(s)| s.to_utf8()
 
 	## A topic's reaction sidecar (reactionsPath):
 	## {conv_dir}/sessions/<topic>.reactions.jsonl.
 	reactions_path : TopicAt -> ChatPath
-	reactions_path = |at| ChatPath.(join([conv_dir(at.key), Str.to_utf8("sessions"), "${at.topic}.reactions.jsonl".to_utf8()]))
+	reactions_path = |at| ChatPath.("${conv_dir(at.key)}/sessions/${at.topic}.reactions.jsonl")
 
 	## Channel `name`'s member file (channelMembers's): channels/<name>.channel.
 	channel_path : ChannelName -> ChatPath
-	channel_path = |ChannelName.(name)| ChatPath.(join([Str.to_utf8("channels"), "${name}.channel".to_utf8()]))
+	channel_path = |ChannelName.(name)| ChatPath.("channels/${name}.channel")
 
 	## The folder of every channel's member file (channelRosters's listing):
 	## channels.
 	channels_folder : ChatPath
-	channels_folder = ChatPath.(Str.to_utf8("channels"))
+	channels_folder = ChatPath.("channels")
 
-	## A conversation's topics folder (listTopics's listing): sessions_dir
-	## of its folder.
+	## A conversation's topics folder (listTopics's listing):
+	## {conv_dir}/sessions.
 	topics_folder : ConvKey -> ChatPath
-	topics_folder = |key| ChatPath.(sessions_dir(conv_dir(key)))
+	topics_folder = |key| ChatPath.("${conv_dir(key)}/sessions")
 
 	## The member's DM last in (lastUserConv's file): users/<uid>/last-conv.
 	last_conv_path : Uid -> ChatPath
-	last_conv_path = |uid| ChatPath.(join([Str.to_utf8("users"), uid.to_str().to_utf8(), Str.to_utf8("last-conv")]))
+	last_conv_path = |uid| ChatPath.("users/${uid.to_str()}/last-conv")
 
 	## The topic the member last viewed in DM `key` (lastViewedTopic's
 	## file): users/<uid>/last-sessions/<conv>.
 	last_session_path : Uid, ConvKey -> ChatPath
-	last_session_path = |uid, key| ChatPath.(join([Str.to_utf8("users"), uid.to_str().to_utf8(), Str.to_utf8("last-sessions"), conv_key_bytes(key)]))
+	last_session_path = |uid, key| ChatPath.("users/${uid.to_str()}/last-sessions/${conv_key_to_str(key)}")
 
 	## The member's pins in `key` (pinnedTopics's file):
 	## users/<uid>/pinned-sessions/<conv>.
 	pinned_path : Uid, ConvKey -> ChatPath
-	pinned_path = |uid, key| ChatPath.(join([Str.to_utf8("users"), uid.to_str().to_utf8(), Str.to_utf8("pinned-sessions"), conv_key_bytes(key)]))
+	pinned_path = |uid, key| ChatPath.("users/${uid.to_str()}/pinned-sessions/${conv_key_to_str(key)}")
 
 	## The member's feed file: users/<uid>/images.md or code.md, where
 	## images_store and code_store keep them.
@@ -301,7 +290,7 @@ Paths := [].{
 			Images => "images.md"
 			Code => "code.md"
 		}
-		ChatPath.(join([Str.to_utf8("users"), uid.to_str().to_utf8(), Str.to_utf8(name)]))
+		ChatPath.("users/${uid.to_str()}/${name}")
 	}
 
 	## **A CHANNEL'S MEMBERS** (channelMembers): one uid a line, each line
@@ -398,36 +387,13 @@ Paths := [].{
 		if n >= k and List.drop_first(name, n - k) == suffix Ok(List.take_first(name, n - k)) else Err(NoSuffix)
 	}
 
-	## `std.fs.path.join` on POSIX: the non-empty parts joined by one `/`,
-	## where a part ending in `/` meeting one starting with it keeps one.
-	join : List(List(U8)) -> List(U8)
-	join = |parts|
-		List.fold(
-			List.drop_if(parts, |p| p == []),
-			[],
-			|out, p|
-				if out == [] {
-					p
-				} else {
-					end = List.last(out) == Ok('/')
-					start = List.first(p) == Ok('/')
-					if end and start {
-						List.concat(out, List.drop_first(p, 1))
-					} else if end or start {
-						List.concat(out, p)
-					} else {
-						List.concat(List.append(out, '/'), p)
-					}
-				},
-		)
-
 	## A topic's transcript: {conv_dir}/sessions/<topic>.md.
 	transcript_path : TopicAt -> ChatPath
-	transcript_path = |at| ChatPath.(join([conv_dir(at.key), Str.to_utf8("sessions"), "${at.topic}.md".to_utf8()]))
+	transcript_path = |at| ChatPath.("${conv_dir(at.key)}/sessions/${at.topic}.md")
 
 	## The member's links page (the links route's file): users/<uid>/links.md.
 	links_path : Uid -> ChatPath
-	links_path = |uid| ChatPath.(join([Str.to_utf8("users"), uid.to_str().to_utf8(), Str.to_utf8("links.md")]))
+	links_path = |uid| ChatPath.("users/${uid.to_str()}/links.md")
 
 	is_alpha : U8 -> Bool
 	is_alpha = |c| (c >= 'A' and c <= 'Z') or (c >= 'a' and c <= 'z')
@@ -468,8 +434,8 @@ expect match (Paths.pair_key_from_str("3_7"), Paths.channel_name_from_str("gener
 					and (Paths.bytes(Paths.reactions_path({ key: channel, topic: "road-trip" })) == Str.to_utf8("channels/general/sessions/road-trip.reactions.jsonl"))
 						and (Paths.bytes(Paths.transcript_path({ key: dm, topic: "ChitChat" })) == Str.to_utf8("3_7/sessions/ChitChat.md"))
 							and (Paths.bytes(Paths.transcript_path({ key: channel, topic: "road-trip" })) == Str.to_utf8("channels/general/sessions/road-trip.md"))
-								and (Paths.conv_dir(dm) == Str.to_utf8("3_7"))
-									and (Paths.conv_dir(channel) == Str.to_utf8("channels/general"))
+								and (Paths.conv_dir(dm) == "3_7")
+									and (Paths.conv_dir(channel) == "channels/general")
 	}
 	_ => Bool.False
 }
