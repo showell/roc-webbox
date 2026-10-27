@@ -25,7 +25,7 @@ app does not hand the host a description of work to do afterwards.
 ## Build, test, serve
 
 ```
-zig build test                          # src/todo_test.zig, then src/shared_check.zig
+zig build test                          # the TODO app's and the chat seam's tests, then src/shared_check.zig
 zig build serve                         # http://localhost:9110
 zig build demo                          # the client test bench, zig-out/demo/ (below)
 zig build metal                         # zig-out/bin/roc-todo.elf
@@ -33,7 +33,9 @@ zig build metal                         # zig-out/bin/roc-todo.elf
 
 `zig build -l` lists the steps. `test` runs the host's tests through the
 Roc app (the seam's strings, the routes against a store in a temporary
-folder), then `src/shared_check.zig`: the list with `roc_hooks` in its root,
+folder), the chat seam's (`src/chat_hosted.zig`, `src/chat_crash_test.zig`,
+`src/twin_abi.zig`, each with its own Roc linked), then
+`src/shared_check.zig`: the list with `roc_hooks` in its root,
 as a binary holding two Roc apps has it. It is a program, not a test,
 because a test's root is the test runner's.
 
@@ -93,6 +95,8 @@ What this repo exports for a combination (`build.zig`):
 | `roc_todo` | `src/hosted.zig` with its Roc linked, for a Linux combination; takes the combination's `target`, `optimize` and `roc` options |
 | `roc_todo_metal` | the same for a combination's kernel: one of zig-metal-unikernel `addAppKernel`'s `parts`, with `assets.zon`; no target or mode (the kernel's), Roc built for `x64v1elf` |
 | `roc_hooks` | `src/roc_hooks.zig`, Roc's runtime when a binary holds two Roc apps |
+| `roc_chat`, `roc_chat_metal` | the Roc chat for angry-gopher, and for `gopher.elf` (Roc for `x64v1elf`): `src/chat_hosted.zig` with `chat/` linked (docs/ROC-CHAT.md) |
+| `roc_chat_twin` | tests only: the chat's pure modules behind one entry (`src/twin_abi.zig`, `chat/twin.roc`), for angry-gopher's twin tests |
 
 Pitfalls:
 
@@ -138,6 +142,7 @@ not test.
 | `assets.zon` | What the site serves besides its code: the page, compiled in. |
 | `web/index.html` | The client. Every API answer is the whole list, and the page draws it. |
 | `demo/` | **Not the server.** A test bench for the client: the Roc app as wasm in the tab (demo/README.md). |
+| `chat/`, `src/chat_*.zig`, `src/twin_abi.zig`, `src/sljmp.zig` | The Roc chat angry-gopher mounts, on its own platform (`chat/platform/`): docs/ROC-CHAT.md. |
 
 ## The API
 
@@ -175,4 +180,5 @@ The archive asks its host for:
 - **Everything Roc allocates during a request is in one arena, dropped when
   the request ends.** So `roc_dealloc` frees nothing, and the host keeps no
   refcounts for the strings it hands Roc. Webbox runs one handler at a time,
-  so the arena and the request's `Io` are plain globals in `roc_abi.zig`.
+  so the arena and the request's `Io` are plain globals (`roc_abi.zig`,
+  `roc_files.zig`).

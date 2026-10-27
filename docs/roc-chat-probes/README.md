@@ -1,6 +1,6 @@
 # Probes behind docs/ROC-CHAT.md
 
-Small programs that tested the design's assumptions against the pinned Roc
+Small programs that tested the design's assumptions against the Roc
 nightly (2026-10-18-1df370f), each built with `roc build --target=x64musl`
 and linked into a minimal Zig 0.17 host (`common/rt.zig`, copied into each
 probe as `rt.zig`). Kept as evidence; they are not built by `zig build`. The
