@@ -47,7 +47,10 @@ function read_trees(files)
       push(stack, {d, name or ""})
     end
     push(file, current)
-    if #stack > 0 then push(within, stack[#stack][2]) else push(within, "") end
+    -- The top-level definition, not the innermost: a local's name (`id`,
+    -- `path`) recurs across definitions, and a finding grouped by it
+    -- landed under another definition's line.
+    if #stack > 0 then push(within, stack[1][2]) else push(within, "") end
     i = i + 1
   end
   return {text = text, depth = depth, file = file, within = within}

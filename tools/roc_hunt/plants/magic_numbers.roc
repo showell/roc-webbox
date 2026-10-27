@@ -15,3 +15,15 @@ quiet_zero = |n| n + 0
 quiet_one = |n| n - 1
 
 quiet_character = |b| b == '_'
+
+# A local's name recurs across definitions: the number is found as the
+# second one's, not grouped under the first's.
+quiet_local = |n| {
+	id = n
+	id
+}
+
+fires_local = |n| {
+	id = n + 47
+	id
+}
