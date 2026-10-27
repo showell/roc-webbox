@@ -38,8 +38,10 @@
 --   - `zig build codec-bench`, which links the twin archive: run by hand;
 --   - roc_hunt's plants (tools/roc_hunt/hunt.shale self_test=1): they test
 --     the hunts against their own plants, never chat/;
---   - roc fmt --check: the tree is not as `roc fmt` formats it (most of
---     chat/ would be rewritten), so as a gate it would fail every run.
+--   - roc fmt --check: no file in chat/ or chat/platform/ is as `roc fmt`
+--     formats it (it puts a trailing lambda's arguments a line each, and a
+--     blank line after `X := [].{`), so as a gate it would fail every run.
+--     Whether the chat takes roc fmt's layout is Steve's to decide.
 --
 -- **RUN THE FULL GATES INSTEAD** when a step changes anything beyond the
 -- chat's Roc and its seam: angry-gopher's Zig other than its chat twins'
