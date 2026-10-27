@@ -278,6 +278,10 @@ pub const Host = struct {
     /// Roc's own for a malformed channel (Host.fail!). A host that has
     /// failed already keeps its first failure.
     fail: *const fn (ctx: *anyopaque, e: anyerror) void = noFail,
+    /// Host.fail!'s `NotUtf8`: the file at `path` under the chat root read
+    /// as bytes that are not UTF-8, which the Roc refuses at its door. The
+    /// host fails the request (error.NotUtf8), saying the path.
+    fail_text: *const fn (ctx: *anyopaque, path: []const u8) void = noFailText,
     /// Host.malformed_channel!: channel `name`'s member file skipped by a
     /// listing as malformed, counted for the operator.
     malformed_channel: *const fn (ctx: *anyopaque, name: []const u8) void = noMalformed,
@@ -354,6 +358,9 @@ fn noListing(_: *anyopaque, _: []const u8) Listing {
 }
 fn noFail(_: *anyopaque, e: anyerror) void {
     std.debug.panic("a host that cannot fail a request was asked to: {t}", .{e});
+}
+fn noFailText(_: *anyopaque, path: []const u8) void {
+    std.debug.panic("a host that cannot fail a request was asked to, for {s}, not UTF-8", .{path});
 }
 fn noMalformed(_: *anyopaque, _: []const u8) void {
     @panic("malformed_channel asked of a host that does not answer it");
@@ -602,6 +609,7 @@ export fn roc_chat_fail(reason: route_mod.FailReason, whose: RocBytes) callconv(
         .kind_unreadable => h.fail_account(h.ctx, .kind, whose.slice()),
         .name_unreadable => h.fail_account(h.ctx, .name, whose.slice()),
         .no_author => h.fail(h.ctx, error.NoAuthor),
+        .not_utf8 => h.fail_text(h.ctx, whose.slice()),
     }
 }
 

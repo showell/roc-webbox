@@ -88,8 +88,9 @@ Host := [].{
 	## name, which a lookup needed and which `accounts!` listed as
 	## unreadable (the error that read failed with, as the host kept it); a
 	## message with no author's name (appendMessage's error.NoAuthor, `whose`
-	## unused).
-	fail! : [KindUnreadable, MalformedChannel, NameUnreadable, NoAuthor], List(U8) => {}
+	## unused); a file at path `whose` whose bytes are not UTF-8 (Files.read!'s
+	## door, error.NotUtf8).
+	fail! : [KindUnreadable, MalformedChannel, NameUnreadable, NoAuthor, NotUtf8], List(U8) => {}
 
 	## Count channel `name` as one a listing skipped as malformed: the
 	## operator's count, kept by the host for /admin/host.

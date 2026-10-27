@@ -243,17 +243,21 @@ file = |how, bytes| match how {
 }
 
 ## A folder's entries as the test wrote them: `kind, name` pairs from
-## argument `i`, the kind `d`, `f` or `o`.
+## argument `i`, the kind `d`, `f` or `o`. A name that is not UTF-8 is left
+## out, as Files.list!'s door leaves it out.
 entries : List(List(U8)), U64, List(Paths.Entry) -> List(Paths.Entry)
 entries = |args, i, out|
 	match (List.get(args, i), List.get(args, i + 1)) {
-		(Ok(k), Ok(name)) => {
+		(Ok(k), Ok(raw)) => {
 			kind = match k {
 				[100] => Dir
 				[102] => File
 				_ => Other
 			}
-			entries(args, i + 2, List.append(out, { kind, name }))
+			match Str.from_utf8(raw) {
+				Ok(name) => entries(args, i + 2, List.append(out, { kind, name }))
+				Err(_) => entries(args, i + 2, out)
+			}
 		}
 		_ => out
 	}

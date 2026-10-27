@@ -184,7 +184,7 @@ in_topic! = |req, route, found| {
 				# readReactions's: nobody has reacted yet is no events.
 				ndjson = Str.to_utf8("application/x-ndjson; charset=utf-8")
 				match Files.read!(Paths.reactions_path({ key: found.key, topic: route.topic })) {
-					Ok(bytes) => Chat.respond(200, ndjson, bytes)
+					Ok(text) => Chat.respond(200, ndjson, Str.to_utf8(text))
 					Err(Missing) => Chat.respond(200, ndjson, [])
 					Err(Failed) => Chat.answered
 				}
@@ -301,7 +301,7 @@ unreadable! = |why|
 ## failed it already.
 channel_members! : Paths.ChannelName => List(List(U8))
 channel_members! = |name|
-	match Files.read!(Paths.channel_path(name)) {
+	match text_bytes!(Paths.channel_path(name)) {
 		Ok(bytes) =>
 			match Paths.channel_members(bytes) {
 				Ok(members) => members
@@ -323,7 +323,12 @@ channel_members! = |name|
 channel_rosters! : {} => Try(List(Paths.Roster), [Failed])
 channel_rosters! = |{}| {
 	match Files.list!(Paths.channels_folder) {
-		Ok(entries) => rosters!(Paths.channel_names(entries), 0, [])
+		Ok(listed) => {
+			# A channel whose name is not UTF-8 is skipped, and counted as a
+			# malformed one is.
+			List.for_each!(Paths.channel_names_not_utf8(listed.not_utf8), |name| Host.malformed_channel!(name))
+			rosters!(Paths.channel_names(listed.entries), 0, [])
+		}
 		Err(Missing) => Ok([])
 		Err(Failed) => Err(Failed)
 	}
@@ -336,7 +341,7 @@ rosters! = |names, i, out|
 		Ok(name) =>
 			match Paths.channel_name(name) {
 				Ok(valid) =>
-					match Paths.roster(name, Files.read!(Paths.channel_path(valid))) {
+					match Paths.roster(name, text_bytes!(Paths.channel_path(valid))) {
 						Listed(r) => rosters!(names, i + 1, List.append(out, r))
 						Malformed => {
 							Host.malformed_channel!(name)
@@ -360,10 +365,11 @@ topics! = |key| Paths.topics(list!(Paths.topics_folder(key)))
 ## Files.list!'s entries. **NOTHING THERE HOLDS NOTHING** (webbox's
 ## store.list); a listing that failed has failed the request, and answers
 ## nothing too, so what follows writes nothing (the host does nothing more).
+## A name that is not UTF-8 is no topic, and no counter is kept of it.
 list! : Paths.ChatPath => List(Paths.Entry)
 list! = |path|
 	match Files.list!(path) {
-		Ok(entries) => entries
+		Ok(listed) => listed.entries
 		Err(Missing) | Err(Failed) => []
 	}
 
@@ -394,7 +400,7 @@ title! = |conv, who|
 pin! : Paths.ConvKey, List(U8), ChatState.Pin => Try({}, [Failed])
 pin! = |key, topic, pin| {
 	path = Paths.pinned_path(Uid.from_bytes(Host.me!({})), key)
-	match Files.read!(path) {
+	match text_bytes!(path) {
 		Ok(stored) => repin!(path, stored, topic, pin)
 		Err(Missing) => repin!(path, [], topic, pin)
 		Err(Failed) => Err(Failed)
@@ -431,7 +437,13 @@ bookmark! = |key, topic| {
 ## disk requests each time.
 write_if_changed! : Paths.ChatPath, List(U8) => Try({}, [Failed])
 write_if_changed! = |path, value|
-	if ChatState.changed(Files.read!(path), value) Files.write!(path, ChatState.bookmark_line(value)) else Ok({})
+	if ChatState.changed(text_bytes!(path), value) Files.write!(path, ChatState.bookmark_line(value)) else Ok({})
+
+## TEMPORARY DOOR: moves out in a later run. A file's text (Files.read!,
+## which refuses bytes that are not UTF-8) as bytes, for the parsers not yet
+## on Str: ChatState's, Feeds's and Paths.roster.
+text_bytes! : Paths.ChatPath => Try(List(U8), [Missing, Failed])
+text_bytes! = |path| Files.read!(path).map_ok(Str.to_utf8)
 
 ## POST .../react: the form, then the reaction stored and sent live.
 react! : Chat.Conv, Who, Paths.TopicAt => Chat.Answer
@@ -545,7 +557,7 @@ feed! = |which, rest|
 			Ok(viewer) => {
 				# A feed that failed is the request's failure; the page made
 				# of nothing is not sent.
-				file = match Files.read!(Paths.feed_path(Host.me!({}), which)) {
+				file = match text_bytes!(Paths.feed_path(Host.me!({}), which)) {
 					Ok(bytes) => bytes
 					Err(Missing) | Err(Failed) => []
 				}
@@ -627,7 +639,7 @@ sidebar! = |topic, at| {
 							match channel_rosters!({}) {
 								Err(Failed) => Err(Failed)
 								Ok(rosters) =>
-									match Files.read!(Paths.pinned_path(Uid.from_bytes(me), at.key)) {
+									match text_bytes!(Paths.pinned_path(Uid.from_bytes(me), at.key)) {
 										Err(Failed) => Err(Failed)
 										Ok(stored) => Ok((viewer, sidebar_of(me, topic, at, with_online(others, flags), Paths.member_channels(rosters, me), ChatState.pins(stored))))
 										Err(Missing) => Ok((viewer, sidebar_of(me, topic, at, with_online(others, flags), Paths.member_channels(rosters, me), [])))
@@ -658,7 +670,7 @@ json = Str.to_utf8("application/json; charset=utf-8")
 resume! : {} => Chat.Answer
 resume! = |{}| {
 	me = Host.me!({})
-	conv = ChatState.bookmark(Files.read!(Paths.last_conv_path(me)))
+	conv = ChatState.bookmark(text_bytes!(Paths.last_conv_path(me)))
 	match Paths.pair_key_of(conv) {
 		Ok(pair) if Paths.participant(conv, Uid.from_bytes(me)) => {
 			topics = topics!(Dm(pair))
@@ -680,7 +692,7 @@ resume! = |{}| {
 ## ChatState's, the last-viewed topic and the clock the host's.
 resume_at! : Paths.PairKey, List(List(U8)) => List(U8)
 resume_at! = |pair, topics| {
-	last = ChatState.bookmark(Files.read!(Paths.last_session_path(Uid.from_bytes(Host.me!({})), Dm(pair))))
+	last = ChatState.bookmark(text_bytes!(Paths.last_session_path(Uid.from_bytes(Host.me!({})), Dm(pair))))
 	ChatState.resume_topic(topics, last, Host.now!({}))
 }
 

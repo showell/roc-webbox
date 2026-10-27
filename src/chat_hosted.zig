@@ -157,7 +157,7 @@ const Scripted = struct {
     const Channel = struct { name: []const u8, read: abi.Read };
 
     fn host(self: *Scripted) Host {
-        return .{ .ctx = self, .member = member, .presence = presence, .accounts = accountsOf, .me = meId, .now = nowOf, .body = bodyOf, .publish = publish, .append_line = appendLine, .message_count = messageCount, .read = readOf, .write = writeOf, .remove = removeOf, .list = listOf, .fail = failOf, .fail_account = failAccountOf, .malformed_channel = malformed, .online = onlineOf, .limits = limitsOf, .header = header, .hostile = hostile, .render = render, .store_message = storeMessage, .append_entry = appendEntry, .fanout_failed = fanoutFailed, .raw = raw, .links = links, .srcs = srcs };
+        return .{ .ctx = self, .member = member, .presence = presence, .accounts = accountsOf, .me = meId, .now = nowOf, .body = bodyOf, .publish = publish, .append_line = appendLine, .message_count = messageCount, .read = readOf, .write = writeOf, .remove = removeOf, .list = listOf, .fail = failOf, .fail_text = failTextOf, .fail_account = failAccountOf, .malformed_channel = malformed, .online = onlineOf, .limits = limitsOf, .header = header, .hostile = hostile, .render = render, .store_message = storeMessage, .append_entry = appendEntry, .fanout_failed = fanoutFailed, .raw = raw, .links = links, .srcs = srcs };
     }
     fn me(ctx: *anyopaque) *Scripted {
         return @ptrCast(@alignCast(ctx));
@@ -242,6 +242,9 @@ const Scripted = struct {
     }
     fn failOf(ctx: *anyopaque, e: anyerror) void {
         say(ctx, "fail {t}", .{e});
+    }
+    fn failTextOf(ctx: *anyopaque, path: []const u8) void {
+        say(ctx, "fail not_utf8 {s}", .{path});
     }
     fn failAccountOf(ctx: *anyopaque, which: abi.AccountRead, id: []const u8) void {
         say(ctx, "fail {t} {s}", .{ which, id });
@@ -450,6 +453,18 @@ test "a topic's reactions, react, pin and unpin are the Roc's: presence, the con
         s.files = &.{.{ .path = sidecar, .read = .failed }};
         break :blk s;
     }, .answered, dm_topic ++ "read " ++ sidecar ++ ";");
+    // Text with `é` and an emoji is served as stored; bytes that are not
+    // UTF-8 fail the request at Files.read!'s door, about the file's path.
+    try expectAct("/c/1_2/Plans/reactions", false, .GET, blk: {
+        var s = a;
+        s.files = &.{.{ .path = sidecar, .read = .{ .found = "{\"emoji\":\"caf\xc3\xa9 \xf0\x9f\x91\x8d\"}\n" } }};
+        break :blk s;
+    }, .{ .respond = .{ .status = 200, .content_type = ndjson, .body = "{\"emoji\":\"caf\xc3\xa9 \xf0\x9f\x91\x8d\"}\n" } }, dm_topic ++ "read " ++ sidecar ++ ";");
+    try expectAct("/c/1_2/Plans/reactions", false, .GET, blk: {
+        var s = a;
+        s.files = &.{.{ .path = sidecar, .read = .{ .found = "{\"msg\":1}\xff\n" } }};
+        break :blk s;
+    }, .answered, dm_topic ++ "read " ++ sidecar ++ ";fail not_utf8 " ++ sidecar ++ ";");
     try expectAct("/ops/Plans/reactions", true, .GET, a, .{ .respond = .{ .status = 200, .content_type = ndjson, .body = "" } }, ops_topic ++ "read channels/ops/sessions/Plans.reactions.jsonl;");
     // The set is the Roc's (ChatState.pinned), and its file's name: read,
     // changed, written back sorted by bytes, or removed when emptied. A
@@ -939,11 +954,13 @@ test "/chat/msg: every channel's roster, which are the member's, and their order
     // **A MALFORMED CHANNEL IS SKIPPED AND COUNTED** as it is met (Abad
     // would be first by bytes), and so is one whose name is no channel
     // name, never read; one gone since the listing is skipped, uncounted.
+    // A name that is not UTF-8 (`\xffhigh`) is counted at the listing's
+    // door, before any member file is read: Files.list! refuses it there.
     try expectAct("/msg/Plans_1", false, .GET, blk: {
         var s = a;
         s.channels = &.{ .{ .name = "Abad", .read = .{ .found = "1\nnot a uid\n" } }, .{ .name = "Agone", .read = .missing }, .{ .name = "\xffhigh", .read = .{ .found = "1\n" } }, .{ .name = "ops", .read = .{ .found = "1\n" } }, .{ .name = "Adup", .read = .{ .found = "1\n1\n" } } };
         break :blk s;
-    }, .{ .found = "/channel/ops/Plans#msg-Plans_1" }, "member;presence;accounts;list channels;read channels/Abad.channel;malformed Abad;read channels/Agone.channel;malformed \xffhigh;read channels/ops.channel;read channels/Adup.channel;malformed Adup;list channels/ops/sessions;");
+    }, .{ .found = "/channel/ops/Plans#msg-Plans_1" }, "member;presence;accounts;list channels;malformed \xffhigh;read channels/Abad.channel;malformed Abad;read channels/Agone.channel;read channels/ops.channel;read channels/Adup.channel;malformed Adup;list channels/ops/sessions;");
     // A member file that will not read: nothing past it is read, and no
     // channel searched (the host has failed the request), never "no such
     // topic"; one malformed before it was counted already, as the Zig

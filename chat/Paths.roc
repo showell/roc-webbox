@@ -174,8 +174,8 @@ Paths := [].{
 	member_channels : List(Roster), List(U8) -> List(List(U8))
 	member_channels = |all, uid| Bytes.sort(List.map(List.keep_if(all, |r| List.contains(r.members, uid)), |r| r.name))
 
-	## A folder's entry, as Host.list! answers it.
-	Entry : { kind : [Dir, File, Other], name : List(U8) }
+	## A folder's entry, as Files.list! answers it: its name is text.
+	Entry : { kind : [Dir, File, Other], name : Str }
 
 	## A channel and its members, as its member file lists them.
 	Roster : { name : List(U8), members : List(List(U8)) }
@@ -209,7 +209,13 @@ Paths := [].{
 	## topic "".
 	topics : List(Entry) -> List(List(U8))
 	topics = |entries|
-		Bytes.sort(List.keep_oks(entries, |e| if e.kind == Dir Err(NoSuffix) else cut_suffix(e.name, Str.to_utf8(".md"))))
+		# TEMPORARY DOOR: moves out in a later run. A topic is bytes until
+		# TopicAt.topic is a Str.
+		Bytes.sort(List.keep_oks(entries, |e| if e.kind == Dir Err(NoSuffix) else str_suffix(e.name, ".md").map_ok(Str.to_utf8)))
+
+	## `name` without `suffix`, when it ends in it.
+	str_suffix : Str, Str -> Try(Str, [NoSuffix])
+	str_suffix = |name, suffix| if name.ends_with(suffix) Ok(name.drop_suffix(suffix)) else Err(NoSuffix)
 
 	## **A FILE UNDER THE CHAT ROOT, NAMED HERE**: opaque (`::`), so only
 	## this module makes one, and Files.roc, the one module that reaches the
@@ -321,7 +327,16 @@ Paths := [].{
 	## not read, and fails the listing, as the Zig's did), that cut off, in
 	## the listing's order. A file named `.channel` is channel "".
 	channel_names : List(Entry) -> List(List(U8))
-	channel_names = |entries| List.keep_oks(entries, |e| cut_suffix(e.name, Str.to_utf8(".channel")))
+	channel_names = |entries|
+		# TEMPORARY DOOR: moves out in a later run. A channel's name is bytes
+		# until ChannelName is built from a Str.
+		List.keep_oks(entries, |e| str_suffix(e.name, ".channel").map_ok(Str.to_utf8))
+
+	## Of a listing's names that are not UTF-8 (Files.list!'s `not_utf8`),
+	## those channel_names would have chosen: each is a channel the listing
+	## skipped, and counted as malformed.
+	channel_names_not_utf8 : List(List(U8)) -> List(List(U8))
+	channel_names_not_utf8 = |names| List.keep_oks(names, |n| cut_suffix(n, Str.to_utf8(".channel")))
 
 	## **ONE CHANNEL'S PART IN EVERY ROSTER** (channelRosters), from its
 	## member file as read: its roster (`Listed`); `Malformed`, skipped, and
