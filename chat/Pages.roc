@@ -223,7 +223,7 @@ Pages := [].{
 	decode_sidebar = |fields| {
 		at = |i| List.get(fields, i) ?? []
 		text_at = |i| Str.from_utf8(at(i)).map_err(|_| NotUtf8)
-		uid_at = |i| Uid.from_str(Str.from_utf8(at(i)) ?? "")
+		uid_at = |i| Uid.from_utf8(at(i))
 		n_others = ZigText.parse_u64(at(5)) ?? 0
 		others = List.sublist(fields, { start: 6, len: n_others }) |> List.map_with_index(|_, k| uid_at(6 + 3 * k).map_ok(|id| { id, name: at(7 + 3 * k), presence: if at(8 + 3 * k) == ['1'] Online else Offline }))
 		(channels, after_channels) = counted(fields, 6 + 3 * n_others)?

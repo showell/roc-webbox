@@ -13,6 +13,15 @@ Uid :: Str.{
 			_ => Err(NotAUid)
 		}
 
+	## The uid bytes spell where the host hands them: bytes that are not
+	## UTF-8 are no uid either.
+	from_utf8 : List(U8) -> Try(Uid, [NotAUid])
+	from_utf8 = |bytes|
+		match Str.from_utf8(bytes) {
+			Ok(text) => from_str(text)
+			Err(_) => Err(NotAUid)
+		}
+
 	## The uid's digits.
 	to_str : Uid -> Str
 	to_str = |Uid.(s)| s
@@ -28,3 +37,6 @@ expect Uid.from_str("0").is_err()
 expect Uid.from_str("3a").is_err()
 expect Uid.from_str("../3").is_err()
 expect Uid.from_str("\u(663)").is_err()
+expect Uid.from_utf8(Str.to_utf8("37")).map_ok(Uid.to_str) == Ok("37")
+expect Uid.from_utf8([0x33, 0xff]).is_err()
+expect Uid.from_utf8([]).is_err()

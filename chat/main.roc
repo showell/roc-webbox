@@ -269,12 +269,12 @@ accounts! = |who|
 				# folders a counter named, so one that is no uid fails the
 				# request (NotUtf8, about it).
 				Found =>
-					match List.keep_if(got.accounts, |a| uid_of(a.id).is_err()) {
+					match List.keep_if(got.accounts, |a| Uid.from_utf8(a.id).is_err()) {
 						[bad, ..] => {
 							Host.fail!(NotUtf8, bad.id)
 							Err(Failed)
 						}
-						[] => Ok(List.keep_oks(got.accounts, |a| uid_of(a.id).map_ok(|id| { id, kind: a.kind, name: a.name, name_read: a.name_read })))
+						[] => Ok(List.keep_oks(got.accounts, |a| Uid.from_utf8(a.id).map_ok(|id| { id, kind: a.kind, name: a.name, name_read: a.name_read })))
 					}
 				Failed => Err(Failed)
 			}
@@ -298,7 +298,7 @@ viewer! = |who| {
 me! : {} => Try(Uid, [Failed])
 me! = |{}| {
 	bytes = Host.me!({})
-	match Uid.from_str(Str.from_utf8(bytes) ?? "") {
+	match Uid.from_utf8(bytes) {
 		Ok(uid) => Ok(uid)
 		Err(NotAUid) => {
 			Host.fail!(NotUtf8, bytes)
@@ -775,21 +775,17 @@ entries! = |me, members, i, acc|
 		Err(_) => acc
 	}
 
-## An id the host hands as bytes, as a Uid.
-uid_of : List(U8) -> Try(Uid, [NotAUid])
-uid_of = |bytes| Uid.from_str(Str.from_utf8(bytes) ?? "")
-
 ## A conversation's members as Uids: each is a canonical pair's half or a
 ## line Paths.channel_members checked, so one that is no uid fails the
 ## request (NotUtf8, about it), and `Failed`.
 members! : List(List(U8)) => Try(List(Uid), [Failed])
 members! = |all|
-	match List.keep_if(all, |m| uid_of(m).is_err()) {
+	match List.keep_if(all, |m| Uid.from_utf8(m).is_err()) {
 		[bad, ..] => {
 			Host.fail!(NotUtf8, bad)
 			Err(Failed)
 		}
-		[] => Ok(List.keep_oks(all, uid_of))
+		[] => Ok(List.keep_oks(all, Uid.from_utf8))
 	}
 
 ## /chat/msg/<id>: the topic a message id names, in the member's DMs, then

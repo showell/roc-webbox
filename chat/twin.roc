@@ -50,13 +50,13 @@ call = |req| {
 		# A key that is no canonical pair is no PairKey, so no participant.
 		7 =>
 			match pair_of(arg(0)) {
-				Ok(pair) => [bool(decode_uid(arg(1)).map_ok(|u| Paths.is_participant(pair, u)) == Ok(Bool.True))]
+				Ok(pair) => [bool(Uid.from_utf8(arg(1)).map_ok(|u| Paths.is_participant(pair, u)) == Ok(Bool.True))]
 				Err(_) => [bool(Bool.False)]
 			}
 		# Two uids that are canonical numbers make a key; any other half
 		# is no Uid (the Zig's atoiOr0 read it as 0), and no answer.
 		8 =>
-			match (decode_uid(arg(0)), decode_uid(arg(1))) {
+			match (Uid.from_utf8(arg(0)), Uid.from_utf8(arg(1))) {
 				(Ok(a), Ok(b)) => [Paths.pair_key_bytes(Paths.pair_key(a, b))]
 				_ => []
 			}
@@ -103,7 +103,7 @@ call = |req| {
 				Err(NotBelieved) => []
 			}
 		25 =>
-			match decode_uid(arg(2)) {
+			match Uid.from_utf8(arg(2)) {
 				Ok(from_uid) => [Frame.message({ index: u64(arg(0)), from: arg(1), from_uid, at: arg(3), html: arg(4), markdown: arg(5), id: arg(6), cid: arg(7) })]
 				Err(NotAUid) => []
 			}
@@ -132,7 +132,7 @@ call = |req| {
 			}
 		35 => {
 			limits = { image_max: u64(arg(7)), video_max: u64(arg(8)), accept: arg(9), search_min: u64(arg(10)) }
-			match (text(arg(0)), text(arg(1)), text(arg(2)), decode_uid(arg(4))) {
+			match (text(arg(0)), text(arg(1)), text(arg(2)), Uid.from_utf8(arg(4))) {
 				(Ok(key), Ok(base), Ok(topic), Ok(uid)) => {
 					view = { key, base, topic, title: arg(3), uid, viewer: arg(5), sidebar_json: Html.twin_script_json(arg(6)) }
 					[Html.bytes(Pages.conversation(srcs(req.args, 11), limits, view))]
@@ -146,7 +146,7 @@ call = |req| {
 		39 => [Feeds.code_json(Feeds.code(arg(0)))]
 		40 => [Recent.excerpt(arg(0))]
 		41 =>
-			match decode_uid(arg(0)) {
+			match Uid.from_utf8(arg(0)) {
 				Ok(me) => [Recent.json(me, Recent.rows(written(req.args, 1, [])))]
 				Err(NotAUid) => []
 			}
@@ -158,7 +158,7 @@ call = |req| {
 				Remove => []
 			}
 		44 =>
-			match (pair_of(arg(0)), decode_uid(arg(1))) {
+			match (pair_of(arg(0)), Uid.from_utf8(arg(1))) {
 				(Ok(pair), Ok(me)) =>
 					match Conversation.dm_other(pair, me) {
 						Ok(other) => [other.to_str().to_utf8()]
@@ -169,7 +169,7 @@ call = |req| {
 		45 => Conversation.dm_members(arg(0))
 		# The partner is a Uid; the door refuses any other.
 		46 =>
-			match decode_uid(arg(1)) {
+			match Uid.from_utf8(arg(1)) {
 				Ok(other) => [Conversation.dm_title(arg(0), other)]
 				Err(NotAUid) => []
 			}
@@ -192,7 +192,7 @@ call = |req| {
 		53 => [bool(ChatState.changed(file(arg(0), arg(1)), arg(2))), ChatState.bookmark_line(arg(2))]
 		# A uid that is no Uid has no paths: the door refuses it.
 		54 =>
-			match (decode_uid(arg(0)), conv_of(arg(1))) {
+			match (Uid.from_utf8(arg(0)), conv_of(arg(1))) {
 				(Ok(u), Ok(key)) => List.map([Paths.last_conv_path(u), Paths.last_session_path(u, key), Paths.pinned_path(u, key), Paths.feed_path(u, Images), Paths.feed_path(u, Code)], Paths.bytes)
 				_ => []
 			}
@@ -226,7 +226,7 @@ call = |req| {
 			# authorized roster (`ok`, then `id, name` pairs; or its failure).
 			n = u64(arg(0))
 			# An id that is no Uid is asked nothing: the door refuses it.
-			ids = List.keep_oks(List.sublist(req.args, { start: 1, len: n }), decode_uid)
+			ids = List.keep_oks(List.sublist(req.args, { start: 1, len: n }), Uid.from_utf8)
 			all = accounts(req.args, 1 + n, [])
 			asked = List.join(
 				List.map(
@@ -245,7 +245,7 @@ call = |req| {
 			List.concat(asked, roster)
 		}
 		61 =>
-			match (decode_uid(arg(1)), Str.from_utf8(arg(5))) {
+			match (Uid.from_utf8(arg(1)), Str.from_utf8(arg(5))) {
 				(Ok(uid), Ok(at)) => [Reaction.line({ msg: u64(arg(0)), uid, from: arg(2), emoji: arg(3), change: if arg(4) == [49] Added else Removed, at })]
 				_ => []
 			}
@@ -253,7 +253,7 @@ call = |req| {
 		# URL root, topic `arg(1)`'s page and message `arg(2)`'s link.
 		# A member that is no Uid has no keys: the door refuses it.
 		62 =>
-			match decode_uid(arg(0)) {
+			match Uid.from_utf8(arg(0)) {
 				Ok(u) => [Fanout.notify_key(u), Fanout.sidebar_key(u), Fanout.recent_key(u), Fanout.images_key(u), Fanout.code_key(u)]
 				Err(NotAUid) => []
 			}
@@ -295,10 +295,10 @@ call = |req| {
 		69 => {
 			n = u64(arg(3))
 			given = List.sublist(req.args, { start: 4, len: n })
-			members = List.keep_oks(given, decode_uid)
+			members = List.keep_oks(given, Uid.from_utf8)
 			all = accounts(req.args, 4 + n, [])
 			key = if arg(0) == [100] Dm(valid_pair(arg(2))) else Channel(valid_channel(arg(2)))
-			match decode_uid(arg(1)) {
+			match Uid.from_utf8(arg(1)) {
 				Ok(viewer) if List.len(members) == n => [Fanout.recent_where({ key, members, topic: "", index: 0, id: [], from: [], at: [], uid: viewer, accounts: all }, viewer)]
 				_ => []
 			}
@@ -331,14 +331,10 @@ text = |bytes| Str.from_utf8(bytes).map_err(|_| Invalid)
 
 ## A uid the test hands as valid; one that is not stops the twin.
 valid_uid : List(U8) -> Uid
-valid_uid = |bytes| match decode_uid(bytes) {
+valid_uid = |bytes| match Uid.from_utf8(bytes) {
 	Ok(uid) => uid
 	Err(NotAUid) => crash "twin: an invalid uid"
 }
-
-## A uid's bytes as a Uid: digits, the first not zero, or none.
-decode_uid : List(U8) -> Try(Uid, [NotAUid])
-decode_uid = |bytes| Uid.from_str(Str.from_utf8(bytes) ?? "")
 
 ## The test's bytes as a conversation's key: a pair key, else a channel's
 ## name, when they are text and one.
