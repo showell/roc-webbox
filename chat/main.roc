@@ -51,18 +51,22 @@ handle! : Chat.Request => Chat.Answer
 handle! = |req|
 	# **A PATH IS TEXT AT THE DOOR**: one that is not UTF-8 is the site's 400
 	# for a malformed request, before anything else reads it.
-	if Str.from_utf8(req.sub).is_err() Chat.malformed else routed!(req)
+	match Str.from_utf8(req.sub) {
+		Ok(sub) => routed!(req, sub)
+		Err(_) => Chat.malformed
+	}
 
-routed! : Chat.Request => Chat.Answer
-routed! = |req|
-	match (if req.area == Channel Err(NotAnAsset) else Route.asset(req.sub)) {
+## The request, its path (`sub`) the text handle! checked.
+routed! : Chat.Request, Str => Chat.Answer
+routed! = |req, sub|
+	match (if req.area == Channel Err(NotAnAsset) else Route.asset(sub)) {
 		Ok(route) => Chat.zig(route, Uncounted)
 		Err(NotAnAsset) =>
 			if !Host.member!({}) {
 				area = if req.area == Channel "/channel" else "/chat"
 				Chat.redirect(List.concat(Str.to_utf8("/login/full?next=${area}"), req.sub))
 			} else {
-				route = if req.area == Channel Route.under_channel(req.sub) else Route.under_chat(req.sub)
+				route = if req.area == Channel Route.under_channel(sub) else Route.under_chat(sub)
 				if roc_serves(route) act!(req, route) else Chat.zig(route, if Route.is_stream(route) Uncounted else Counted)
 			}
 	}
@@ -146,14 +150,16 @@ in_conversation! = |req, route|
 	}
 
 ## **THE CONVERSATION'S KEY, BUILT ONCE, WHERE THE REQUEST COMES IN**: the
-## seam's bytes (`route.key`) as a DM's pair key (Paths.pair_key_of) or a
-## channel's name (Paths.channel_name); every path past here is built from
+## route's key as a DM's pair key (Paths.pair_key_from_str) or a channel's
+## name (Paths.channel_name_from_str); every path past here is built from
 ## it.
 conv_key : Route.R -> Try(Paths.ConvKey, [Invalid])
 conv_key = |route|
-	match route.family {
-		Dm => Paths.pair_key_of(route.key).map_ok(|pair| Dm(pair))
-		Channel => Paths.channel_name(route.key).map_ok(|name| Channel(name))
+	# TEMPORARY DOOR: moves out in a later run. The key is bytes in a Route
+	# until its fields are Str; it is a segment of the path handle! checked.
+	match (route.family, Str.from_utf8(route.key)) {
+		(Dm, Ok(key)) => Paths.pair_key_from_str(key).map_ok(|pair| Dm(pair))
+		(Channel, Ok(key)) => Paths.channel_name_from_str(key).map_ok(|name| Channel(name))
 		_ => Err(Invalid)
 	}
 
@@ -214,12 +220,12 @@ find! : Paths.ConvKey => Try((Chat.Conv, Who), [NotYours, Failed])
 find! = |key| {
 	bytes = Paths.conv_key_bytes(key)
 	match key {
-		Dm(_) =>
-			match Conversation.dm_other(bytes, Uid.from_bytes(Host.me!({}))) {
+		Dm(pair) =>
+			match Conversation.dm_other(pair, Uid.from_bytes(Host.me!({}))) {
 				Ok(other) =>
 					match accounts!(Unasked) {
 						Ok(all) =>
-							if Accounts.exists(all, Uid.bytes(other)) {
+							if Accounts.exists(all, Uid.to_bytes(other)) {
 								Ok(({ family: Dm, key: bytes, base: Conversation.dm_base(bytes), members: Conversation.dm_members(bytes) }, Known(all)))
 							} else {
 								Err(NotYours)
@@ -334,24 +340,24 @@ channel_rosters! = |{}| {
 	}
 }
 
-rosters! : List(List(U8)), U64, List(Paths.Roster) => Try(List(Paths.Roster), [Failed])
+rosters! : List(Str), U64, List(Paths.Roster) => Try(List(Paths.Roster), [Failed])
 rosters! = |names, i, out|
 	match List.get(names, i) {
 		Err(_) => Ok(out)
 		Ok(name) =>
-			match Paths.channel_name(name) {
+			match Paths.channel_name_from_str(name) {
 				Ok(valid) =>
 					match Paths.roster(name, text_bytes!(Paths.channel_path(valid))) {
 						Listed(r) => rosters!(names, i + 1, List.append(out, r))
 						Malformed => {
-							Host.malformed_channel!(name)
+							Host.malformed_channel!(name.to_utf8())
 							rosters!(names, i + 1, out)
 						}
 						Gone => rosters!(names, i + 1, out)
 						Failed => Err(Failed)
 					}
 				Err(Invalid) => {
-					Host.malformed_channel!(name)
+					Host.malformed_channel!(name.to_utf8())
 					rosters!(names, i + 1, out)
 				}
 			}
@@ -381,7 +387,7 @@ title! = |conv, who|
 	if conv.family == Dm {
 		match accounts!(who) {
 			Ok(all) => {
-				other = Uid.bytes(Conversation.partner(conv.key, Uid.from_bytes(Host.me!({}))))
+				other = Uid.to_bytes(Conversation.partner(conv.key, Uid.from_bytes(Host.me!({}))))
 				match named!(Accounts.name(all, other)) {
 					Ok(name) => Ok(Conversation.dm_title(name, other))
 					Err(Failed) => Err(Failed)
@@ -658,9 +664,9 @@ with_online = |others, flags|
 	List.map_with_index(others, |u, i|
 		{ id: u.id, name: u.name, presence: if List.get(flags, i) == Ok(Online) Online else Offline })
 
-sidebar_of : List(U8), List(U8), AtTopic, List({ id : List(U8), name : List(U8), presence : [Online, Offline] }), List(List(U8)), List(List(U8)) -> Pages.Sidebar
+sidebar_of : List(U8), List(U8), AtTopic, List({ id : List(U8), name : List(U8), presence : [Online, Offline] }), List(Str), List(List(U8)) -> Pages.Sidebar
 sidebar_of = |me, topic, at, others, channels, pins|
-	{ uid: me, kind: if at.conv.family == Dm Dm else Channel, key: at.conv.key, base: at.conv.base, topic, others, channels, pins, topics: at.topics }
+	{ uid: me, kind: if at.conv.family == Dm Dm else Channel, key: at.conv.key, base: at.conv.base, topic, others, channels: List.map(channels, Str.to_utf8), pins, topics: at.topics }
 
 json : List(U8)
 json = Str.to_utf8("application/json; charset=utf-8")
@@ -671,8 +677,13 @@ resume! : {} => Chat.Answer
 resume! = |{}| {
 	me = Host.me!({})
 	conv = ChatState.bookmark(text_bytes!(Paths.last_conv_path(me)))
-	match Paths.pair_key_of(conv) {
-		Ok(pair) if Paths.participant(conv, Uid.from_bytes(me)) => {
+	# The bookmark's bytes are text_bytes!'s, so they decode (its door).
+	pair_of = match Str.from_utf8(conv) {
+		Ok(text) => Paths.pair_key_from_str(text)
+		Err(_) => Err(Invalid)
+	}
+	match pair_of {
+		Ok(pair) if Paths.is_participant(pair, Uid.from_bytes(me)) => {
 			topics = topics!(Dm(pair))
 			if Paths.first_of(topics) == [] {
 				Chat.redirect(List.concat(Str.to_utf8("/chat/c/"), conv))
@@ -725,11 +736,16 @@ entries! = |me, members, i, acc|
 			if id == me {
 				entries!(me, members, i + 1, acc)
 			} else {
-				pair = Paths.pair_key(Uid.from_bytes(me), Uid.from_bytes(id))
-				conv = Paths.pair_key_bytes(pair)
-				sessions = topics!(Dm(pair))
-				default = resume_at!(pair, sessions)
-				entries!(me, members, i + 1, List.append(acc, { conv, id, name, default, sessions }))
+				match Paths.pair_key(Uid.from_bytes(me), Uid.from_bytes(id)) {
+					Ok(pair) => {
+						conv = Paths.pair_key_bytes(pair)
+						sessions = topics!(Dm(pair))
+						default = resume_at!(pair, sessions)
+						entries!(me, members, i + 1, List.append(acc, { conv, id, name, default, sessions }))
+					}
+					# A member whose id is no uid has no DM.
+					Err(Invalid) => entries!(me, members, i + 1, acc)
+				}
 			}
 		Err(_) => acc
 	}
@@ -772,19 +788,22 @@ find_dm! = |me, members, topic, i|
 			if id == me {
 				find_dm!(me, members, topic, i + 1)
 			} else {
-				pair = Paths.pair_key(Uid.from_bytes(me), Uid.from_bytes(id))
-				if List.contains(topics!(Dm(pair)), topic) Ok(Paths.pair_key_bytes(pair)) else find_dm!(me, members, topic, i + 1)
+				match Paths.pair_key(Uid.from_bytes(me), Uid.from_bytes(id)) {
+					Ok(pair) if List.contains(topics!(Dm(pair)), topic) => Ok(Paths.pair_key_bytes(pair))
+					_ => find_dm!(me, members, topic, i + 1)
+				}
 			}
 		Err(_) => Err(NoSuchTopic)
 	}
 
-find_channel! : List(List(U8)), List(U8), U64 => Try(List(U8), [NoSuchTopic])
+find_channel! : List(Str), List(U8), U64 => Try(List(U8), [NoSuchTopic])
 find_channel! = |names, topic, i|
 	match List.get(names, i) {
-		# Every name here passed channel_name already (rosters! keeps no other).
+		# Every name here passed channel_name_from_str already (rosters! keeps
+		# no other).
 		Ok(name) =>
-			match Paths.channel_name(name) {
-				Ok(valid) if List.contains(topics!(Channel(valid)), topic) => Ok(name)
+			match Paths.channel_name_from_str(name) {
+				Ok(valid) if List.contains(topics!(Channel(valid)), topic) => Ok(name.to_utf8())
 				_ => find_channel!(names, topic, i + 1)
 			}
 		Err(_) => Err(NoSuchTopic)
@@ -805,8 +824,8 @@ new_topic! = |req, route, key|
 				} else {
 					match Form.field(body.bytes, "topic") {
 						Malformed => Chat.malformed
-						Found(raw) => make!(key, conv, who, ZigText.trim(Str.to_utf8(raw)))
-						Missing => make!(key, conv, who, [])
+						Found(raw) => make!(key, conv, who, ZigText.trim_str(raw))
+						Missing => make!(key, conv, who, "")
 					}
 				}
 			}
@@ -814,16 +833,12 @@ new_topic! = |req, route, key|
 		Err(Failed) => Chat.answered
 	}
 
-## TEMPORARY DOOR: moves out in a later run. The topic passed
-## valid_topic_id, so it is ASCII and always decodes.
-is_new : List(U8) -> Bool
-is_new = |topic| Str.from_utf8(topic).map_ok(|t| Topics.same_name(t, "new")) == Ok(Bool.True)
-
-make! : Paths.ConvKey, Chat.Conv, Who, List(U8) => Chat.Answer
-make! = |key, conv, who, topic|
-	if !Paths.valid_topic_id(topic) {
+make! : Paths.ConvKey, Chat.Conv, Who, Str => Chat.Answer
+make! = |key, conv, who, text| {
+	topic = text.to_utf8()
+	if !Paths.is_topic_id(text) {
 		Chat.respond(400, [], Str.to_utf8("Topic must be letters, digits, and hyphens only — no spaces, underscores, or punctuation.\n"))
-	} else if is_new(topic) {
+	} else if Topics.same_name(text, "new") {
 		Chat.respond(400, [], Str.to_utf8("\"new\" is reserved — pick another topic name.\n"))
 	} else if Conversation.has_topic(topics!(key), topic) {
 		Chat.respond(409, [], Str.to_utf8("That topic already exists.\n"))
@@ -845,6 +860,7 @@ make! = |key, conv, who, topic|
 			}
 		}
 	}
+}
 
 ## A DM's new topic, said where the partner already watches: its highest
 ## general<N>, unless that is the topic made.

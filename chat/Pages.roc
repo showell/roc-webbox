@@ -193,10 +193,11 @@ Pages := [].{
 	sidebar_json : Sidebar -> Html.ScriptJson
 	sidebar_json = |sb| {
 		prefixed = |prefix, s| JsonText.str_at_door(List.concat(Str.to_utf8(prefix), s))
+		# A member whose id is no uid has no DM key, so no DM to list.
 		person = |u| {
-			pk = Paths.pair_key_bytes(Paths.pair_key(Uid.from_bytes(sb.uid), Uid.from_bytes(u.id)))
+			pk = Paths.pair_key_bytes(Paths.pair_key(Uid.from_bytes(sb.uid), Uid.from_bytes(u.id))?)
 			online = if u.presence == Online [("online", JsonText.bool(Bool.True))] else []
-			JsonText.obj(List.concat([("id", prefixed("uid:", u.id)), ("label", JsonText.str_at_door(u.name)), ("url", prefixed("/chat/c/", pk)), ("active", JsonText.bool(sb.kind == Dm and pk == sb.key))], online))
+			Ok(JsonText.obj(List.concat([("id", prefixed("uid:", u.id)), ("label", JsonText.str_at_door(u.name)), ("url", prefixed("/chat/c/", pk)), ("active", JsonText.bool(sb.kind == Dm and pk == sb.key))], online)))
 		}
 		room = |name|
 			JsonText.obj([("id", prefixed("ch:", name)), ("label", prefixed("# ", name)), ("url", prefixed("/channel/", name)), ("active", JsonText.bool(sb.kind == Channel and name == sb.key))])
@@ -206,7 +207,7 @@ Pages := [].{
 		rest = List.drop_if(sb.topics, |s| List.contains(sb.pins, s))
 		Html.script_safe(
 			JsonText.obj([
-				("conversations", JsonText.arr(List.concat(List.map(sb.others, person), List.map(sb.channels, room)))),
+				("conversations", JsonText.arr(List.concat(List.keep_oks(sb.others, person), List.map(sb.channels, room)))),
 				("pinned_sessions", JsonText.arr(List.map(pinned, topic))),
 				("topics", JsonText.arr(List.map(rest, topic))),
 			]),

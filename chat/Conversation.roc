@@ -11,10 +11,10 @@ import Uid
 Conversation := [].{
 
 	## dmOther: the other of DM pair `key` when `me` is one of the pair, by
-	## chatKeyParticipant's rule (Paths.participant: a canonical pair of
-	## uids); `NotAParticipant` otherwise.
-	dm_other : List(U8), Uid -> Try(Uid, [NotAParticipant])
-	dm_other = |key, me| if Paths.participant(key, me) Ok(partner(key, me)) else Err(NotAParticipant)
+	## chatKeyParticipant's rule (Paths.is_participant; the pair is canonical
+	## by its type); `NotAParticipant` otherwise.
+	dm_other : Paths.PairKey, Uid -> Try(Uid, [NotAParticipant])
+	dm_other = |key, me| if Paths.is_participant(key, me) Ok(partner(Paths.pair_key_bytes(key), me)) else Err(NotAParticipant)
 
 	## partnerName's half: the side of `key`'s first `_` that is not `me`
 	## (the second when the first is `me`, so `1_1`'s partner is `1`); the

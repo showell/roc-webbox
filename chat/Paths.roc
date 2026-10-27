@@ -8,45 +8,60 @@ import ZigText
 
 Paths := [].{
 
-	## chatKeyParticipant: `key` is a canonical DM pair (two uids, digits
-	## without a leading zero, the smaller first) and `user` is one of them.
-	participant : List(U8), Uid -> Bool
-	participant = |key, user|
-		match cut_first(key, '_') {
-			Err(NoSeparator) => Bool.False
-			Ok((x, y)) =>
-				canonical_uid(x) and canonical_uid(y) and pair_key_bytes(pair_key(Uid.from_bytes(x), Uid.from_bytes(y))) == key and (user == Uid.from_bytes(x) or user == Uid.from_bytes(y))
+	## chatKeyParticipant: `user` is one of the pair's two uids (the key is
+	## canonical: only pair_key and pair_key_from_str make one).
+	is_participant : PairKey, Uid -> Bool
+	is_participant = |PairKey.(key), user|
+		match key.split_first("_") {
+			Err(_) => Bool.False
+			Ok({ before, after }) => Uid.to_bytes(user) == before.to_utf8() or Uid.to_bytes(user) == after.to_utf8()
 		}
 
 	## **A DM'S KEY**: opaque (`::`), so only `pair_key` (from two uids) and
-	## `pair_key_of` (from bytes, validated) make one.
-	PairKey :: List(U8)
+	## `pair_key_from_str` (from text, validated) make one.
+	PairKey :: Str
 
-	## chatPairKey: the smaller numeric id first, joined by `_` (a half that
-	## is no number counts as 0, as Zig's `atoiOr0`).
-	pair_key : Uid, Uid -> PairKey
+	## chatPairKey: the smaller numeric id first, joined by `_` (a number
+	## past i64's counts as 0, as Zig's `atoiOr0`). **A UID IS DIGITS, THE
+	## FIRST NOT ZERO** (allocateUser's), or there is no key: the Zig's
+	## `atoiOr0` read any other half as 0 too, and no account has such an
+	## id. Uid stays bytes (the host's me! and the accounts hand it so); its
+	## digits are ASCII, so they are text.
+	pair_key : Uid, Uid -> Try(PairKey, [Invalid])
 	pair_key = |ua, ub| {
-		a = Uid.bytes(ua)
-		b = Uid.bytes(ub)
-		if atoi_or0(a) <= atoi_or0(b) {
-			PairKey.(List.concat(List.append(a, '_'), b))
-		} else {
-			PairKey.(List.concat(List.append(b, '_'), a))
-		}
+		a = uid_text(ua)?
+		b = uid_text(ub)?
+		(small, large) = if atoi_or0(a.to_utf8()) <= atoi_or0(b.to_utf8()) (a, b) else (b, a)
+		Ok(PairKey.("${small}_${large}"))
+	}
+
+	## A canonical uid's digits, as text.
+	uid_text : Uid -> Try(Str, [Invalid])
+	uid_text = |uid| {
+		digits = Uid.to_bytes(uid)
+		if canonical_uid(digits) Str.from_utf8(digits).map_err(|_| Invalid) else Err(Invalid)
 	}
 
 	## The key, when it is exactly the canonical `<small>_<large>` of two
 	## valid uids, or `<uid>_<uid>`: the DM with yourself (`1_1`) is one.
-	pair_key_of : List(U8) -> Try(PairKey, [Invalid])
-	pair_key_of = |key|
-		match cut_first(key, '_') {
-			Ok((x, y)) if canonical_uid(x) and canonical_uid(y) and pair_key_bytes(pair_key(Uid.from_bytes(x), Uid.from_bytes(y))) == key => Ok(PairKey.(key))
-			_ => Err(Invalid)
+	pair_key_from_str : Str -> Try(PairKey, [Invalid])
+	pair_key_from_str = |key|
+		match key.split_first("_") {
+			Ok({ before, after }) =>
+				match pair_key(Uid.from_bytes(before.to_utf8()), Uid.from_bytes(after.to_utf8())) {
+					Ok(PairKey.(made)) if made == key => Ok(PairKey.(key))
+					_ => Err(Invalid)
+				}
+			Err(_) => Err(Invalid)
 		}
 
-	## The key's bytes.
+	## The key's text.
+	pair_key_to_str : PairKey -> Str
+	pair_key_to_str = |PairKey.(s)| s
+
+	## The key's bytes, where they go back out.
 	pair_key_bytes : PairKey -> List(U8)
-	pair_key_bytes = |PairKey.(b)| b
+	pair_key_bytes = |PairKey.(s)| s.to_utf8()
 
 	## **WHICH CONVERSATION**: a DM, by its canonical pair key, two uids
 	## joined by `_`, the smaller first (`3_7`; pair_key); or a channel, by
@@ -106,8 +121,9 @@ Paths := [].{
 
 	## validTopicID: letters and digits joined by single hyphens, none at
 	## either end, 1 to 80 bytes.
-	valid_topic_id : List(U8) -> Bool
-	valid_topic_id = |topic| {
+	is_topic_id : Str -> Bool
+	is_topic_id = |text| {
+		topic = text.to_utf8()
 		n = List.len(topic)
 		if n == 0 or n > 80 or List.first(topic) == Ok('-') or List.last(topic) == Ok('-') {
 			Bool.False
@@ -130,24 +146,29 @@ Paths := [].{
 
 	## validChannelName: a letter, then letters, digits and hyphens, 1 to 40
 	## bytes.
-	valid_channel_name : List(U8) -> Bool
-	valid_channel_name = |name| match name {
+	is_channel_name : Str -> Bool
+	is_channel_name = |text| match text.to_utf8() {
 		[first, .. as more] =>
-			List.len(name) <= 40 and is_alpha(first) and List.all(more, |c| is_alnum(c) or c == '-')
+			text.count_utf8_bytes() <= 40 and is_alpha(first) and List.all(more, |c| is_alnum(c) or c == '-')
 		[] => Bool.False
 	}
 
-	## **A CHANNEL'S NAME, VALIDATED**: opaque (`::`), so only `channel_name`
-	## makes one, and a channel's path is built from nothing else.
-	ChannelName :: List(U8)
+	## **A CHANNEL'S NAME, VALIDATED**: opaque (`::`), so only
+	## `channel_name_from_str` makes one, and a channel's path is built from
+	## nothing else.
+	ChannelName :: Str
 
-	## The name, when valid_channel_name passes it.
-	channel_name : List(U8) -> Try(ChannelName, [Invalid])
-	channel_name = |name| if valid_channel_name(name) Ok(ChannelName.(name)) else Err(Invalid)
+	## The name, when is_channel_name passes it.
+	channel_name_from_str : Str -> Try(ChannelName, [Invalid])
+	channel_name_from_str = |name| if is_channel_name(name) Ok(ChannelName.(name)) else Err(Invalid)
 
-	## The name's bytes.
+	## The name's text.
+	channel_name_to_str : ChannelName -> Str
+	channel_name_to_str = |ChannelName.(s)| s
+
+	## The name's bytes, where they go back out.
 	channel_name_bytes : ChannelName -> List(U8)
-	channel_name_bytes = |ChannelName.(b)| b
+	channel_name_bytes = |ChannelName.(s)| s.to_utf8()
 
 	## validMsgRefID: a topic slug (letters, digits, hyphens), `_`, and a
 	## message's decimal number, cut at the last `_`.
@@ -171,14 +192,29 @@ Paths := [].{
 
 	## listUserChannels's decision: the names of the channels `uid` is in,
 	## sorted by bytes, from every roster (`rosters`'s).
-	member_channels : List(Roster), List(U8) -> List(List(U8))
-	member_channels = |all, uid| Bytes.sort(List.map(List.keep_if(all, |r| List.contains(r.members, uid)), |r| r.name))
+	member_channels : List(Roster), List(U8) -> List(Str)
+	member_channels = |all, uid| sort_by_bytes(List.map(List.keep_if(all, |r| List.contains(r.members, uid)), |r| r.name))
+
+	## Texts sorted by their bytes, as the Zig's sorts compare.
+	sort_by_bytes : List(Str) -> List(Str)
+	sort_by_bytes = |texts|
+		List.sort_with(
+			texts,
+			|a, b|
+				if Bytes.less(a.to_utf8(), b.to_utf8()) {
+					Before
+				} else if Bytes.less(b.to_utf8(), a.to_utf8()) {
+					After
+				} else {
+					Same
+				},
+		)
 
 	## A folder's entry, as Files.list! answers it: its name is text.
 	Entry : { kind : [Dir, File, Other], name : Str }
 
 	## A channel and its members, as its member file lists them.
-	Roster : { name : List(U8), members : List(List(U8)) }
+	Roster : { name : Str, members : List(List(U8)) }
 
 	## A DM's folder under the chat root (dmConvDir): its pair key.
 	dm_conv_dir : List(U8) -> List(U8)
@@ -238,7 +274,7 @@ Paths := [].{
 
 	## Channel `name`'s member file (channelMembers's): channels/<name>.channel.
 	channel_path : ChannelName -> ChatPath
-	channel_path = |ChannelName.(name)| ChatPath.(join([Str.to_utf8("channels"), List.concat(name, Str.to_utf8(".channel"))]))
+	channel_path = |ChannelName.(name)| ChatPath.(join([Str.to_utf8("channels"), "${name}.channel".to_utf8()]))
 
 	## The folder of every channel's member file (channelRosters's listing):
 	## channels.
@@ -257,7 +293,7 @@ Paths := [].{
 	## The topic the member last viewed in DM `key` (lastViewedTopic's
 	## file): users/<uid>/last-sessions/<conv>.
 	last_session_path : Uid, ConvKey -> ChatPath
-	last_session_path = |uid, key| last_session_path_bytes({ uid: Uid.bytes(uid), conv: conv_key_bytes(key) })
+	last_session_path = |uid, key| last_session_path_bytes({ uid: Uid.to_bytes(uid), conv: conv_key_bytes(key) })
 
 	## last_session_path's core, from the uid and key as bytes: the twins
 	## feed it any (production: last_session_path).
@@ -267,7 +303,7 @@ Paths := [].{
 	## The member's pins in `key` (pinnedTopics's file):
 	## users/<uid>/pinned-sessions/<conv>.
 	pinned_path : Uid, ConvKey -> ChatPath
-	pinned_path = |uid, key| pinned_path_bytes({ uid: Uid.bytes(uid), conv: conv_key_bytes(key) })
+	pinned_path = |uid, key| pinned_path_bytes({ uid: Uid.to_bytes(uid), conv: conv_key_bytes(key) })
 
 	## pinned_path's core, from the uid and key as bytes: the twins feed it
 	## any (production: pinned_path).
@@ -326,11 +362,8 @@ Paths := [].{
 	## whose name ends in `.channel`, of any kind (one that is a folder will
 	## not read, and fails the listing, as the Zig's did), that cut off, in
 	## the listing's order. A file named `.channel` is channel "".
-	channel_names : List(Entry) -> List(List(U8))
-	channel_names = |entries|
-		# TEMPORARY DOOR: moves out in a later run. A channel's name is bytes
-		# until ChannelName is built from a Str.
-		List.keep_oks(entries, |e| str_suffix(e.name, ".channel").map_ok(Str.to_utf8))
+	channel_names : List(Entry) -> List(Str)
+	channel_names = |entries| List.keep_oks(entries, |e| str_suffix(e.name, ".channel"))
 
 	## Of a listing's names that are not UTF-8 (Files.list!'s `not_utf8`),
 	## those channel_names would have chosen: each is a channel the listing
@@ -343,7 +376,7 @@ Paths := [].{
 	## counted by the host (the operator's count), so one bad file is not
 	## every member's chat down; `Gone` since the listing, skipped; or
 	## `Failed`, and nothing past it (the request has failed).
-	roster : List(U8), Try(List(U8), [Missing, Failed]) -> [Listed(Roster), Malformed, Gone, Failed]
+	roster : Str, Try(List(U8), [Missing, Failed]) -> [Listed(Roster), Malformed, Gone, Failed]
 	roster = |name, file|
 		match file {
 			Ok(stored) =>
@@ -358,10 +391,10 @@ Paths := [].{
 	## Every roster, from the channels `channel_names` chose and their member
 	## files as read, in that order, by `roster`: the rosters, and the
 	## malformed channels' names, up to a read that failed.
-	rosters : List(List(U8)), List(Try(List(U8), [Missing, Failed])) -> { rosters : List(Roster), malformed : List(List(U8)) }
+	rosters : List(Str), List(Try(List(U8), [Missing, Failed])) -> { rosters : List(Roster), malformed : List(Str) }
 	rosters = |names, files| rosters_from(names, files, 0, { rosters: [], malformed: [] })
 
-	rosters_from : List(List(U8)), List(Try(List(U8), [Missing, Failed])), U64, { rosters : List(Roster), malformed : List(List(U8)) } -> { rosters : List(Roster), malformed : List(List(U8)) }
+	rosters_from : List(Str), List(Try(List(U8), [Missing, Failed])), U64, { rosters : List(Roster), malformed : List(Str) } -> { rosters : List(Roster), malformed : List(Str) }
 	rosters_from = |names, files, i, got|
 		match (List.get(names, i), List.get(files, i)) {
 			(Ok(name), Ok(file)) =>
@@ -447,7 +480,7 @@ Paths := [].{
 }
 
 # The builders' exact bytes, for a DM (`3_7`) and a channel (`general`).
-expect match (Paths.pair_key_of(Str.to_utf8("3_7")), Paths.channel_name(Str.to_utf8("general"))) {
+expect match (Paths.pair_key_from_str("3_7"), Paths.channel_name_from_str("general")) {
 	(Ok(pair), Ok(name)) => {
 		dm = Dm(pair)
 		channel = Channel(name)
@@ -463,111 +496,110 @@ expect match (Paths.pair_key_of(Str.to_utf8("3_7")), Paths.channel_name(Str.to_u
 	_ => Bool.False
 }
 expect Paths.bytes(Paths.channels_folder) == Str.to_utf8("channels")
-expect match Paths.channel_name(Str.to_utf8("general")) {
+expect match Paths.channel_name_from_str("general") {
 	Ok(name) => Paths.bytes(Paths.channel_path(name)) == Str.to_utf8("channels/general.channel")
 	Err(Invalid) => Bool.False
 }
 expect Paths.bytes(Paths.last_conv_path(Str.to_utf8("3"))) == Str.to_utf8("users/3/last-conv")
-expect Paths.bytes(Paths.last_session_path(Uid.from_bytes(Str.to_utf8("3")), Dm(Paths.pair_key(Uid.from_bytes(Str.to_utf8("3")), Uid.from_bytes(Str.to_utf8("7")))))) == Str.to_utf8("users/3/last-sessions/3_7")
-expect Paths.bytes(Paths.pinned_path(Uid.from_bytes(Str.to_utf8("3")), Dm(Paths.pair_key(Uid.from_bytes(Str.to_utf8("7")), Uid.from_bytes(Str.to_utf8("3")))))) == Str.to_utf8("users/3/pinned-sessions/3_7")
-expect match Paths.channel_name(Str.to_utf8("general")) {
+expect match Paths.pair_key(Uid.from_bytes(Str.to_utf8("3")), Uid.from_bytes(Str.to_utf8("7"))) {
+	Ok(pair) => Paths.bytes(Paths.last_session_path(Uid.from_bytes(Str.to_utf8("3")), Dm(pair))) == Str.to_utf8("users/3/last-sessions/3_7")
+	Err(Invalid) => Bool.False
+}
+expect match Paths.pair_key(Uid.from_bytes(Str.to_utf8("7")), Uid.from_bytes(Str.to_utf8("3"))) {
+	Ok(pair) => Paths.bytes(Paths.pinned_path(Uid.from_bytes(Str.to_utf8("3")), Dm(pair))) == Str.to_utf8("users/3/pinned-sessions/3_7")
+	Err(Invalid) => Bool.False
+}
+expect match Paths.channel_name_from_str("general") {
 	Ok(name) => Paths.bytes(Paths.pinned_path(Uid.from_bytes(Str.to_utf8("3")), Channel(name))) == Str.to_utf8("users/3/pinned-sessions/general")
 	Err(Invalid) => Bool.False
 }
 expect Paths.bytes(Paths.feed_path(Str.to_utf8("3"), Images)) == Str.to_utf8("users/3/images.md")
 expect Paths.bytes(Paths.feed_path(Str.to_utf8("3"), Code)) == Str.to_utf8("users/3/code.md")
 
-# pair_key: the smaller uid first, by number, not by bytes.
-expect Paths.pair_key_bytes(Paths.pair_key(Uid.from_bytes(Str.to_utf8("7")), Uid.from_bytes(Str.to_utf8("3")))) == Str.to_utf8("3_7")
-expect Paths.pair_key_bytes(Paths.pair_key(Uid.from_bytes(Str.to_utf8("3")), Uid.from_bytes(Str.to_utf8("7")))) == Str.to_utf8("3_7")
-expect Paths.pair_key_bytes(Paths.pair_key(Uid.from_bytes(Str.to_utf8("10")), Uid.from_bytes(Str.to_utf8("9")))) == Str.to_utf8("9_10")
-expect Paths.pair_key_bytes(Paths.pair_key(Uid.from_bytes(Str.to_utf8("5")), Uid.from_bytes(Str.to_utf8("5")))) == Str.to_utf8("5_5")
+# pair_key: the smaller uid first, by number, not by bytes; a half that is
+# no canonical number makes no key.
+expect Paths.pair_key(Uid.from_bytes(Str.to_utf8("7")), Uid.from_bytes(Str.to_utf8("3"))).map_ok(Paths.pair_key_to_str) == Ok("3_7")
+expect Paths.pair_key(Uid.from_bytes(Str.to_utf8("3")), Uid.from_bytes(Str.to_utf8("7"))).map_ok(Paths.pair_key_to_str) == Ok("3_7")
+expect Paths.pair_key(Uid.from_bytes(Str.to_utf8("10")), Uid.from_bytes(Str.to_utf8("9"))).map_ok(Paths.pair_key_to_str) == Ok("9_10")
+expect Paths.pair_key(Uid.from_bytes(Str.to_utf8("5")), Uid.from_bytes(Str.to_utf8("5"))).map_ok(Paths.pair_key_to_str) == Ok("5_5")
+expect Paths.pair_key(Uid.from_bytes(Str.to_utf8("a")), Uid.from_bytes(Str.to_utf8("5"))).is_err()
+expect Paths.pair_key(Uid.from_bytes(Str.to_utf8("05")), Uid.from_bytes(Str.to_utf8("5"))).is_err()
+expect Paths.pair_key(Uid.from_bytes(Str.to_utf8("9223372036854775808")), Uid.from_bytes(Str.to_utf8("5"))).map_ok(Paths.pair_key_to_str) == Ok("9223372036854775808_5")
 
-# pair_key_of: only the canonical `<small>_<large>` of two uids, or a uid
-# twice (the DM with yourself).
-expect match Paths.pair_key_of(Str.to_utf8("3_7")) {
-	Ok(key) => Paths.pair_key_bytes(key) == Str.to_utf8("3_7")
+# pair_key_from_str: only the canonical `<small>_<large>` of two uids, or a
+# uid twice (the DM with yourself).
+expect Paths.pair_key_from_str("3_7").map_ok(Paths.pair_key_to_str) == Ok("3_7")
+expect Paths.pair_key_from_str("3_3").map_ok(Paths.pair_key_to_str) == Ok("3_3")
+expect Paths.pair_key_from_str("7_3").is_err()
+expect Paths.pair_key_from_str("3_").is_err()
+expect Paths.pair_key_from_str("_7").is_err()
+expect Paths.pair_key_from_str("a_b").is_err()
+expect Paths.pair_key_from_str("..").is_err()
+expect Paths.pair_key_from_str("3_7_9").is_err()
+expect Paths.pair_key_from_str("03_7").is_err()
+expect Paths.pair_key_from_str("3_../7").is_err()
+expect Paths.pair_key_from_str("").is_err()
+
+# is_participant: only the pair's two members.
+expect match Paths.pair_key_from_str("3_7") {
+	Ok(pair) =>
+		Paths.is_participant(pair, Uid.from_bytes(Str.to_utf8("3")))
+			and Paths.is_participant(pair, Uid.from_bytes(Str.to_utf8("7")))
+				and !Paths.is_participant(pair, Uid.from_bytes(Str.to_utf8("9")))
+					and !Paths.is_participant(pair, Uid.from_bytes(Str.to_utf8("37")))
+						and !Paths.is_participant(pair, Uid.from_bytes([]))
 	Err(Invalid) => Bool.False
 }
-expect match Paths.pair_key_of(Str.to_utf8("3_3")) {
-	Ok(key) => Paths.pair_key_bytes(key) == Str.to_utf8("3_3")
-	Err(Invalid) => Bool.False
-}
-expect Paths.pair_key_of(Str.to_utf8("7_3")).is_err()
-expect Paths.pair_key_of(Str.to_utf8("3_")).is_err()
-expect Paths.pair_key_of(Str.to_utf8("_7")).is_err()
-expect Paths.pair_key_of(Str.to_utf8("a_b")).is_err()
-expect Paths.pair_key_of(Str.to_utf8("..")).is_err()
-expect Paths.pair_key_of(Str.to_utf8("3_7_9")).is_err()
-expect Paths.pair_key_of(Str.to_utf8("03_7")).is_err()
 
-# participant: only a canonical pair, and only its two members.
-expect Paths.participant(Str.to_utf8("3_7"), Uid.from_bytes(Str.to_utf8("3")))
-expect Paths.participant(Str.to_utf8("3_7"), Uid.from_bytes(Str.to_utf8("7")))
-expect !Paths.participant(Str.to_utf8("3_7"), Uid.from_bytes(Str.to_utf8("9")))
-expect !Paths.participant(Str.to_utf8("7_3"), Uid.from_bytes(Str.to_utf8("3")))
-expect !Paths.participant(Str.to_utf8("03_7"), Uid.from_bytes(Str.to_utf8("7")))
-expect !Paths.participant(Str.to_utf8(".._3"), Uid.from_bytes(Str.to_utf8("3")))
-expect !Paths.participant(Str.to_utf8("3_../7"), Uid.from_bytes(Str.to_utf8("3")))
-expect !Paths.participant(Str.to_utf8("3_7/x"), Uid.from_bytes(Str.to_utf8("3")))
-expect !Paths.participant(Str.to_utf8(".."), Uid.from_bytes(Str.to_utf8("3")))
-expect !Paths.participant([], Uid.from_bytes([]))
+# is_topic_id: letters and digits joined by single hyphens, 1 to 80 bytes.
+expect Paths.is_topic_id("ChitChat")
+expect Paths.is_topic_id("road-trip-2")
+expect Paths.is_topic_id("9")
+expect Paths.is_topic_id(Str.repeat("a", 80))
+expect !Paths.is_topic_id(Str.repeat("a", 81))
+expect !Paths.is_topic_id("")
+expect !Paths.is_topic_id("..")
+expect !Paths.is_topic_id("a/b")
+expect !Paths.is_topic_id("../x")
+expect !Paths.is_topic_id("-a")
+expect !Paths.is_topic_id("a-")
+expect !Paths.is_topic_id("a--b")
+expect !Paths.is_topic_id("a_b")
+expect !Paths.is_topic_id("a b")
+expect !Paths.is_topic_id("a.md")
+expect !Paths.is_topic_id("caf\u(e9)")
 
-# valid_topic_id: letters and digits joined by single hyphens, 1 to 80.
-expect Paths.valid_topic_id(Str.to_utf8("ChitChat"))
-expect Paths.valid_topic_id(Str.to_utf8("road-trip-2"))
-expect Paths.valid_topic_id(Str.to_utf8("9"))
-expect Paths.valid_topic_id(List.repeat('a', 80))
-expect !Paths.valid_topic_id(List.repeat('a', 81))
-expect !Paths.valid_topic_id([])
-expect !Paths.valid_topic_id(Str.to_utf8(".."))
-expect !Paths.valid_topic_id(Str.to_utf8("a/b"))
-expect !Paths.valid_topic_id(Str.to_utf8("../x"))
-expect !Paths.valid_topic_id(Str.to_utf8("-a"))
-expect !Paths.valid_topic_id(Str.to_utf8("a-"))
-expect !Paths.valid_topic_id(Str.to_utf8("a--b"))
-expect !Paths.valid_topic_id(Str.to_utf8("a_b"))
-expect !Paths.valid_topic_id(Str.to_utf8("a b"))
-expect !Paths.valid_topic_id(Str.to_utf8("a.md"))
-
-# valid_channel_name: a letter, then letters, digits and hyphens, 1 to 40.
-expect Paths.valid_channel_name(Str.to_utf8("general"))
+# is_channel_name: a letter, then letters, digits and hyphens, 1 to 40
+# bytes.
+expect Paths.is_channel_name("general")
 # Production's two channels, made by hand (Steve, 2026-10-27): a stricter
 # rule must still take them, or they vanish from the chat.
-expect Paths.valid_channel_name(Str.to_utf8("Cobblestone"))
-expect Paths.valid_channel_name(Str.to_utf8("General"))
-expect Paths.valid_channel_name(Str.to_utf8("a-1-"))
-expect Paths.valid_channel_name(List.repeat('a', 40))
-expect !Paths.valid_channel_name(List.repeat('a', 41))
-expect !Paths.valid_channel_name([])
-expect !Paths.valid_channel_name(Str.to_utf8("1abc"))
-expect !Paths.valid_channel_name(Str.to_utf8("-abc"))
-expect !Paths.valid_channel_name(Str.to_utf8(".."))
-expect !Paths.valid_channel_name(Str.to_utf8("a/b"))
-expect !Paths.valid_channel_name(Str.to_utf8("a_b"))
-expect !Paths.valid_channel_name(Str.to_utf8("a.channel"))
+expect Paths.is_channel_name("Cobblestone")
+expect Paths.is_channel_name("General")
+expect Paths.is_channel_name("a-1-")
+expect Paths.is_channel_name(Str.repeat("a", 40))
+expect !Paths.is_channel_name(Str.repeat("a", 41))
+expect !Paths.is_channel_name("")
+expect !Paths.is_channel_name("1abc")
+expect !Paths.is_channel_name("-abc")
+expect !Paths.is_channel_name("..")
+expect !Paths.is_channel_name("a/b")
+expect !Paths.is_channel_name("a_b")
+expect !Paths.is_channel_name("a.channel")
+expect !Paths.is_channel_name("caf\u(e9)")
 
-# channel_name: a valid name round-trips; nothing else is a ChannelName, so
-# no channel path is built from it.
-expect match Paths.channel_name(Str.to_utf8("a-1-")) {
-	Ok(name) => Paths.channel_name_bytes(name) == Str.to_utf8("a-1-")
-	Err(Invalid) => Bool.False
-}
-expect match Paths.channel_name(Str.to_utf8("../x")) {
-	Ok(_) => Bool.False
-	Err(Invalid) => Bool.True
-}
-expect match Paths.channel_name([]) {
-	Ok(_) => Bool.False
-	Err(Invalid) => Bool.True
-}
+# channel_name_from_str: a valid name round-trips; nothing else is a
+# ChannelName, so no channel path is built from it.
+expect Paths.channel_name_from_str("a-1-").map_ok(Paths.channel_name_to_str) == Ok("a-1-")
+expect Paths.channel_name_from_str("../x").is_err()
+expect Paths.channel_name_from_str("").is_err()
 
 # **A CONVERSATION'S PATHS ARE BUILT FROM A ConvKey ALONE**, which only
-# pair_key_of (or pair_key) and channel_name make; the `_bytes` cores join
-# what they are handed, so a hostile folder or topic makes a path out of
-# the chat root, and only the twins call them (the hunt
+# pair_key_from_str (or pair_key) and channel_name_from_str make; the
+# `_bytes` cores join what they are handed, so a hostile folder or topic
+# makes a path out of the chat root, and only the twins call them (the hunt
 # bytes_core_outside_twin). The rest is upstream: Route.conversation
-# passes a topic only through valid_topic_id, make! checks a new topic's
+# passes a topic only through is_topic_id, make! checks a new topic's
 # id, and a uid is the host's (Host.me!) or a canonical pair's half.
 expect Paths.bytes(Paths.reactions_path_bytes({ dir: Str.to_utf8("channels/../.."), topic: Str.to_utf8("../x") })) == Str.to_utf8("channels/../../sessions/../x.reactions.jsonl")
 expect Paths.transcript_path_bytes({ dir: [], topic: [] }) == Str.to_utf8("sessions/.md")

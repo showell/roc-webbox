@@ -47,10 +47,22 @@ call = |req| {
 				Err(_) => []
 			}
 		6 => [ZigText.trim(arg(0))]
-		7 => [bool(Paths.participant(arg(0), Uid.from_bytes(arg(1))))]
-		8 => [Paths.pair_key_bytes(Paths.pair_key(Uid.from_bytes(arg(0)), Uid.from_bytes(arg(1))))]
-		9 => [bool(Paths.valid_topic_id(arg(0)))]
-		10 => [bool(Paths.valid_channel_name(arg(0)))]
+		# A key that is no canonical pair is no PairKey, so no participant.
+		7 =>
+			match pair_of(arg(0)) {
+				Ok(pair) => [bool(Paths.is_participant(pair, Uid.from_bytes(arg(1))))]
+				Err(_) => [bool(Bool.False)]
+			}
+		# Two uids that are canonical numbers make a key; any other half
+		# makes none (the Zig's atoiOr0 read it as 0), and no answer.
+		8 =>
+			match Paths.pair_key(Uid.from_bytes(arg(0)), Uid.from_bytes(arg(1))) {
+				Ok(pair) => [Paths.pair_key_bytes(pair)]
+				Err(Invalid) => []
+			}
+		# Bytes that are not UTF-8 are no text, so neither a topic nor a name.
+		9 => [bool(text(arg(0)).map_ok(Paths.is_topic_id) == Ok(Bool.True))]
+		10 => [bool(text(arg(0)).map_ok(Paths.is_channel_name) == Ok(Bool.True))]
 		11 => [bool(Paths.valid_msg_ref_id(arg(0)))]
 		12 => [Paths.join(req.args)]
 		13 => [Paths.first_of(req.args)]
@@ -123,9 +135,13 @@ call = |req| {
 				Remove => []
 			}
 		44 =>
-			match Conversation.dm_other(arg(0), Uid.from_bytes(arg(1))) {
-				Ok(other) => [Uid.bytes(other)]
-				Err(NotAParticipant) => []
+			match pair_of(arg(0)) {
+				Ok(pair) =>
+					match Conversation.dm_other(pair, Uid.from_bytes(arg(1))) {
+						Ok(other) => [Uid.to_bytes(other)]
+						Err(NotAParticipant) => []
+					}
+				Err(_) => []
 			}
 		45 => Conversation.dm_members(arg(0))
 		46 => [Conversation.dm_title(arg(0), arg(1))]
@@ -133,7 +149,7 @@ call = |req| {
 		48 => [Conversation.topic_title(arg(0), arg(1))]
 		49 => [bool(Conversation.has_topic(List.drop_first(req.args, 1), arg(0)))]
 		50 => [Conversation.dm_base(arg(0)), Conversation.channel_base(arg(0))]
-		51 => Paths.member_channels(flat_rosters(req.args, 1, []), arg(0))
+		51 => List.map(Paths.member_channels(flat_rosters(req.args, 1, []), arg(0)), Str.to_utf8)
 		52 => [ChatState.bookmark(file(arg(0), arg(1)))]
 		53 => [bool(ChatState.changed(file(arg(0), arg(1)), arg(2))), ChatState.bookmark_line(arg(2))]
 		54 => List.map([Paths.last_conv_path(arg(0)), Paths.last_session_path_bytes({ uid: arg(0), conv: arg(1) }), Paths.pinned_path_bytes({ uid: arg(0), conv: arg(1) }), Paths.feed_path(arg(0), Images), Paths.feed_path(arg(0), Code)], Paths.bytes)
@@ -143,14 +159,15 @@ call = |req| {
 				Ok(members) => List.prepend(members, [79])
 				Err(Malformed) => [[77]]
 			}
-		57 => Paths.channel_names(entries(req.args, 0, []))
+		57 => List.map(Paths.channel_names(entries(req.args, 0, [])), Str.to_utf8)
 		58 => {
 			# The names, then as many reads (how, bytes); the malformed
 			# count and names, then each roster as `name, count, member...`.
+			# The names are a listing's, text at Files.list!'s door.
 			n = u64(arg(0))
-			names = List.sublist(req.args, { start: 1, len: n })
+			names = List.keep_oks(List.sublist(req.args, { start: 1, len: n }), Str.from_utf8)
 			got = Paths.rosters(names, reads(req.args, 1 + n, []))
-			List.join([[num(List.len(got.malformed))], got.malformed, List.join(List.map(got.rosters, |r| List.concat([r.name, num(List.len(r.members))], r.members)))])
+			List.join([[num(List.len(got.malformed))], List.map(got.malformed, Str.to_utf8), List.join(List.map(got.rosters, |r| List.concat([r.name.to_utf8(), num(List.len(r.members))], r.members)))])
 		}
 		59 => [Paths.sessions_dir(Paths.dm_conv_dir(arg(0))), Paths.sessions_dir(Paths.channel_conv_dir(arg(1))), Paths.bytes(Paths.channel_path(valid_channel(arg(1)))), Paths.bytes(Paths.reactions_path_bytes({ dir: Paths.dm_conv_dir(arg(0)), topic: arg(2) }))]
 		60 => {
@@ -221,17 +238,30 @@ bool = |b| if b [49] else [48]
 
 ## A channel's name the test hands as valid; one that is not stops the twin.
 valid_channel : List(U8) -> Paths.ChannelName
-valid_channel = |name| match Paths.channel_name(name) {
+valid_channel = |name| match channel_of(name) {
 	Ok(valid) => valid
-	Err(Invalid) => crash "twin: an invalid channel name"
+	Err(_) => crash "twin: an invalid channel name"
 }
 
 ## A DM's pair key the test hands as valid; one that is not stops the twin.
 valid_pair : List(U8) -> Paths.PairKey
-valid_pair = |key| match Paths.pair_key_of(key) {
+valid_pair = |key| match pair_of(key) {
 	Ok(valid) => valid
-	Err(Invalid) => crash "twin: an invalid pair key"
+	Err(_) => crash "twin: an invalid pair key"
 }
+
+## The test's bytes as text; bytes that are not UTF-8 are `Invalid`, as
+## no validated type takes them.
+text : List(U8) -> Try(Str, [Invalid])
+text = |bytes| Str.from_utf8(bytes).map_err(|_| Invalid)
+
+## The test's bytes as a pair key, when they are text and one.
+pair_of : List(U8) -> Try(Paths.PairKey, [Invalid])
+pair_of = |bytes| Paths.pair_key_from_str(text(bytes)?)
+
+## The test's bytes as a channel's name, when they are text and one.
+channel_of : List(U8) -> Try(Paths.ChannelName, [Invalid])
+channel_of = |bytes| Paths.channel_name_from_str(text(bytes)?)
 
 ## A read as the test says it went: `F` found (`bytes` the file), `M`
 ## missing, anything else failed.
@@ -313,7 +343,9 @@ flat_rosters = |args, i, out|
 		Err(_) => out
 		Ok(name) => {
 			n = u64(List.get(args, i + 1) ?? [])
-			flat_rosters(args, i + 2 + n, List.append(out, { name, members: List.sublist(args, { start: i + 2, len: n }) }))
+			# A roster's name is a listing's, text at Files.list!'s door.
+			roster = Str.from_utf8(name).map_ok(|text_name| { name: text_name, members: List.sublist(args, { start: i + 2, len: n }) })
+			flat_rosters(args, i + 2 + n, List.concat(out, List.keep_oks([roster], |r| r)))
 		}
 	}
 

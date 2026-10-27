@@ -5,8 +5,8 @@ Uid := List(U8).{
 	from_bytes : List(U8) -> Uid
 	from_bytes = |b| Uid.(b)
 
-	bytes : Uid -> List(U8)
-	bytes = |Uid.(b)| b
+	to_bytes : Uid -> List(U8)
+	to_bytes = |Uid.(b)| b
 
 	is_eq : _
 }

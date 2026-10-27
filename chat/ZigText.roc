@@ -61,6 +61,20 @@ ZigText := [].{
 	hex = |d| if d < 10 d + '0' else d - 10 + 'a'
 
 	## `std.mem.trim(u8, s, " \t\r\n")`, as the sidecars' readers trim.
+	## trim's, on text: the same four ASCII spaces off each end (Str.trim's
+	## are Unicode's, and the Zig's are not).
+	trim_str : Str -> Str
+	trim_str = |s| {
+		ws = [" ", "\t", "\r", "\n"]
+		front = List.find_first(ws, |w| s.starts_with(w))
+		back = List.find_first(ws, |w| s.ends_with(w))
+		match (front, back) {
+			(Ok(w), _) => trim_str(s.drop_prefix(w))
+			(_, Ok(w)) => trim_str(s.drop_suffix(w))
+			_ => s
+		}
+	}
+
 	trim : List(U8) -> List(U8)
 	trim = |s| {
 		ws = |c| c == ' ' or c == '\t' or c == '\r' or c == '\n'

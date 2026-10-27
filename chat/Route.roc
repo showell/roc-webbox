@@ -4,58 +4,50 @@
 ## DM, whether the account or the topic exists) stay in the Zig that serves
 ## the route, so this says only what the path says.
 ##
-## A path is bytes (Chat.roc): every comparison is on bytes.
-import Bytes
+## A path is text (main.handle! checked it at the door); the route it makes
+## crosses back to the Zig as bytes (Chat.roc).
 import Paths
 
 Route := [].{
 
 	## The route for `sub`, the path under /chat.
-	under_chat : List(U8) -> R
+	under_chat : Str -> R
 	under_chat = |sub|
-		if sub == [] or sub == slash {
+		if sub.is_empty() or sub == "/" {
 			family(Default)
 		} else {
 			match family_under(sub) {
 				Ok(r) => r
 				Err(NotUnderAPrefix) =>
-					match Bytes.strip_prefix(sub, Str.to_utf8("/search")) {
-						Ok(rest) => with_rest(Search, rest)
-						Err(NoMatch) =>
-							if sub == Str.to_utf8("/default") {
-								family(Default)
-							} else if sub == Str.to_utf8("/conversations") {
-								family(Conversations)
-							} else {
-								match Bytes.strip_prefix(sub, Str.to_utf8("/msg/")) {
-									Ok(rest) => with_rest(Msg, rest)
-									Err(NoMatch) =>
-										match Bytes.strip_prefix(sub, Str.to_utf8("/c/")) {
-											Ok(rest) => conversation(Dm, segments(rest))
-											Err(NoMatch) =>
-												if sub == Str.to_utf8("/notifications") {
-													family(Notifications)
-												} else if sub == Str.to_utf8("/sidebar/stream") {
-													family(SidebarStream)
-												} else {
-													family(NotFound)
-												}
-										}
-								}
-							}
+					if sub.starts_with("/search") {
+						with_rest(Search, sub.drop_prefix("/search"))
+					} else if sub == "/default" {
+						family(Default)
+					} else if sub == "/conversations" {
+						family(Conversations)
+					} else if sub.starts_with("/msg/") {
+						with_rest(Msg, sub.drop_prefix("/msg/"))
+					} else if sub.starts_with("/c/") {
+						conversation(Dm, segments(sub.drop_prefix("/c/")))
+					} else if sub == "/notifications" {
+						family(Notifications)
+					} else if sub == "/sidebar/stream" {
+						family(SidebarStream)
+					} else {
+						family(NotFound)
 					}
 			}
 		}
 
 	## The route for `sub`, the path under /channel.
-	under_channel : List(U8) -> R
+	under_channel : Str -> R
 	under_channel = |sub| conversation(Channel, segments(sub))
 
 	## A static script: `/<name>.js` under /chat, `rest` the name.
-	asset : List(U8) -> Try(R, [NotAnAsset])
+	asset : Str -> Try(R, [NotAnAsset])
 	asset = |sub|
-		if List.len(sub) > 1 and ends_with(sub, Str.to_utf8(".js")) {
-			Ok(with_rest(Asset, List.drop_first(sub, 1)))
+		if sub.count_utf8_bytes() > 1 and sub.ends_with(".js") {
+			Ok(with_rest(Asset, sub.drop_prefix("/")))
 		} else {
 			Err(NotAnAsset)
 		}
@@ -85,11 +77,9 @@ Route := [].{
 	family : Family -> R
 	family = |f| { family: f, key: [], rest: [], topic: [], part: Landing, tail: Page }
 
-	slash = ['/']
-
 	## The five families under a prefix of their own, at a segment's
 	## boundary (`/docsX` is none of them).
-	family_under : List(U8) -> Try(R, [NotUnderAPrefix])
+	family_under : Str -> Try(R, [NotUnderAPrefix])
 	family_under = |sub| {
 		named = [("/docs", Docs), ("/recent", Recent), ("/images", Images), ("/code", Code), ("/links", Links)]
 		List.fold(
@@ -99,32 +89,34 @@ Route := [].{
 				match found {
 					Ok(r) => Ok(r)
 					Err(NotUnderAPrefix) =>
-						match Bytes.strip_prefix(sub, Str.to_utf8(prefix)) {
-							Ok(rest) if rest == [] or Bytes.starts_with(rest, slash) => Ok(with_rest(f, rest))
-							_ => Err(NotUnderAPrefix)
+						if sub.starts_with(prefix) {
+							rest = sub.drop_prefix(prefix)
+							if rest.is_empty() or rest.starts_with("/") Ok(with_rest(f, rest)) else Err(NotUnderAPrefix)
+						} else {
+							Err(NotUnderAPrefix)
 						}
 				},
 		)
 	}
 
 	## A DM's or a channel's route from its path's segments.
-	conversation : Family, List(List(U8)) -> R
+	conversation : Family, List(Str) -> R
 	conversation = |f, segs| match segs {
 		[] => family(NotFound)
 		[key, .. as more] =>
-			if f == Channel and !valid_channel_name(key) {
+			if f == Channel and !Paths.is_channel_name(key) {
 				family(NotFound)
 			} else {
-				base = { ..family(f), key }
+				base = { ..family(f), key: key.to_utf8() }
 				match more {
 					[] => base
 					[first, .. as after] =>
-						if first == Str.to_utf8("new") {
+						if first == "new" {
 							{ ..base, part: New }
-						} else if !valid_topic_id(first) {
+						} else if !Paths.is_topic_id(first) {
 							{ ..base, part: Invalid }
 						} else {
-							tail_of({ ..base, part: Topic, topic: first }, after)
+							tail_of({ ..base, part: Topic, topic: first.to_utf8() }, after)
 						}
 				}
 			}
@@ -132,50 +124,32 @@ Route := [].{
 
 	## A topic's tail (chat.zig `topicRoute`): one segment naming it, or
 	## `uploads/<file>`.
-	tail_of : R, List(List(U8)) -> R
+	tail_of : R, List(Str) -> R
 	tail_of = |r, segs|
 		match segs {
 			[] => r
-			[first, ..] if first == Str.to_utf8("uploads") =>
+			[first, ..] if first == "uploads" =>
 				match segs {
-					[_, file] => { ..r, tail: Uploads, rest: file }
+					[_, file] => { ..r, tail: Uploads, rest: file.to_utf8() }
 					_ => { ..r, tail: Invalid }
 				}
 			[first] => { ..r, tail: named_tail(first) }
-			[first, ..] => { ..r, tail: if first == Str.to_utf8("send") InvalidSend else Invalid }
+			[first, ..] => { ..r, tail: if first == "send" InvalidSend else Invalid }
 		}
 
 	## The tail one segment names, or `Invalid`.
-	named_tail : List(U8) -> Tail
+	named_tail : Str -> Tail
 	named_tail = |seg| {
 		tails = [("stream", Stream), ("send", Send), ("upload", Upload), ("pin", Pin), ("unpin", Unpin), ("raw", Raw), ("download", Download), ("saved", Saved), ("reactions", Reactions), ("react", React)]
 		List.fold(tails, Invalid, |found, (name, tail)|
-			if found == Invalid and Str.to_utf8(name) == seg tail else found)
+			if found == Invalid and name == seg tail else found)
 	}
 
-	with_rest : Family, List(U8) -> R
-	with_rest = |f, rest| { ..family(f), rest }
+	with_rest : Family, Str -> R
+	with_rest = |f, rest| { ..family(f), rest: rest.to_utf8() }
 
 	## The path's segments, empty ones skipped (chat.zig's SegIter).
-	segments : List(U8) -> List(List(U8))
-	segments = |path| {
-		(done, last) = List.fold(
-			path,
-			([], []),
-			|(segs, cur), b|
-				if b == '/' {
-					(if cur == [] segs else List.append(segs, cur), [])
-				} else {
-					(segs, List.append(cur, b))
-				},
-		)
-		if last == [] done else List.append(done, last)
-	}
-
-	ends_with : List(U8), List(U8) -> Bool
-	ends_with = |l, p| List.len(l) >= List.len(p) and List.take_last(l, List.len(p)) == p
-
-	valid_channel_name = Paths.valid_channel_name
-	valid_topic_id = Paths.valid_topic_id
+	segments : Str -> List(Str)
+	segments = |path| path.split_on("/").drop_if(|s| s.is_empty())
 
 }

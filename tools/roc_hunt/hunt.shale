@@ -339,8 +339,8 @@ end
 -- which takes a ConvKey and unwraps it. A core's own module calls it
 -- unqualified, or qualified in its expects (chat/<Module>.roc), so any
 -- other qualified call is from outside. chat/twin.roc is never in the tree. The unwrappers and Uid's
--- constructor end in `_bytes` too, and are no cores.
-const bytes_unwrappers = " from_bytes pair_key_bytes conv_key_bytes channel_name_bytes "
+-- constructor and conversion end in `_bytes` too, and are no cores.
+const bytes_unwrappers = " from_bytes to_bytes pair_key_bytes conv_key_bytes channel_name_bytes "
 
 function bytes_core_outside_twin(tree)
   local found = {}
