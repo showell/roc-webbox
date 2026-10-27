@@ -17,7 +17,8 @@ pub fn build(b: *std.Build) void {
     // platform in platform/, an archive the host links (`roc_handle`, and
     // the hosted functions it calls back), by the Roc roc-version pins.
     const roc = rocCompiler(b);
-    const app_roc = rocArchive(b, roc, rocTarget(target.result));
+    const roc_opt = rocOpt(optimize);
+    const app_roc = rocArchive(b, roc, rocTarget(target.result), roc_opt);
 
     const exe = b.addExecutable(.{ .name = "roc-todo", .root_module = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
@@ -45,7 +46,7 @@ pub fn build(b: *std.Build) void {
     // The same for a combination on zig-metal-unikernel (its addAppKernel
     // `parts`): no target, mode or webbox (the kernel's), Roc for its target.
     const hosted_metal = b.addModule("roc_todo_metal", .{ .root_source_file = b.path("src/hosted.zig") });
-    const metal_roc = rocArchive(b, roc, "x64v1elf");
+    const metal_roc = rocArchive(b, roc, "x64v1elf", .speed);
     withApp(b, hosted_metal, metal_roc);
     _ = b.addModule("roc_hooks", .{ .root_source_file = b.path("src/roc_hooks.zig") });
 
@@ -58,14 +59,14 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    twin.addObjectFile(appArchive(b, roc, "chat-twin", twinInputs(b), rocTarget(target.result)));
+    twin.addObjectFile(appArchive(b, roc, "chat-twin", twinInputs(b), rocTarget(target.result), roc_opt));
 
     // **THE ROC CHAT'S ROUTER, FOR ANGRY-GOPHER** (docs/ROC-CHAT.md §3):
     // `roc_chat`, chat/main.roc as angry-gopher calls it (chat_hosted.zig),
     // its Roc for this build's target; and `roc_chat_metal`, the same for
     // gopher.elf (no target or mode: the kernel's; Roc for its target). It
     // imports nothing but std.
-    const chat_roc = appArchive(b, roc, "chat", chatInputs(b), rocTarget(target.result));
+    const chat_roc = appArchive(b, roc, "chat", chatInputs(b), rocTarget(target.result), roc_opt);
     const chat = b.addModule("roc_chat", .{
         .root_source_file = b.path("src/chat_hosted.zig"),
         .target = target,
@@ -73,7 +74,7 @@ pub fn build(b: *std.Build) void {
     });
     chat.addObjectFile(chat_roc);
     const chat_metal = b.addModule("roc_chat_metal", .{ .root_source_file = b.path("src/chat_hosted.zig") });
-    chat_metal.addObjectFile(appArchive(b, roc, "chat", chatInputs(b), "x64v1elf"));
+    chat_metal.addObjectFile(appArchive(b, roc, "chat", chatInputs(b), "x64v1elf", .speed));
 
     _ = demo(b, roc, optimize);
 
@@ -128,14 +129,14 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    crash_test.addObjectFile(appArchive(b, roc, "chat-crash", &.{ "chat/test/crash.roc", "chat/platform/main.roc", "chat/platform/Chat.roc", "chat/platform/Host.roc" }, rocTarget(target.result)));
+    crash_test.addObjectFile(appArchive(b, roc, "chat-crash", &.{ "chat/test/crash.roc", "chat/platform/main.roc", "chat/platform/Chat.roc", "chat/platform/Host.roc" }, rocTarget(target.result), roc_opt));
     tests.dependOn(&b.addRunArtifact(b.addTest(.{ .root_module = crash_test })).step);
     const twin_test = b.createModule(.{
         .root_source_file = b.path("src/twin_abi.zig"),
         .target = target,
         .optimize = optimize,
     });
-    twin_test.addObjectFile(appArchive(b, roc, "chat-twin", twinInputs(b), rocTarget(target.result)));
+    twin_test.addObjectFile(appArchive(b, roc, "chat-twin", twinInputs(b), rocTarget(target.result), roc_opt));
     tests.dependOn(&b.addRunArtifact(b.addTest(.{ .root_module = twin_test })).step);
     const shared = b.createModule(.{
         .root_source_file = b.path("src/shared_check.zig"),
@@ -162,7 +163,7 @@ fn demo(b: *std.Build, roc: []const u8, optimize: std.lang.Optimize) *std.Build.
         .strip = true,
         .imports = &.{.{ .name = "roc_abi", .module = b.createModule(.{ .root_source_file = b.path("src/roc_abi.zig") }) }},
     }) });
-    wasm.root_module.addObjectFile(rocArchive(b, roc, "wasm32"));
+    wasm.root_module.addObjectFile(rocArchive(b, roc, "wasm32", .speed));
     wasm.entry = .disabled;
     wasm.rdynamic = true;
     step.dependOn(&b.addInstallFileWithDir(wasm.getEmittedBin(), .{ .custom = "demo" }, "todo.wasm").step);
@@ -199,6 +200,16 @@ fn rocCompiler(b: *std.Build) []const u8 {
     return found;
 }
 
+/// **ROC'S BUILD MODE FOLLOWS ZIG'S**: a Debug build (every test and gate)
+/// takes Roc's dev backend, a release build LLVM. Roc's own default is
+/// `speed`: the chat took 5 min 21 s that way, 0.9 s in dev (2026-10-27).
+/// The kernel's archives (ReleaseSafe) and the wasm demo are always `speed`.
+const RocOpt = enum { dev, speed };
+
+fn rocOpt(optimize: std.lang.Optimize) RocOpt {
+    return if (optimize == .debug) .dev else .speed;
+}
+
 /// The page at `/` and the Roc app, for the module `m` that serves them.
 fn withApp(b: *std.Build, m: *std.Build.Module, app_roc: std.Build.LazyPath) void {
     m.addAnonymousImport("todo_page", .{ .root_source_file = b.path("web/index.html") });
@@ -213,8 +224,8 @@ fn rocTarget(t: std.Target) []const u8 {
 }
 
 /// app/todo.roc built for Roc's target `roc_target`.
-fn rocArchive(b: *std.Build, roc: []const u8, roc_target: []const u8) std.Build.LazyPath {
-    return appArchive(b, roc, "todo", &.{ "app/todo.roc", "platform/main.roc", "platform/File.roc", "platform/Http.roc" }, roc_target);
+fn rocArchive(b: *std.Build, roc: []const u8, roc_target: []const u8, opt: RocOpt) std.Build.LazyPath {
+    return appArchive(b, roc, "todo", &.{ "app/todo.roc", "platform/main.roc", "platform/File.roc", "platform/Http.roc" }, roc_target, opt);
 }
 
 /// The pure modules' twin app (chat/twin.roc, on chat/twin/platform/).
@@ -251,8 +262,8 @@ fn chatModules(b: *std.Build, own: []const []const u8) []const []const u8 {
 
 /// The Roc app `inputs[0]` (its other files the rest of `inputs`) built for
 /// Roc's target `roc_target`, as `<name>-<target>.a`.
-fn appArchive(b: *std.Build, roc: []const u8, name: []const u8, inputs: []const []const u8, roc_target: []const u8) std.Build.LazyPath {
-    const run = b.addSystemCommand(&.{ roc, "build", inputs[0], b.fmt("--target={s}", .{roc_target}) });
+fn appArchive(b: *std.Build, roc: []const u8, name: []const u8, inputs: []const []const u8, roc_target: []const u8, opt: RocOpt) std.Build.LazyPath {
+    const run = b.addSystemCommand(&.{ roc, "build", inputs[0], b.fmt("--target={s}", .{roc_target}), b.fmt("--opt={t}", .{opt}) });
     run.setCwd(b.path("."));
     for (inputs) |f| run.addFileInput(b.path(f));
     // The compiler too: a new Roc builds the archive again.

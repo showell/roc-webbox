@@ -52,14 +52,18 @@
 -- A step's output kept to its last lines, enough for a compile error's
 -- context or a failed twin's diff.
 const tail_lines_kept = 40
--- A cold build of the router's tests takes minutes; a warm one seconds.
-const part_ms = 1800000
+-- A part past this is stuck (a cache lock, a hung build), not slow: a quick
+-- gate fails loud rather than wait.
+const part_ms = 600000
 const results = {}
-const started = now()
+-- The parts' times so far (`now()` is fixed for the run).
+const clock = {ms = 0}
 
 -- `path`'s folder: what comes before its last `/`.
 function folder_of(path)
   local i = #path
+  -- `real(".")` keeps its `/.`, which names this folder, not a parent.
+  if sub(path, i - 1, i) == "/." then i = i - 2 end
   while i > 0 and sub(path, i, i) ~= "/" do i = i - 1 end
   if i <= 1 then fail("quick gate: " .. path .. " has no folder above it") end
   return sub(path, 1, i - 1)
@@ -72,25 +76,26 @@ end
 
 -- One part: `argv` run (from the root unless `opts.cwd`), timed; its
 -- result recorded, or the gate stopped with its output's tail.
-function part(name, argv, opts)
-  local t0 = now()
+function part(name, argv, opts?)
   local o = {tail = tail_lines_kept, timeout_ms = part_ms}
   if opts ~= nil and opts.cwd ~= nil then o.cwd = opts.cwd end
   local r = run(argv, o)
-  local secs = now() - t0
+  -- `now()` is the run's start, fixed: a part's time is `run`'s own `ms`.
+  local secs = r.ms // 1000
+  clock.ms = clock.ms + r.ms
   if r.ended == "exit" and r.code == 0 then
     push(results, "  ok    " .. name .. " (" .. tostring(secs) .. " s)")
     return r
   end
   local how = "was ended by a signal"
   if r.ended == "exit" then how = "exited " .. tostring(r.code) end
-  if r.ended == "timeout" then how = "timed out after " .. tostring(part_ms / 1000) .. " s" end
+  if r.ended == "timeout" then how = "timed out after " .. tostring(part_ms // 1000) .. " s" end
   push(results, "  FAIL  " .. name .. " (" .. tostring(secs) .. " s): `" .. join(argv, " ") .. "` " .. how)
   print("── " .. name .. ", its last " .. tostring(tail_lines_kept) .. " lines:")
   print(r.out)
   print("── the quick gate:")
   report()
-  fail("FAIL: the Roc chat's quick gate, at " .. name .. ", " .. tostring(now() - started) .. " s")
+  fail("FAIL: the Roc chat's quick gate, at " .. name .. ", " .. tostring(clock.ms // 1000) .. " s")
 end
 
 -- Where both worktrees are, and what each holds.
@@ -119,4 +124,4 @@ part("angry-gopher zig build test", {"zig", "build", "test", "--summary", "failu
 
 print("── the quick gate:")
 report()
-print("PASS: the Roc chat's quick gate, " .. tostring(now() - started) .. " s")
+print("PASS: the Roc chat's quick gate, " .. tostring(clock.ms // 1000) .. " s")
