@@ -53,24 +53,16 @@ ZigText := [].{
 	## literals have no escape for either.
 	escaped : U8 -> List(U8)
 	escaped = |c|
-		if c == '"' {
-			['\\', '"']
-		} else if c == '\\' {
-			['\\', '\\']
-		} else if c == 8 {
-			['\\', 'b']
-		} else if c == 12 {
-			['\\', 'f']
-		} else if c == '\n' {
-			['\\', 'n']
-		} else if c == '\r' {
-			['\\', 'r']
-		} else if c == '\t' {
-			['\\', 't']
-		} else if c < 0x20 {
-			List.concat(Str.to_utf8("\\u00"), [hex(c // 16), hex(c % 16)])
-		} else {
-			[c]
+		match c {
+			'"' => ['\\', '"']
+			'\\' => ['\\', '\\']
+			8 => ['\\', 'b']
+			12 => ['\\', 'f']
+			'\n' => ['\\', 'n']
+			'\r' => ['\\', 'r']
+			'\t' => ['\\', 't']
+			_ if c < 0x20 => List.concat(Str.to_utf8("\\u00"), [hex(c // 16), hex(c % 16)])
+			_ => [c]
 		}
 
 	hex : U8 -> U8
