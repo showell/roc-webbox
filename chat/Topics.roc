@@ -3,6 +3,7 @@
 ## announced in, the conversations JSON and the new topic's answer.
 import JsonText
 import Paths
+import Uid
 import ZigText
 
 Topics := [].{
@@ -35,20 +36,20 @@ Topics := [].{
 
 	## One DM in /chat/conversations: its pair, the partner, where the member
 	## resumes it, and its topics.
-	Entry : { conv : List(U8), id : List(U8), name : List(U8), default : List(U8), sessions : List(List(U8)) }
+	Entry : { conv : Paths.PairKey, id : Uid, name : List(U8), default : List(U8), sessions : List(Str) }
 
 	## chatConversations' JSON: the member, then a DM with every other.
-	# TEMPORARY DOOR: moves out in a later run.
-	conversations_json : List(U8), List(Entry) -> List(U8)
+	# TEMPORARY DOOR: moves out in a later run (a name and a bookmark, still bytes).
+	conversations_json : Uid, List(Entry) -> List(U8)
 	conversations_json = |me, entries| {
 		one = |e|
 			JsonText.obj([
-				("conv", JsonText.str_at_door(e.conv)),
-				("partner", JsonText.obj([("id", JsonText.str_at_door(e.id)), ("name", JsonText.str_at_door(e.name))])),
+				("conv", JsonText.str(Paths.pair_key_to_str(e.conv))),
+				("partner", JsonText.obj([("id", JsonText.str(e.id.to_str())), ("name", JsonText.str_at_door(e.name))])),
 				("default", JsonText.str_at_door(e.default)),
-				("sessions", JsonText.arr(List.map(e.sessions, JsonText.str_at_door))),
+				("sessions", JsonText.arr(List.map(e.sessions, JsonText.str))),
 			])
-		JsonText.obj([("me", JsonText.str_at_door(me)), ("conversations", JsonText.arr(List.map(entries, one)))])
+		JsonText.obj([("me", JsonText.str(me.to_str())), ("conversations", JsonText.arr(List.map(entries, one)))])
 	}
 
 	## newTopic's answer: the conversation and the topic made.

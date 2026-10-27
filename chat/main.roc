@@ -744,7 +744,7 @@ resume_at! = |me, pair, topics| {
 conversations! : {} => Chat.Answer
 conversations! = |{}|
 	match (roster!({}), me!({})) {
-		(Ok(members), Ok(me)) => Chat.respond(200, json, Topics.conversations_json(me.to_str().to_utf8(), entries!(me, members, 0, [])))
+		(Ok(members), Ok(me)) => Chat.respond(200, json, Topics.conversations_json(me, entries!(me, members, 0, [])))
 		(Err(Failed), _) | (Ok(_), Err(Failed)) => Chat.answered
 	}
 
@@ -766,11 +766,9 @@ entries! = |me, members, i, acc|
 				entries!(me, members, i + 1, acc)
 			} else {
 				pair = Paths.pair_key(me, id)
-				conv = Paths.pair_key_bytes(pair)
 				listed = topics!(Dm(pair))
-				sessions = List.map(listed, Str.to_utf8)
 				default = resume_at!(me, pair, listed)
-				entries!(me, members, i + 1, List.append(acc, { conv, id: id.to_str().to_utf8(), name, default, sessions }))
+				entries!(me, members, i + 1, List.append(acc, { conv: pair, id, name, default, sessions: listed }))
 			}
 		Err(_) => acc
 	}
