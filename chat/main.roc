@@ -798,7 +798,7 @@ make! = |route, conv, who, topic|
 				# The bookmark first, as a send's: one that fails makes no topic.
 				if dm and !bookmark!(conv, topic) {
 					Chat.answered
-				} else if !appended!(conv, who, topic, name, Str.to_utf8("hi"), []) {
+				} else if !appended!(conv, who, { sid: topic, name, markdown: Str.to_utf8("hi"), cid: [] }) {
 					Chat.answered
 				} else if dm and !announce!(route, conv, who, topic, name) {
 					Chat.answered
@@ -815,7 +815,7 @@ announce! : Route.R, Chat.Conv, Who, List(U8), List(U8) => Bool
 announce! = |route, conv, who, topic, name|
 	match Topics.highest_general(topics!(route.family, route.key)) {
 		Ok(gen) if gen != topic =>
-			appended!(conv, who, gen, name, List.join([Str.to_utf8("New topic: ["), topic, Str.to_utf8("]("), conv.base, ['/'], topic, Str.to_utf8(")")]), [])
+			appended!(conv, who, { sid: gen, name, markdown: List.join([Str.to_utf8("New topic: ["), topic, Str.to_utf8("]("), conv.base, ['/'], topic, Str.to_utf8(")")]), cid: [] })
 		_ => Bool.True
 	}
 
@@ -884,7 +884,7 @@ store! = |route, conv, who, send, md, cid|
 			Ok(name) =>
 				if conv.family == Dm and !bookmark!(conv, route.sid) {
 					Chat.answered
-				} else if !appended!(conv, who, route.sid, name, md, cid) {
+				} else if !appended!(conv, who, { sid: route.sid, name, markdown: md, cid }) {
 					Chat.answered
 				} else if send == Async {
 					Chat.respond(204, [], [])
@@ -893,6 +893,11 @@ store! = |route, conv, who, send, md, cid|
 				}
 		}
 	}
+
+## A message not yet stored: its topic's `sid`, its author's `name`, its
+## `markdown`, and the sender's client id `cid`. Named fields because all
+## four are byte lists: in a row of arguments, a swapped pair type-checks.
+Draft : { sid : List(U8), name : List(U8), markdown : List(U8), cid : List(U8) }
 
 ## **A MESSAGE STORED, THEN SENT LIVE** (angry-gopher chat_store
 ## `appendMessage`, its comments the spec): by the member, named `name`, to
@@ -905,8 +910,8 @@ store! = |route, conv, who, send, md, cid|
 ## made before the store too). `who` holds a DM's accounts (the fan-out
 ## names the other member). False when a step before the store failed (the
 ## request has, with its error), and nothing was stored.
-appended! : Chat.Conv, Who, List(U8), List(U8), List(U8), List(U8) => Bool
-appended! = |conv, who, sid, name, md, cid|
+appended! : Chat.Conv, Who, Draft => Bool
+appended! = |conv, who, { sid, name, markdown: md, cid }|
 	# **NO MESSAGE WITHOUT AN AUTHOR** (the review of 156): the decoder
 	# refuses such a block on every read, so it would go out live and be
 	# gone on reload. A nameless member (a release cut short) cannot post.
