@@ -123,7 +123,11 @@ call = |req| {
 		29 => [bool(Reaction.valid_emoji(arg(0)))]
 		30 => [Html.bytes(Chrome.page({ tab: Html.host_markup(arg(0)), title: arg(1), viewer: arg(2), active: arg(3), src: srcs(req.args, 5) }, Html.host_markup(arg(4))))]
 		31 => [Html.bytes(Pages.not_found(srcs(req.args, 3), { viewer: arg(0), what: arg(1), back: arg(2) }))]
-		32 => [Html.bytes(Pages.no_topics(srcs(req.args, 3), { viewer: arg(0), base: arg(1), title: arg(2) }))]
+		32 =>
+			match Str.from_utf8(arg(1)) {
+				Ok(base) => [Html.bytes(Pages.no_topics(srcs(req.args, 3), { viewer: arg(0), base, title: arg(2) }))]
+				Err(_) => []
+			}
 		33 => [Html.bytes(Pages.no_conversations(srcs(req.args, 1), arg(0)))]
 		34 =>
 			match Pages.decode_sidebar(req.args) {

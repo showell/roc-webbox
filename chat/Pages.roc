@@ -33,7 +33,7 @@ Pages := [].{
 
 	## A conversation with no topics yet: the `viewer`, its URL `base`, and
 	## its `title`.
-	Topicless : { viewer : List(U8), base : List(U8), title : List(U8) }
+	Topicless : { viewer : List(U8), base : Str, title : List(U8) }
 
 	## noTopicsHtml: an addressable conversation with no topics, its
 	## first-topic widget mounted on `base`.
@@ -44,7 +44,7 @@ Pages := [].{
 			s,
 			Html.join([
 				Html.trusted("<div id=\"chat-first-topic\" data-conv-base=\""),
-				Html.escape(base),
+				Html.text(base),
 				Html.trusted("\"></div>"),
 				Chrome.script(s, "chat_add_topic.js"),
 				Chrome.script(s, "chat_first_topic.js"),

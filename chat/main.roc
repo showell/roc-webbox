@@ -621,7 +621,7 @@ landing! = |route, key|
 					Err(Failed) => Chat.answered
 					Ok(title) =>
 						match viewer!(who) {
-							Ok(viewer) => Chat.respond(200, html, Html.bytes(Pages.no_topics(Chrome.src_in(Host.srcs!({})), { viewer, base: conv.base, title })))
+							Ok(viewer) => Chat.respond(200, html, Html.bytes(Pages.no_topics(Chrome.src_in(Host.srcs!({})), { viewer, base: Paths.conv_base(key), title })))
 							Err(Failed) => Chat.answered
 						}
 				}
