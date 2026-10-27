@@ -18,7 +18,7 @@
 ## through `store_message!` (the append, the count cache, the search index),
 ## and its fan-out (Fanout.roc: every member's surfaces, their keys, events
 ## and feed entries) through `publish!`, `append_entry!` and
-## `fanout_failed!` over the host's `message_parts!`. The files and folders it reads by name (the member's own, a
+## `fanout_failed!`, the message's parts its own (Fanout.parts_of). The files and folders it reads by name (the member's own, a
 ## conversation's topics, a channel's members, the rosters, a topic's
 ## reactions) it reads through the file primitives, the names and formats
 ## its own.
@@ -970,7 +970,7 @@ appended! = |conv, who, { at: topic_at, name, markdown: md, cid }|
 						match named {
 							Err(Failed) => Bool.False
 							Ok(all) => {
-								steps = Fanout.steps({ key: topic_at.key, members: conv.members, topic, index, id, from: name, at: message.at, uid, accounts: all }, parts!(md))
+								steps = Fanout.steps({ key: topic_at.key, members: conv.members, topic, index, id, from: name, at: message.at, uid, accounts: all }, Fanout.parts_of(md))
 								if Host.store_message!(conv, topic, block, index, message) {
 									# **STORED IS DONE** (metal-vmm QUEUE 172): from
 									# here nothing fails the send, which a client
@@ -991,27 +991,6 @@ appended! = |conv, who, { at: topic_at, name, markdown: md, cid }|
 		}
 	}
 
-## The message's parts as the host found them (Host.message_parts!), each
-## made or failed on its own.
-parts! : List(U8) => Fanout.Parts
-parts! = |md| {
-	got = Host.message_parts!(md)
-	{
-		excerpt: match got.excerpt.status {
-			Made => Made(got.excerpt.bytes)
-			Failed => Failed(got.excerpt.fault)
-		},
-		images: match got.images.status {
-			Made => Made(got.images.tags)
-			Failed => Failed(got.images.fault)
-		},
-		code: match got.code.status {
-			Made => Made(got.code.blocks)
-			Failed => Failed(got.code.fault)
-		},
-	}
-}
-
 ## **THE FAN-OUT, CARRIED OUT IN ITS ORDER** (Fanout.steps): each publish
 ## sent; each feed's entry appended and only then its event sent; each
 ## surface that failed for a member counted and said (`fanout_failed!`),
@@ -1031,7 +1010,6 @@ fanned! = |at, steps|
 						Failed => Host.fanout_failed!(f.surface, f.member, Paths.conv_key_bytes(at.key), at.topic, got.fault)
 					}
 				}
-				Failed(surface, member, fault) => Host.fanout_failed!(surface, member, Paths.conv_key_bytes(at.key), at.topic, fault)
 			}
 			fanned!(at, rest)
 		}

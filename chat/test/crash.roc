@@ -6,8 +6,7 @@
 ## `/remove/<path>`, `/list/<path>`, `/append/<path>`), as the chat's own
 ## Roc never would, so the seam's check of each is seen; it publishes
 ## (`/publish/<key>`), counts (`/count/<topic>`), renders (`/render/<md>`),
-## stores a message (`/store/<topic>`), asks its parts (`/parts/<md>`),
-## appends a feed's entry and says one that failed (`/entry/<path>`), and asks
+## stores a message (`/store/<topic>`), appends a feed's entry and says one that failed (`/entry/<path>`), and asks
 ## `fail!` (`/fail/<reason>/<whose>`),
 ## `malformed_channel!` (`/malformed/<name>`), `accounts!` (`/accounts`),
 ## `online!` (`/online/<id>,<id>`) and `limits!` (`/limits`). Never linked
@@ -53,23 +52,6 @@ handle! = |req|
 		# Message 9 of DM 1_2's topic `<topic>`: every field of the message a
 		# different string, so a record laid out wrong shows.
 		Chat.respond(200, [], done(Host.store_message!(dm12, List.drop_first(req.sub, 7), Str.to_utf8("the block"), 8, probe_message)))
-	} else if starts(req.sub, "/parts/") {
-		# Each part as `<status>:<fault>:<its bytes>`, so a record laid out
-		# wrong, or a fault that crossed wrong, shows.
-		got = Host.message_parts!(List.drop_first(req.sub, 7))
-		said = |status, fault, bytes| List.join([
-			Str.to_utf8(
-				match status {
-					Made => "made:"
-					Failed => "failed:"
-				},
-			),
-			Str.to_utf8(U16.to_str(fault)),
-			[58],
-			bytes,
-		])
-		blocks = List.join(List.map(got.code.blocks, |b| List.join([b.lang, [61], b.body, [44]])))
-		Chat.respond(200, [], List.join([said(got.excerpt.status, got.excerpt.fault, got.excerpt.bytes), [32], said(got.images.status, got.images.fault, List.join(List.intersperse(got.images.tags, [44]))), [32], said(got.code.status, got.code.fault, blocks)]))
 	} else if starts(req.sub, "/entry/") {
 		# An entry appended to `<path>`; one that failed is said for member 2
 		# on 1_2/Plans with the fault it answered, the request never failed.

@@ -144,14 +144,6 @@ Host := [].{
 	## the Roc never reads, carried to `fanout_failed!` to be counted and
 	## said; a member's other surfaces, and every other member's, go on.
 
-	## **A MESSAGE'S PARTS, AS THE ONE MARKDOWN READER FINDS THEM**
-	## (angry-gopher recent_feed `recentExcerpt`, images_store
-	## `extractImageTags`, code_store `extractCodeBlocks`): the Recent feed's
-	## excerpt, every `<img>` tag, every fenced block that is not a quote.
-	## **EACH PART IS MADE OR FAILS ON ITS OWN** (`Failed` with its fault):
-	## never an empty part for one that failed.
-	message_parts! : List(U8) => { code : { blocks : List({ body : List(U8), lang : List(U8) }), fault : U16, status : [Failed, Made] }, excerpt : { bytes : List(U8), fault : U16, status : [Failed, Made] }, images : { fault : U16, status : [Failed, Made], tags : List(List(U8)) } }
-
 	## **A FEED'S ENTRY APPENDED** to the file at `path` under the chat root
 	## (checked as `read!`'s is, but a path outside it is this append's
 	## failure, never the request's), its folders made: `separator` and

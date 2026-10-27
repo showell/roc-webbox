@@ -50,7 +50,6 @@ const Files = struct {
         h.message_count = count;
         h.render = render;
         h.store_message = storeMessage;
-        h.message_parts = parts;
         h.append_entry = appendEntry;
         h.fanout_failed = fanoutFailed;
         h.online = online;
@@ -66,13 +65,6 @@ const Files = struct {
     fn limits(ctx: *anyopaque) abi.Limits {
         say(ctx, "limits", "");
         return .{ .image_max = 10485760, .video_max = 104857600, .accept = "image/*,video/mp4", .search_min = 2 };
-    }
-    /// `boom` makes no part, each failing with its own error; anything else
-    /// makes each, every field its own bytes.
-    fn parts(ctx: *anyopaque, md: []const u8) abi.Parts {
-        say(ctx, "parts", md);
-        if (std.mem.eql(u8, md, "boom")) return .{ .excerpt = .{ .failed = error.OutOfMemory }, .images = .{ .failed = error.IsDir }, .code = .{ .failed = error.NoSpaceLeft } };
-        return .{ .excerpt = .{ .made = "the excerpt" }, .images = .{ .made = &.{ "<img a>", "<img b>" } }, .code = .{ .made = &.{ .{ .lang = "zig", .body = "x" }, .{ .lang = "", .body = "y" } } } };
     }
     /// `users/2/images.md` will not take an entry; any other path does.
     /// **NEVER THE REQUEST'S FAILURE**: the error goes back, not to `fail`.
@@ -220,18 +212,11 @@ test "a line appended: a path that would leave the root fails the request at the
     try probe("/publish/1_2/Plans", "published", "publish 1_2/Plans event: reaction\\ndata: x\\n\\n;", null);
 }
 
-test "the fan-out's primitives cross the seam and never fail the request: each part made or failed on its own, its error carried back as the host's; a feed's entry appended or failed, that failure said; a feed's path outside the root the append's failure, the host never asked" {
+test "the fan-out's primitives cross the seam and never fail the request: a feed's entry appended or failed, that failure said; a feed's path outside the root the append's failure, the host never asked" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     roc.use(arena.allocator());
     defer roc.deinit();
-    const fault = struct {
-        fn of(comptime e: anyerror) []const u8 {
-            return std.fmt.comptimePrint("{d}", .{@intFromError(e)});
-        }
-    }.of;
-    try probe("/parts/hi", "made:0:the excerpt made:0:<img a>,<img b> made:0:zig=x,=y,", "parts hi;", null);
-    try probe("/parts/boom", "failed:" ++ comptime fault(error.OutOfMemory) ++ ": failed:" ++ fault(error.IsDir) ++ ": failed:" ++ fault(error.NoSpaceLeft) ++ ":", "parts boom;", null);
     try probe("/entry/users/1/images.md", "appended", "append_entry users/1/images.md -- the entry;", null);
     try probe("/entry/users/2/images.md", "said", "append_entry users/2/images.md -- the entry;fanout_failed images 2 1_2 Plans IsDir;", null);
     for ([_][]const u8{ "/entry/../x", "/entry//etc/passwd", "/entry/users/../../x" }) |sub|

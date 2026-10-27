@@ -2,8 +2,8 @@
 ## (angry-gopher chat_fanout `fanoutCrossPage`, `Fan`): who gets which of
 ## the five surfaces, on which key, as which bytes, and which feed files
 ## take an entry, as the steps chat/main.roc carries out after the store.
-## Pure: the markdown's parts are the host's (Host.message_parts!, the one
-## markdown reader), everything else is this module's. angry-gopher's
+## Pure: the markdown's parts are Recent's and Feeds' (`parts_of`), everything
+## else is this module's. angry-gopher's
 ## chat_twin_test.zig holds each encoder to its Zig, and
 ## chat_actions_twin_test.zig a whole send's frames and files.
 import Feeds
@@ -14,25 +14,27 @@ import Paths
 
 Fanout := [].{
 
-	## The message's parts as the host found them, each made or failed on
-	## its own (its fault: the host's error, a number this module never
-	## reads, carried to be said).
-	Parts : { excerpt : [Made(List(U8)), Failed(U16)], images : [Made(List(List(U8))), Failed(U16)], code : [Made(List(Feeds.Block)), Failed(U16)] }
+	## A message's parts, as its feeds keep them: the Recent row's excerpt,
+	## the `<img>` tags, the code blocks.
+	Parts : { excerpt : List(U8), images : List(List(U8)), code : List(Feeds.Block) }
 
-	## The surfaces that can fail for a member, as /admin/host names them.
+	## The parts of a message's markdown `md` (Recent.excerpt, Feeds.img_tags,
+	## Feeds.code_blocks; the twins hold each to its Zig).
+	parts_of : List(U8) -> Parts
+	parts_of = |md| { excerpt: Recent.excerpt(md), images: Feeds.img_tags(md), code: Feeds.code_blocks(md) }
+
+	## The surfaces that can fail for a member, as /admin/host names them
+	## (Host.fanout_failed!'s; a feed's append is the one that still can).
 	Surface : [Code, Images, Recent]
 
 	## One step of the fan-out, in the order it is taken:
 	## - `Publish`: bytes on a member's key (it cannot fail);
 	## - `Feed`: an entry appended to a member's feed file, and only then
 	##   its event published; an append that failed is that surface's
-	##   failure, counted, and its event never sent;
-	## - `Failed`: a surface that cannot be made for a member (a part that
-	##   failed), counted and said.
+	##   failure, counted, and its event never sent.
 	Step : [
 		Publish(List(U8), List(U8)),
 		Feed({ surface : Surface, member : List(U8), path : Paths.ChatPath, entry : List(U8), key : List(U8), event : List(U8) }),
-		Failed(Surface, List(U8), U16),
 	]
 
 	## A message stored in a conversation (its key and its members), as the
@@ -65,24 +67,18 @@ Fanout := [].{
 						# A topic is added to the sidebar by its first message alone.
 						if m.index == 0 [Publish(sidebar_key(uid), added)] else [],
 						# **EVERY MEMBER SEES THE ROW, THE AUTHOR AS "YOU"**.
-						match parts.excerpt {
-							Made(excerpt) => {
-								who = if uid == m.uid Str.to_utf8("You") else m.from
-								[Publish(recent_key(uid), Recent.chat_event({ at: m.at, url, who, label: recent_where(m, uid), topic: m.topic, excerpt, dm: Paths.conv_kind(m.key) }))]
-							}
-							Failed(fault) => [Failed(Recent, uid, fault)]
+						{
+							who = if uid == m.uid Str.to_utf8("You") else m.from
+							[Publish(recent_key(uid), Recent.chat_event({ at: m.at, url, who, label: recent_where(m, uid), topic: m.topic, excerpt: parts.excerpt, dm: Paths.conv_kind(m.key) }))]
 						},
-						# The feeds only when the message has what they keep; a part
-						# that failed fails them whatever it held.
+						# The feeds only when the message has what they keep.
 						match parts.images {
-							Made([]) => []
-							Made(tags) => [Feed({ surface: Images, member: uid, path: Paths.feed_path(uid, Images), entry: Feeds.images_entry(head, tags), key: images_key(uid), event: Feeds.images_event(head, tags) })]
-							Failed(fault) => [Failed(Images, uid, fault)]
+							[] => []
+							tags => [Feed({ surface: Images, member: uid, path: Paths.feed_path(uid, Images), entry: Feeds.images_entry(head, tags), key: images_key(uid), event: Feeds.images_event(head, tags) })]
 						},
 						match parts.code {
-							Made([]) => []
-							Made(blocks) => [Feed({ surface: Code, member: uid, path: Paths.feed_path(uid, Code), entry: Feeds.code_entry(head, blocks), key: code_key(uid), event: Feeds.code_event(head, blocks) })]
-							Failed(fault) => [Failed(Code, uid, fault)]
+							[] => []
+							blocks => [Feed({ surface: Code, member: uid, path: Paths.feed_path(uid, Code), entry: Feeds.code_entry(head, blocks), key: code_key(uid), event: Feeds.code_event(head, blocks) })]
 						},
 					]),
 			),

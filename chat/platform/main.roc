@@ -27,7 +27,6 @@ platform ""
 		"roc_chat_me": Host.me!,
 		"roc_chat_member": Host.member!,
 		"roc_chat_message_count": Host.message_count!,
-		"roc_chat_message_parts": Host.message_parts!,
 		"roc_chat_now": Host.now!,
 		"roc_chat_online": Host.online!,
 		"roc_chat_presence": Host.presence!,
