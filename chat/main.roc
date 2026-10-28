@@ -18,7 +18,7 @@
 ## stored through `store_block!` (the append, the count cache, the search
 ## index), and its fan-out (Fanout.roc: every member's surfaces, their keys,
 ## events and feed entries) through `publish!`, Files' `append_entry!`, each
-## in an aside, and `report_fanout_failure!`, the message's parts its own
+## in an aside, and `count!`, the message's parts its own
 ## (Fanout.parts_of).
 ## The files and folders it reads by name (the member's own, a
 ## conversation's topics, a channel's members, the rosters, a topic's
@@ -637,7 +637,7 @@ load_channel_members! = |name|
 ## **EVERY CHANNEL'S ROSTER** (channelRosters): channels/ listed
 ## (Paths.channel_names), then each member file read and judged in the
 ## listing's order (Paths.roster), a malformed one counted as it is met
-## (Host.count_malformed_channel!), as the Zig counted it, before any read after
+## (`count_malformed!`), as the Zig counted it, before any read after
 ## it can fail. `Failed` when the listing or a member file would not read
 ## (the request has failed with its error): **NEVER THE ROSTERS THAT READ
 ## BEFORE IT**, which would leave the rest out.
@@ -647,16 +647,18 @@ load_channel_rosters! = |{}| {
 		Ok(listed) => {
 			# A channel whose name is not UTF-8 is skipped, and counted as a
 			# malformed one is.
-			List.for_each!(
-				Paths.channel_names_not_utf8(listed.not_utf8),
-				|name| Host.count_malformed_channel!(name),
-			)
+			List.for_each!(Paths.channel_names_not_utf8(listed.not_utf8), count_malformed!)
 			load_rosters_from!(Paths.channel_names(listed.entries), { at: 0, out: [] })
 		}
 		Err(Missing) => Ok([])
 		Err(Failed) => Err(Failed)
 	}
 }
+
+## A channel named `name` skipped as malformed, counted for the operator as
+## `#<name>`.
+count_malformed! : List(U8) => {}
+count_malformed! = |name| Host.count!(MalformedChannel, List.concat(['#'], name))
 
 load_rosters_from! : List(Str),
 {
@@ -683,7 +685,7 @@ load_rosters_from! = |names, { at: i, out }|
 							{ at: i + 1, out: List.append(out, r) },
 						)
 						Malformed => {
-							Host.count_malformed_channel!(name.to_utf8())
+							count_malformed!(name.to_utf8())
 							load_rosters_from!(names, { at: i + 1, out })
 						}
 						Gone => load_rosters_from!(names, { at: i + 1, out })
@@ -691,7 +693,7 @@ load_rosters_from! = |names, { at: i, out }|
 					}
 				}
 				Err(Invalid) => {
-					Host.count_malformed_channel!(name.to_utf8())
+					count_malformed!(name.to_utf8())
 					load_rosters_from!(names, { at: i + 1, out })
 				}
 			}
@@ -939,7 +941,7 @@ serve_recent! = |rest, accounts|
 				# text is not UTF-8 (a torn last block) is left out and
 				# counted, and the page served with the rest.
 				got = Recent.rows_of(written)
-				List.for_each!(got.damaged, |key| Host.count_dropped!(RecentRow, key))
+				List.for_each!(got.damaged, |key| Host.count!(DroppedRecentRow, key))
 				Chat.respond(
 					200,
 					{
@@ -1048,8 +1050,8 @@ gather_convs! = |
 					Err(Unreadable) => {
 						List.for_each!(
 							topics,
-							|topic| Host.count_dropped!(
-								RecentRow,
+							|topic| Host.count!(
+								DroppedRecentRow,
 								Str.to_utf8("${conv.key.base()}/${topic}"),
 							),
 						)
@@ -1113,7 +1115,7 @@ gather_topics! = |
 								},
 							])
 							(Ok(_), Err(Unreadable)) => {
-								Host.count_dropped!(RecentRow, row.key)
+								Host.count!(DroppedRecentRow, row.key)
 								Ok([])
 							}
 							(Err(NotADate), _) => by_file_time!(Paths.transcript_path(at), row)
@@ -1239,7 +1241,7 @@ serve_feed! = |which, { rest, accounts }|
 						)
 					}
 				}
-				if damaged > 0 Host.count_dropped!(FeedEntry, path.bytes()) else {}
+				if damaged > 0 Host.count!(DroppedFeedEntry, path.bytes()) else {}
 				Chat.respond(200, { content_type: html, body: page.bytes() })
 			}
 		}
@@ -1868,7 +1870,7 @@ make_topic! = |
 						)
 						match Host.mark_aside!(End).status {
 							Done => {}
-							Failed => Host.count_dropped!(Announcement, topic.to_utf8())
+							Failed => Host.count!(DroppedAnnouncement, topic.to_utf8())
 						}
 					} else {
 						{}
@@ -2557,7 +2559,8 @@ store_block! = |
 
 ## **THE FAN-OUT, CARRIED OUT IN ITS ORDER** (Fanout.steps): each publish
 ## sent; each feed's entry appended and only then its event sent; each
-## surface that failed for a member counted and said (`report_fanout_failure!`),
+## surface that failed for a member counted and said (`count!`, in
+## Fanout.failure's words),
 ## on the topic `at`. **A FAILURE NEVER STOPS
 ## THE STEPS AFTER IT, NOR FAILS THE SEND.**
 fan_out! : Paths.TopicAt, List(Fanout.Step) => {}
@@ -2580,14 +2583,17 @@ fan_out! = |at, steps|
 							ended = Host.mark_aside!(End)
 							match ended.status {
 								Done => Host.publish!(f.key.bytes(), f.event)
-								Failed => Host.report_fanout_failure!(
-									f.surface,
-									{
-										member: f.member,
-										key: at.key.bytes(),
-										sid: at.topic.to_utf8(),
-										fault: ended.fault,
-									},
+								Failed => Host.count!(
+									FanoutFailure,
+									Fanout.failure(
+										f.surface,
+										{
+											member: f.member,
+											key: at.key.bytes(),
+											sid: at.topic.to_utf8(),
+											fault: Host.name_fault!(ended.fault),
+										},
+									),
 								)
 							}
 						}

@@ -129,10 +129,6 @@ pub const AppendedRec = extern struct { size: u64, status: route_mod.AppendStatu
 /// Host.roc's `index_message!` record (metal-vmm QUEUE 297): `{ sid :
 /// List(U8), message : Chat.Message }`, by name.
 pub const IndexMessageArgs = extern struct { message: MessageRec, sid: RocBytes };
-/// Host.roc's `report_fanout_failure!` record (metal-vmm QUEUE 297):
-/// `{ member, key, sid : List(U8), fault : U16 }`, the bytes by name, the
-/// fault last.
-pub const FanoutFailureArgs = extern struct { key: RocBytes, member: RocBytes, sid: RocBytes, fault: u16 };
 /// Host.roc's `serve_upload!` record (metal-vmm QUEUE 291): `{ first, last,
 /// size : U64, content_type, path : List(U8), part : [Range, Unsatisfiable,
 /// Whole] }`, the numbers first, the bytes by name, the tag last.
@@ -279,7 +275,6 @@ comptime {
     std.debug.assert(@offsetOf(IdentityRec, "uid") == 0 and @offsetOf(IdentityRec, "status") == 3 * w and @sizeOf(IdentityRec) == 4 * w);
     // The hosted effects' argument records (metal-vmm QUEUE 297).
     std.debug.assert(@offsetOf(IndexMessageArgs, "message") == 0 and @offsetOf(IndexMessageArgs, "sid") == 15 * w and @sizeOf(IndexMessageArgs) == 18 * w);
-    std.debug.assert(@offsetOf(FanoutFailureArgs, "key") == 0 and @offsetOf(FanoutFailureArgs, "member") == 3 * w and @offsetOf(FanoutFailureArgs, "sid") == 6 * w and @offsetOf(FanoutFailureArgs, "fault") == 9 * w and @sizeOf(FanoutFailureArgs) == 10 * w);
     // retire_asked!'s (metal-vmm QUEUE 293).
     std.debug.assert(@offsetOf(RetireAskedRec, "days") == 0 and @offsetOf(RetireAskedRec, "now") == 8 and @offsetOf(RetireAskedRec, "keep") == 16 and @sizeOf(RetireAskedRec) == 16 + 3 * w);
     // serve_upload!'s (metal-vmm QUEUE 291): three numbers, two lists, a tag.
@@ -587,20 +582,13 @@ pub const Host = struct {
     /// as bytes that are not UTF-8, which the Roc refuses at its door. The
     /// host fails the request (error.NotUtf8), saying the path.
     fail_text: *const fn (ctx: *anyopaque, path: []const u8) void = noFailText,
-    /// Host.count_malformed_channel!: channel `name`'s member file skipped by a
-    /// listing as malformed, counted for the operator.
-    count_malformed_channel: *const fn (ctx: *anyopaque, name: []const u8) void = noMalformed,
-    /// Host.count_refused_block!: a transcript block the Roc's decoder
-    /// refused (`first`, its first line), counted for the operator.
-    count_refused_block: *const fn (ctx: *anyopaque, first: []const u8) void = noRefusedBlock,
-    /// Host.count_dropped!: something the chat dropped rather than fail the
-    /// request for (`what`, about `whose`: a topic, a feed's path, a recent
-    /// row's key), counted for the operator.
-    count_dropped: *const fn (
+    /// Host.count!: `kind` counted once more for the operator, `text` the
+    /// Roc's words for this one, kept as the last one's.
+    count: *const fn (
         ctx: *anyopaque,
-        what: route_mod.Dropped,
-        whose: []const u8,
-    ) void = noDropped,
+        kind: route_mod.CountKind,
+        text: []const u8,
+    ) void = noCount,
     /// Host.aside!: from `begin` to `end`, a failure is the aside's, kept
     /// apart and answered at `end` (its error, which the seam hands the Roc
     /// as a fault), never the request's; after one, the aside's later calls
@@ -669,17 +657,6 @@ pub const Host = struct {
         path: []const u8,
         bytes: []const u8,
     ) void = noWriteCache,
-    /// Host.report_fanout_failure!: `surface` failed for `member` with `e`, on
-    /// topic `sid` of the conversation keyed `key`: counted and said, the
-    /// operator's (/admin/host). **NEVER THE REQUEST'S FAILURE.**
-    report_fanout_failure: *const fn (
-        ctx: *anyopaque,
-        surface: route_mod.Surface,
-        member: []const u8,
-        key: []const u8,
-        sid: []const u8,
-        e: anyerror,
-    ) void = noFanoutFailed,
     /// Host.read_header!: a request header's value, or none.
     read_header: *const fn (ctx: *anyopaque, name: []const u8) []const []const u8 = noHeader,
     /// Host.check_hostile!: `refusal` what a refusal says.
@@ -819,18 +796,8 @@ fn noFail(_: *anyopaque, e: anyerror) void {
 fn noFailText(_: *anyopaque, path: []const u8) void {
     std.debug.panic("a host that cannot fail a request was asked to, for {s}, not UTF-8", .{path});
 }
-fn noMalformed(_: *anyopaque, _: []const u8) void {
-    @panic("count_malformed_channel asked of a host that does not answer it");
-}
-fn noRefusedBlock(_: *anyopaque, _: []const u8) void {
-    @panic("count_refused_block asked of a host that does not answer it");
-}
-fn noDropped(
-    _: *anyopaque,
-    _: route_mod.Dropped,
-    _: []const u8,
-) void {
-    @panic("count_dropped asked of a host that does not answer it");
+fn noCount(_: *anyopaque, _: route_mod.CountKind, _: []const u8) void {
+    @panic("count asked of a host that does not answer it");
 }
 fn noAside(_: *anyopaque, _: route_mod.Aside) AsideOutcome {
     @panic("aside asked of a host that does not answer it");
@@ -879,16 +846,6 @@ fn noIndexMessage(_: *anyopaque, _: []const u8, _: []const u8, _: Message) void 
 }
 fn noWriteCache(_: *anyopaque, _: []const u8, _: []const u8) void {
     @panic("write_cache asked of a host that does not answer it");
-}
-fn noFanoutFailed(
-    _: *anyopaque,
-    _: route_mod.Surface,
-    _: []const u8,
-    _: []const u8,
-    _: []const u8,
-    _: anyerror,
-) void {
-    @panic("report_fanout_failure asked of a host that does not answer it");
 }
 
 fn noAdmit(_: *anyopaque) route_mod.Admission {
@@ -1292,23 +1249,9 @@ pub export fn roc_chat_fail(reason: route_mod.FailReason, whose: RocBytes) callc
     }
 }
 
-pub export fn roc_chat_count_malformed_channel(name: RocBytes) callconv(.c) void {
-    const h = current("count_malformed_channel");
-    h.count_malformed_channel(h.ctx, name.slice());
-}
-
-pub export fn roc_chat_count_refused_block(first: RocBytes) callconv(.c) void {
-    const h = current("count_refused_block");
-    h.count_refused_block(h.ctx, first.slice());
-}
-
-pub export fn roc_chat_count_dropped(what: route_mod.Dropped, whose: RocBytes) callconv(.c) void {
-    const h = current("count_dropped");
-    h.count_dropped(
-        h.ctx,
-        what,
-        whose.slice(),
-    );
+pub export fn roc_chat_count(kind: route_mod.CountKind, text: RocBytes) callconv(.c) void {
+    const h = current("count");
+    h.count(h.ctx, kind, text.slice());
 }
 
 pub export fn roc_chat_mark_aside(which: route_mod.Aside) callconv(.c) AsideRec {
@@ -1476,25 +1419,17 @@ fn onePart(name: []const u8) bool {
     ) == null;
 }
 
-pub export fn roc_chat_report_fanout_failure(surface: route_mod.Surface, args: FanoutFailureArgs) callconv(.c) void {
-    const member = args.member;
-    const key = args.key;
-    const sid = args.sid;
-    const fault = args.fault;
-    comptime if (@typeInfo(route_mod.Surface).@"enum".field_names.len < 2)
-        @compileError("Host.report_fanout_failure!'s surface of one tag crosses as nothing: roc_chat_report_fanout_failure must not take it");
-    const h = current("report_fanout_failure");
+/// Host.name_fault!: the error a fault names, by its name, answered by the
+/// seam alone (no host keeps anything for it).
+pub export fn roc_chat_name_fault(fault: u16) callconv(.c) RocBytes {
+    const h = current("name_fault");
     // A fault the seam never handed out is the Roc's bug: the request's
     // failure, never illegal behaviour here (metal-vmm QUEUE 268).
-    const e = errorOf(fault) orelse return h.fail(h.ctx, error.FaultNotIssued);
-    h.report_fanout_failure(
-        h.ctx,
-        surface,
-        member.slice(),
-        key.slice(),
-        sid.slice(),
-        e,
-    );
+    const e = errorOf(fault) orelse {
+        h.fail(h.ctx, error.FaultNotIssued);
+        return .from("");
+    };
+    return .from(@errorName(e));
 }
 
 pub export fn roc_chat_read_header(name: RocBytes) callconv(.c) roc.RocBytesList {

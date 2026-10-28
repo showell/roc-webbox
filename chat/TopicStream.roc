@@ -42,7 +42,7 @@ backlog! = |at| {
 		Err(Failed) => Err(Failed)
 	}?
 	decoded = Transcript.decode_blocks(raw)
-	List.for_each!(decoded.refused, Host.count_refused_block!)
+	List.for_each!(decoded.refused, |first| Host.count!(RefusedBlock, first))
 	rest = Backlog.from(decoded.blocks, { topic: at.topic.to_utf8(), since })
 	frames = List.map_try!(
 		rest,

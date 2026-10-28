@@ -58,7 +58,7 @@ const Files = struct {
         h.list = list;
         h.fail = fail;
         h.fail_account = failAccount;
-        h.count_malformed_channel = malformed;
+        h.count = counted;
         h.append = append;
         h.publish = publish;
         h.render = render;
@@ -77,7 +77,6 @@ const Files = struct {
         h.index_message = indexMessage;
         h.write_cache = writeCache;
         h.aside = asideOf;
-        h.report_fanout_failure = fanoutFailed;
         h.check_online = online;
         return h;
     }
@@ -113,25 +112,8 @@ const Files = struct {
         }
         return .done;
     }
-    fn fanoutFailed(
-        ctx: *anyopaque,
-        surface: @import("chat_route.zig").Surface,
-        member: []const u8,
-        key: []const u8,
-        sid: []const u8,
-        e: anyerror,
-    ) void {
-        of(ctx).asked.print(
-            testing.allocator,
-            "fanout_failed {t} {s} {s} {s} {t};",
-            .{
-                surface,
-                member,
-                key,
-                sid,
-                e,
-            },
-        ) catch @panic("oom");
+    fn counted(ctx: *anyopaque, kind: route.CountKind, text: []const u8) void {
+        of(ctx).asked.print(testing.allocator, "count {t} {s};", .{ kind, text }) catch @panic("oom");
     }
     /// `boom` will not render; anything else is its own HTML, marked.
     fn render(ctx: *anyopaque, md: []const u8) abi.Rendered {
@@ -314,13 +296,6 @@ const Files = struct {
             return .failed;
         }
         return .missing;
-    }
-    fn malformed(ctx: *anyopaque, name: []const u8) void {
-        say(
-            ctx,
-            "malformed",
-            name,
-        );
     }
     fn of(ctx: *anyopaque) *Files {
         return @ptrCast(@alignCast(ctx));
@@ -659,7 +634,7 @@ test "bytes appended: a path that would leave the root fails the request at the 
     );
 }
 
-test "an append in an aside never fails the request: a feed's entry appended or failed, the failure the aside's, its fault crossing back at the aside's end to be said; a feed's path outside the root the aside's failure, the host never asked" {
+test "an append in an aside never fails the request: a feed's entry appended or failed, the failure the aside's, its fault crossing back at the aside's end to be named and counted; a feed's path outside the root the aside's failure, the host never asked" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     roc.use(arena.allocator());
@@ -673,7 +648,7 @@ test "an append in an aside never fails the request: a feed's entry appended or 
     try probe(
         "/entry/users/2/images.md",
         "said",
-        "aside begin;append users/2/images.md the entry;aside end;fanout_failed images 2 1_2 Plans IsDir;",
+        "aside begin;append users/2/images.md the entry;aside end;count fanout_failure images for member 2, IsDir, on 1_2/Plans;",
         null,
     );
     for ([_][]const u8{
@@ -684,7 +659,7 @@ test "an append in an aside never fails the request: a feed's entry appended or 
         try probe(
             sub,
             "said",
-            "aside begin;aside end;fanout_failed images 2 1_2 Plans PathOutsideChatRoot;",
+            "aside begin;aside end;count fanout_failure images for member 2, PathOutsideChatRoot, on 1_2/Plans;",
             null,
         );
 }
@@ -850,7 +825,7 @@ test "the Roc fails a request by a reason, each reason its own byte across: a ma
     try probe(
         "/malformed/Abad",
         "counted",
-        "malformed Abad;",
+        "count malformed_channel Abad;",
         null,
     );
 }

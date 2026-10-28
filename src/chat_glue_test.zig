@@ -206,10 +206,10 @@ test "roc glue declares every function chat_abi.zig has, and no other" {
 }
 
 test "a field swap fails the check, naming the function, the field and the offsets" {
-    // report_fanout_failure!'s record: two lists exchanged, the size the same.
-    const Swapped = extern struct { member: abi.RocBytes, key: abi.RocBytes, sid: abi.RocBytes, fault: u16 };
-    const m = comptime mismatch(Swapped, argOf(glue.roc_chat_report_fanout_failure, 1), "roc_chat_report_fanout_failure argument 1").?;
-    try std.testing.expect(contains(m, "roc_chat_report_fanout_failure argument 1.key: at byte 24 of "));
+    // index_message!'s record: its two fields exchanged, the size the same.
+    const Swapped = extern struct { sid: abi.RocBytes, message: abi.MessageRec };
+    const m = comptime mismatch(Swapped, argOf(glue.roc_chat_index_message, 1), "roc_chat_index_message argument 1").?;
+    try std.testing.expect(contains(m, "roc_chat_index_message argument 1.message: at byte 24 of "));
     try std.testing.expect(contains(m, "at byte 0 in roc glue"));
     // Inside a list's element: a hit's two numbers exchanged.
     const HitSwapped = extern struct {

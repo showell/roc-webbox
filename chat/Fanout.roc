@@ -34,9 +34,37 @@ Fanout := [].{
 		code: Feeds.code_blocks(md),
 	}
 
-	## The surfaces that can fail for a member, as /admin/host names them
-	## (Host.report_fanout_failure!'s; a feed's append is the one that still can).
+	## The surfaces that can fail for a member (`failure` names them, as
+	## /admin/host says them; a feed's append is the one that still can).
 	Surface : [Code, Images]
+
+	## **A SURFACE THAT FAILED FOR ONE MEMBER, IN THE OPERATOR'S WORDS**
+	## (Host.count!'s text for a `FanoutFailure`):
+	## "<surface> for member <member>, <fault>, on <key>/<sid>", `fault` the
+	## name of the error the surface's aside ended with (Host.name_fault!).
+	failure : Surface,
+	{
+		member : List(U8),
+		key : List(U8),
+		sid : List(U8),
+		fault : List(U8),
+	} -> List(U8)
+	failure = |surface, f| {
+		name = match surface {
+			Code => "code"
+			Images => "images"
+		}
+		List.join([
+			Str.to_utf8("${name} for member "),
+			f.member,
+			Str.to_utf8(", "),
+			f.fault,
+			Str.to_utf8(", on "),
+			f.key,
+			['/'],
+			f.sid,
+		])
+	}
 
 	## One step of the fan-out, in the order it is taken:
 	## - `Publish`: bytes on a member's key (it cannot fail);
@@ -202,4 +230,29 @@ Fanout := [].{
 				}
 			}
 		}
+}
+
+expect {
+	said = Fanout.failure(
+		Images,
+		{
+			member: Str.to_utf8("2"),
+			key: Str.to_utf8("ops"),
+			sid: Str.to_utf8("Standup"),
+			fault: Str.to_utf8("IsDir"),
+		},
+	)
+	said == Str.to_utf8("images for member 2, IsDir, on ops/Standup")
+}
+expect {
+	said = Fanout.failure(
+		Code,
+		{
+			member: Str.to_utf8("12"),
+			key: Str.to_utf8("1_12"),
+			sid: Str.to_utf8("Plans"),
+			fault: Str.to_utf8("NoSpaceLeft"),
+		},
+	)
+	said == Str.to_utf8("code for member 12, NoSpaceLeft, on 1_12/Plans")
 }

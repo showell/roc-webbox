@@ -227,34 +227,38 @@ Host := [].{
 	],
 	List(U8) => {}
 
-	## Count channel `name` as one a listing skipped as malformed: the
-	## operator's count, kept by the host for /admin/host.
-	count_malformed_channel! : List(U8) => {}
-
-	## Count a transcript block the decoder refused (Transcript.decode_blocks:
-	## no id, author or date), `first` its first line: the operator's count of
-	## reads that met one, and the last one's line, kept by the host for
-	## /admin/host.
-	count_refused_block! : List(U8) => {}
-
-	## **WHAT THE CHAT DROPPED RATHER THAN FAIL A REQUEST FOR** (metal-vmm
-	## QUEUE 267), counted for the operator (/admin/host), about `whose`: a
-	## DM's new-topic announcement that failed after the topic was made (the
-	## topic), a feed's entries whose bytes are not UTF-8 (the feed's path),
-	## a recent row whose text is not (its key).
-	count_dropped! : [
-		Announcement,
-		FeedEntry,
-		RecentRow,
+	## **THE OPERATOR'S COUNT, ONE TABLE** (/admin/host, a row a kind):
+	## `kind` met once more, and `text`, the Roc's words for this one, kept
+	## as the last one's (its first 192 bytes), for the process's life.
+	## What the chat dropped rather than fail a request for (metal-vmm QUEUE
+	## 267): a DM's new-topic announcement that failed after the topic was
+	## made, a feed's entries or a recent row whose bytes are not UTF-8; a
+	## fan-out surface that failed for a member; a channel a listing skipped
+	## as malformed; a transcript block the decoder refused (Transcript:
+	## no id, author or date). It cannot fail, and counts nothing once the
+	## request has failed.
+	count! : [
+		DroppedAnnouncement,
+		DroppedFeedEntry,
+		DroppedRecentRow,
+		FanoutFailure,
+		MalformedChannel,
+		RefusedBlock,
 	],
 	List(U8) => {}
+
+	## **A FAULT, BY ITS NAME**: the name of the host's error that `fault`
+	## (as an aside's `End` answered it) stands for, for the Roc's words
+	## about it. A number the host never answered is the Roc's bug: the
+	## request fails, and the name is empty.
+	name_fault! : U16 => List(U8)
 
 	## **AN ASIDE: WORK WHOSE FAILURE IS ITS OWN** (STORED IS DONE): from
 	## `Begin` to `End`, a primitive that fails fails the aside, never the
 	## request, and the aside's later calls do nothing, as a failed
 	## request's do. `End` answers `Failed` when anything in it failed, with
-	## its `fault` (the host's error as a number the Roc never reads, to be
-	## carried to `report_fanout_failure!`), and the request goes on.
+	## its `fault` (the host's error as a number the Roc never reads, only
+	## hands to `name_fault!`), and the request goes on.
 	## `Begin` answers `Failed` only for a request that has failed already:
 	## then nothing is begun, and no `End` follows. **ASIDES NEST**: one
 	## begun inside another ends first, and its failure is its own alone.
@@ -378,20 +382,6 @@ Host := [].{
 	## under the chat root. **NEVER THE REQUEST'S FAILURE**: a cache not
 	## written is a miss, recounted (QUEUE 284); the host logs it.
 	write_cache! : List(U8), List(U8) => {}
-
-	## **A SURFACE THAT FAILED FOR ONE MEMBER, COUNTED AND SAID** (angry-gopher
-	## chat_fanout `fanoutFailed`): `surface` for `member`, with `fault` (as
-	## the surface's aside's `End` answered it), on topic `sid` of the
-	## conversation keyed `key`.
-	## The operator's count and last failure, kept by the host for
-	## /admin/host.
-	report_fanout_failure! : [Code, Images],
-	{
-		member : List(U8),
-		key : List(U8),
-		sid : List(U8),
-		fault : U16,
-	} => {}
 
 	## A request header's value, or none (read before the body).
 	read_header! : List(U8) => List(List(U8))

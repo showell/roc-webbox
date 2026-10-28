@@ -1629,60 +1629,6 @@ comptime {
     }
 }
 
-/// Element type for __AnonStruct_f0a6792d1cc1096c
-pub const __AnonStruct_f0a6792d1cc1096c = if (@sizeOf(usize) == 4) extern struct {
-    key: RocListWith(u8, false),
-    member: RocListWith(u8, false),
-    sid: RocListWith(u8, false),
-    fault: u16,
-    /// Recursively decrement Roc-owned fields.
-    pub fn decref(self: @This(), roc_host: *RocHost) void {
-        const value = self;
-        value.key.decref(roc_host);
-        value.member.decref(roc_host);
-        value.sid.decref(roc_host);
-    }
-
-    /// Increment Roc-owned fields.
-    pub fn incref(self: @This(), amount: isize) void {
-        const value = self;
-        value.key.incref(amount);
-        value.member.incref(amount);
-        value.sid.incref(amount);
-    }
-} else extern struct {
-    key: RocListWith(u8, false),
-    member: RocListWith(u8, false),
-    sid: RocListWith(u8, false),
-    fault: u16,
-    /// Recursively decrement Roc-owned fields.
-    pub fn decref(self: @This(), roc_host: *RocHost) void {
-        const value = self;
-        value.key.decref(roc_host);
-        value.member.decref(roc_host);
-        value.sid.decref(roc_host);
-    }
-
-    /// Increment Roc-owned fields.
-    pub fn incref(self: @This(), amount: isize) void {
-        const value = self;
-        value.key.incref(amount);
-        value.member.incref(amount);
-        value.sid.incref(amount);
-    }
-};
-
-comptime {
-    if (@sizeOf(usize) == 8) {
-        if (@sizeOf(__AnonStruct_f0a6792d1cc1096c) != 80) @compileError("__AnonStruct_f0a6792d1cc1096c size mismatch");
-        if (@alignOf(__AnonStruct_f0a6792d1cc1096c) != 8) @compileError("__AnonStruct_f0a6792d1cc1096c alignment mismatch");
-    }
-    if (@sizeOf(usize) == 4) {
-        if (@sizeOf(__AnonStruct_f0a6792d1cc1096c) != 40) @compileError("__AnonStruct_f0a6792d1cc1096c size mismatch");
-        if (@alignOf(__AnonStruct_f0a6792d1cc1096c) != 4) @compileError("__AnonStruct_f0a6792d1cc1096c alignment mismatch");
-    }
-}
-
 /// Element type for __AnonStruct_5ad6bf82dad4a993
 pub const __AnonStruct_5ad6bf82dad4a993 = if (@sizeOf(usize) == 4) extern struct {
     first: u64,
@@ -2373,11 +2319,14 @@ comptime {
     }
 }
 
-/// Tag union: AnnouncementOrFeedEntryOrRecentRow
-pub const AnnouncementOrFeedEntryOrRecentRow = enum(u8) {
-    announcement = 0,
-    feed_entry = 1,
-    recent_row = 2,
+/// Tag union: DroppedAnnouncementOrDroppedFeedEntryOrDroppedRecentRowOrFanoutFailureOrMalformedChannelOrRefusedBlock
+pub const DroppedAnnouncementOrDroppedFeedEntryOrDroppedRecentRowOrFanoutFailureOrMalformedChannelOrRefusedBlock = enum(u8) {
+    dropped_announcement = 0,
+    dropped_feed_entry = 1,
+    dropped_recent_row = 2,
+    fanout_failure = 3,
+    malformed_channel = 4,
+    refused_block = 5,
     /// Recursively decrement Roc-owned payloads.
     pub fn decref(self: @This(), roc_host: *RocHost) void {
         _ = self;
@@ -2393,12 +2342,12 @@ pub const AnnouncementOrFeedEntryOrRecentRow = enum(u8) {
 
 comptime {
     if (@sizeOf(usize) == 8) {
-        if (@sizeOf(AnnouncementOrFeedEntryOrRecentRow) != 1) @compileError("AnnouncementOrFeedEntryOrRecentRow size mismatch");
-        if (@alignOf(AnnouncementOrFeedEntryOrRecentRow) != 1) @compileError("AnnouncementOrFeedEntryOrRecentRow alignment mismatch");
+        if (@sizeOf(DroppedAnnouncementOrDroppedFeedEntryOrDroppedRecentRowOrFanoutFailureOrMalformedChannelOrRefusedBlock) != 1) @compileError("DroppedAnnouncementOrDroppedFeedEntryOrDroppedRecentRowOrFanoutFailureOrMalformedChannelOrRefusedBlock size mismatch");
+        if (@alignOf(DroppedAnnouncementOrDroppedFeedEntryOrDroppedRecentRowOrFanoutFailureOrMalformedChannelOrRefusedBlock) != 1) @compileError("DroppedAnnouncementOrDroppedFeedEntryOrDroppedRecentRowOrFanoutFailureOrMalformedChannelOrRefusedBlock alignment mismatch");
     }
     if (@sizeOf(usize) == 4) {
-        if (@sizeOf(AnnouncementOrFeedEntryOrRecentRow) != 1) @compileError("AnnouncementOrFeedEntryOrRecentRow size mismatch");
-        if (@alignOf(AnnouncementOrFeedEntryOrRecentRow) != 1) @compileError("AnnouncementOrFeedEntryOrRecentRow alignment mismatch");
+        if (@sizeOf(DroppedAnnouncementOrDroppedFeedEntryOrDroppedRecentRowOrFanoutFailureOrMalformedChannelOrRefusedBlock) != 1) @compileError("DroppedAnnouncementOrDroppedFeedEntryOrDroppedRecentRowOrFanoutFailureOrMalformedChannelOrRefusedBlock size mismatch");
+        if (@alignOf(DroppedAnnouncementOrDroppedFeedEntryOrDroppedRecentRowOrFanoutFailureOrMalformedChannelOrRefusedBlock) != 1) @compileError("DroppedAnnouncementOrDroppedFeedEntryOrDroppedRecentRowOrFanoutFailureOrMalformedChannelOrRefusedBlock alignment mismatch");
     }
 }
 
@@ -2624,34 +2573,6 @@ comptime {
     if (@sizeOf(usize) == 4) {
         if (@sizeOf(FailedOrRendered) != 1) @compileError("FailedOrRendered size mismatch");
         if (@alignOf(FailedOrRendered) != 1) @compileError("FailedOrRendered alignment mismatch");
-    }
-}
-
-/// Tag union: CodeOrImages
-pub const CodeOrImages = enum(u8) {
-    code = 0,
-    images = 1,
-    /// Recursively decrement Roc-owned payloads.
-    pub fn decref(self: @This(), roc_host: *RocHost) void {
-        _ = self;
-        _ = roc_host;
-    }
-
-    /// Increment Roc-owned payloads.
-    pub fn incref(self: @This(), amount: isize) void {
-        _ = self;
-        _ = amount;
-    }
-};
-
-comptime {
-    if (@sizeOf(usize) == 8) {
-        if (@sizeOf(CodeOrImages) != 1) @compileError("CodeOrImages size mismatch");
-        if (@alignOf(CodeOrImages) != 1) @compileError("CodeOrImages alignment mismatch");
-    }
-    if (@sizeOf(usize) == 4) {
-        if (@sizeOf(CodeOrImages) != 1) @compileError("CodeOrImages size mismatch");
-        if (@alignOf(CodeOrImages) != 1) @compileError("CodeOrImages alignment mismatch");
     }
 }
 
@@ -3416,26 +3337,12 @@ pub const HostCheck_onlineArgs = extern struct {
     arg0: RocList(RocListWith(u8, false)),
 };
 
-/// Arguments for Host.count_dropped!
-/// Roc signature: [Announcement, FeedEntry, RecentRow], List(U8) => {}
+/// Arguments for Host.count!
+/// Roc signature: [DroppedAnnouncement, DroppedFeedEntry, DroppedRecentRow, FanoutFailure, MalformedChannel, RefusedBlock], List(U8) => {}
 /// Refcounted fields are owned by the hosted function.
-pub const HostCount_droppedArgs = extern struct {
-    arg0: AnnouncementOrFeedEntryOrRecentRow,
+pub const HostCountArgs = extern struct {
+    arg0: DroppedAnnouncementOrDroppedFeedEntryOrDroppedRecentRowOrFanoutFailureOrMalformedChannelOrRefusedBlock,
     arg1: RocListWith(u8, false),
-};
-
-/// Arguments for Host.count_malformed_channel!
-/// Roc signature: List(U8) => {}
-/// Refcounted fields are owned by the hosted function.
-pub const HostCount_malformed_channelArgs = extern struct {
-    arg0: RocListWith(u8, false),
-};
-
-/// Arguments for Host.count_refused_block!
-/// Roc signature: List(U8) => {}
-/// Refcounted fields are owned by the hosted function.
-pub const HostCount_refused_blockArgs = extern struct {
-    arg0: RocListWith(u8, false),
 };
 
 /// Arguments for Host.fail!
@@ -3466,6 +3373,13 @@ pub const HostListArgs = extern struct {
 /// Refcounted fields are owned by the hosted function.
 pub const HostMark_asideArgs = extern struct {
     arg0: BeginOrEnd,
+};
+
+/// Arguments for Host.name_fault!
+/// Roc signature: U16 => List(U8)
+/// Refcounted fields are owned by the hosted function.
+pub const HostName_faultArgs = extern struct {
+    arg0: u16,
 };
 
 /// Arguments for Host.publish!
@@ -3547,14 +3461,6 @@ pub const HostRenderArgs = extern struct {
 /// Refcounted fields are owned by the hosted function.
 pub const HostRender_previewArgs = extern struct {
     arg0: RocListWith(u8, false),
-};
-
-/// Arguments for Host.report_fanout_failure!
-/// Roc signature: [Code, Images], { fault : U16, key : List(U8), member : List(U8), sid : List(U8) } => {}
-/// Refcounted fields are owned by the hosted function.
-pub const HostReport_fanout_failureArgs = extern struct {
-    arg0: CodeOrImages,
-    arg1: __AnonStruct_f0a6792d1cc1096c,
 };
 
 /// Arguments for Host.reserve_upload!
@@ -3752,7 +3658,6 @@ pub const HostRead_upload = __AnonStruct_51608bf801aeaa9b;
 pub const HostRemoveResult = HostBundle_addResult;
 pub const HostRender = __AnonStruct_a7430791c7b5a122;
 pub const HostRender_preview = __AnonStruct_a7430791c7b5a122;
-pub const HostReport_fanout_failureArg1 = __AnonStruct_f0a6792d1cc1096c;
 pub const HostRetire_asked = __AnonStruct_308de772291a51ac;
 pub const HostRetire_removeResult = HostBundle_addResult;
 pub const HostRetire_replaceResult = HostBundle_addResult;
@@ -3884,12 +3789,6 @@ pub const __AnonStruct_f8c5938ec6752e0Release = struct {
     }
 };
 
-pub const __AnonStruct_f0a6792d1cc1096cRelease = struct {
-    pub fn release(value: __AnonStruct_f0a6792d1cc1096c, roc_host: *RocHost) void {
-        value.decref(roc_host);
-    }
-};
-
 pub const __AnonStruct_5ad6bf82dad4a993Release = struct {
     pub fn release(value: __AnonStruct_5ad6bf82dad4a993, roc_host: *RocHost) void {
         value.decref(roc_host);
@@ -3994,7 +3893,6 @@ fn rocReleasePolicy(comptime T: type) type {
     if (T == __AnonStruct_a7430791c7b5a122) return __AnonStruct_a7430791c7b5a122Release;
     if (T == __AnonStruct_a1e45760313971e2) return __AnonStruct_a1e45760313971e2Release;
     if (T == __AnonStruct_f8c5938ec6752e0) return __AnonStruct_f8c5938ec6752e0Release;
-    if (T == __AnonStruct_f0a6792d1cc1096c) return __AnonStruct_f0a6792d1cc1096cRelease;
     if (T == __AnonStruct_5ad6bf82dad4a993) return __AnonStruct_5ad6bf82dad4a993Release;
     if (T == __AnonStruct_51608bf801aeaa9b) return __AnonStruct_51608bf801aeaa9bRelease;
     if (T == __AnonStruct_3b5aad2f43ce5e73) return __AnonStruct_3b5aad2f43ce5e73Release;
@@ -4069,31 +3967,17 @@ pub extern fn roc_chat_check_welcome() callconv(.c) FailedOrNoneOrPending;
 /// Roc signature: {} => Try({}, [Failed])
 pub extern fn roc_chat_clear_welcome() callconv(.c) HostBundle_addResult;
 
-/// Hosted symbol for Host.count_dropped!
-/// Roc signature: [Announcement, FeedEntry, RecentRow], List(U8) => {}
+/// Hosted symbol for Host.count!
+/// Roc signature: [DroppedAnnouncement, DroppedFeedEntry, DroppedRecentRow, FanoutFailure, MalformedChannel, RefusedBlock], List(U8) => {}
 /// Owned arguments. Release each exactly once before returning, unless it is
 /// moved into storage or into the result:
 ///     arg0.decref(roc_host);
 ///     arg1.decref(roc_host);
-pub extern fn roc_chat_count_dropped(arg0: AnnouncementOrFeedEntryOrRecentRow, arg1: RocListWith(u8, false)) callconv(.c) void;
-
-/// Hosted symbol for Host.count_malformed_channel!
-/// Roc signature: List(U8) => {}
-/// Owned arguments. Release each exactly once before returning, unless it is
-/// moved into storage or into the result:
-///     arg0.decref(roc_host);
-pub extern fn roc_chat_count_malformed_channel(arg0: RocListWith(u8, false)) callconv(.c) void;
+pub extern fn roc_chat_count(arg0: DroppedAnnouncementOrDroppedFeedEntryOrDroppedRecentRowOrFanoutFailureOrMalformedChannelOrRefusedBlock, arg1: RocListWith(u8, false)) callconv(.c) void;
 
 /// Hosted symbol for Host.count_presence!
 /// Roc signature: {} => [CameOnline, Steady]
 pub extern fn roc_chat_count_presence() callconv(.c) CameOnlineOrSteady;
-
-/// Hosted symbol for Host.count_refused_block!
-/// Roc signature: List(U8) => {}
-/// Owned arguments. Release each exactly once before returning, unless it is
-/// moved into storage or into the result:
-///     arg0.decref(roc_host);
-pub extern fn roc_chat_count_refused_block(arg0: RocListWith(u8, false)) callconv(.c) void;
 
 /// Hosted symbol for Host.fail!
 /// Roc signature: [KindUnreadable, MalformedChannel, NameUnreadable, NoAuthor, NotAUid, NotUtf8, ShortRead], List(U8) => {}
@@ -4140,6 +4024,11 @@ pub extern fn roc_chat_list_srcs() callconv(.c) RocList(__AnonStruct_7dfaf577f60
 /// moved into storage or into the result:
 ///     arg0.decref(roc_host);
 pub extern fn roc_chat_mark_aside(arg0: BeginOrEnd) callconv(.c) __AnonStruct_5b37becdc53785eb;
+
+/// Hosted symbol for Host.name_fault!
+/// Roc signature: U16 => List(U8)
+/// The result is owned by Roc: return exactly one owned reference.
+pub extern fn roc_chat_name_fault(arg0: u16) callconv(.c) RocListWith(u8, false);
 
 /// Hosted symbol for Host.presence_unspent!
 /// Roc signature: {} => {}
@@ -4244,14 +4133,6 @@ pub extern fn roc_chat_render(arg0: RocListWith(u8, false)) callconv(.c) __AnonS
 ///     arg0.decref(roc_host);
 /// The result is owned by Roc: return exactly one owned reference.
 pub extern fn roc_chat_render_preview(arg0: RocListWith(u8, false)) callconv(.c) __AnonStruct_a7430791c7b5a122;
-
-/// Hosted symbol for Host.report_fanout_failure!
-/// Roc signature: [Code, Images], { fault : U16, key : List(U8), member : List(U8), sid : List(U8) } => {}
-/// Owned arguments. Release each exactly once before returning, unless it is
-/// moved into storage or into the result:
-///     arg0.decref(roc_host);
-///     arg1.decref(roc_host);
-pub extern fn roc_chat_report_fanout_failure(arg0: CodeOrImages, arg1: __AnonStruct_f0a6792d1cc1096c) callconv(.c) void;
 
 /// Hosted symbol for Host.reserve_upload!
 /// Roc signature: U64 => [Failed, Refused, Reserved]

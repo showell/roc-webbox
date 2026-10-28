@@ -140,11 +140,6 @@ pub const RenderStatus = enum(u8) { failed, rendered };
 /// request, or the aside).
 pub const AppendStatus = enum(u8) { appended, failed };
 
-/// Host.roc's `report_fanout_failure!`: the fan-out's surfaces that can fail, a
-/// member at a time (chat_fanout's names for them, as /admin/host says
-/// them). Notify and sidebar are made of the Roc's bytes alone, so never.
-pub const Surface = enum(u8) { code, images };
-
 /// Host.roc's `admit!` answer: the member may search now, or has searched
 /// too often this second (chat_search.zig `admit`).
 pub const Admission = enum(u8) { admitted, refused };
@@ -230,14 +225,19 @@ pub const Reservation = enum(u8) { failed, refused, reserved };
 /// Host.roc's `store_upload!` answer's `status`.
 pub const UploadStored = enum(u8) { failed, stored };
 
-/// Host.roc's `count_dropped!`: what the chat dropped, counted, rather than
-/// fail the request for (metal-vmm QUEUE 267): a DM's new-topic announcement
-/// that failed after the topic was made, a feed's entry or a recent row
-/// whose bytes are not UTF-8.
-pub const Dropped = enum(u8) {
-    announcement,
-    feed_entry,
-    recent_row,
+/// Host.roc's `count!` kind: what the operator's table counts, a row of
+/// /admin/host each. What the chat dropped rather than fail the request for
+/// (metal-vmm QUEUE 267: a DM's new-topic announcement that failed after the
+/// topic was made, a feed's entry or a recent row whose bytes are not
+/// UTF-8); a fan-out surface that failed for a member; a channel a listing
+/// skipped as malformed; a transcript block the decoder refused.
+pub const CountKind = enum(u8) {
+    dropped_announcement,
+    dropped_feed_entry,
+    dropped_recent_row,
+    fanout_failure,
+    malformed_channel,
+    refused_block,
 };
 
 /// Host.roc's `aside!` argument: the start or the end of work whose failure

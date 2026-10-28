@@ -22,7 +22,6 @@ pub const Message = abi.Message;
 pub const Appended = abi.Appended;
 pub const AsideOutcome = abi.AsideOutcome;
 pub const AppendStatus = route.AppendStatus;
-pub const Surface = route.Surface;
 pub const Hostility = route.Hostility;
 pub const ReadStatus = route.ReadStatus;
 pub const Read = abi.Read;
@@ -57,7 +56,7 @@ pub const UploadServed = route.UploadServed;
 pub const ScriptServed = route.ScriptServed;
 pub const Welcome = route.Welcome;
 pub const Serving = route.Serving;
-pub const Dropped = route.Dropped;
+pub const CountKind = route.CountKind;
 pub const Aside = route.Aside;
 pub const AsideEnd = route.AsideEnd;
 
@@ -327,9 +326,7 @@ const Scripted = struct {
             .fail = failOf,
             .fail_text = failTextOf,
             .fail_account = failAccountOf,
-            .count_malformed_channel = malformed,
-            .count_refused_block = refusedBlock,
-            .count_dropped = dropped,
+            .count = counted,
             .aside = asideOf,
             .check_online = onlineOf,
             .read_header = header,
@@ -338,7 +335,6 @@ const Scripted = struct {
             .render_preview = renderPreview,
             .index_message = indexMessage,
             .write_cache = writeCache,
-            .report_fanout_failure = fanoutFailed,
             .serve_file = raw,
             .serve_rendered = links,
             .srcs = srcs,
@@ -643,26 +639,8 @@ const Scripted = struct {
         } else return .missing;
         return .{ .found = out.items };
     }
-    fn malformed(ctx: *anyopaque, channel: []const u8) void {
-        say(
-            ctx,
-            "malformed {s}",
-            .{channel},
-        );
-    }
-    fn refusedBlock(ctx: *anyopaque, first: []const u8) void {
-        say(ctx, "refused {s}", .{first});
-    }
-    fn dropped(
-        ctx: *anyopaque,
-        what: route.Dropped,
-        whose: []const u8,
-    ) void {
-        say(
-            ctx,
-            "dropped {t} {s}",
-            .{ what, whose },
-        );
+    fn counted(ctx: *anyopaque, kind: route.CountKind, text: []const u8) void {
+        say(ctx, "count {t} {s}", .{ kind, text });
     }
     fn asideOf(ctx: *anyopaque, which: route.Aside) abi.AsideOutcome {
         say(
@@ -843,26 +821,6 @@ const Scripted = struct {
             .{
                 path,
                 std.zig.fmtString(bytes),
-            },
-        );
-    }
-    fn fanoutFailed(
-        ctx: *anyopaque,
-        surface: route.Surface,
-        member_: []const u8,
-        key: []const u8,
-        sid: []const u8,
-        e: anyerror,
-    ) void {
-        say(
-            ctx,
-            "fanout_failed {t} {s} {s} {s} {t}",
-            .{
-                surface,
-                member_,
-                key,
-                sid,
-                e,
             },
         );
     }
@@ -1356,7 +1314,7 @@ test "a topic's reactions, react, pin and unpin are the Roc's: presence, the con
     }, .{ .stream = .{
         .key = "1_2/Plans",
         .backlog = "event: backlog-size\ndata: 1\n\nid: 1\ndata: {\"index\":1,\"from\":\"S\",\"at\":\"d\",\"html\":\"<p>hi</p>\",\"markdown\":\"hi\",\"id\":\"Plans_2\"}\n\n",
-    } }, "identify;accounts;list 1_2/sessions;header last-event-id;query since;read 1_2/sessions/Plans.md;refused from: x;render hi;");
+    } }, "identify;accounts;list 1_2/sessions;header last-event-id;query since;read 1_2/sessions/Plans.md;count refused_block from: x;render hi;");
     try expectAct("/ops/Plans/upload", true, .POST, blk: {
         var s = a;
         s.upload = .{ .read = .{ .size = 62, .ext = "png", .filename = "a.png" } };
@@ -1589,7 +1547,7 @@ test "a page's sidebar is the Roc's (sidebarOf): the roster but the viewer, each
     try testing.expect(std.mem.indexOf(
         u8,
         m.asked,
-        "list channels;read channels/bad.channel;malformed bad;read channels/ops.channel;",
+        "list channels;read channels/bad.channel;count malformed_channel #bad;read channels/ops.channel;",
     ) != null);
     // **A READ THAT FAILED SERVES NO PAGE**, and nothing after it is asked:
     // the pins (a folder: never no pins), a member file, the roster's
@@ -2032,7 +1990,7 @@ test "the fan-out is the Roc's: every member in order, each member's notify (nev
         true,
         ex,
     ) ++
-        "aside begin;stat users/2/images.md;append users/2/images.md " ++ img_entry ++ ";aside end;fanout_failed images 2 1_2 Plans IsDir;" ++
+        "aside begin;stat users/2/images.md;append users/2/images.md " ++ img_entry ++ ";aside end;count fanout_failure images for member 2, IsDir, on 1_2/Plans;" ++
         "aside begin;stat users/2/code.md;append users/2/code.md " ++ code_entry ++ ";aside end;" ++ published("code:2", code_event);
     const tail = s.asked.items[std.mem.indexOf(
         u8,
@@ -2236,7 +2194,7 @@ test "a send is the Roc's: the conversation, the method, the header, the body, t
             "",
         );
         break :blk g.count ++ g.render ++ g.append;
-    } ++ "aside end;dropped announcement Ideas;");
+    } ++ "aside end;count dropped_announcement Ideas;");
 }
 
 test "a topic's raw transcript and /chat/links are the Roc's: a transcript the host has not is a plain 404, never handed back" {
@@ -2410,7 +2368,7 @@ test "the member's bookmarks are the Roc's files: the topic last viewed first, t
         ) == null);
         try testing.expectEqualStrings(try std.fmt.allocPrint(
             arena.allocator(),
-            "identify;accounts;presence;read {s};srcs;dropped feed_entry {s};",
+            "identify;accounts;presence;read {s};srcs;count dropped_feed_entry {s};",
             .{ feed[1], feed[1] },
         ), s.asked.items);
     }
@@ -2430,7 +2388,7 @@ test "/chat/msg: every channel's roster, which are the member's, and their order
             .{ .name = "ops", .read = .{ .found = "1\n" } },
         };
         break :blk s;
-    }, .{ .found = "/channel/ops/Plans#msg-Plans_1" }, "identify;accounts;presence;list channels;read channels/bad.channel;malformed bad;read channels/ops.channel;list channels/ops/sessions;");
+    }, .{ .found = "/channel/ops/Plans#msg-Plans_1" }, "identify;accounts;presence;list channels;read channels/bad.channel;count malformed_channel #bad;read channels/ops.channel;list channels/ops/sessions;");
     // channels/ listed, each member file read in the listing's order, not
     // sorted: the member is in ops, Zed and a name that sorts high, not in
     // zeta. Every topic list has Plans, so the first of the member's by
@@ -2470,7 +2428,7 @@ test "/chat/msg: every channel's roster, which are the member's, and their order
             .{ .name = "Adup", .read = .{ .found = "1\n1\n" } },
         };
         break :blk s;
-    }, .{ .found = "/channel/ops/Plans#msg-Plans_1" }, "identify;accounts;presence;list channels;malformed \xffhigh;read channels/Abad.channel;malformed Abad;read channels/Agone.channel;read channels/ops.channel;read channels/Adup.channel;malformed Adup;list channels/ops/sessions;");
+    }, .{ .found = "/channel/ops/Plans#msg-Plans_1" }, "identify;accounts;presence;list channels;count malformed_channel #\xffhigh;read channels/Abad.channel;count malformed_channel #Abad;read channels/Agone.channel;read channels/ops.channel;read channels/Adup.channel;count malformed_channel #Adup;list channels/ops/sessions;");
     // A member file that will not read: nothing past it is read, and no
     // channel searched (the host has failed the request), never "no such
     // topic"; one malformed before it was counted already, as the Zig
@@ -2483,7 +2441,7 @@ test "/chat/msg: every channel's roster, which are the member's, and their order
             .{ .name = "Zed", .read = .{ .found = "1\n" } },
         };
         break :blk s;
-    }, .answered, "identify;accounts;presence;list channels;read channels/Abad.channel;malformed Abad;read channels/ops.channel;");
+    }, .answered, "identify;accounts;presence;list channels;read channels/Abad.channel;count malformed_channel #Abad;read channels/ops.channel;");
 }
 
 test "what a search walks is the Roc's (the pure-Roc plan's item 8): a DM with every other member and the agent, then the member's channels by bytes, each handed to the host a call at a time; each hit's conversation the scope's at its place, one past it a crash" {
@@ -2509,7 +2467,7 @@ test "what a search walks is the Roc's (the pure-Roc plan's item 8): a DM with e
         },
         .query = "Lantern",
     };
-    const walked = "identify;accounts;presence;admit;query {s};list channels;read channels/ops.channel;read channels/zeta.channel;read channels/Zed.channel;malformed 9lives;scope 1_2;scope 1_3;scope channels/Zed;scope channels/ops;";
+    const walked = "identify;accounts;presence;admit;query {s};list channels;read channels/ops.channel;read channels/zeta.channel;read channels/Zed.channel;count malformed_channel #9lives;scope 1_2;scope 1_3;scope channels/Zed;scope channels/ops;";
     const hit: abi.Hit = .{
         .conv = 3,
         .sid = "Lamps",

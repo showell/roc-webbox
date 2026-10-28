@@ -10,7 +10,7 @@
 ## (`/publish/<key>`), counts (`/count/<topic>`), renders (`/render/<md>`),
 ## stores a message (`/store/<topic>`), appends a feed's entry and says one that failed (`/entry/<path>`), and asks
 ## `fail!` (`/fail/<reason>/<whose>`),
-## `count_malformed_channel!` (`/malformed/<name>`), `list_accounts!` (`/accounts`),
+## `count!` (`/malformed/<name>`), `list_accounts!` (`/accounts`),
 ## and `check_online!` (`/online/<id>,<id>`). Never linked
 ## into a server.
 app [handle!] { pf: platform "../platform/main.roc" }
@@ -195,23 +195,22 @@ handle! = |req|
 		Host.write_cache!(List.drop_first(req.sub, 7), Str.to_utf8("7 99\n"))
 		Chat.respond(200, { content_type: [], body: Str.to_utf8("written") })
 	} else if starts(req.sub, "/entry/") {
-		# An entry appended to `<path>` in an aside; one that failed is said
-		# for member 2 on 1_2/Plans with the fault the aside's end answered,
-		# the request never failed.
+		# An entry appended to `<path>` in an aside; one that failed is counted
+		# for member 2 on 1_2/Plans with the name of the fault the aside's end
+		# answered, the request never failed.
 		_ = Host.mark_aside!(Begin)
 		_ = Host.append!(List.drop_first(req.sub, 7), Str.to_utf8("the entry"))
 		ended = Host.mark_aside!(End)
 		match ended.status {
 			Done => Chat.respond(200, { content_type: [], body: Str.to_utf8("appended") })
 			Failed => {
-				Host.report_fanout_failure!(
-					Images,
-					{
-						member: Str.to_utf8("2"),
-						key: Str.to_utf8("1_2"),
-						sid: Str.to_utf8("Plans"),
-						fault: ended.fault,
-					},
+				Host.count!(
+					FanoutFailure,
+					List.join([
+						Str.to_utf8("images for member 2, "),
+						Host.name_fault!(ended.fault),
+						Str.to_utf8(", on 1_2/Plans"),
+					]),
 				)
 				Chat.respond(200, { content_type: [], body: Str.to_utf8("said") })
 			}
@@ -331,7 +330,7 @@ handle! = |req|
 			},
 		)
 	} else if starts(req.sub, "/malformed/") {
-		Host.count_malformed_channel!(List.drop_first(req.sub, 11))
+		Host.count!(MalformedChannel, List.drop_first(req.sub, 11))
 		Chat.respond(200, { content_type: [], body: Str.to_utf8("counted") })
 	} else if req.sub == Str.to_utf8("/crash") {
 		crash "a planted crash"
