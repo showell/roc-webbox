@@ -82,12 +82,8 @@ Count := [].{
 		}
 
 	## countText: what a send writes, nobody as `-`.
-	text : U64, U64, Last -> List(U8)
-	text = |
-		count,
-		size,
-		last,
-	| {
+	text : U64, { size : U64, last : Last } -> List(U8)
+	text = |count, { size, last }| {
 		head = Str.to_utf8("${U64.to_str(count)} ${U64.to_str(size)}\n")
 		match last {
 			Known(l) => List.join([
@@ -111,12 +107,12 @@ Count := [].{
 
 	## recordedAuthor: the record's author, nobody included, when it counted
 	## exactly this transcript, in blocks and in bytes.
-	recorded_author : Try(Counted, [Malformed]), U64, U64 -> Try(List(U8), [NotRecorded])
-	recorded_author = |
-		counted,
-		blocks,
-		size,
-	| match counted {
+	recorded_author : Try(Counted, [Malformed]),
+	{
+		blocks : U64,
+		size : U64,
+	} -> Try(List(U8), [NotRecorded])
+	recorded_author = |counted, { blocks, size }| match counted {
 		Ok(
 			{
 				count,

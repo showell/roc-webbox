@@ -44,8 +44,7 @@ Last := [].{
 			) if count > 0 =>
 				match Files.read_cache!(
 					Paths.transcript_path(at),
-					l.offset,
-					tail_window,
+					{ offset: l.offset, max: tail_window },
 				) {
 					Ok(window) => {
 						fill = if List.len(window) == tail_window Full else Partial
@@ -131,11 +130,7 @@ Last := [].{
 	## count's (`messages!`) and the last message's (`of!`).
 	sidecar! : Paths.TopicAt => Try(Count.Counted, [Malformed])
 	sidecar! = |at|
-		match Files.read_cache!(
-			Paths.count_path(at),
-			0,
-			1025,
-		) {
+		match Files.read_cache!(Paths.count_path(at), { offset: 0, max: 1025 }) {
 			Ok(raw) if List.len(raw) <= 1024 => Count.parse(raw)
 			_ => Err(Malformed)
 		}
@@ -173,8 +168,7 @@ whole! = |
 							uid =
 								match Count.recorded_author(
 									counted,
-									blocks,
-									List.len(raw),
+									{ blocks, size: List.len(raw) },
 								) {
 									Ok(recorded) => recorded
 									Err(NotRecorded) => author(msg, accounts)

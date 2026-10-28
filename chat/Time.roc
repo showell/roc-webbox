@@ -52,36 +52,12 @@ Time := [].{
 				..,
 			] if sep == 'T' or sep == 't' =>
 				match (
-					digits(
-						t,
-						0,
-						4,
-					),
-					digits(
-						t,
-						5,
-						2,
-					),
-					digits(
-						t,
-						8,
-						2,
-					),
-					digits(
-						t,
-						11,
-						2,
-					),
-					digits(
-						t,
-						14,
-						2,
-					),
-					digits(
-						t,
-						17,
-						2,
-					),
+					digits(t, { start: 0, len: 4 }),
+					digits(t, { start: 5, len: 2 }),
+					digits(t, { start: 8, len: 2 }),
+					digits(t, { start: 11, len: 2 }),
+					digits(t, { start: 14, len: 2 }),
+					digits(t, { start: 17, len: 2 }),
 				) {
 					(
 						Ok(year),
@@ -98,8 +74,7 @@ Time := [].{
 							Ok(
 								days_from_civil(
 									year,
-									month,
-									day,
+									{ month, day },
 								) * 86400 + hour * 3600 + minute * 60 + second - offset,
 							)
 						}
@@ -119,11 +94,7 @@ offset_of : List(U8) -> Try(I64, [NotADate])
 offset_of = |rest0| {
 	rest = match rest0 {
 		['.', .. as frac] => {
-			n = Bytes.count_while(
-				frac,
-				Ascii.is_digit,
-				0,
-			)
+			n = Bytes.count_while(frac, { keep: Ascii.is_digit, at: 0 })
 			if n == 0 Err(NotADate) else Ok(List.drop_first(frac, n))
 		}
 		_ => Ok(rest0)
@@ -142,16 +113,8 @@ offset_of = |rest0| {
 			],
 		) if sign == '+' or sign == '-' => {
 			match (
-				digits(
-					[h1, h2],
-					0,
-					2,
-				),
-				digits(
-					[m1, m2],
-					0,
-					2,
-				),
+				digits([h1, h2], { start: 0, len: 2 }),
+				digits([m1, m2], { start: 0, len: 2 }),
 			) {
 				(Ok(oh), Ok(om)) =>
 					if oh > 23 or om > 59 {
@@ -167,12 +130,8 @@ offset_of = |rest0| {
 }
 
 ## `len` decimal digits at `start`, as a number, or none.
-digits : List(U8), U64, U64 -> Try(I64, [NotDigits])
-digits = |
-	t,
-	start,
-	len,
-| {
+digits : List(U8), { start : U64, len : U64 } -> Try(I64, [NotDigits])
+digits = |t, { start, len }| {
 	piece = List.sublist(t, { start, len })
 	if List.len(piece) != len or !List.all(piece, Ascii.is_digit) {
 		Err(NotDigits)
@@ -211,12 +170,8 @@ civil_from_days = |days| {
 	}
 }
 
-days_from_civil : I64, I64, I64 -> I64
-days_from_civil = |
-	year,
-	month,
-	day,
-| {
+days_from_civil : I64, { month : I64, day : I64 } -> I64
+days_from_civil = |year, { month, day }| {
 	y = year - (if month <= 2 1 else 0)
 	era = I64.div_floor_by(y, 400)
 	yoe = y - era * 400

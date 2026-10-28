@@ -237,19 +237,11 @@ Chat := [].{
 
 	## The site's 400, in `why`'s words.
 	refuse : Str -> Answer
-	refuse = |why| respond(
-		400,
-		[],
-		Str.to_utf8(why),
-	)
+	refuse = |why| respond(400, { content_type: [], body: Str.to_utf8(why) })
 
 	## `status` with `body`, typed `content_type` when it is not empty.
-	respond : U16, List(U8), List(U8) -> Answer
-	respond = |
-		status,
-		content_type,
-		body,
-	| {
+	respond : U16, { content_type : List(U8), body : List(U8) } -> Answer
+	respond = |status, { content_type, body }| {
 		..none,
 		kind: Respond,
 		status,
@@ -259,11 +251,10 @@ Chat := [].{
 
 	## A 200 of text, as stored: plain UTF-8, never sniffed for another type.
 	plain : List(U8) -> Answer
-	plain = |body| { ..respond(
-		200,
-		Str.to_utf8("text/plain; charset=utf-8"),
-		body,
-	), sniff: Forbid }
+	plain = |body| {
+		..respond(200, { content_type: Str.to_utf8("text/plain; charset=utf-8"), body }),
+		sniff: Forbid,
+	}
 
 	## A 200 of the bytes the host is serving (Files.serve_file!) as text, as
 	## stored, never sniffed.
@@ -274,11 +265,7 @@ Chat := [].{
 	## `after`.
 	served_html : List(U8), List(U8) -> Answer
 	served_html = |before, after| {
-		..respond(
-			200,
-			html,
-			before,
-		),
+		..respond(200, { content_type: html, body: before }),
 		kind: Held,
 		location: after,
 	}
@@ -322,12 +309,8 @@ Chat := [].{
 
 	## A topic's stream on the bus key `key`: its backlog first, from the
 	## transcript at `transcript`, numbered in `topic`.
-	topic_stream : List(U8), List(U8), List(U8) -> Answer
-	topic_stream = |
-		key,
-		transcript,
-		topic,
-	| {
+	topic_stream : List(U8), { transcript : List(U8), topic : List(U8) } -> Answer
+	topic_stream = |key, { transcript, topic }| {
 		..none,
 		kind: Stream,
 		location: key,

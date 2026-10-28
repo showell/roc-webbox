@@ -18,11 +18,7 @@ JsonOut :: List(U8).{
 	## `Str.from_utf8_lossy` gives one U+FFFD per bad sequence, not per byte.
 	lossy : List(U8) -> JsonOut
 	lossy = |b| string(
-		whole_or_replaced(
-			b,
-			0,
-			"",
-		),
+		whole_or_replaced(b, { at: 0, out: "" }),
 	)
 
 	## A whole number, in decimal.
@@ -77,12 +73,8 @@ JsonOut :: List(U8).{
 	bytes = |JsonOut.(b)| b
 }
 
-whole_or_replaced : List(U8), U64, Str -> Str
-whole_or_replaced = |
-	b,
-	i,
-	out,
-|
+whole_or_replaced : List(U8), { at : U64, out : Str } -> Str
+whole_or_replaced = |b, { at: i, out }|
 	match List.get(b, i) {
 		Err(_) => out
 		Ok(c) => {
@@ -94,16 +86,8 @@ whole_or_replaced = |
 				),
 			) else Err(Short)
 			match whole {
-				Ok(text) => whole_or_replaced(
-					b,
-					i + n,
-					Str.concat(out, text),
-				)
-				Err(_) => whole_or_replaced(
-					b,
-					i + 1,
-					Str.concat(out, "\u(fffd)"),
-				)
+				Ok(text) => whole_or_replaced(b, { at: i + n, out: Str.concat(out, text) })
+				Err(_) => whole_or_replaced(b, { at: i + 1, out: Str.concat(out, "\u(fffd)") })
 			}
 		}
 	}

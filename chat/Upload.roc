@@ -51,8 +51,7 @@ Upload := [].{
 				match Bytes.cut_seq(spec, ['-']) {
 					Ok((left, right)) => from_to(
 						Bytes.trim(left, [' ']),
-						Bytes.trim(right, [' ']),
-						size,
+						{ right: Bytes.trim(right, [' ']), size },
 					)
 					Err(NotFound) => Err(Unsatisfiable)
 				}
@@ -142,11 +141,7 @@ Upload := [].{
 					Host.refuse_upload!(Malformed, "no file\n".to_utf8())
 					Chat.answered
 				}
-				Unsupported => Chat.respond(
-					415,
-					[],
-					unsupported.to_utf8(),
-				)
+				Unsupported => Chat.respond(415, { content_type: [], body: unsupported.to_utf8() })
 				Read =>
 					match kind_of(form.ext) {
 						Err(NotTaken) => crash "Upload.post!: the host sniffed a type not taken"
@@ -226,11 +221,7 @@ keep! : {
 keep! = |form, { kind, at }|
 	match Host.reserve_upload!(form.size) {
 		Failed => Chat.answered
-		Refused => Chat.respond(
-			403,
-			[],
-			Upload.allowance_spent.to_utf8(),
-		)
+		Refused => Chat.respond(403, { content_type: [], body: Upload.allowance_spent.to_utf8() })
 		Reserved => {
 			stored = Host.store_upload!(Paths.uploads_folder(at).bytes(), form.ext)
 			name = Str.from_utf8_lossy(stored.name)
@@ -238,24 +229,26 @@ keep! = |form, { kind, at }|
 				Failed => Chat.answered
 				Stored => Chat.respond(
 					200,
-					Chat.json,
-					Upload.stored_answer({
-						url: "${Paths.ConvKey.base(at.key)}/${at.topic}/uploads/${name}",
-						filename: form.filename,
-						kind,
-					}),
+					{
+						content_type: Chat.json,
+						body: Upload.stored_answer({
+							url: "${Paths.ConvKey.base(at.key)}/${at.topic}/uploads/${name}",
+							filename: form.filename,
+							kind,
+						}),
+					},
 				)
 			}
 		}
 	}
 
 ## The range `left-right` of `size` bytes, cut to the window.
-from_to : List(U8), List(U8), U64 -> Try({ first : U64, last : U64 }, [Unsatisfiable])
-from_to = |
-	left,
-	right,
-	size,
-| {
+from_to : List(U8),
+{ right : List(U8), size : U64 } -> Try(
+	{ first : U64, last : U64 },
+	[Unsatisfiable],
+)
+from_to = |left, { right, size }| {
 	whole = if left == [] {
 		# A suffix: the last N bytes.
 		match ZigText.parse_u64(right) {

@@ -99,11 +99,7 @@ Retire := [].{
 	plan! : List(Accounts.Account), Asked => Try(List(Step), [Failed])
 	plan! = |accounts, asked| {
 		cutoff = asked.now - asked.days.to_i64_wrap() * 86400
-		topics = old_topics!(
-			conversations!({})?,
-			cutoff,
-			[],
-		)?
+		topics = old_topics!(conversations!({})?, { cutoff, steps: [] })?
 		removed = List.drop_if(accounts, |a| List.contains(asked.keep, a.name.to_utf8()))
 		ids = List.map(removed, |a| a.id.to_str())
 		users = List.join(
@@ -150,19 +146,14 @@ Retire := [].{
 					}
 					Err(Refused(why)) => Chat.respond(
 						400,
-						[],
-						why.to_utf8(),
+						{ content_type: [], body: why.to_utf8() },
 					)
 					Ok({}) =>
 						match plan!(accounts, got) {
 							Err(Failed) => Chat.answered
 							Ok(steps) =>
 								match carry_out!(steps) {
-									Ok({}) => Chat.respond(
-										200,
-										[],
-										[],
-									)
+									Ok({}) => Chat.respond(200, { content_type: [], body: [] })
 									Err(Failed) => Chat.answered
 								}
 						}
@@ -294,12 +285,8 @@ files! = |parts|
 ## is before `cutoff`, with their sidecars. **A TOPIC WE CANNOT DATE IS
 ## KEPT** (Steve, 2026-10-04): an empty or hand-damaged transcript may be a
 ## fresh topic someone just made.
-old_topics! : List(Conv), I64, List(Step) => Try(List(Step), [Failed])
-old_topics! = |
-	convs,
-	cutoff,
-	steps,
-|
+old_topics! : List(Conv), { cutoff : I64, steps : List(Step) } => Try(List(Step), [Failed])
+old_topics! = |convs, { cutoff, steps }|
 	match convs {
 		[] => Ok(steps)
 		[conv, .. as more] => {
@@ -310,26 +297,32 @@ old_topics! = |
 			)
 			gone = old_in!(
 				conv,
-				sessions,
-				sids,
-				cutoff,
-				[],
+				{
+					sessions,
+					sids,
+					cutoff,
+					steps: [],
+				},
 			)?
-			old_topics!(
-				more,
-				cutoff,
-				List.concat(steps, gone),
-			)
+			old_topics!(more, { cutoff, steps: List.concat(steps, gone) })
 		}
 	}
 
-old_in! : Conv, List(Str), List(Str), I64, List(Step) => Try(List(Step), [Failed])
+old_in! : Conv,
+{
+	sessions : List(Str),
+	sids : List(Str),
+	cutoff : I64,
+	steps : List(Step),
+} => Try(List(Step), [Failed])
 old_in! = |
 	conv,
-	sessions,
-	sids,
-	cutoff,
-	steps,
+	{
+		sessions,
+		sids,
+		cutoff,
+		steps,
+	},
 |
 	match sids {
 		[] => Ok(steps)
@@ -361,10 +354,12 @@ old_in! = |
 				}
 			old_in!(
 				conv,
-				sessions,
-				more,
-				cutoff,
-				List.concat(steps, these),
+				{
+					sessions,
+					sids: more,
+					cutoff,
+					steps: List.concat(steps, these),
+				},
 			)
 		}
 	}
@@ -421,19 +416,11 @@ gone_dms! = |ids| {
 pruned_channels! : List(Str) => Try(List(Step), [Failed])
 pruned_channels! = |ids| {
 	names = List.keep_if(files!(["channels"])?, |n| n.ends_with(".channel"))
-	pruned_in!(
-		names,
-		ids,
-		[],
-	)
+	pruned_in!(names, { ids, steps: [] })
 }
 
-pruned_in! : List(Str), List(Str), List(Step) => Try(List(Step), [Failed])
-pruned_in! = |
-	names,
-	ids,
-	steps,
-|
+pruned_in! : List(Str), { ids : List(Str), steps : List(Step) } => Try(List(Step), [Failed])
+pruned_in! = |names, { ids, steps }|
 	match names {
 		[] => Ok(steps)
 		[name, .. as more] => {
@@ -456,11 +443,7 @@ pruned_in! = |
 				Err(Missing) => Ok([])
 				Err(Failed) => Err(Failed)
 			}
-			pruned_in!(
-				more,
-				ids,
-				List.concat(steps, these?),
-			)
+			pruned_in!(more, { ids, steps: List.concat(steps, these?) })
 		}
 	}
 
@@ -523,19 +506,11 @@ dangling! = |
 				Err(NotKept)
 			},
 	)
-	swept!(
-		kept,
-		gone,
-		[],
-	)
+	swept!(kept, { gone, steps: [] })
 }
 
-swept! : List(Str), List(Str), List(Step) => Try(List(Step), [Failed])
-swept! = |
-	uids,
-	gone,
-	steps,
-|
+swept! : List(Str), { gone : List(Str), steps : List(Step) } => Try(List(Step), [Failed])
+swept! = |uids, { gone, steps }|
 	match uids {
 		[] => Ok(steps)
 		[uid, .. as more] => {
@@ -561,36 +536,49 @@ swept! = |
 				}
 			sessions = swept_in!(
 				uid,
-				"last-sessions",
-				RefLastSession,
-				gone,
+				{
+					sub: "last-sessions",
+					kind: RefLastSession,
+					gone,
+				},
 			)?
 			pinned = swept_in!(
 				uid,
-				"pinned-sessions",
-				RefPinned,
-				gone,
+				{
+					sub: "pinned-sessions",
+					kind: RefPinned,
+					gone,
+				},
 			)?
 			swept!(
 				more,
-				gone,
-				List.join([
-					steps,
-					head,
-					sessions,
-					pinned,
-				]),
+				{
+					gone,
+					steps: List.join([
+						steps,
+						head,
+						sessions,
+						pinned,
+					]),
+				},
 			)
 		}
 	}
 
 ## Each file in the member's folder `sub`, named for a conversation now gone.
-swept_in! : Str, Str, Kind, List(Str) => Try(List(Step), [Failed])
+swept_in! : Str,
+{
+	sub : Str,
+	kind : Kind,
+	gone : List(Str),
+} => Try(List(Step), [Failed])
 swept_in! = |
 	uid,
-	sub,
-	kind,
-	gone,
+	{
+		sub,
+		kind,
+		gone,
+	},
 | {
 	names = files!([
 		"users",
@@ -599,22 +587,33 @@ swept_in! = |
 	])?
 	dangling_of!(
 		names,
+		{
+			uid,
+			sub,
+			kind,
+			gone,
+			steps: [],
+		},
+	)
+}
+
+dangling_of! : List(Str),
+{
+	uid : Str,
+	sub : Str,
+	kind : Kind,
+	gone : List(Str),
+	steps : List(Step),
+} => Try(List(Step), [Failed])
+dangling_of! = |
+	names,
+	{
 		uid,
 		sub,
 		kind,
 		gone,
-		[],
-	)
-}
-
-dangling_of! : List(Str), Str, Str, Kind, List(Str), List(Step) => Try(List(Step), [Failed])
-dangling_of! = |
-	names,
-	uid,
-	sub,
-	kind,
-	gone,
-	steps,
+		steps,
+	},
 |
 	match names {
 		[] => Ok(steps)
@@ -638,11 +637,13 @@ dangling_of! = |
 				}
 			dangling_of!(
 				more,
-				uid,
-				sub,
-				kind,
-				gone,
-				List.concat(steps, these),
+				{
+					uid,
+					sub,
+					kind,
+					gone,
+					steps: List.concat(steps, these),
+				},
 			)
 		}
 	}

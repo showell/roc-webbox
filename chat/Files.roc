@@ -70,12 +70,8 @@ Files := [].{
 	## caller recounts or reads the truth, as for any miss. The chat's
 	## caches are the .count sidecar and the last message's window; every
 	## other read is the truth's, and its failure fails the request.
-	read_cache! : Paths.ChatPath, U64, U64 => Try(List(U8), [Miss])
-	read_cache! = |
-		path,
-		offset,
-		max,
-	| {
+	read_cache! : Paths.ChatPath, { offset : U64, max : U64 } => Try(List(U8), [Miss])
+	read_cache! = |path, { offset, max }| {
 		got = Host.read_at!(
 			path.bytes(),
 			offset,

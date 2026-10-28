@@ -92,12 +92,19 @@ Search := [].{
 	}
 
 	## The answer: `{"word":…,"matched":N,"unreadable":N,"messages":[{"conv":…,"kind":…,"sid":…,"id":…,"from":…,"date":…,"before":…,"mark":…,"after":…},…]}`.
-	messages_json : List(U8), U64, U64, List(Hit) -> List(U8)
+	messages_json : List(U8),
+	{
+		matched : U64,
+		unreadable : U64,
+		hits : List(Hit),
+	} -> List(U8)
 	messages_json = |
 		word,
-		matched,
-		unreadable,
-		hits,
+		{
+			matched,
+			unreadable,
+			hits,
+		},
 	|
 		JsonOut.object([
 			("word", JsonOut.lossy(word)),
@@ -107,12 +114,12 @@ Search := [].{
 		]).bytes()
 
 	## The answer: `{"prefix":…,"most":20,"unreadable":N,"words":[{"word":…,"count":N},…]}`.
-	words_json : List(U8), U64, List({ count : U64, word : List(U8) }) -> List(U8)
-	words_json = |
-		prefix,
-		unreadable,
-		words,
-	|
+	words_json : List(U8),
+	{
+		unreadable : U64,
+		words : List({ count : U64, word : List(U8) }),
+	} -> List(U8)
+	words_json = |prefix, { unreadable, words }|
 		JsonOut.object([
 			("prefix", JsonOut.lossy(prefix)),
 			("most", JsonOut.number(most_words)),

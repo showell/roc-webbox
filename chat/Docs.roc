@@ -275,8 +275,10 @@ create_doc! = |title|
 							# A slug of 80 suffixed past 80 (docPath's InvalidDocSlug).
 							Err(NotASlug) => Chat.respond(
 								500,
-								[],
-								"The doc cannot be made: InvalidDocSlug.\n".to_utf8(),
+								{
+									content_type: [],
+									body: "The doc cannot be made: InvalidDocSlug.\n".to_utf8(),
+								},
 							)
 							Ok(path) =>
 								match Files.write!(path, []) {
@@ -302,30 +304,18 @@ unused_slug! = |me, base|
 		"render",
 		"post",
 	].contains(base) {
-		suffixed_slug!(
-			me,
-			base,
-			2,
-		)
+		suffixed_slug!(me, { base, kept: 2 })
 	} else {
 		match doc_there!(me, base) {
 			Err(Failed) => Err(Failed)
 			Ok(Free) => Ok(base)
-			Ok(Taken) => suffixed_slug!(
-				me,
-				base,
-				2,
-			)
+			Ok(Taken) => suffixed_slug!(me, { base, kept: 2 })
 		}
 	}
 
 ## `base-n`, or the next, up to 999.
-suffixed_slug! : Uid, Str, U64 => Try(Str, [Failed])
-suffixed_slug! = |
-	me,
-	base,
-	n,
-|
+suffixed_slug! : Uid, { base : Str, kept : U64 } => Try(Str, [Failed])
+suffixed_slug! = |me, { base, kept: n }|
 	if n >= 1000 {
 		Ok(base)
 	} else {
@@ -333,11 +323,7 @@ suffixed_slug! = |
 		match doc_there!(me, candidate) {
 			Err(Failed) => Err(Failed)
 			Ok(Free) => Ok(candidate)
-			Ok(Taken) => suffixed_slug!(
-				me,
-				base,
-				n + 1,
-			)
+			Ok(Taken) => suffixed_slug!(me, { base, kept: n + 1 })
 		}
 	}
 
@@ -391,8 +377,7 @@ save_slug! = |form, slug|
 							match Files.stat!(path) {
 								Err(Missing) => Chat.respond(
 									404,
-									[],
-									"no such doc\n".to_utf8(),
+									{ content_type: [], body: "no such doc\n".to_utf8() },
 								)
 								Err(Failed) => Chat.answered
 								Ok(_) =>
@@ -400,11 +385,7 @@ save_slug! = |form, slug|
 										Err(Failed) => Chat.answered
 										Ok({}) => {
 											doc_touched!(me, slug)
-											Chat.respond(
-												204,
-												[],
-												[],
-											)
+											Chat.respond(204, { content_type: [], body: [] })
 										}
 									}
 							}
@@ -437,11 +418,7 @@ preview! = |md| {
 	rendered = Host.render_preview!(md.to_utf8())
 	match rendered.status {
 		Failed => Chat.answered
-		Rendered => Chat.respond(
-			200,
-			Chat.html,
-			rendered.html,
-		)
+		Rendered => Chat.respond(200, { content_type: Chat.html, body: rendered.html })
 	}
 }
 
@@ -543,19 +520,17 @@ saved_message! = |m|
 						if List.len(before) + List.len(entry) > Limits.reading_list_bytes {
 							Chat.respond(
 								413,
-								[],
-								"not saved: the reading list is full\n".to_utf8(),
+								{
+									content_type: [],
+									body: "not saved: the reading list is full\n".to_utf8(),
+								},
 							)
 						} else {
 							match Files.write!(path, List.concat(before, entry)) {
 								Err(Failed) => Chat.answered
 								Ok({}) => {
 									doc_touched!(me, "reading-list")
-									Chat.respond(
-										204,
-										[],
-										[],
-									)
+									Chat.respond(204, { content_type: [], body: [] })
 								}
 							}
 						}
@@ -656,8 +631,7 @@ docs_list! = |me|
 		Err(Failed) => Chat.answered
 		Ok(docs) => Chat.respond(
 			200,
-			Chat.json,
-			Docs.list_json(me.to_str(), sorted_slugs(docs)),
+			{ content_type: Chat.json, body: Docs.list_json(me.to_str(), sorted_slugs(docs)) },
 		)
 	}
 
@@ -668,15 +642,13 @@ raw_doc! = |me, slug|
 	match Paths.doc_path(me, slug) {
 		Err(NotASlug) => Chat.respond(
 			500,
-			[],
-			"The doc cannot be read: InvalidDocSlug.\n".to_utf8(),
+			{ content_type: [], body: "The doc cannot be read: InvalidDocSlug.\n".to_utf8() },
 		)
 		Ok(path) =>
 			match Files.read_bytes!(path) {
 				Ok(bytes) => Chat.respond(
 					200,
-					"text/markdown; charset=utf-8".to_utf8(),
-					bytes,
+					{ content_type: "text/markdown; charset=utf-8".to_utf8(), body: bytes },
 				)
 				Err(Missing) => Chat.not_found
 				Err(Failed) => Chat.answered
@@ -695,11 +667,7 @@ docs_editor! = |me, slug|
 				docs_page!(slugs, Nothing)
 			} else {
 				match (Paths.doc_path(me, slug), slugs.contains(slug)) {
-					(Ok(path), Bool.True) => open_doc!(
-						slugs,
-						slug,
-						path,
-					)
+					(Ok(path), Bool.True) => open_doc!(slugs, { slug, path })
 					_ => Chat.redirect("/chat/docs".to_utf8())
 				}
 			}
@@ -708,12 +676,8 @@ docs_editor! = |me, slug|
 
 ## The editor with the doc at `path` open: its markdown (a doc gone since
 ## the listing is empty) and that rendered, the preview's first paint.
-open_doc! : List(Str), Str, Paths.ChatPath => Chat.Answer
-open_doc! = |
-	slugs,
-	slug,
-	path,
-| {
+open_doc! : List(Str), { slug : Str, path : Paths.ChatPath } => Chat.Answer
+open_doc! = |slugs, { slug, path }| {
 	stored = match Files.read_bytes!(path) {
 		Ok(bytes) => Ok(bytes)
 		Err(Missing) => Ok([])
@@ -745,13 +709,15 @@ docs_page! = |slugs, open|
 		Err(Failed) => Chat.answered
 		Ok(viewer) => Chat.respond(
 			200,
-			Chat.html,
-			Docs.editor({
-				src: Chrome.src_in(Host.srcs!({})),
-				viewer,
-				slugs,
-				open,
-			}).bytes(),
+			{
+				content_type: Chat.html,
+				body: Docs.editor({
+					src: Chrome.src_in(Host.srcs!({})),
+					viewer,
+					slugs,
+					open,
+				}).bytes(),
+			},
 		)
 	}
 
@@ -810,11 +776,7 @@ quote_fence = |body| {
 		List.split_on(body.to_utf8(), '\n'),
 		0,
 		|most, line| {
-			run = Bytes.count_while(
-				line,
-				|c| c == '~',
-				0,
-			)
+			run = Bytes.count_while(line, { keep: |c| c == '~', at: 0 })
 			if run >= 3 and run > most run else most
 		},
 	)

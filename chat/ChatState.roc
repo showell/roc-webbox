@@ -20,12 +20,8 @@ ChatState := [].{
 	## while the conversation still has it; else its first topic
 	## (Paths.first_of); else the date of `now_secs`, so a conversation's
 	## first post makes today's topic.
-	resume_topic : List(Str), Str, I64 -> Str
-	resume_topic = |
-		topics,
-		last,
-		now_secs,
-	|
+	resume_topic : List(Str), { last : Str, now_secs : I64 } -> Str
+	resume_topic = |topics, { last, now_secs }|
 		match List.keep_if(topics, |t| !last.is_empty() and t == last) {
 			[t, ..] => t
 			[] => {
@@ -42,12 +38,8 @@ ChatState := [].{
 	## no pin is left (the file goes). Only `topic` is de-duplicated: a pin it
 	## adds is not added twice, an unpin drops every copy, and a line the
 	## file already repeats stays repeated, as the Zig keeps it.
-	pinned : Str, Str, PinEdit -> [Write(List(U8)), Remove]
-	pinned = |
-		stored,
-		topic,
-		pin,
-	| {
+	pinned : Str, { topic : Str, pin : PinEdit } -> [Write(List(U8)), Remove]
+	pinned = |stored, { topic, pin }| {
 		cur = parse(stored)
 		kept = if pin == Pin cur else List.drop_if(cur, |s| s == topic)
 		next = if pin == Pin and !List.contains(cur, topic) List.append(kept, topic) else kept

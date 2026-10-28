@@ -47,42 +47,25 @@ Form := [].{
 
 ## formDecode, or `BadEscape` for a `%` that is not two hex digits.
 decode : List(U8) -> Try(List(U8), [BadEscape])
-decode = |raw| decode_from(
-	raw,
-	0,
-	[],
-)
+decode = |raw| decode_from(raw, { at: 0, out: [] })
 
-decode_from : List(U8), U64, List(U8) -> Try(List(U8), [BadEscape])
-decode_from = |
-	raw,
-	i,
-	out,
-| match List.get(raw, i) {
+decode_from : List(U8), { at : U64, out : List(U8) } -> Try(List(U8), [BadEscape])
+decode_from = |raw, { at: i, out }| match List.get(raw, i) {
 	Err(_) => Ok(out)
-	Ok('+') => decode_from(
-		raw,
-		i + 1,
-		List.append(out, ' '),
-	)
+	Ok('+') => decode_from(raw, { at: i + 1, out: List.append(out, ' ') })
 	Ok('%') =>
 		match (List.get(raw, i + 1), List.get(raw, i + 2)) {
 			(Ok(h), Ok(l)) =>
 				match (hex(h), hex(l)) {
 					(Ok(hi), Ok(lo)) => decode_from(
 						raw,
-						i + 3,
-						List.append(out, hi * 16 + lo),
+						{ at: i + 3, out: List.append(out, hi * 16 + lo) },
 					)
 					_ => Err(BadEscape)
 				}
 			_ => Err(BadEscape)
 		}
-	Ok(c) => decode_from(
-		raw,
-		i + 1,
-		List.append(out, c),
-	)
+	Ok(c) => decode_from(raw, { at: i + 1, out: List.append(out, c) })
 }
 
 hex : U8 -> Try(U8, [NotHex])

@@ -54,11 +54,7 @@ Feeds := [].{
 			blocks_of(text.to_utf8()),
 			[],
 			|out, block| {
-				(line, body) = match Bytes.find_byte(
-					block,
-					'\n',
-					0,
-				) {
+				(line, body) = match Bytes.find_byte(block, { byte: '\n', at: 0 }) {
 					Ok(nl) => (List.take_first(block, nl), List.drop_first(block, nl + 1))
 					Err(NotFound) => (block, [])
 				}
@@ -99,11 +95,7 @@ Feeds := [].{
 			blocks_of(text.to_utf8()),
 			[],
 			|out, block|
-				match Bytes.find_byte(
-					block,
-					'\n',
-					0,
-				) {
+				match Bytes.find_byte(block, { byte: '\n', at: 0 }) {
 					Err(NotFound) => out
 					Ok(nl) =>
 						match header(text_of(List.take_first(block, nl))) {
@@ -254,19 +246,28 @@ tags_in : List(U8) -> List(Str)
 tags_in = |s| List.map(
 	img_tags_from(
 		s,
-		0,
-		[],
-		Unknown,
+		{
+			at: 0,
+			out: [],
+			gt_seen: Unknown,
+		},
 	),
 	text_of,
 )
 
-img_tags_from : List(U8), U64, List(List(U8)), Bytes.Seen -> List(List(U8))
+img_tags_from : List(U8),
+{
+	at : U64,
+	out : List(List(U8)),
+	gt_seen : Bytes.Seen,
+} -> List(List(U8))
 img_tags_from = |
 	s,
-	i,
-	out,
-	gt_seen,
+	{
+		at: i,
+		out,
+		gt_seen,
+	},
 |
 	if i >= List.len(s) {
 		out
@@ -289,69 +290,69 @@ img_tags_from = |
 			) == Str.to_utf8("<img") and Ascii.is_whitespace(e) =>
 				match Bytes.find_seen(
 					s,
-					'>',
-					i + 4,
-					gt_seen,
+					{
+						byte: '>',
+						from: i + 4,
+						seen: gt_seen,
+					},
 				) {
 					(Ok(gt), seen) => img_tags_from(
 						s,
-						gt + 1,
-						List.append(out, List.sublist(s, { start: i, len: gt + 1 - i })),
-						seen,
+						{
+							at: gt + 1,
+							out: List.append(out, List.sublist(s, { start: i, len: gt + 1 - i })),
+							gt_seen: seen,
+						},
 					)
 					(Err(NotFound), seen) => img_tags_from(
 						s,
-						i + 1,
-						out,
-						seen,
+						{
+							at: i + 1,
+							out,
+							gt_seen: seen,
+						},
 					)
 				}
 			_ => img_tags_from(
 				s,
-				i + 1,
-				out,
-				gt_seen,
+				{
+					at: i + 1,
+					out,
+					gt_seen,
+				},
 			)
 		}
 	}
 
 blocks_in : List(U8) -> List(Block)
-blocks_in = |body| blocks_from(
-	List.split_on(body, '\n'),
-	0,
-	[],
-)
+blocks_in = |body| blocks_from(List.split_on(body, '\n'), { at: 0, out: [] })
 
-blocks_from : List(List(U8)), U64, List(Block) -> List(Block)
-blocks_from = |
-	ls,
-	i,
-	out,
-|
+blocks_from : List(List(U8)), { at : U64, out : List(Block) } -> List(Block)
+blocks_from = |ls, { at: i, out }|
 	match List.get(ls, i) {
 		Err(_) => out
 		Ok(line) =>
 			match Fence.fence_open(line) {
-				Err(NotAFence) => blocks_from(
-					ls,
-					i + 1,
-					out,
-				)
+				Err(NotAFence) => blocks_from(ls, { at: i + 1, out })
 				Ok(fo) => {
 					j = Fence.close_at(
 						ls,
-						fo.char,
-						fo.count,
-						i + 1,
+						{
+							char: fo.char,
+							count: fo.count,
+							at: i + 1,
+						},
 					)
 					body = Bytes.join_lines(List.sublist(ls, { start: i + 1, len: j - (i + 1) }))
 					blocks_from(
 						ls,
-						j + 1,
-						if fo.lang == Str.to_utf8("quote") out else List.append(
-							out,
-							{ lang: text_of(fo.lang), body: text_of(body) },
-						),
+						{
+							at: j + 1,
+							out: if fo.lang == Str.to_utf8("quote") out else List.append(
+								out,
+								{ lang: text_of(fo.lang), body: text_of(body) },
+							),
+						},
 					)
 				}
 			}

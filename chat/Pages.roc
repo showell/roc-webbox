@@ -148,12 +148,8 @@ Pages := [].{
 	## chat_links.zig's /chat/links: the member's curated links where the
 	## host holds them (`Held`, a mark the host fills), or the stub that says
 	## who curates them, in a readable column of its own.
-	links : (List(U8) -> Str), Str, [Held, NoLinks] -> Html
-	links = |
-		src,
-		viewer,
-		rendered,
-	|
+	links : (List(U8) -> Str), { viewer : Str, rendered : [Held, NoLinks] } -> Html
+	links = |src, { viewer, rendered }|
 		Chrome.page(
 			{
 				tab: Html.trusted("Links"),
@@ -178,11 +174,7 @@ Pages := [].{
 	links_around : (List(U8) -> Str), Str -> (List(U8), List(U8))
 	links_around = |src, viewer|
 		match Bytes.cut_seq(
-			links(
-				src,
-				viewer,
-				Held,
-			).bytes(),
+			links(src, { viewer, rendered: Held }).bytes(),
 			[0],
 		) {
 			Ok(parts) => parts
@@ -221,30 +213,34 @@ Pages := [].{
 	images : (List(U8) -> Str), FeedView -> Html
 	images = |src, { viewer, json }| feed(
 		src,
-		viewer,
-		Images,
-		json,
-		[
-			"styles.js",
-			"chat_image_popup.js",
-			"images.js",
-			"notify.js",
-		],
+		{
+			viewer,
+			which: Images,
+			json,
+			scripts: [
+				"styles.js",
+				"chat_image_popup.js",
+				"images.js",
+				"notify.js",
+			],
+		},
 	)
 
 	## /chat/code: every entry of the member's code.md.
 	code : (List(U8) -> Str), FeedView -> Html
 	code = |src, { viewer, json }| feed(
 		src,
-		viewer,
-		Code,
-		json,
-		[
-			"styles.js",
-			"chat_code_popup.js",
-			"code.js",
-			"notify.js",
-		],
+		{
+			viewer,
+			which: Code,
+			json,
+			scripts: [
+				"styles.js",
+				"chat_code_popup.js",
+				"code.js",
+				"notify.js",
+			],
+		},
 	)
 
 	## noConversationsHtml: /chat for a viewer with nothing to resume.
@@ -263,12 +259,8 @@ Pages := [].{
 		)
 
 	## conversationHtml: the page that boots the chat's client.
-	conversation : (List(U8) -> Str), Limits, View -> Html
-	conversation = |
-		src,
-		limits,
-		v,
-	| {
+	conversation : (List(U8) -> Str), { limits : Limits, v : View } -> Html
+	conversation = |src, { limits, v }| {
 		s = shell(
 			src,
 			{
@@ -435,13 +427,21 @@ links_css = Html.trusted(
 
 ## images.zig's and code.zig's pages: the attention strip, the feed's
 ## mount, its JSON (`json`, script-safe) and its scripts.
-feed : (List(U8) -> Str), Str, [Images, Code], List(U8), List(Str) -> Html
+feed : (List(U8) -> Str),
+{
+	viewer : Str,
+	which : [Images, Code],
+	json : List(U8),
+	scripts : List(Str),
+} -> Html
 feed = |
 	src,
-	viewer,
-	which,
-	json,
-	scripts,
+	{
+		viewer,
+		which,
+		json,
+		scripts,
+	},
 | {
 	(name, title) = match which {
 		Images => ("images", "Images")
@@ -511,10 +511,12 @@ counted = |fields, i| {
 expect {
 	page = feed(
 		|_| "/x.js",
-		"v",
-		Images,
-		Str.to_utf8("{}"),
-		[],
+		{
+			viewer: "v",
+			which: Images,
+			json: Str.to_utf8("{}"),
+			scripts: [],
+		},
 	)
 	(Str.from_utf8(Html.bytes(page)) ?? "").contains("<div class=\"chat-notify\" id=\"chat-notify\"></div><div id=\"images-mount\"></div><script id=\"images-data\" type=\"application/json\">{}</script>")
 }

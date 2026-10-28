@@ -103,8 +103,7 @@ not_yours! = |route|
 	if route.family == Channel {
 		not_found_page!(
 			Unasked,
-			"#${route.key} is not a channel you are a member of.",
-			"/chat",
+			{ what: "#${route.key} is not a channel you are a member of.", back: "/chat" },
 		)
 	} else {
 		Chat.not_found
@@ -112,24 +111,22 @@ not_yours! = |route|
 
 ## **A 404 THAT SAYS WHY** (metal-vmm QUEUE 156(j)): `what` is not there, and
 ## `back` is where to go instead.
-not_found_page! : Who, Str, Str => Chat.Answer
-not_found_page! = |
-	who,
-	what,
-	back,
-|
+not_found_page! : Who, { what : Str, back : Str } => Chat.Answer
+not_found_page! = |who, { what, back }|
 	match Members.load_viewer!(who) {
 		Ok(viewer) => Chat.respond(
 			404,
-			html,
-			Pages.not_found(
-				Chrome.src_in(Host.srcs!({})),
-				{
-					viewer,
-					what,
-					back,
-				},
-			).bytes(),
+			{
+				content_type: html,
+				body: Pages.not_found(
+					Chrome.src_in(Host.srcs!({})),
+					{
+						viewer,
+						what,
+						back,
+					},
+				).bytes(),
+			},
 		)
 		Err(Failed) => Chat.answered
 	}
@@ -286,17 +283,9 @@ serve_conversation! = |req, route|
 		Err(Invalid) => not_yours!(route)
 		Ok(key) =>
 			if route.part == New {
-				create_topic!(
-					req,
-					route,
-					key,
-				)
+				create_topic!(req, { route, key })
 			} else if route.tail == Send or route.tail == InvalidSend {
-				send!(
-					req,
-					route,
-					key,
-				)
+				send!(req, { route, key })
 			} else if route.part == Landing {
 				serve_landing!(route, key)
 			} else {
@@ -316,13 +305,15 @@ serve_conversation! = |req, route|
 									if Conversation.has_topic(topics, route.topic) {
 										serve_topic!(
 											req,
-											route,
 											{
-												key,
-												conv,
-												who,
-												title: Conversation.topic_title(t, route.topic),
-												topics,
+												route,
+												found: {
+													key,
+													conv,
+													who,
+													title: Conversation.topic_title(t, route.topic),
+													topics,
+												},
 											},
 										)
 									} else {
@@ -330,8 +321,10 @@ serve_conversation! = |req, route|
 										# (metal-vmm QUEUE 156(j)).
 										not_found_page!(
 											who,
-											"There is no topic \u(201C)${route.topic}\u(201D) in this conversation.",
-											key.base(),
+											{
+												what: "There is no topic \u(201C)${route.topic}\u(201D) in this conversation.",
+												back: key.base(),
+											},
 										)
 									}
 								}
@@ -376,37 +369,30 @@ serve_saved! = |route|
 				Ok(text) => {
 					ids = Saved.ids(
 						text,
-						route.key.to_utf8(),
-						route.topic.to_utf8(),
+						{ conv: route.key.to_utf8(), topic: route.topic.to_utf8() },
 					)
 					# An id is ASCII by its rule (Paths.is_valid_msg_ref_id).
 					Chat.respond(
 						200,
-						json,
-						JsonOut.array(
-							List.map(
-								ids,
-								|id| JsonOut.string(Str.from_utf8_lossy(id)),
-							),
-						).bytes(),
+						{
+							content_type: json,
+							body: JsonOut.array(
+								List.map(
+									ids,
+									|id| JsonOut.string(Str.from_utf8_lossy(id)),
+								),
+							).bytes(),
+						},
 					)
 				}
-				Err(Missing) => Chat.respond(
-					200,
-					json,
-					Str.to_utf8("[]"),
-				)
+				Err(Missing) => Chat.respond(200, { content_type: json, body: Str.to_utf8("[]") })
 				Err(Failed) => Chat.answered
 			}
 	}
 
 ## A topic's page, or its raw transcript: a read, then the work.
-serve_page_or_raw! : Chat.Request, Route.R, AtTopic => Chat.Answer
-serve_page_or_raw! = |
-	req,
-	route,
-	found,
-|
+serve_page_or_raw! : Chat.Request, { route : Route.R, found : AtTopic } => Chat.Answer
+serve_page_or_raw! = |req, { route, found }|
 	if req.method != Get and req.method != Head {
 		Chat.not_allowed(Get)
 	} else if route.tail == Page {
@@ -423,12 +409,8 @@ serve_page_or_raw! = |
 ## folder in the uploads passed over), named under the topic, then served
 ## as `<topic>.tar.gz`. A topic with no transcript is a 404; anything else
 ## that will not read fails the download: the whole topic or nothing.
-serve_download! : Chat.Request, Route.R, AtTopic => Chat.Answer
-serve_download! = |
-	req,
-	route,
-	found,
-|
+serve_download! : Chat.Request, { route : Route.R, found : AtTopic } => Chat.Answer
+serve_download! = |req, { route, found }|
 	if req.method != Get and req.method != Head {
 		Chat.not_allowed(Get)
 	} else {
@@ -515,12 +497,8 @@ add_all! = |files|
 	}
 
 ## A topic that is there: the method, then the work.
-serve_topic! : Chat.Request, Route.R, AtTopic => Chat.Answer
-serve_topic! = |
-	req,
-	route,
-	found,
-| {
+serve_topic! : Chat.Request, { route : Route.R, found : AtTopic } => Chat.Answer
+serve_topic! = |req, { route, found }| {
 	who = found.who
 	match route.tail {
 		# An upload and the bundle (metal-vmm QUEUE 291): the Roc decides,
@@ -529,11 +507,7 @@ serve_topic! = |
 			req,
 			{ at: { key: found.key, topic: route.topic }, file: route.rest },
 		)
-		Download => serve_download!(
-			req,
-			route,
-			found,
-		)
+		Download => serve_download!(req, { route, found })
 		Upload => Upload.post!(req, { key: found.key, topic: route.topic })
 		# The topic's stream (metal-vmm QUEUE 286): its key and transcript
 		# the Roc's, the backlog's replay and the live stream the host's.
@@ -544,8 +518,7 @@ serve_topic! = |
 				at = { key: found.key, topic: route.topic }
 				Chat.topic_stream(
 					BusKey.topic(at).bytes(),
-					Paths.transcript_path(at).bytes(),
-					route.topic.to_utf8(),
+					{ transcript: Paths.transcript_path(at).bytes(), topic: route.topic.to_utf8() },
 				)
 			}
 		Saved =>
@@ -555,11 +528,7 @@ serve_topic! = |
 				serve_saved!(route)
 			}
 		Invalid => Chat.not_found
-		Page | Raw => serve_page_or_raw!(
-			req,
-			route,
-			found,
-		)
+		Page | Raw => serve_page_or_raw!(req, { route, found })
 		Reactions =>
 			if req.method != Get {
 				Chat.not_allowed(Get)
@@ -572,16 +541,8 @@ serve_topic! = |
 						topic: route.topic,
 					}),
 				) {
-					Ok(bytes) => Chat.respond(
-						200,
-						ndjson,
-						bytes,
-					)
-					Err(Missing) => Chat.respond(
-						200,
-						ndjson,
-						[],
-					)
+					Ok(bytes) => Chat.respond(200, { content_type: ndjson, body: bytes })
+					Err(Missing) => Chat.respond(200, { content_type: ndjson, body: [] })
 					Err(Failed) => Chat.answered
 				}
 			}
@@ -593,14 +554,9 @@ serve_topic! = |
 			} else {
 				match pin!(
 					found.key,
-					route.topic,
-					if route.tail == Pin Pin else Unpin,
+					{ topic: route.topic, pin: if route.tail == Pin Pin else Unpin },
 				) {
-					Ok({}) => Chat.respond(
-						204,
-						[],
-						[],
-					)
+					Ok({}) => Chat.respond(204, { content_type: [], body: [] })
 					Err(Failed) => Chat.answered
 				}
 			}
@@ -701,23 +657,19 @@ load_channel_rosters! = |{}| {
 				Paths.channel_names_not_utf8(listed.not_utf8),
 				|name| Host.count_malformed_channel!(name),
 			)
-			load_rosters_from!(
-				Paths.channel_names(listed.entries),
-				0,
-				[],
-			)
+			load_rosters_from!(Paths.channel_names(listed.entries), { at: 0, out: [] })
 		}
 		Err(Missing) => Ok([])
 		Err(Failed) => Err(Failed)
 	}
 }
 
-load_rosters_from! : List(Str), U64, List(Paths.Roster) => Try(List(Paths.Roster), [Failed])
-load_rosters_from! = |
-	names,
-	i,
-	out,
-|
+load_rosters_from! : List(Str),
+{
+	at : U64,
+	out : List(Paths.Roster),
+} => Try(List(Paths.Roster), [Failed])
+load_rosters_from! = |names, { at: i, out }|
 	match List.get(names, i) {
 		Err(_) => Ok(out)
 		Ok(name) =>
@@ -734,32 +686,19 @@ load_rosters_from! = |
 					match part {
 						Listed(r) => load_rosters_from!(
 							names,
-							i + 1,
-							List.append(out, r),
+							{ at: i + 1, out: List.append(out, r) },
 						)
 						Malformed => {
 							Host.count_malformed_channel!(name.to_utf8())
-							load_rosters_from!(
-								names,
-								i + 1,
-								out,
-							)
+							load_rosters_from!(names, { at: i + 1, out })
 						}
-						Gone => load_rosters_from!(
-							names,
-							i + 1,
-							out,
-						)
+						Gone => load_rosters_from!(names, { at: i + 1, out })
 						Failed => Err(Failed)
 					}
 				}
 				Err(Invalid) => {
 					Host.count_malformed_channel!(name.to_utf8())
-					load_rosters_from!(
-						names,
-						i + 1,
-						out,
-					)
+					load_rosters_from!(names, { at: i + 1, out })
 				}
 			}
 	}
@@ -804,25 +743,25 @@ load_title! = |key, who|
 ## `topic` pinned or unpinned (ChatState.pinned), and the file written back or,
 ## emptied, removed. A read that failed stops here: the set is not empty, it
 ## is unknown, and writing it would drop every pin. `Failed` when a step failed.
-pin! : Paths.ConvKey, Str, ChatState.PinEdit => Try({}, [Failed])
-pin! = |
-	key,
-	topic,
-	pin,
-| {
+pin! : Paths.ConvKey, { topic : Str, pin : ChatState.PinEdit } => Try({}, [Failed])
+pin! = |key, { topic, pin }| {
 	path = Paths.pinned_path(Members.load_uid!({})?, key)
 	match Files.read!(path) {
 		Ok(stored) => write_pins!(
 			path,
-			stored,
-			topic,
-			pin,
+			{
+				stored,
+				topic,
+				pin,
+			},
 		)
 		Err(Missing) => write_pins!(
 			path,
-			"",
-			topic,
-			pin,
+			{
+				stored: "",
+				topic,
+				pin,
+			},
 		)
 		Err(Failed) => Err(Failed)
 	}
@@ -830,18 +769,21 @@ pin! = |
 
 ## The pinned file at `path`, read as `stored`, with `topic` pinned or
 ## unpinned: written back, or, emptied, removed.
-write_pins! : Paths.ChatPath, Str, Str, ChatState.PinEdit => Try({}, [Failed])
+write_pins! : Paths.ChatPath,
+{
+	stored : Str,
+	topic : Str,
+	pin : ChatState.PinEdit,
+} => Try({}, [Failed])
 write_pins! = |
 	path,
-	stored,
-	topic,
-	pin,
-|
-	match ChatState.pinned(
+	{
 		stored,
 		topic,
 		pin,
-	) {
+	},
+|
+	match ChatState.pinned(stored, { topic, pin }) {
 		Write(bytes) => Files.write!(path, bytes)
 		Remove => Files.remove!(path)
 	}
@@ -880,26 +822,17 @@ react! = |who, at| {
 	} else {
 		match Reaction.form(body.bytes) {
 			Malformed => Chat.malformed
-			Bad(why) => Chat.respond(
-				400,
-				[],
-				why,
-			)
+			Bad(why) => Chat.respond(400, { content_type: [], body: why })
 			Reacted(r) =>
 				match store_reaction!(
 					who,
 					at,
 					r,
 				) {
-					Stored => Chat.respond(
-						204,
-						[],
-						[],
-					)
+					Stored => Chat.respond(204, { content_type: [], body: [] })
 					NoSuchMessage => Chat.respond(
 						400,
-						[],
-						Str.to_utf8("react: no such message\n"),
+						{ content_type: [], body: Str.to_utf8("react: no such message\n") },
 					)
 					Failed => Chat.answered
 				}
@@ -987,12 +920,10 @@ serve_links! = |rest|
 					}
 					NotServing => Chat.respond(
 						200,
-						html,
-						Pages.links(
-							src,
-							viewer,
-							NoLinks,
-						).bytes(),
+						{
+							content_type: html,
+							body: Pages.links(src, { viewer, rendered: NoLinks }).bytes(),
+						},
 					)
 				}
 			}
@@ -1021,11 +952,13 @@ serve_recent! = |rest|
 				List.for_each!(got.damaged, |key| Host.count_dropped!(RecentRow, key))
 				Chat.respond(
 					200,
-					html,
-					Pages.recent(
-						Chrome.src_in(Host.srcs!({})),
-						{ viewer, json: Recent.json(me, got.rows) },
-					).bytes(),
+					{
+						content_type: html,
+						body: Pages.recent(
+							Chrome.src_in(Host.srcs!({})),
+							{ viewer, json: Recent.json(me, got.rows) },
+						).bytes(),
+					},
 				)
 			}
 			Err(Failed) => Chat.answered
@@ -1179,11 +1112,7 @@ gather_topics! = |
 					Some(last) =>
 						match (
 							Time.unix_from_rfc3339(last.at),
-							author_name(
-								me,
-								accounts,
-								last.uid,
-							),
+							author_name(me, { accounts, uid: last.uid }),
 						) {
 							(Ok(secs), Ok(name)) => Ok([
 								{
@@ -1261,12 +1190,8 @@ by_file_time! = |path, row|
 ## viewer ("" for the viewer, whom the page calls "You", and for nobody:
 ## an empty Who cell, never an older author). An id that is no uid names
 ## no account, so no name.
-author_name : Uid, List(Accounts.Account), List(U8) -> Try(Str, [Unreadable])
-author_name = |
-	me,
-	accounts,
-	uid,
-|
+author_name : Uid, { accounts : List(Accounts.Account), uid : List(U8) } -> Try(Str, [Unreadable])
+author_name = |me, { accounts, uid }|
 	match Uid.from_utf8(uid) {
 		Ok(id) if id != me => Accounts.name(accounts, id).map_err(|_| Unreadable)
 		_ => Ok("")
@@ -1326,11 +1251,7 @@ serve_feed! = |which, rest|
 					}
 				}
 				if damaged > 0 Host.count_dropped!(FeedEntry, path.bytes()) else {}
-				Chat.respond(
-					200,
-					html,
-					page.bytes(),
-				)
+				Chat.respond(200, { content_type: html, body: page.bytes() })
 			}
 		}
 	}
@@ -1359,15 +1280,17 @@ serve_landing! = |route, key|
 						match Members.load_viewer!(who) {
 							Ok(viewer) => Chat.respond(
 								200,
-								html,
-								Pages.no_topics(
-									Chrome.src_in(Host.srcs!({})),
-									{
-										viewer,
-										base: key.base(),
-										title,
-									},
-								).bytes(),
+								{
+									content_type: html,
+									body: Pages.no_topics(
+										Chrome.src_in(Host.srcs!({})),
+										{
+											viewer,
+											base: key.base(),
+											title,
+										},
+									).bytes(),
+								},
 							)
 							Err(Failed) => Chat.answered
 						}
@@ -1399,12 +1322,13 @@ serve_topic_page! = |route, at|
 				}
 				Chat.respond(
 					200,
-					html,
-					Pages.conversation(
-						Chrome.src_in(Host.srcs!({})),
-						Limits.page,
-						view,
-					).bytes(),
+					{
+						content_type: html,
+						body: Pages.conversation(
+							Chrome.src_in(Host.srcs!({})),
+							{ limits: Limits.page, v: view },
+						).bytes(),
+					},
 				)
 			}
 		}
@@ -1554,12 +1478,8 @@ welcome! = |{}| {
 }
 
 ## The host's hello in the DM `key`, and the member's bookmark at it.
-hello! : List(Accounts.Account), Uid, Paths.ConvKey => Try({}, [Failed])
-hello! = |
-	accounts,
-	host,
-	key,
-| {
+hello! : List(Accounts.Account), { host : Uid, key : Paths.ConvKey } => Try({}, [Failed])
+hello! = |accounts, { host, key }| {
 	name = Members.fail_if_unreadable!(Accounts.name(accounts, host))?
 	bytes = key.bytes()
 	conv = {
@@ -1571,13 +1491,15 @@ hello! = |
 	text = "Hi, this is an automated message from ${name}. Please say hello and ${name} will get back to you soon."
 	_ = append_message_by!(
 		conv,
-		Known(accounts),
-		host,
 		{
-			at: { key, topic: "general" },
-			name,
-			markdown: text,
-			cid: "",
+			who: Known(accounts),
+			me: host,
+			draft: {
+				at: { key, topic: "general" },
+				name,
+				markdown: text,
+				cid: "",
+			},
 		},
 	)?
 	bookmark!(key, "general")
@@ -1596,11 +1518,7 @@ seed_welcome! = |{}| {
 					pair = Paths.pair_key(host.id, me)
 					key = Dm(pair)
 					if Paths.first_of(load_topics!(key)).is_empty() {
-						hello!(
-							accounts,
-							host.id,
-							key,
-						)?
+						hello!(accounts, { host: host.id, key })?
 					}
 					Host.welcome_done!({})?
 					Ok(Known(accounts))
@@ -1629,15 +1547,20 @@ resume! = |who|
 					if Paths.first_of(topics).is_empty() {
 						Chat.redirect("/chat/c/${conv}".to_utf8())
 					} else {
-						Chat.redirect("/chat/c/${conv}/${resume_at!(me, pair, topics)}".to_utf8())
+						Chat.redirect("/chat/c/${conv}/${resume_at!(me, { pair, topics })}".to_utf8())
 					}
 				}
 				_ =>
 					match Members.load_viewer!(who) {
 						Ok(viewer) => Chat.respond(
 							200,
-							html,
-							Pages.no_conversations(Chrome.src_in(Host.srcs!({})), viewer).bytes(),
+							{
+								content_type: html,
+								body: Pages.no_conversations(
+									Chrome.src_in(Host.srcs!({})),
+									viewer,
+								).bytes(),
+							},
 						)
 						Err(Failed) => Chat.answered
 					}
@@ -1647,18 +1570,10 @@ resume! = |who|
 
 ## Where member `me` resumes DM `conv`, whose topics are `topics`: the
 ## choice ChatState's, the last-viewed topic and the clock the host's.
-resume_at! : Uid, Paths.PairKey, List(Str) => Str
-resume_at! = |
-	me,
-	pair,
-	topics,
-| {
+resume_at! : Uid, { pair : Paths.PairKey, topics : List(Str) } => Str
+resume_at! = |me, { pair, topics }| {
 	last = ChatState.bookmark(Files.read!(Paths.last_session_path(me, Dm(pair))))
-	ChatState.resume_topic(
-		topics,
-		last,
-		Host.now!({}),
-	)
+	ChatState.resume_topic(topics, { last, now_secs: Host.now!({}) })
 }
 
 ## /chat/conversations: a DM with every other member, where the member
@@ -1668,16 +1583,18 @@ serve_conversations! = |{}|
 	match (load_roster!({}), Members.load_uid!({})) {
 		(Ok(members), Ok(me)) => Chat.respond(
 			200,
-			json,
-			Conversation.conversations_json(
-				me,
-				load_dm_entries!(
+			{
+				content_type: json,
+				body: Conversation.conversations_json(
 					me,
-					members,
-					0,
-					[],
+					load_dm_entries!(
+						me,
+						members,
+						0,
+						[],
+					),
 				),
-			),
+			},
 		)
 		(Err(Failed), _) | (Ok(_), Err(Failed)) => Chat.answered
 	}
@@ -1719,11 +1636,7 @@ load_dm_entries! = |
 			} else {
 				pair = Paths.pair_key(me, id)
 				listed = load_topics!(Dm(pair))
-				default = resume_at!(
-					me,
-					pair,
-					listed,
-				)
+				default = resume_at!(me, { pair, topics: listed })
 				load_dm_entries!(
 					me,
 					members,
@@ -1780,9 +1693,11 @@ redirect_to_msg! = |id|
 			(Ok(me), Ok(members)) =>
 				match find_dm!(
 					me,
-					members,
-					topic,
-					0,
+					{
+						members,
+						topic,
+						at: 0,
+					},
 				) {
 					Ok(conv) => Chat.found(at("/chat/c/", conv))
 					Err(NoSuchTopic) =>
@@ -1791,8 +1706,7 @@ redirect_to_msg! = |id|
 							Ok(rosters) =>
 								match find_channel!(
 									Paths.member_channels(rosters, me),
-									topic,
-									0,
+									{ topic, at: 0 },
 								) {
 									Ok(name) => Chat.found(at("/channel/", name))
 									Err(NoSuchTopic) => Chat.not_found
@@ -1802,21 +1716,30 @@ redirect_to_msg! = |id|
 		}
 	}
 
-find_dm! : Uid, List({ id : Uid, name : Str }), List(U8), U64 => Try(List(U8), [NoSuchTopic])
+find_dm! : Uid,
+{
+	members : List({ id : Uid, name : Str }),
+	topic : List(U8),
+	at : U64,
+} => Try(List(U8), [NoSuchTopic])
 find_dm! = |
 	me,
-	members,
-	topic,
-	i,
+	{
+		members,
+		topic,
+		at: i,
+	},
 |
 	match List.get(members, i) {
 		Ok({ id, name: _ }) =>
 			if id == me {
 				find_dm!(
 					me,
-					members,
-					topic,
-					i + 1,
+					{
+						members,
+						topic,
+						at: i + 1,
+					},
 				)
 			} else {
 				pair = Paths.pair_key(me, id)
@@ -1825,20 +1748,18 @@ find_dm! = |
 					topic,
 				) Ok(pair.bytes()) else find_dm!(
 					me,
-					members,
-					topic,
-					i + 1,
+					{
+						members,
+						topic,
+						at: i + 1,
+					},
 				)
 			}
 		Err(_) => Err(NoSuchTopic)
 	}
 
-find_channel! : List(Str), List(U8), U64 => Try(List(U8), [NoSuchTopic])
-find_channel! = |
-	names,
-	topic,
-	i,
-|
+find_channel! : List(Str), { topic : List(U8), at : U64 } => Try(List(U8), [NoSuchTopic])
+find_channel! = |names, { topic, at: i }|
 	match List.get(names, i) {
 		Ok(name) =>
 			match Paths.channel_name_from_str(name) {
@@ -1846,11 +1767,7 @@ find_channel! = |
 					if List.contains(List.map(load_topics!(Channel(valid)), Str.to_utf8), topic) {
 						Ok(name.to_utf8())
 					} else {
-						find_channel!(
-							names,
-							topic,
-							i + 1,
-						)
+						find_channel!(names, { topic, at: i + 1 })
 					}
 				# Every name here passed channel_name_from_str already
 				# (load_rosters_from! keeps no other).
@@ -1861,12 +1778,8 @@ find_channel! = |
 
 ## POST <base>/new: a topic made with a first "hi", a DM's announced in its
 ## highest general<N>; the conversation and topic as JSON.
-create_topic! : Chat.Request, Route.R, Paths.ConvKey => Chat.Answer
-create_topic! = |
-	req,
-	route,
-	key,
-|
+create_topic! : Chat.Request, { route : Route.R, key : Paths.ConvKey } => Chat.Answer
+create_topic! = |req, { route, key }|
 	match find!(key) {
 		Ok((conv, who)) =>
 			if req.method != Post {
@@ -1880,15 +1793,19 @@ create_topic! = |
 						Malformed => Chat.malformed
 						Found(raw) => make_topic!(
 							key,
-							conv,
-							who,
-							ZigText.trim_str(raw),
+							{
+								conv,
+								who,
+								topic: ZigText.trim_str(raw),
+							},
 						)
 						Missing => make_topic!(
 							key,
-							conv,
-							who,
-							"",
+							{
+								conv,
+								who,
+								topic: "",
+							},
 						)
 					}
 				}
@@ -1897,31 +1814,38 @@ create_topic! = |
 		Err(Failed) => Chat.answered
 	}
 
-make_topic! : Paths.ConvKey, Chat.Conv, Who, Str => Chat.Answer
+make_topic! : Paths.ConvKey,
+{
+	conv : Chat.Conv,
+	who : Who,
+	topic : Str,
+} => Chat.Answer
 make_topic! = |
 	key,
-	conv,
-	who,
-	topic,
+	{
+		conv,
+		who,
+		topic,
+	},
 | {
 	if !Paths.is_topic_id(topic) {
 		Chat.respond(
 			400,
-			[],
-			Str.to_utf8("Topic must be letters, digits, and hyphens only — no spaces, underscores, or punctuation.\n"),
+			{
+				content_type: [],
+				body: Str.to_utf8("Topic must be letters, digits, and hyphens only — no spaces, underscores, or punctuation.\n"),
+			},
 		)
 	} else if topic.caseless_ascii_equals("new") {
 		Chat.respond(
 			400,
-			[],
-			Str.to_utf8("\"new\" is reserved — pick another topic name.\n"),
+			{
+				content_type: [],
+				body: Str.to_utf8("\"new\" is reserved — pick another topic name.\n"),
+			},
 		)
 	} else if Conversation.has_topic(load_topics!(key), topic) {
-		Chat.respond(
-			409,
-			[],
-			Str.to_utf8("That topic already exists.\n"),
-		)
+		Chat.respond(409, { content_type: [], body: Str.to_utf8("That topic already exists.\n") })
 	} else {
 		match Members.load_viewer!(who) {
 			Err(Failed) => Chat.answered
@@ -1932,12 +1856,14 @@ make_topic! = |
 					Chat.answered
 				} else if append_message!(
 					conv,
-					who,
 					{
-						at: { key, topic },
-						name,
-						markdown: "hi",
-						cid: "",
+						who,
+						draft: {
+							at: { key, topic },
+							name,
+							markdown: "hi",
+							cid: "",
+						},
 					},
 				).is_err() {
 					Chat.answered
@@ -1950,10 +1876,12 @@ make_topic! = |
 						_ = Host.aside!(Begin)
 						_ = announce!(
 							key,
-							conv,
-							who,
-							topic,
-							name,
+							{
+								conv,
+								who,
+								topic,
+								name,
+							},
 						)
 						match Host.aside!(End) {
 							Done => {}
@@ -1964,8 +1892,7 @@ make_topic! = |
 					}
 					Chat.respond(
 						200,
-						json,
-						Conversation.made_json({ key, topic }),
+						{ content_type: json, body: Conversation.made_json({ key, topic }) },
 					)
 				}
 			}
@@ -1975,24 +1902,34 @@ make_topic! = |
 
 ## A DM's new topic, said where the partner already watches: its highest
 ## general<N>, unless that is the topic made.
-announce! : Paths.ConvKey, Chat.Conv, Who, Str, Str => Try({}, [Failed])
+announce! : Paths.ConvKey,
+{
+	conv : Chat.Conv,
+	who : Who,
+	topic : Str,
+	name : Str,
+} => Try({}, [Failed])
 announce! = |
 	key,
-	conv,
-	who,
-	topic,
-	name,
+	{
+		conv,
+		who,
+		topic,
+		name,
+	},
 |
 	match Conversation.highest_general(load_topics!(key)) {
 		Ok(gen) if gen != topic =>
 			append_message!(
 				conv,
-				who,
 				{
-					at: { key, topic: gen },
-					name,
-					markdown: "New topic: [${topic}](${key.base()}/${topic})",
-					cid: "",
+					who,
+					draft: {
+						at: { key, topic: gen },
+						name,
+						markdown: "New topic: [${topic}](${key.base()}/${topic})",
+						cid: "",
+					},
 				},
 			).map_ok(|_| {})
 		_ => Ok({})
@@ -2001,12 +1938,8 @@ announce! = |
 ## POST .../<topic>/send: docs/ROC-CHAT.md §6.2's steps, the store's append
 ## the host's. A send makes its topic, so no topic need be there; the
 ## conversation must be the member's.
-send! : Chat.Request, Route.R, Paths.ConvKey => Chat.Answer
-send! = |
-	req,
-	route,
-	key,
-|
+send! : Chat.Request, { route : Route.R, key : Paths.ConvKey } => Chat.Answer
+send! = |req, { route, key }|
 	match find!(key) {
 		Err(Failed) => Chat.answered
 		Ok((conv, who)) =>
@@ -2016,10 +1949,12 @@ send! = |
 				Err(Failed) => Chat.answered
 				Ok(_) => receive_message!(
 					req,
-					route,
-					{ key, topic: route.topic },
-					conv,
-					who,
+					{
+						route,
+						at: { key, topic: route.topic },
+						conv,
+						who,
+					},
 				)
 			}
 		Err(NotYours) => not_yours!(route)
@@ -2027,13 +1962,21 @@ send! = |
 
 ## A send in `conv`, found and titled: the tail, the method, the header,
 ## the body, the form.
-receive_message! : Chat.Request, Route.R, Paths.TopicAt, Chat.Conv, Who => Chat.Answer
+receive_message! : Chat.Request,
+{
+	route : Route.R,
+	at : Paths.TopicAt,
+	conv : Chat.Conv,
+	who : Who,
+} => Chat.Answer
 receive_message! = |
 	req,
-	route,
-	at,
-	conv,
-	who,
+	{
+		route,
+		at,
+		conv,
+		who,
+	},
 |
 	if route.tail == InvalidSend {
 		Chat.not_found
@@ -2054,17 +1997,21 @@ receive_message! = |
 						Malformed => Chat.malformed
 						Found(cid) => store!(
 							at,
-							conv,
-							who,
-							send,
-							{ markdown: md, cid },
+							{
+								conv,
+								who,
+								send,
+								posted: { markdown: md, cid },
+							},
 						)
 						Missing => store!(
 							at,
-							conv,
-							who,
-							send,
-							{ markdown: md, cid: "" },
+							{
+								conv,
+								who,
+								send,
+								posted: { markdown: md, cid: "" },
+							},
 						)
 					}
 			}
@@ -2080,13 +2027,21 @@ Posted : { markdown : Str, cid : Str }
 ## is not UTF-8 text the form refused); the bookmark (a DM's) before the
 ## store, so one that fails stores nothing; then 204 for an async sender,
 ## else back to the topic.
-store! : Paths.TopicAt, Chat.Conv, Who, [Async, Sync], Posted => Chat.Answer
+store! : Paths.TopicAt,
+{
+	conv : Chat.Conv,
+	who : Who,
+	send : [Async, Sync],
+	posted : Posted,
+} => Chat.Answer
 store! = |
 	at,
-	conv,
-	who,
-	send,
-	{ markdown: md, cid },
+	{
+		conv,
+		who,
+		send,
+		posted: { markdown: md, cid },
+	},
 |
 	if Bytes.trim(md.to_utf8(), Bytes.zig_spaces) == [] {
 		Chat.refuse("not sent: the message is empty\n")
@@ -2103,21 +2058,19 @@ store! = |
 					Chat.answered
 				} else if append_message!(
 					conv,
-					who,
 					{
-						at,
-						name,
-						markdown: md,
-						cid,
+						who,
+						draft: {
+							at,
+							name,
+							markdown: md,
+							cid,
+						},
 					},
 				).is_err() {
 					Chat.answered
 				} else if send == Async {
-					Chat.respond(
-						204,
-						[],
-						[],
-					)
+					Chat.respond(204, { content_type: [], body: [] })
 				} else {
 					Chat.redirect(List.concat(conv.base, "/${at.topic}".to_utf8()))
 				}
@@ -2151,8 +2104,7 @@ search_words! = |req|
 	} else if Host.admit!({}) == Refused {
 		Chat.respond(
 			429,
-			json,
-			search_error("too many searches; wait a second"),
+			{ content_type: json, body: search_error("too many searches; wait a second") },
 		)
 	} else {
 		match Form.value(List.first(Host.read_query!(Str.to_utf8("prefix"))) ?? []) {
@@ -2163,17 +2115,17 @@ search_words! = |req|
 				match got.status {
 					Ready => Chat.respond(
 						200,
-						json,
-						Search.words_json(
-							key,
-							got.unreadable,
-							got.words,
-						),
+						{
+							content_type: json,
+							body: Search.words_json(
+								key,
+								{ unreadable: got.unreadable, words: got.words },
+							),
+						},
 					)
 					NotReady => Chat.respond(
 						503,
-						json,
-						search_error("search is not ready"),
+						{ content_type: json, body: search_error("search is not ready") },
 					)
 				}
 			}
@@ -2191,8 +2143,7 @@ search_messages! = |req|
 	} else if Host.admit!({}) == Refused {
 		Chat.respond(
 			429,
-			json,
-			search_error("too many searches; wait a second"),
+			{ content_type: json, body: search_error("too many searches; wait a second") },
 		)
 	} else {
 		match Form.value(List.first(Host.read_query!(Str.to_utf8("word"))) ?? []) {
@@ -2206,18 +2157,21 @@ search_messages! = |req|
 				match got.status {
 					Ready => Chat.respond(
 						200,
-						json,
-						Search.messages_json(
-							key,
-							got.matched,
-							got.unreadable,
-							got.hits,
-						),
+						{
+							content_type: json,
+							body: Search.messages_json(
+								key,
+								{
+									matched: got.matched,
+									unreadable: got.unreadable,
+									hits: got.hits,
+								},
+							),
+						},
 					)
 					NotReady => Chat.respond(
 						503,
-						json,
-						search_error("search is not ready"),
+						{ content_type: json, body: search_error("search is not ready") },
 					)
 				}
 			}
@@ -2293,9 +2247,11 @@ post_text! = |me, md|
 							[] => Chat.refuse("no default chat partner available\n")
 							[partner, ..] => post_to!(
 								me,
-								Known(accounts),
-								Paths.pair_key(me, partner.id),
-								md,
+								{
+									who: Known(accounts),
+									pair: Paths.pair_key(me, partner.id),
+									md,
+								},
 							)
 						}
 				}
@@ -2309,19 +2265,22 @@ default_partner = |me| if me.to_str() == "1" "2" else "1"
 ## The doc stored in DM `pair`, at the topic `me` resumes it at, by their
 ## name, with no client id; the bookmark left as it was (appendMessage
 ## wrote none).
-post_to! : Uid, Who, Paths.PairKey, Str => Chat.Answer
+post_to! : Uid,
+{
+	who : Who,
+	pair : Paths.PairKey,
+	md : Str,
+} => Chat.Answer
 post_to! = |
 	me,
-	who,
-	pair,
-	md,
+	{
+		who,
+		pair,
+		md,
+	},
 | {
 	key = Dm(pair)
-	topic = resume_at!(
-		me,
-		pair,
-		load_topics!(key),
-	)
+	topic = resume_at!(me, { pair, topics: load_topics!(key) })
 	bytes = key.bytes()
 	conv = {
 		family: Dm,
@@ -2334,23 +2293,27 @@ post_to! = |
 		Ok(name) =>
 			match append_message!(
 				conv,
-				who,
 				{
-					at: { key, topic },
-					name,
-					markdown: md,
-					cid: "",
+					who,
+					draft: {
+						at: { key, topic },
+						name,
+						markdown: md,
+						cid: "",
+					},
 				},
 			) {
 				Err(Failed) => Chat.answered
 				Ok(id) => Chat.respond(
 					200,
-					json,
-					JsonOut.object([
-						("conv", JsonOut.string(pair.to_str())),
-						("session", JsonOut.string(topic)),
-						("id", JsonOut.string(id)),
-					]).bytes(),
+					{
+						content_type: json,
+						body: JsonOut.object([
+							("conv", JsonOut.string(pair.to_str())),
+							("session", JsonOut.string(topic)),
+							("id", JsonOut.string(id)),
+						]).bytes(),
+					},
 				)
 			}
 	}
@@ -2379,30 +2342,35 @@ Draft : {
 ## names the other member). Its id once stored; `Err(Failed)` when a step
 ## before the store failed (the request has, with its error), and nothing
 ## was stored.
-append_message! : Chat.Conv, Who, Draft => Try(Str, [Failed])
-append_message! = |
+append_message! : Chat.Conv, { who : Who, draft : Draft } => Try(Str, [Failed])
+append_message! = |conv, { who, draft }| append_message_by!(
 	conv,
-	who,
-	draft,
-| append_message_by!(
-	conv,
-	who,
-	Members.load_uid!({})?,
-	draft,
+	{
+		who,
+		me: Members.load_uid!({})?,
+		draft,
+	},
 )
 
 ## append_message!, by the member `me` (the request's, or the host's for
 ## the welcome DM).
-append_message_by! : Chat.Conv, Who, Uid, Draft => Try(Str, [Failed])
+append_message_by! : Chat.Conv,
+{
+	who : Who,
+	me : Uid,
+	draft : Draft,
+} => Try(Str, [Failed])
 append_message_by! = |
 	conv,
-	who,
-	me,
 	{
-		at: topic_at,
-		name,
-		markdown: md,
-		cid,
+		who,
+		me,
+		draft: {
+			at: topic_at,
+			name,
+			markdown: md,
+			cid,
+		},
 	},
 |
 	# **NO MESSAGE WITHOUT AN AUTHOR** (the review of 156): the decoder
@@ -2490,9 +2458,11 @@ append_message_by! = |
 								)
 								store_block!(
 									{ conv, at: topic_at },
-									block,
-									index,
-									stored,
+									{
+										block,
+										index,
+										message: stored,
+									},
 								)?
 								# **STORED IS DONE** (metal-vmm QUEUE 172): from
 								# here nothing fails the send, which a client
@@ -2524,12 +2494,19 @@ append_message_by! = |
 ## Where a block goes: its conversation, as the host takes it, and its topic.
 BlockAt : { conv : Chat.Conv, at : Paths.TopicAt }
 
-store_block! : BlockAt, List(U8), U64, Chat.Message => Try({}, [Failed])
+store_block! : BlockAt,
+{
+	block : List(U8),
+	index : U64,
+	message : Chat.Message,
+} => Try({}, [Failed])
 store_block! = |
 	{ conv, at },
-	block,
-	index,
-	message,
+	{
+		block,
+		index,
+		message,
+	},
 | {
 	appended = Host.append_message!(
 		conv,
@@ -2545,11 +2522,7 @@ store_block! = |
 			})
 			Files.write_cache!(
 				Paths.count_path(at),
-				Count.text(
-					index + 1,
-					appended.size,
-					last,
-				),
+				Count.text(index + 1, { size: appended.size, last }),
 			)
 			Host.index_message!(
 				conv,

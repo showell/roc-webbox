@@ -150,19 +150,14 @@ call = |req| {
 				uid: arg(3),
 			}) else Unknown
 			[
-				Count.text(
-					u64(arg(0)),
-					u64(arg(1)),
-					last,
-				),
+				Count.text(u64(arg(0)), { size: u64(arg(1)), last }),
 			]
 		}
 		22 => maybe(Count.believed(Count.parse(arg(0)), u64(arg(1))))
 		23 =>
 			match Count.recorded_author(
 				Count.parse(arg(0)),
-				u64(arg(1)),
-				u64(arg(2)),
+				{ blocks: u64(arg(1)), size: u64(arg(2)) },
 			) {
 				Ok(uid) => [uid]
 				Err(NotRecorded) => []
@@ -376,11 +371,7 @@ call = |req| {
 					}
 					[
 						Html.bytes(
-							Pages.conversation(
-								srcs(req.args, 11),
-								limits,
-								view,
-							),
+							Pages.conversation(srcs(req.args, 11), { limits, v: view }),
 						),
 					]
 				}
@@ -419,15 +410,13 @@ call = |req| {
 		42 => [
 			ChatState.resume_topic(
 				List.keep_oks(List.drop_first(req.args, 2), Str.from_utf8),
-				valid_text(arg(0)),
-				int(arg(1)),
+				{ last: valid_text(arg(0)), now_secs: int(arg(1)) },
 			).to_utf8(),
 		]
 		43 =>
 			match ChatState.pinned(
 				valid_text(arg(0)),
-				valid_text(arg(1)),
-				if arg(2) == [49] Pin else Unpin,
+				{ topic: valid_text(arg(1)), pin: if arg(2) == [49] Pin else Unpin },
 			) {
 				Write(bytes) => [bytes]
 				Remove => []
@@ -479,11 +468,7 @@ call = |req| {
 			match Uid.from_utf8(arg(0)) {
 				Ok(uid) => List.map(
 					Paths.member_channels(
-						flat_rosters(
-							req.args,
-							1,
-							[],
-						),
+						flat_rosters(req.args, { at: 1, out: [] }),
 						uid,
 					),
 					Str.to_utf8,
@@ -1018,12 +1003,8 @@ reads = |args, i|
 	)
 
 ## Rosters flat, `name, count, member...` each, from argument `i`.
-flat_rosters : List(List(U8)), U64, List(Paths.Roster) -> List(Paths.Roster)
-flat_rosters = |
-	args,
-	i,
-	out,
-|
+flat_rosters : List(List(U8)), { at : U64, out : List(Paths.Roster) } -> List(Paths.Roster)
+flat_rosters = |args, { at: i, out }|
 	match List.get(args, i) {
 		Err(_) => out
 		Ok(name) => {
@@ -1035,11 +1016,7 @@ flat_rosters = |
 					members: List.map(List.sublist(args, { start: i + 2, len: n }), valid_uid),
 				},
 			)
-			flat_rosters(
-				args,
-				i + 2 + n,
-				List.append_if_ok(out, roster),
-			)
+			flat_rosters(args, { at: i + 2 + n, out: List.append_if_ok(out, roster) })
 		}
 	}
 

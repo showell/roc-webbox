@@ -41,12 +41,8 @@ Saved := [].{
 
 	## The ids saved in topic `topic` of conversation `conv`, in refs' order,
 	## a ref saved twice twice.
-	ids : List(U8), List(U8), List(U8) -> List(List(U8))
-	ids = |
-		text,
-		conv,
-		topic,
-	| List.keep_oks(
+	ids : List(U8), { conv : List(U8), topic : List(U8) } -> List(List(U8))
+	ids = |text, { conv, topic }| List.keep_oks(
 		refs(text),
 		|r| if r.conv == conv and r.topic == topic Ok(r.id) else Err(Elsewhere),
 	)
@@ -55,20 +51,12 @@ Saved := [].{
 ## parseRefAt: `<conv>/<topic>#msg-<id>` from `start`, or nothing.
 ref_at : List(U8), U64 -> Try(Saved.Ref, [NotARef])
 ref_at = |text, start| {
-	conv_end = Bytes.count_while(
-		text,
-		is_path_seg,
-		start,
-	)
+	conv_end = Bytes.count_while(text, { keep: is_path_seg, at: start })
 	if conv_end == start or List.get(text, conv_end) != Ok('/') {
 		Err(NotARef)
 	} else {
 		topic_start = conv_end + 1
-		topic_end = Bytes.count_while(
-			text,
-			is_path_seg,
-			topic_start,
-		)
+		topic_end = Bytes.count_while(text, { keep: is_path_seg, at: topic_start })
 		anchor = "#msg-".to_utf8()
 		if topic_end == topic_start or !List.starts_with(List.drop_first(text, topic_end), anchor) {
 			Err(NotARef)
@@ -78,11 +66,7 @@ ref_at = |text, start| {
 				text,
 				{
 					start: id_start,
-					len: Bytes.count_while(
-						text,
-						is_id_char,
-						id_start,
-					) - id_start,
+					len: Bytes.count_while(text, { keep: is_id_char, at: id_start }) - id_start,
 				},
 			)
 			if Paths.is_valid_msg_ref_id(id) {
@@ -108,8 +92,7 @@ is_id_char = |c| Ascii.is_alphanumeric(c) or c == '-' or c == '_'
 
 expect Saved.ids(
 	Str.to_utf8("[o](/chat/c/1_2/Plans#msg-Plans_3) /channel/1_2/Plans#msg-Plans_9 /chat/c/1_2/Plans#msg-bad /chat/c/1_2/Other#msg-Other_1"),
-	Str.to_utf8("1_2"),
-	Str.to_utf8("Plans"),
+	{ conv: Str.to_utf8("1_2"), topic: Str.to_utf8("Plans") },
 ) == [Str.to_utf8("Plans_3"), Str.to_utf8("Plans_9")]
 expect Saved.refs([]) == []
 expect Saved.refs(List.concat(Str.to_utf8("/chat/c/1_2/Plans#msg-Plans_4)"), [0xff])) == [
