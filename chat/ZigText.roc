@@ -17,6 +17,29 @@ ZigText := [].{
 			U64.from_int_digits(List.map(s, |c| c - '0')).map_err(|_| TooBig)
 		}
 
+	## `std.fmt.parseInt(u64, s, 10)`, as webbox's resume cursor reads a
+	## number (sse.resumeAt): an optional `+` or `-`, then digits with any
+	## `_` among them passed over (never first or last), and it fits; behind
+	## a `-` only zeros (`-0` is 0, `-1` too big). **Kept on purpose:**
+	## `parse_u64` is decimal.zig's, which takes neither a sign nor a `_`.
+	std_parse_u64 : List(U8) -> Try(U64, [NotANumber, TooBig])
+	std_parse_u64 = |s| {
+		(sign, body) = match s {
+			['-', .. as rest] => (Minus, rest)
+			['+', .. as rest] => (Plus, rest)
+			_ => (Plus, s)
+		}
+		digits = List.keep_if(body, |c| c != '_')
+		edged = List.first(body) == Ok('_') or List.last(body) == Ok('_')
+		if body == [] or edged or !List.all(digits, Ascii.is_digit) {
+			Err(NotANumber)
+		} else if sign == Minus {
+			if List.all(digits, |c| c == '0') Ok(0) else Err(TooBig)
+		} else {
+			U64.from_int_digits(List.map(digits, |c| c - '0')).map_err(|_| TooBig)
+		}
+	}
+
 	## `std.mem.trim(u8, s, " \t\r\n")` on text, as the sidecars' readers trim
 	## (`Bytes.trim` with `Bytes.zig_spaces`, on bytes). **Kept on purpose:**
 	## `Str.trim` takes Unicode's spaces off, and the Zig only these four.

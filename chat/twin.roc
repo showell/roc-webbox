@@ -31,6 +31,7 @@ import Search
 import BusKey
 import ChatUrl
 import Bytes
+import Backlog
 
 call : { which : U8, args : List(List(U8)) } -> List(List(U8))
 call = |req| {
@@ -828,12 +829,57 @@ call = |req| {
 				ex.after,
 			]
 		}
+		# The resume cursor: a Last-Event-ID, a ?since (each `given`).
+		76 => [num(Backlog.resume_at({ last_event_id: given(arg(0)), since: given(arg(1)) }))]
+		77 => maybe(ZigText.std_parse_u64(arg(0)))
+		78 => [JsonOut.zig_bytes(arg(0)).bytes()]
+		# A backlog's frame: index, id, from, at, uid, markdown, html.
+		79 => [
+			Frame.stored({
+				index: u64(arg(0)),
+				block: {
+					id: arg(1),
+					from: arg(2),
+					at: arg(3),
+					uid: arg(4),
+					markdown: arg(5),
+				},
+				html: arg(6),
+			}),
+		]
+		# A transcript's backlog from `since` in `topic`: the blocks refused,
+		# then each message's index, id and uid.
+		80 => {
+			d = Transcript.decode_blocks(arg(0))
+			List.join(
+				List.prepend(
+					List.map(
+						Backlog.from(d.blocks, { topic: arg(1), since: u64(arg(2)) }),
+						|m| [
+							num(m.index),
+							m.block.id,
+							m.block.uid,
+						],
+					),
+					[num(List.len(d.refused))],
+				),
+			)
+		}
 		_ => crash "twin: no function ${U8.to_str(req.which)}"
 	}
 }
 
 bool : Bool -> List(U8)
 bool = |b| if b [49] else [48]
+
+## A resume source as the test hands it: empty is none sent; any other is
+## a marker byte, then the value.
+given : List(U8) -> Backlog.Given
+given = |b|
+	match b {
+		[] => Unsent
+		[_, .. as v] => Sent(v)
+	}
 
 ## A channel's name the test hands as valid; one that is not stops the twin.
 valid_channel : List(U8) -> Paths.ChannelName

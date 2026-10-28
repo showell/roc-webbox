@@ -322,10 +322,12 @@ const Scripted = struct {
             .fail_text = failTextOf,
             .fail_account = failAccountOf,
             .count_malformed_channel = malformed,
+            .count_refused_block = refusedBlock,
             .count_dropped = dropped,
             .aside = asideOf,
             .check_online = onlineOf,
             .read_header = header,
+            .read_query = query,
             .check_hostile = hostile,
             .render = render,
             .render_preview = renderPreview,
@@ -614,6 +616,13 @@ const Scripted = struct {
             "malformed {s}",
             .{channel},
         );
+    }
+    fn refusedBlock(ctx: *anyopaque, first: []const u8) void {
+        say(ctx, "refused {s}", .{first});
+    }
+    fn query(ctx: *anyopaque, name: []const u8) []const []const u8 {
+        say(ctx, "query {s}", .{name});
+        return &.{};
     }
     fn dropped(
         ctx: *anyopaque,
@@ -925,8 +934,8 @@ inline fn bookmarked(comptime sid: []const u8) []const u8 {
     return comptime "read users/1/last-sessions/1_2;write users/1/last-sessions/1_2 " ++ sid ++ "\n;read users/1/last-conv;write users/1/last-conv 1_2\n;";
 }
 
-/// A frame as the scripted host says a publish of it: chat_frame
-/// reactionFrame's bytes around the sidecar's `line`, escaped.
+/// A frame as the scripted host says a publish of it: Frame.reaction's
+/// bytes around the sidecar's `line`, escaped.
 fn frameSaid(comptime line: []const u8) []const u8 {
     return std.fmt.comptimePrint(
         "{f}",
@@ -1305,11 +1314,20 @@ test "a topic's reactions, react, pin and unpin are the Roc's: presence, the con
         a,
         .{ .stream = .{
             .key = "1_2/Plans",
-            .transcript = "1_2/sessions/Plans.md",
-            .topic = "Plans",
+            .backlog = "event: backlog-size\ndata: 0\n\n",
         } },
-        "identify;accounts;list 1_2/sessions;",
+        "identify;accounts;list 1_2/sessions;header last-event-id;query since;read 1_2/sessions/Plans.md;",
     );
+    // Its backlog the Roc's: a refused block counted, a message's number
+    // from its id, its markdown rendered, its frame laid out.
+    try expectAct("/c/1_2/Plans/stream", false, .GET, blk: {
+        var s = a;
+        s.files = &.{.{ .path = "1_2/sessions/Plans.md", .read = .{ .found = "from: x\n\nrefused\n\n-------------\nMSG_Plans_2\nfrom: S\ndate: d\n\nhi" } }};
+        break :blk s;
+    }, .{ .stream = .{
+        .key = "1_2/Plans",
+        .backlog = "event: backlog-size\ndata: 1\n\nid: 1\ndata: {\"index\":1,\"from\":\"S\",\"at\":\"d\",\"html\":\"<p>hi</p>\",\"markdown\":\"hi\",\"id\":\"Plans_2\"}\n\n",
+    } }, "identify;accounts;list 1_2/sessions;header last-event-id;query since;read 1_2/sessions/Plans.md;refused from: x;render hi;");
     try expectAct("/ops/Plans/upload", true, .POST, blk: {
         var s = a;
         s.upload = .{ .read = .{ .size = 62, .ext = "png", .filename = "a.png" } };

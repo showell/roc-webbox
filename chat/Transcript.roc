@@ -37,20 +37,31 @@ Transcript := [].{
 	## store writes only canonical uids, so such a line is damaged data, and
 	## skipping its block would renumber every message after it.
 	decode_file : List(U8) -> Try({ messages : List(Msg), refused : U64 }, [CorruptUid(List(U8))])
-	decode_file = |data|
-		List.fold_try(
+	decode_file = |data| {
+		d = decode_blocks(data)
+		messages = List.map_try(d.blocks, message_of)?
+		Ok({ messages, refused: List.len(d.refused) })
+	}
+
+	## decodeChatFile's reading, before any author is decoded: each message
+	## block as it reads (its `uid:` the bytes there, whatever they are),
+	## and the first line of each block refused. A piece that is only
+	## whitespace is neither. **A STREAM'S BACKLOG READS THESE** (main.roc
+	## `replay!`): it sends what the transcript holds, as the Zig did.
+	decode_blocks : List(U8) -> { blocks : List(Block), refused : List(List(U8)) }
+	decode_blocks = |data|
+		List.fold(
 			List.split_on_list(data, sep),
-			{ messages: [], refused: 0 },
+			{ blocks: [], refused: [] },
 			|acc, piece|
 				if Bytes.trim(piece, Bytes.zig_spaces) == [] {
-					Ok(acc)
+					acc
 				} else {
 					b = decode_block(piece)
 					if is_message(b) {
-						m = message_of(b)?
-						Ok({ ..acc, messages: List.append(acc.messages, m) })
+						{ ..acc, blocks: List.append(acc.blocks, b) }
 					} else {
-						Ok({ ..acc, refused: acc.refused + 1 })
+						{ ..acc, refused: List.append(acc.refused, line_at(piece, 0)) }
 					}
 				},
 		)

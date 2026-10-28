@@ -21,6 +21,17 @@ JsonOut :: List(U8).{
 		whole_or_replaced(b, { at: 0, out: "" }),
 	)
 
+	## Bytes as std.json writes a `[]const u8` (a backlog frame's fields,
+	## Frame.stored): a string when they are UTF-8, else an array of their
+	## numbers. **Kept on purpose:** `lossy` is chat_search's, a U+FFFD for
+	## each bad byte.
+	zig_bytes : List(U8) -> JsonOut
+	zig_bytes = |b|
+		match Str.from_utf8(b) {
+			Ok(s) => string(s)
+			Err(_) => array(List.map(b, |c| number(U8.to_u64(c))))
+		}
+
 	## A whole number, in decimal.
 	number : U64 -> JsonOut
 	number = |n| JsonOut.(Str.to_utf8(U64.to_str(n)))
@@ -118,6 +129,10 @@ expect JsonOut.object([
 expect JsonOut.object([]).bytes() == Str.to_utf8("{}")
 expect JsonOut.array([]).bytes() == Str.to_utf8("[]")
 expect JsonOut.signed(-3).bytes() == Str.to_utf8("-3")
+# zig_bytes: text is a string; bytes that are not are their numbers.
+expect JsonOut.zig_bytes(Str.to_utf8("a\"b")).bytes() == Str.to_utf8("\"a\\\"b\"")
+expect JsonOut.zig_bytes([0x42, 0xFF]).bytes() == Str.to_utf8("[66,255]")
+expect JsonOut.zig_bytes([]).bytes() == Str.to_utf8("\"\"")
 # lossy: a torn sequence is one U+FFFD a byte; a whole one passes.
 expect JsonOut.lossy([
 	0x6C,

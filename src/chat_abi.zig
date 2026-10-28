@@ -39,7 +39,6 @@ pub const Answer = extern struct {
     body: RocBytes,
     content_type: RocBytes,
     location: RocBytes,
-    topic: RocBytes,
     status: u16,
     allow: Method,
     kind: route_mod.Kind,
@@ -268,7 +267,7 @@ pub const AccountList = RecList(AccountRec, Account, struct {
 
 comptime {
     const w = @sizeOf(usize);
-    std.debug.assert(@sizeOf(RocBytes) == 3 * w and @sizeOf(Request) == 4 * w and @sizeOf(Answer) == 13 * w and @sizeOf(Got) == 4 * w and @sizeOf(ReadRec) == 4 * w and @sizeOf(EntryRec) == 4 * w and @sizeOf(SrcRec) == 6 * w and @sizeOf(ListRec) == 4 * w and @sizeOf(AccountRec) == 7 * w and @sizeOf(AccountsRec) == 4 * w and @sizeOf(RenderRec) == 4 * w and @sizeOf(MessageRec) == 15 * w);
+    std.debug.assert(@sizeOf(RocBytes) == 3 * w and @sizeOf(Request) == 4 * w and @sizeOf(Answer) == 10 * w and @sizeOf(Got) == 4 * w and @sizeOf(ReadRec) == 4 * w and @sizeOf(EntryRec) == 4 * w and @sizeOf(SrcRec) == 6 * w and @sizeOf(ListRec) == 4 * w and @sizeOf(AccountRec) == 7 * w and @sizeOf(AccountsRec) == 4 * w and @sizeOf(RenderRec) == 4 * w and @sizeOf(MessageRec) == 15 * w);
     std.debug.assert(@sizeOf(AsideRec) == 4 and @offsetOf(AsideRec, "fault") == 0 and @offsetOf(AsideRec, "status") == 2);
     std.debug.assert(@sizeOf(AppendedRec) == 16 and @offsetOf(AppendedRec, "size") == 0 and @offsetOf(AppendedRec, "status") == 8);
     // read_upload!'s and store_upload!'s (metal-vmm QUEUE 292).
@@ -592,6 +591,9 @@ pub const Host = struct {
     /// Host.count_malformed_channel!: channel `name`'s member file skipped by a
     /// listing as malformed, counted for the operator.
     count_malformed_channel: *const fn (ctx: *anyopaque, name: []const u8) void = noMalformed,
+    /// Host.count_refused_block!: a transcript block the Roc's decoder
+    /// refused (`first`, its first line), counted for the operator.
+    count_refused_block: *const fn (ctx: *anyopaque, first: []const u8) void = noRefusedBlock,
     /// Host.count_dropped!: something the chat dropped rather than fail the
     /// request for (`what`, about `whose`: a topic, a feed's path, a recent
     /// row's key), counted for the operator.
@@ -813,6 +815,9 @@ fn noFailText(_: *anyopaque, path: []const u8) void {
 }
 fn noMalformed(_: *anyopaque, _: []const u8) void {
     @panic("count_malformed_channel asked of a host that does not answer it");
+}
+fn noRefusedBlock(_: *anyopaque, _: []const u8) void {
+    @panic("count_refused_block asked of a host that does not answer it");
 }
 fn noDropped(
     _: *anyopaque,
@@ -1279,6 +1284,11 @@ pub export fn roc_chat_count_malformed_channel(name: RocBytes) callconv(.c) void
     h.count_malformed_channel(h.ctx, name.slice());
 }
 
+pub export fn roc_chat_count_refused_block(first: RocBytes) callconv(.c) void {
+    const h = current("count_refused_block");
+    h.count_refused_block(h.ctx, first.slice());
+}
+
 pub export fn roc_chat_count_dropped(what: route_mod.Dropped, whose: RocBytes) callconv(.c) void {
     const h = current("count_dropped");
     h.count_dropped(
@@ -1713,16 +1723,10 @@ fn call(
         .not_found => .not_found,
         .found => .{ .found = try alloc.dupe(u8, a.location.slice()) },
         .to_login => .{ .to_login = try alloc.dupe(u8, a.location.slice()) },
-        .stream => blk: {
-            // A transcript the host replays is a file the Roc names, held
-            // to the chat root as every file call is (QUEUE 268).
-            if (a.body.slice().len > 0 and !roc.inRoot(a.body.slice())) return error.PathOutsideChatRoot;
-            break :blk .{ .stream = .{
-                .key = try alloc.dupe(u8, a.location.slice()),
-                .transcript = try alloc.dupe(u8, a.body.slice()),
-                .topic = try alloc.dupe(u8, a.topic.slice()),
-            } };
-        },
+        .stream => .{ .stream = .{
+            .key = try alloc.dupe(u8, a.location.slice()),
+            .backlog = try alloc.dupe(u8, a.body.slice()),
+        } },
         .held => .{ .held = .{
             .status = a.status,
             .content_type = try alloc.dupe(u8, a.content_type.slice()),
