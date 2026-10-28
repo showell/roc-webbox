@@ -150,6 +150,10 @@ pub const IndexMessageArgs = extern struct { message: MessageRec, sid: RocBytes 
 /// Host.roc's `append_entry!` record (metal-vmm QUEUE 297): `{ separator,
 /// entry : List(U8) }`, the bytes by name.
 pub const AppendEntryArgs = extern struct { entry: RocBytes, separator: RocBytes };
+/// Host.roc's `report_fanout_failure!` record (metal-vmm QUEUE 297):
+/// `{ member, key, sid : List(U8), fault : U16 }`, the bytes by name, the
+/// fault last.
+pub const FanoutFailureArgs = extern struct { key: RocBytes, member: RocBytes, sid: RocBytes, fault: u16 };
 /// Host.roc's `serve_upload!` record (metal-vmm QUEUE 291): `{ first, last,
 /// size : U64, content_type, path : List(U8), part : [Range, Unsatisfiable,
 /// Whole] }`, the numbers first, the bytes by name, the tag last.
@@ -295,6 +299,7 @@ comptime {
     std.debug.assert(@offsetOf(AppendMessageArgs, "block") == 0 and @offsetOf(AppendMessageArgs, "sid") == 3 * w and @sizeOf(AppendMessageArgs) == 6 * w);
     std.debug.assert(@offsetOf(IndexMessageArgs, "message") == 0 and @offsetOf(IndexMessageArgs, "sid") == 15 * w and @sizeOf(IndexMessageArgs) == 18 * w);
     std.debug.assert(@offsetOf(AppendEntryArgs, "entry") == 0 and @offsetOf(AppendEntryArgs, "separator") == 3 * w and @sizeOf(AppendEntryArgs) == 6 * w);
+    std.debug.assert(@offsetOf(FanoutFailureArgs, "key") == 0 and @offsetOf(FanoutFailureArgs, "member") == 3 * w and @offsetOf(FanoutFailureArgs, "sid") == 6 * w and @offsetOf(FanoutFailureArgs, "fault") == 9 * w and @sizeOf(FanoutFailureArgs) == 10 * w);
     // retire_asked!'s (metal-vmm QUEUE 293).
     std.debug.assert(@offsetOf(RetireAskedRec, "days") == 0 and @offsetOf(RetireAskedRec, "now") == 8 and @offsetOf(RetireAskedRec, "keep") == 16 and @sizeOf(RetireAskedRec) == 16 + 3 * w);
     // serve_upload!'s (metal-vmm QUEUE 291): three numbers, two lists, a tag.
@@ -1517,13 +1522,11 @@ export fn roc_chat_append_entry(path: RocBytes, args: AppendEntryArgs) callconv(
     };
 }
 
-export fn roc_chat_report_fanout_failure(
-    surface: route_mod.Surface,
-    member: RocBytes,
-    key: RocBytes,
-    sid: RocBytes,
-    fault: u16,
-) callconv(.c) void {
+export fn roc_chat_report_fanout_failure(surface: route_mod.Surface, args: FanoutFailureArgs) callconv(.c) void {
+    const member = args.member;
+    const key = args.key;
+    const sid = args.sid;
+    const fault = args.fault;
     comptime if (@typeInfo(route_mod.Surface).@"enum".field_names.len < 2)
         @compileError("Host.report_fanout_failure!'s surface of one tag crosses as nothing: roc_chat_report_fanout_failure must not take it");
     const h = current("report_fanout_failure");

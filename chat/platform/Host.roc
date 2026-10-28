@@ -374,7 +374,13 @@ Host := [].{
 	## primitive answered it), on topic `sid` of the conversation keyed `key`.
 	## The operator's count and last failure, kept by the host for
 	## /admin/host.
-	report_fanout_failure! : [Code, Images], List(U8), List(U8), List(U8), U16 => {}
+	report_fanout_failure! : [Code, Images],
+	{
+		member : List(U8),
+		key : List(U8),
+		sid : List(U8),
+		fault : U16,
+	} => {}
 
 	## A request header's value, or none (read before the body).
 	read_header! : List(U8) => List(List(U8))

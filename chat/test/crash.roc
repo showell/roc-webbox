@@ -206,10 +206,12 @@ handle! = |req|
 			Failed => {
 				Host.report_fanout_failure!(
 					Images,
-					Str.to_utf8("2"),
-					Str.to_utf8("1_2"),
-					Str.to_utf8("Plans"),
-					got.fault,
+					{
+						member: Str.to_utf8("2"),
+						key: Str.to_utf8("1_2"),
+						sid: Str.to_utf8("Plans"),
+						fault: got.fault,
+					},
 				)
 				Chat.respond(200, { content_type: [], body: Str.to_utf8("said") })
 			}

@@ -2548,10 +2548,12 @@ fan_out! = |at, steps|
 						Appended => Host.publish!(f.key.bytes(), f.event)
 						Failed => Host.report_fanout_failure!(
 							f.surface,
-							f.member,
-							at.key.bytes(),
-							at.topic.to_utf8(),
-							got.fault,
+							{
+								member: f.member,
+								key: at.key.bytes(),
+								sid: at.topic.to_utf8(),
+								fault: got.fault,
+							},
 						)
 					}
 				}
