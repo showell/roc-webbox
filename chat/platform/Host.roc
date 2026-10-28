@@ -66,13 +66,14 @@ Host := [].{
 	## cannot fail.
 	publish! : List(U8), List(U8) => {}
 
-	## **ONE LINE APPENDED** to the file at `path` under the chat root
-	## (checked as `read!`'s is), its folders made as needed: `line`, then a
-	## newline. **A TORN LINE STAYS ITS OWN LINE**: a file that does not end
-	## in a newline gets one first, the host reading its last byte before it
-	## stores, so a read that fails stores nothing. `Err(Failed)` when it
-	## failed (the request has failed).
-	append_line! : List(U8), List(U8) => Try({}, [Failed])
+	## **BYTES APPENDED, AS A PRIMITIVE**: `bytes` exactly, at the end of
+	## the file at `path` under the chat root (checked as `read!`'s is), its
+	## folders made as needed, in one write; the file's size after it
+	## (`Appended`). `Failed` when it failed (the request has failed, or
+	## the aside, and nothing was stored). Every rule of what goes before
+	## the bytes (a torn line's newline, a feed's separator) is the Roc's
+	## (Files.roc).
+	append! : List(U8), List(U8) => { size : U64, status : [Appended, Failed] }
 
 	## **THE FILES, AS PRIMITIVES**: a file or folder under the chat root,
 	## `path` relative to it (ChatState.roc, Feeds.roc and Paths.roc name
@@ -197,7 +198,9 @@ Host := [].{
 	## unreadable (the error that read failed with, as the host kept it); a
 	## message with no author's name (appendMessage's error.NoAuthor, `whose`
 	## unused); a file at path `whose` whose bytes are not UTF-8 (Files.read!'s
-	## door, error.NotUtf8).
+	## door, error.NotUtf8); a file at path `whose` whose last byte, which a
+	## stat said is there, would not read (Files.append_line!'s torn-line
+	## check, error.ShortRead).
 	## An id that is no canonical uid (the member's own, from `me!`, or an
 	## account folder's) is `NotAUid` (error.NotAUid), never said as a file
 	## that is not UTF-8.
@@ -208,6 +211,7 @@ Host := [].{
 		NoAuthor,
 		NotAUid,
 		NotUtf8,
+		ShortRead,
 	],
 	List(U8) => {}
 
@@ -230,10 +234,13 @@ Host := [].{
 	## **AN ASIDE: WORK WHOSE FAILURE IS ITS OWN** (STORED IS DONE): from
 	## `Begin` to `End`, a primitive that fails fails the aside, never the
 	## request, and the aside's later calls do nothing, as a failed
-	## request's do. `End` answers `Failed` when anything in it failed, and
-	## the request goes on. `Begin` answers `Failed` only for a request that
-	## has failed already.
-	mark_aside! : [Begin, End] => [Done, Failed]
+	## request's do. `End` answers `Failed` when anything in it failed, with
+	## its `fault` (the host's error as a number the Roc never reads, to be
+	## carried to `report_fanout_failure!`), and the request goes on.
+	## `Begin` answers `Failed` only for a request that has failed already:
+	## then nothing is begun, and no `End` follows. **ASIDES NEST**: one
+	## begun inside another ends first, and its failure is its own alone.
+	mark_aside! : [Begin, End] => { fault : U16, status : [Done, Failed] }
 
 	## **WHO IS ONLINE, AT THE REQUEST'S TIME** (angry-gopher presence.zig
 	## `isOnline`): for each of `ids`, in their order, whether it was seen
@@ -330,48 +337,23 @@ Host := [].{
 	## `malformed_markdown`), shown as the processor's placeholder.
 	render_preview! : List(U8) => { html : List(U8), status : [Failed, Rendered] }
 
-	## **A MESSAGE'S BLOCK APPENDED** (metal-vmm QUEUE 287): `block`
-	## (Transcript.stored_form) appended to topic `sid`'s transcript in `conv`,
-	## and the transcript's size after it. `Failed` when the append failed
-	## (the request has failed, and nothing was stored). The count and the
-	## search index are the Roc's to tell after (`write_cache!`,
-	## `index_message!`).
-	append_message! : Chat.Conv,
-	{ sid : List(U8), block : List(U8) } => {
-		size : U64,
-		status : [Appended, Failed],
-	}
-
 	## **THE SEARCH INDEX TOLD OF A MESSAGE AS IT LANDS** (search_index
-	## `noteAppend`): process-lifetime state, so a primitive. It never fails:
-	## an index that cannot take the message drops itself, to be rebuilt.
-	index_message! : Chat.Conv, { sid : List(U8), message : Chat.Message } => {}
+	## `noteAppend`): topic `sid` of the conversation whose folder is `dir`
+	## under the chat root (Paths.conv_folder). Process-lifetime state, so a
+	## primitive. It never fails: an index that cannot take the message
+	## drops itself, to be rebuilt, and a folder or topic the host would not
+	## join is told nothing.
+	index_message! : List(U8), { sid : List(U8), message : Chat.Message } => {}
 
 	## **A CACHE WRITTEN** (a topic's `.count`): the whole file as `bytes`,
 	## under the chat root. **NEVER THE REQUEST'S FAILURE**: a cache not
 	## written is a miss, recounted (QUEUE 284); the host logs it.
 	write_cache! : List(U8), List(U8) => {}
 
-	## **THE FAN-OUT'S PRIMITIVES NEVER FAIL THE REQUEST** (metal-vmm QUEUE
-	## 172, 156(c)): the fan-out runs after the store, and **STORED IS DONE**.
-	## Each that can fail answers its `fault`, the host's error as a number
-	## the Roc never reads, carried to `report_fanout_failure!` to be counted and
-	## said; a member's other surfaces, and every other member's, go on.
-
-	## **A FEED'S ENTRY APPENDED** to the file at `path` under the chat root
-	## (checked as `read!`'s is, but a path outside it is this append's
-	## failure, never the request's), its folders made: `separator` and
-	## `entry` when the file holds anything, else `entry` alone. `Failed`,
-	## with its fault, when it could not be.
-	append_entry! : List(U8),
-	{ separator : List(U8), entry : List(U8) } => {
-		fault : U16,
-		status : [Appended, Failed],
-	}
-
 	## **A SURFACE THAT FAILED FOR ONE MEMBER, COUNTED AND SAID** (angry-gopher
-	## chat_fanout `fanoutFailed`): `surface` for `member`, with `fault` (as a
-	## primitive answered it), on topic `sid` of the conversation keyed `key`.
+	## chat_fanout `fanoutFailed`): `surface` for `member`, with `fault` (as
+	## the surface's aside's `End` answered it), on topic `sid` of the
+	## conversation keyed `key`.
 	## The operator's count and last failure, kept by the host for
 	## /admin/host.
 	report_fanout_failure! : [Code, Images],

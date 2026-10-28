@@ -83,18 +83,13 @@ handle! = |req|
 			},
 		)
 	} else if starts(req.sub, "/append/") {
-		Chat.respond(
-			200,
-			{
-				content_type: [],
-				body: done(
-					Host.append_line!(
-						List.drop_first(req.sub, 8),
-						Str.to_utf8("{\"a\":1}"),
-					),
-				),
-			},
-		)
+		# The bytes appended at `<path>`, and the file's size after.
+		got = Host.append!(List.drop_first(req.sub, 8), Str.to_utf8("{\"a\":1}\n"))
+		said = match got.status {
+			Appended => "appended ${U64.to_str(got.size)}"
+			Failed => "failed"
+		}
+		Chat.respond(200, { content_type: [], body: Str.to_utf8(said) })
 	} else if starts(req.sub, "/publish/") {
 		Host.publish!(List.drop_first(req.sub, 9), Str.to_utf8("event: reaction\ndata: x\n\n"))
 		Chat.respond(200, { content_type: [], body: Str.to_utf8("published") })
@@ -110,10 +105,15 @@ handle! = |req|
 		# size after; then message 9 told to the index, every field of the
 		# message a different string, so a record laid out wrong shows.
 		topic = List.drop_first(req.sub, 7)
-		got = Host.append_message!(dm12, { sid: topic, block: Str.to_utf8("the block") })
+		transcript = List.join([
+			Str.to_utf8("1_2/sessions/"),
+			topic,
+			Str.to_utf8(".md"),
+		])
+		got = Host.append!(transcript, Str.to_utf8("the block"))
 		match got.status {
 			Appended => {
-				Host.index_message!(dm12, { sid: topic, message: probe_message })
+				Host.index_message!(Str.to_utf8("1_2"), { sid: topic, message: probe_message })
 				Chat.respond(
 					200,
 					{ content_type: [], body: Str.to_utf8("appended ${U64.to_str(got.size)}") },
@@ -195,14 +195,14 @@ handle! = |req|
 		Host.write_cache!(List.drop_first(req.sub, 7), Str.to_utf8("7 99\n"))
 		Chat.respond(200, { content_type: [], body: Str.to_utf8("written") })
 	} else if starts(req.sub, "/entry/") {
-		# An entry appended to `<path>`; one that failed is said for member 2
-		# on 1_2/Plans with the fault it answered, the request never failed.
-		got = Host.append_entry!(
-			List.drop_first(req.sub, 7),
-			{ separator: Str.to_utf8("--"), entry: Str.to_utf8("the entry") },
-		)
-		match got.status {
-			Appended => Chat.respond(200, { content_type: [], body: Str.to_utf8("appended") })
+		# An entry appended to `<path>` in an aside; one that failed is said
+		# for member 2 on 1_2/Plans with the fault the aside's end answered,
+		# the request never failed.
+		_ = Host.mark_aside!(Begin)
+		_ = Host.append!(List.drop_first(req.sub, 7), Str.to_utf8("the entry"))
+		ended = Host.mark_aside!(End)
+		match ended.status {
+			Done => Chat.respond(200, { content_type: [], body: Str.to_utf8("appended") })
 			Failed => {
 				Host.report_fanout_failure!(
 					Images,
@@ -210,7 +210,7 @@ handle! = |req|
 						member: Str.to_utf8("2"),
 						key: Str.to_utf8("1_2"),
 						sid: Str.to_utf8("Plans"),
-						fault: got.fault,
+						fault: ended.fault,
 					},
 				)
 				Chat.respond(200, { content_type: [], body: Str.to_utf8("said") })
@@ -386,14 +386,6 @@ split_on = |l, sep|
 				) ?? acc
 			},
 	)
-
-dm12 : Chat.Conv
-dm12 = {
-	family: Dm,
-	key: Str.to_utf8("1_2"),
-	base: Str.to_utf8("/chat/c/1_2"),
-	members: [Str.to_utf8("1"), Str.to_utf8("2")],
-}
 
 probe_message : Chat.Message
 probe_message = {

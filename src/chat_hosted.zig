@@ -25,7 +25,7 @@ pub const Rendered = abi.Rendered;
 pub const RenderStatus = route.RenderStatus;
 pub const Message = abi.Message;
 pub const Appended = abi.Appended;
-pub const AppendedAt = abi.AppendedAt;
+pub const AsideOutcome = abi.AsideOutcome;
 pub const AppendStatus = route.AppendStatus;
 pub const Surface = route.Surface;
 pub const Hostility = route.Hostility;
@@ -36,7 +36,6 @@ pub const Stat = abi.Stat;
 pub const Entry = abi.Entry;
 pub const Src = abi.Src;
 pub const EntryKind = route.EntryKind;
-pub const Conv = abi.Conv;
 pub const Account = abi.Account;
 pub const Accounts = abi.Accounts;
 pub const AccountKind = route.AccountKind;
@@ -293,8 +292,12 @@ const Scripted = struct {
     body: ?[]const u8 = "",
     /// A topic's message count, or a count that failed.
     count: abi.Count = .{ .counted = 3 },
-    /// Whether an appended line is stored.
+    /// Whether a line appended to a topic's reactions is stored.
     append_line_ok: bool = true,
+    /// A topic's reactions as stored (null: none), and whether a read of
+    /// them fails (Host.read_at!'s miss).
+    sidecar: ?[]const u8 = null,
+    sidecar_unread: bool = false,
     /// The files under the chat root, each as read; any other is missing.
     files: []const File = &.{},
     /// Whether a write or a remove succeeds.
@@ -313,10 +316,13 @@ const Scripted = struct {
     store_ok: bool = true,
     /// A topic whose message will not store, alone (an announcement's).
     store_fails_for: ?[]const u8 = null,
-    /// The transcript's size before an append (Host.append_message!).
+    /// The transcript's size before an append (Host.append!).
     transcript_before: u64 = 100,
-    /// What Host.aside!(End) answers.
-    aside_end: route.AsideEnd = .done,
+    /// An aside whose every end fails with this error, whatever was in it.
+    aside_fails: ?anyerror = null,
+    /// Inside an aside, and the error an append in it failed with.
+    in_aside: bool = false,
+    aside_failed: ?anyerror = null,
     /// What Host.welcome_pending! answers (metal-vmm QUEUE 283); `welcome_done!`
     /// makes it `.none`.
     welcome: route.Welcome = .none,
@@ -345,7 +351,7 @@ const Scripted = struct {
             .now = nowOf,
             .read_body = bodyOf,
             .publish = publish,
-            .append_line = appendLine,
+            .append = appendOf,
             .stat = statOf,
             .read_at = readAtOf,
             .read = readOf,
@@ -363,10 +369,8 @@ const Scripted = struct {
             .check_hostile = hostile,
             .render = render,
             .render_preview = renderPreview,
-            .append_message = appendMessage,
             .index_message = indexMessage,
             .write_cache = writeCache,
-            .append_entry = appendEntry,
             .report_fanout_failure = fanoutFailed,
             .serve_file = raw,
             .serve_rendered = links,
@@ -426,31 +430,6 @@ const Scripted = struct {
             args,
         ) catch @panic("oom");
     }
-    /// A conversation as the Roc handed it: every field, so a record laid
-    /// out wrong across the seam shows.
-    fn sayConv(
-        ctx: *anyopaque,
-        what: []const u8,
-        conv: Conv,
-    ) void {
-        const s = me(ctx);
-        s.asked.print(
-            s.alloc,
-            "{s} {t} {s} {s} [",
-            .{
-                what,
-                conv.family,
-                conv.key,
-                conv.base,
-            },
-        ) catch @panic("oom");
-        for (conv.members, 0..) |m, i| s.asked.print(
-            s.alloc,
-            "{s}{s}",
-            .{ if (i == 0) "" else ",", m },
-        ) catch @panic("oom");
-        s.asked.appendSlice(s.alloc, "]") catch @panic("oom");
-    }
     fn member(ctx: *anyopaque) route.Membership {
         say(
             ctx,
@@ -505,27 +484,58 @@ const Scripted = struct {
             .{ key, std.zig.fmtString(bytes) },
         );
     }
-    fn appendLine(
+    /// The bytes escaped, so their every byte shows. A topic's reactions
+    /// take a line but where `append_line_ok` is not; a transcript takes a
+    /// block but where `store_ok` is not or its topic is `store_fails_for`,
+    /// and is `transcript_before` bytes before it; a feed takes an entry
+    /// but at `entry_fails`'s path, whose error is its aside's.
+    fn appendOf(
         ctx: *anyopaque,
         path: []const u8,
-        line: []const u8,
-    ) route.Done {
+        bytes: []const u8,
+    ) abi.Appended {
         say(
             ctx,
-            "append_line {s} {s}",
-            .{ path, line },
+            "append {s} {f}",
+            .{ path, std.zig.fmtString(bytes) },
         );
-        return if (me(ctx).append_line_ok) .ok else .failed;
+        const s = me(ctx);
+        if (std.mem.endsWith(u8, path, ".reactions.jsonl")) {
+            return if (s.append_line_ok) .{ .appended = 7 + bytes.len } else .failed;
+        }
+        if (std.mem.indexOf(u8, path, "/sessions/") != null) {
+            if (s.store_fails_for) |t| if (std.mem.endsWith(u8, path, std.fmt.allocPrint(
+                s.alloc,
+                "/sessions/{s}.md",
+                .{t},
+            ) catch @panic("oom"))) return .failed;
+            if (!s.store_ok) return .failed;
+            return .{ .appended = s.transcript_before + bytes.len };
+        }
+        if (s.entry_fails) |fails| if (std.mem.eql(
+            u8,
+            fails.path,
+            path,
+        )) {
+            if (s.in_aside and s.aside_failed == null) s.aside_failed = fails.e;
+            return .failed;
+        };
+        return .{ .appended = 7 + bytes.len };
     }
     /// A transcript (`<dir>/sessions/<topic>.md`) is 7 bytes, but where
     /// `count` failed (its stat fails); its sidecar says
-    /// `count` at 7, so it is believed. Any other path is not there.
+    /// `count` at 7, so it is believed. A topic's reactions are `sidecar`.
+    /// Any other path is not there.
     fn statOf(ctx: *anyopaque, path: []const u8) abi.Stat {
         say(
             ctx,
             "stat {s}",
             .{path},
         );
+        if (std.mem.endsWith(u8, path, ".reactions.jsonl")) {
+            const bytes = me(ctx).sidecar orelse return .missing;
+            return .{ .found = .{ .size = bytes.len, .mtime = 1761400000 } };
+        }
         if (!std.mem.endsWith(
             u8,
             path,
@@ -539,14 +549,21 @@ const Scripted = struct {
     fn readAtOf(
         ctx: *anyopaque,
         path: []const u8,
-        _: u64,
-        _: u64,
+        offset: u64,
+        max: u64,
     ) abi.Read {
         say(
             ctx,
             "read_at {s}",
             .{path},
         );
+        if (std.mem.endsWith(u8, path, ".reactions.jsonl")) {
+            const s = me(ctx);
+            const bytes = s.sidecar orelse return .missing;
+            if (s.sidecar_unread) return .failed;
+            const from: usize = @intCast(@min(offset, bytes.len));
+            return .{ .found = bytes[from..@min(bytes.len, from + @as(usize, @intCast(max)))] };
+        }
         if (!std.mem.endsWith(
             u8,
             path,
@@ -649,13 +666,23 @@ const Scripted = struct {
             .{ what, whose },
         );
     }
-    fn asideOf(ctx: *anyopaque, which: route.Aside) route.AsideEnd {
+    fn asideOf(ctx: *anyopaque, which: route.Aside) abi.AsideOutcome {
         say(
             ctx,
             "aside {t}",
             .{which},
         );
-        return if (which == .end) me(ctx).aside_end else .done;
+        const s = me(ctx);
+        switch (which) {
+            .begin => s.in_aside = true,
+            .end => {
+                s.in_aside = false;
+                const e = s.aside_failed orelse (s.aside_fails orelse return .done);
+                s.aside_failed = null;
+                return .{ .failed = e };
+            },
+        }
+        return .done;
     }
     fn writeOf(
         ctx: *anyopaque,
@@ -789,41 +816,11 @@ const Scripted = struct {
             .{markdown},
         ) catch @panic("oom") };
     }
-    /// The block escaped, so its every byte shows; the transcript was
-    /// `transcript_before` bytes, so its size after is that and the block.
-    fn appendMessage(
-        ctx: *anyopaque,
-        conv: Conv,
-        sid: []const u8,
-        block: []const u8,
-    ) abi.AppendedAt {
-        sayConv(
-            ctx,
-            "append",
-            conv,
-        );
-        say(
-            ctx,
-            " {s} {f}",
-            .{
-                sid,
-                std.zig.fmtString(block),
-            },
-        );
-        const s = me(ctx);
-        if (s.store_fails_for) |t| if (std.mem.eql(
-            u8,
-            t,
-            sid,
-        )) return .failed;
-        if (!s.store_ok) return .failed;
-        return .{ .appended = s.transcript_before + block.len };
-    }
     /// Every field of the message in Chat.Message's order, so a record laid
     /// out wrong across the seam shows.
     fn indexMessage(
         ctx: *anyopaque,
-        conv: Conv,
+        dir: []const u8,
         sid: []const u8,
         m: abi.Message,
     ) void {
@@ -831,7 +828,7 @@ const Scripted = struct {
             ctx,
             "index {s} {s} {s}|{s}|{s}|{s}|{s}",
             .{
-                conv.key,
+                dir,
                 sid,
                 m.id,
                 m.from,
@@ -850,29 +847,6 @@ const Scripted = struct {
                 std.zig.fmtString(bytes),
             },
         );
-    }
-    /// The separator and the entry escaped, so their every byte shows.
-    fn appendEntry(
-        ctx: *anyopaque,
-        path: []const u8,
-        separator: []const u8,
-        entry: []const u8,
-    ) abi.Appended {
-        say(
-            ctx,
-            "append_entry {s} {f} {f}",
-            .{
-                path,
-                std.zig.fmtString(separator),
-                std.zig.fmtString(entry),
-            },
-        );
-        const fails = me(ctx).entry_fails orelse return .appended;
-        return if (std.mem.eql(
-            u8,
-            fails.path,
-            path,
-        )) .{ .failed = fails.e } else .appended;
     }
     fn fanoutFailed(
         ctx: *anyopaque,
@@ -1002,9 +976,17 @@ fn frameSaid(comptime line: []const u8) []const u8 {
 
 /// Steve's 👍 on message 3 taken back, at the scripted host's time.
 const thumbs_line = "{\"msg\":3,\"uid\":\"1\",\"from\":\"Steve\",\"emoji\":\"\u{1F44D}\",\"on\":false,\"at\":\"2025-10-25T13:46:40Z\"}";
+/// A line appended to the sidecar at `path` as the scripted host says it:
+/// the sidecar's stat (none there, so no newline first), then the line and
+/// its newline, escaped.
+fn lineSaid(comptime path: []const u8, comptime line: []const u8) []const u8 {
+    @setEvalBranchQuota(200_000);
+    return comptime std.fmt.comptimePrint("stat {s};append {s} {f};", .{ path, path, std.zig.fmtString(line ++ "\n") });
+}
+
 /// What storing it in DM 1_2's topic Plans asks: the count, the line
 /// appended to the sidecar, then its frame on the topic's key.
-const stored_thumbs = "stat 1_2/sessions/Plans.md;read_at 1_2/sessions/Plans.count;append_line 1_2/sessions/Plans.reactions.jsonl " ++ thumbs_line ++ ";publish 1_2/Plans " ++ frameSaid(thumbs_line) ++ ";";
+const stored_thumbs = "stat 1_2/sessions/Plans.md;read_at 1_2/sessions/Plans.count;" ++ lineSaid("1_2/sessions/Plans.reactions.jsonl", thumbs_line) ++ "publish 1_2/Plans " ++ frameSaid(thumbs_line) ++ ";";
 
 test "a topic's reactions, react, pin and unpin are the Roc's: presence, the conversation and topic found, the method, then the work" {
     use(testing.allocator);
@@ -1041,7 +1023,7 @@ test "a topic's reactions, react, pin and unpin are the Roc's: presence, the con
         var s = a;
         s.body = "msg=1&emoji=%F0%9F%91%8D";
         break :blk s;
-    }, .{ .respond = .{ .status = 204 } }, ops_topic ++ "body;accounts;stat channels/ops/sessions/Plans.md;read_at channels/ops/sessions/Plans.count;append_line channels/ops/sessions/Plans.reactions.jsonl {\"msg\":1,\"uid\":\"1\",\"from\":\"Steve\",\"emoji\":\"\u{1F44D}\",\"on\":true,\"at\":\"2025-10-25T13:46:40Z\"};publish ops/Plans " ++ comptime frameSaid("{\"msg\":1,\"uid\":\"1\",\"from\":\"Steve\",\"emoji\":\"\u{1F44D}\",\"on\":true,\"at\":\"2025-10-25T13:46:40Z\"}") ++ ";");
+    }, .{ .respond = .{ .status = 204 } }, ops_topic ++ "body;accounts;stat channels/ops/sessions/Plans.md;read_at channels/ops/sessions/Plans.count;" ++ comptime lineSaid("channels/ops/sessions/Plans.reactions.jsonl", "{\"msg\":1,\"uid\":\"1\",\"from\":\"Steve\",\"emoji\":\"\u{1F44D}\",\"on\":true,\"at\":\"2025-10-25T13:46:40Z\"}") ++ "publish ops/Plans " ++ frameSaid("{\"msg\":1,\"uid\":\"1\",\"from\":\"Steve\",\"emoji\":\"\u{1F44D}\",\"on\":true,\"at\":\"2025-10-25T13:46:40Z\"}") ++ ";");
     try expectAct("/ops/Plans/react", true, .POST, blk: {
         var s = a;
         s.body = "msg=1&emoji=%F0%9F%91%8D";
@@ -1058,13 +1040,45 @@ test "a topic's reactions, react, pin and unpin are the Roc's: presence, the con
         s.count = .failed;
         break :blk s;
     }, .answered, dm_topic ++ "body;stat 1_2/sessions/Plans.md;");
+    // **A TORN LINE STAYS ITS OWN LINE**: a sidecar whose last byte is no
+    // newline (a stop cut its append short) gets one before the line; one
+    // that ends in a newline, or is empty, does not; a last byte that will
+    // not read fails the request (ShortRead), nothing stored or sent.
+    const reactions = "1_2/sessions/Plans.reactions.jsonl";
+    const counted = "body;stat 1_2/sessions/Plans.md;read_at 1_2/sessions/Plans.count;stat " ++ reactions ++ ";";
+    const thumbs_frame = comptime "publish 1_2/Plans " ++ frameSaid(thumbs_line) ++ ";";
+    try expectAct("/c/1_2/Plans/react", false, .POST, blk: {
+        var s = a;
+        s.body = thumbs;
+        s.sidecar = "{\"msg\":1,\"fr";
+        break :blk s;
+    }, .{ .respond = .{ .status = 204 } }, dm_topic ++ counted ++ "read_at " ++ reactions ++ ";" ++ comptime std.fmt.comptimePrint("append {s} {f};", .{ reactions, std.zig.fmtString("\n" ++ thumbs_line ++ "\n") }) ++ thumbs_frame);
+    try expectAct("/c/1_2/Plans/react", false, .POST, blk: {
+        var s = a;
+        s.body = thumbs;
+        s.sidecar = "{\"msg\":1}\n";
+        break :blk s;
+    }, .{ .respond = .{ .status = 204 } }, dm_topic ++ counted ++ "read_at " ++ reactions ++ ";" ++ comptime std.fmt.comptimePrint("append {s} {f};", .{ reactions, std.zig.fmtString(thumbs_line ++ "\n") }) ++ thumbs_frame);
+    try expectAct("/c/1_2/Plans/react", false, .POST, blk: {
+        var s = a;
+        s.body = thumbs;
+        s.sidecar = "";
+        break :blk s;
+    }, .{ .respond = .{ .status = 204 } }, dm_topic ++ counted ++ comptime std.fmt.comptimePrint("append {s} {f};", .{ reactions, std.zig.fmtString(thumbs_line ++ "\n") }) ++ thumbs_frame);
+    try expectAct("/c/1_2/Plans/react", false, .POST, blk: {
+        var s = a;
+        s.body = thumbs;
+        s.sidecar = "{\"msg\":1}\n";
+        s.sidecar_unread = true;
+        break :blk s;
+    }, .answered, dm_topic ++ counted ++ "read_at " ++ reactions ++ ";fail ShortRead;");
     // **A LINE NOT STORED IS NEVER SENT**: no publish after a failed append.
     try expectAct("/c/1_2/Plans/react", false, .POST, blk: {
         var s = a;
         s.body = thumbs;
         s.append_line_ok = false;
         break :blk s;
-    }, .answered, dm_topic ++ "body;stat 1_2/sessions/Plans.md;read_at 1_2/sessions/Plans.count;append_line 1_2/sessions/Plans.reactions.jsonl " ++ thumbs_line ++ ";");
+    }, .answered, dm_topic ++ "body;stat 1_2/sessions/Plans.md;read_at 1_2/sessions/Plans.count;" ++ comptime lineSaid("1_2/sessions/Plans.reactions.jsonl", thumbs_line));
     // The reactor's name that will not read: the request fails with it, and
     // nothing is counted, stored or sent.
     try expectAct("/ops/Plans/react", true, .POST, blk: {
@@ -1618,8 +1632,8 @@ test "a page's sidebar is the Roc's (sidebarOf): the roster but the viewer, each
 }
 
 /// What storing a message asks, step by step: message 4 (index 3, the
-/// scripted count) of topic `sid` in `conv` (as `sayConv` says it), the
-/// conversation's key `key`, by member 1 named `name`, at the scripted
+/// scripted count) of topic `sid` in `conv` (`dm ...` for a DM, else a
+/// channel), the conversation's key `key`, by member 1 named `name`, at the scripted
 /// time. The count, the render, the parts, the store (the block escaped, then
 /// the message's fields), the frame on the topic's key, then the fan-out
 /// (`fanned`: DM 1_2's or channel ops's members).
@@ -1647,41 +1661,33 @@ fn sent(
     const block = "\n\n-------------\nMSG_" ++ id ++ "\nfrom: " ++ name ++ "\ndate: " ++ at ++ "\nuid: 1\n\n" ++ md;
     const frame = "id: 3\ndata: {\"index\":3,\"from\":\"" ++ name ++ "\",\"from_uid\":\"1\",\"at\":\"" ++ at ++ "\",\"html\":\"<p>" ++ md ++ "</p>\",\"markdown\":\"" ++ md ++ "\",\"id\":\"" ++ id ++ "\"" ++ (if (cid.len == 0) "" else ",\"cid\":\"" ++ cid ++ "\"") ++ "}\n\n";
     const message = id ++ "|" ++ name ++ "|" ++ at ++ "|1|" ++ md;
-    const appended = std.fmt.comptimePrint("append {s} {s} {f};", .{
+    // The conversation's folder: a DM's key, a channel's channels/<key>.
+    const dir = if (std.mem.startsWith(
+        u8,
         conv,
+        "dm ",
+    )) key else "channels/" ++ key;
+    const appended = std.fmt.comptimePrint("append {s}/sessions/{s}.md {f};", .{
+        dir,
         sid,
         std.zig.fmtString(block),
     });
     return comptime .{
         .append = appended,
-        .count = blk: {
-            const dir = if (std.mem.startsWith(
-                u8,
-                conv,
-                "dm ",
-            )) key else "channels/" ++ key;
-            break :blk "stat " ++ dir ++ "/sessions/" ++ sid ++ ".md;read_at " ++ dir ++ "/sessions/" ++ sid ++ ".count;";
-        },
+        .count = "stat " ++ dir ++ "/sessions/" ++ sid ++ ".md;read_at " ++ dir ++ "/sessions/" ++ sid ++ ".count;",
         .render = "render " ++ md ++ ";",
         // The append, then the count the Roc writes (metal-vmm QUEUE 287:
         // 4 messages, the transcript's 100 bytes and the block, the block
-        // at 100 by member 1), then the index.
-        .store = blk: {
-            const dir = if (std.mem.startsWith(
-                u8,
-                conv,
-                "dm ",
-            )) key else "channels/" ++ key;
-            break :blk std.fmt.comptimePrint("{s}cache {s}/sessions/{s}.count 4 {d}\\n100 1\\n;index {s} {s} {s};", .{
-                appended,
-                dir,
-                sid,
-                100 + block.len,
-                key,
-                sid,
-                message,
-            });
-        },
+        // at 100 by member 1), then the index, told the folder.
+        .store = std.fmt.comptimePrint("{s}cache {s}/sessions/{s}.count 4 {d}\\n100 1\\n;index {s} {s} {s};", .{
+            appended,
+            dir,
+            sid,
+            100 + block.len,
+            dir,
+            sid,
+            message,
+        }),
         .publish = std.fmt.comptimePrint("publish {s}/{s} {f};", .{
             key,
             sid,
@@ -1928,7 +1934,7 @@ test "a message is the Roc's: no author, no message; the count, the id, the stam
     );
     const at = "2025-10-25T13:46:40Z";
     for ([_][]const u8{
-        "append " ++ dm_said ++ " Plans MSG_Plans_1\\nfrom: Steve\\ndate: " ++ at ++ "\\nuid: 1\\n\\none;",
+        "append 1_2/sessions/Plans.md MSG_Plans_1\\nfrom: Steve\\ndate: " ++ at ++ "\\nuid: 1\\n\\none;",
         "index 1_2 Plans Plans_1|Steve|" ++ at ++ "|1|one;",
         "publish 1_2/Plans id: 0\\ndata: {\\\"index\\\":0,",
     }) |want| if (std.mem.indexOf(
@@ -1946,19 +1952,15 @@ test "the fan-out is the Roc's: every member in order, each member's notify (nev
     defer @import("roc_abi.zig").deinit();
     const url = "/chat/c/1_2/Plans";
     const head = "Sent by Steve at " ++ at_said ++ ", source MSG_Plans_1 in 1_2:";
+    // Each feed's entry in an aside of its own: the feed's stat (7 bytes,
+    // so the separator first), then the separator and the entry, escaped.
     const img_entry = comptime std.fmt.comptimePrint(
-        "{f} {f}",
-        .{
-            std.zig.fmtString("\n\n-------------\n\n"),
-            std.zig.fmtString(head ++ "\n<img a b>\n<IMG\tsrc=/x.png onerror=c>"),
-        },
+        "{f}",
+        .{std.zig.fmtString("\n\n-------------\n\n" ++ head ++ "\n<img a b>\n<IMG\tsrc=/x.png onerror=c>")},
     );
     const code_entry = comptime std.fmt.comptimePrint(
-        "{f} {f}",
-        .{
-            std.zig.fmtString("\n\n-------------\n\n"),
-            std.zig.fmtString(head ++ "\n```zig\nx\n```\n\n```\ny\n```"),
-        },
+        "{f}",
+        .{std.zig.fmtString("\n\n-------------\n\n" ++ head ++ "\n```zig\nx\n```\n\n```\ny\n```")},
     );
     const head_json = "{\"source_id\":\"Plans_1\",\"from\":\"Steve\",\"conv\":\"1_2\",\"at\":\"" ++ at_said ++ "\",";
     const src = ",\"source_url\":\"/chat/c/1_2/Plans#msg-Plans_1\"}";
@@ -2001,8 +2003,8 @@ test "the fan-out is the Roc's: every member in order, each member's notify (nev
         true,
         ex,
     ) ++
-        "append_entry users/1/images.md " ++ img_entry ++ ";" ++ published("img:1", img_event) ++
-        "append_entry users/1/code.md " ++ code_entry ++ ";" ++ published("code:1", code_event);
+        "aside begin;stat users/1/images.md;append users/1/images.md " ++ img_entry ++ ";aside end;" ++ published("img:1", img_event) ++
+        "aside begin;stat users/1/code.md;append users/1/code.md " ++ code_entry ++ ";aside end;" ++ published("code:1", code_event);
     const member2 = comptime notifySaid(
         "2",
         "1_2",
@@ -2023,8 +2025,8 @@ test "the fan-out is the Roc's: every member in order, each member's notify (nev
         true,
         ex,
     ) ++
-        "append_entry users/2/images.md " ++ img_entry ++ ";fanout_failed images 2 1_2 Plans IsDir;" ++
-        "append_entry users/2/code.md " ++ code_entry ++ ";" ++ published("code:2", code_event);
+        "aside begin;stat users/2/images.md;append users/2/images.md " ++ img_entry ++ ";aside end;fanout_failed images 2 1_2 Plans IsDir;" ++
+        "aside begin;stat users/2/code.md;append users/2/code.md " ++ code_entry ++ ";aside end;" ++ published("code:2", code_event);
     const tail = s.asked.items[std.mem.indexOf(
         u8,
         s.asked.items,
@@ -2204,7 +2206,7 @@ test "a send is the Roc's: the conversation, the method, the header, the body, t
         s.body = "topic=Ideas";
         s.topics = &.{ "general2", "Plans" };
         s.store_fails_for = "general2";
-        s.aside_end = .failed;
+        s.aside_fails = error.IsDir;
         break :blk s;
     }, .{ .respond = .{
         .status = 200,

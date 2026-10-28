@@ -58,13 +58,6 @@ pub const Answer = extern struct {
 };
 /// Host.roc's `read_body!` answer: `{ bytes : List(U8), status : [Answered, Read] }`.
 pub const Got = extern struct { bytes: RocBytes, status: route_mod.BodyStatus };
-/// Chat.roc's `Conv`, as Roc hands it to a hosted function.
-pub const ConvRec = extern struct {
-    base: RocBytes,
-    key: RocBytes,
-    members: roc.RocBytesList,
-    family: Family,
-};
 /// Host.roc's `read!` answer: `{ bytes : List(U8), status : [Failed, Found, Missing] }`.
 pub const ReadRec = extern struct { bytes: RocBytes, status: route_mod.ReadStatus };
 /// One of Host.roc's `list!` entries: `{ kind : [Dir, File, Other], name : List(U8) }`.
@@ -140,20 +133,14 @@ pub const MessageRec = extern struct {
     markdown: RocBytes,
     uid: RocBytes,
 };
-/// Host.roc's `append_entry!` answer: `{ fault : U16, status : [Appended, Failed] }`.
-pub const AppendRec = extern struct { fault: u16, status: route_mod.AppendStatus };
-/// Host.roc's `append_message!` answer (metal-vmm QUEUE 287): `{ size : U64,
-/// status : [Appended, Failed] }`, the transcript's size after the append.
-pub const AppendedAtRec = extern struct { size: u64, status: route_mod.AppendStatus };
-/// Host.roc's `append_message!` record (metal-vmm QUEUE 297): `{ sid,
-/// block : List(U8) }`, the bytes by name.
-pub const AppendMessageArgs = extern struct { block: RocBytes, sid: RocBytes };
+/// Host.roc's `mark_aside!` answer: `{ fault : U16, status : [Done, Failed] }`.
+pub const AsideRec = extern struct { fault: u16, status: route_mod.AsideEnd };
+/// Host.roc's `append!` answer: `{ size : U64, status : [Appended,
+/// Failed] }`, the file's size after the append.
+pub const AppendedRec = extern struct { size: u64, status: route_mod.AppendStatus };
 /// Host.roc's `index_message!` record (metal-vmm QUEUE 297): `{ sid :
 /// List(U8), message : Chat.Message }`, by name.
 pub const IndexMessageArgs = extern struct { message: MessageRec, sid: RocBytes };
-/// Host.roc's `append_entry!` record (metal-vmm QUEUE 297): `{ separator,
-/// entry : List(U8) }`, the bytes by name.
-pub const AppendEntryArgs = extern struct { entry: RocBytes, separator: RocBytes };
 /// Host.roc's `report_fanout_failure!` record (metal-vmm QUEUE 297):
 /// `{ member, key, sid : List(U8), fault : U16 }`, the bytes by name, the
 /// fault last.
@@ -289,9 +276,9 @@ pub const AccountList = RecList(AccountRec, Account, struct {
 
 comptime {
     const w = @sizeOf(usize);
-    std.debug.assert(@sizeOf(RocBytes) == 3 * w and @sizeOf(Request) == 4 * w and @sizeOf(RouteRec) == 10 * w and @sizeOf(Answer) == 20 * w and @sizeOf(Got) == 4 * w and @sizeOf(ConvRec) == 10 * w and @sizeOf(ReadRec) == 4 * w and @sizeOf(EntryRec) == 4 * w and @sizeOf(SrcRec) == 6 * w and @sizeOf(ListRec) == 4 * w and @sizeOf(AccountRec) == 7 * w and @sizeOf(AccountsRec) == 4 * w and @sizeOf(RenderRec) == 4 * w and @sizeOf(MessageRec) == 15 * w);
-    std.debug.assert(@sizeOf(AppendRec) == 4);
-    std.debug.assert(@sizeOf(AppendedAtRec) == 16 and @offsetOf(AppendedAtRec, "size") == 0 and @offsetOf(AppendedAtRec, "status") == 8);
+    std.debug.assert(@sizeOf(RocBytes) == 3 * w and @sizeOf(Request) == 4 * w and @sizeOf(RouteRec) == 10 * w and @sizeOf(Answer) == 20 * w and @sizeOf(Got) == 4 * w and @sizeOf(ReadRec) == 4 * w and @sizeOf(EntryRec) == 4 * w and @sizeOf(SrcRec) == 6 * w and @sizeOf(ListRec) == 4 * w and @sizeOf(AccountRec) == 7 * w and @sizeOf(AccountsRec) == 4 * w and @sizeOf(RenderRec) == 4 * w and @sizeOf(MessageRec) == 15 * w);
+    std.debug.assert(@sizeOf(AsideRec) == 4 and @offsetOf(AsideRec, "fault") == 0 and @offsetOf(AsideRec, "status") == 2);
+    std.debug.assert(@sizeOf(AppendedRec) == 16 and @offsetOf(AppendedRec, "size") == 0 and @offsetOf(AppendedRec, "status") == 8);
     // read_upload!'s and store_upload!'s (metal-vmm QUEUE 292).
     std.debug.assert(@offsetOf(UploadReadRec, "size") == 0 and
         @offsetOf(UploadReadRec, "ext") == 8 and
@@ -300,9 +287,7 @@ comptime {
         @sizeOf(UploadReadRec) == std.mem.alignForward(usize, 8 + 6 * w + 1, 8));
     std.debug.assert(@offsetOf(StoredRec, "name") == 0 and @offsetOf(StoredRec, "status") == 3 * w and @sizeOf(StoredRec) == 4 * w);
     // The hosted effects' argument records (metal-vmm QUEUE 297).
-    std.debug.assert(@offsetOf(AppendMessageArgs, "block") == 0 and @offsetOf(AppendMessageArgs, "sid") == 3 * w and @sizeOf(AppendMessageArgs) == 6 * w);
     std.debug.assert(@offsetOf(IndexMessageArgs, "message") == 0 and @offsetOf(IndexMessageArgs, "sid") == 15 * w and @sizeOf(IndexMessageArgs) == 18 * w);
-    std.debug.assert(@offsetOf(AppendEntryArgs, "entry") == 0 and @offsetOf(AppendEntryArgs, "separator") == 3 * w and @sizeOf(AppendEntryArgs) == 6 * w);
     std.debug.assert(@offsetOf(FanoutFailureArgs, "key") == 0 and @offsetOf(FanoutFailureArgs, "member") == 3 * w and @offsetOf(FanoutFailureArgs, "sid") == 6 * w and @offsetOf(FanoutFailureArgs, "fault") == 9 * w and @sizeOf(FanoutFailureArgs) == 10 * w);
     // retire_asked!'s (metal-vmm QUEUE 293).
     std.debug.assert(@offsetOf(RetireAskedRec, "days") == 0 and @offsetOf(RetireAskedRec, "now") == 8 and @offsetOf(RetireAskedRec, "keep") == 16 and @sizeOf(RetireAskedRec) == 16 + 3 * w);
@@ -506,42 +491,17 @@ pub const Message = struct {
     }
 };
 
-/// A feed's entry appended (Host.append_entry!), or why not: the
-/// fan-out's failure, never the request's.
-pub const Appended = union(route_mod.AppendStatus) { appended, failed: anyerror };
-/// What Host.append_message! answers: the transcript's size after the
-/// append, or that it failed (the host has failed the request).
-pub const AppendedAt = union(route_mod.AppendStatus) { appended: u64, failed };
+/// What Host.append! answers: the file's size after the append, or that it
+/// failed (the host has failed the request, or the aside).
+pub const Appended = union(route_mod.AppendStatus) { appended: u64, failed };
+
+/// What Host.aside! answers: done, or the error something in it failed
+/// with (at `end`; at `begin`, the request's own, which has failed).
+pub const AsideOutcome = union(route_mod.AsideEnd) { done, failed: anyerror };
 
 /// Which of an account's reads a lookup needed, and failed on: its kind
 /// (the password's stat) or its name.
 pub const AccountRead = enum { kind, name };
-
-/// **A CONVERSATION THE ROC FOUND TO BE THE MEMBER'S** (chat/main.roc
-/// `find!`), handed to each hosted function that works on one: the host
-/// holds no conversation between calls. `family` is `.dm` or `.channel`;
-/// `members` each member once. Its bytes are the call's.
-pub const Conv = struct {
-    family: Family,
-    key: []const u8,
-    base: []const u8,
-    members: []const []const u8,
-
-    fn of(r: ConvRec) Conv {
-        const items = r.members.slice();
-        const members = roc.alloc().alloc(
-            []const u8,
-            items.len,
-        ) catch @panic("roc_chat: out of memory for a conversation's members");
-        for (items, members) |*it, *m| m.* = it.slice();
-        return .{
-            .family = r.family,
-            .key = r.key.slice(),
-            .base = r.base.slice(),
-            .members = members,
-        };
-    }
-};
 
 pub extern fn roc_chat_handle(req: Request) callconv(.c) Answer;
 
@@ -586,15 +546,15 @@ pub const Host = struct {
         key: []const u8,
         bytes: []const u8,
     ) void = noPublish,
-    /// Host.append_line!: `line` and a newline appended to the file at
-    /// `path` under the chat root (checked here first, as the file
-    /// primitives' are), a newline first when the file ends mid-line. `.failed`
-    /// when it failed (the host has failed the request).
-    append_line: *const fn (
+    /// Host.append!: `bytes` appended to the file at `path` under the chat
+    /// root (checked here first, as the file primitives' are), its folders
+    /// made; the file's size after, or `.failed` (the host has failed the
+    /// request, or the aside; nothing stored).
+    append: *const fn (
         ctx: *anyopaque,
         path: []const u8,
-        line: []const u8,
-    ) route_mod.Done = noAppendLine,
+        bytes: []const u8,
+    ) Appended = noAppend,
     /// **THE FILE PRIMITIVES** (Host.read!, Host.write!, Host.remove!): a
     /// file under the chat root, `path` relative to it, its bytes and its
     /// name the Roc's. Every path is checked here first (`inRoot`); the host
@@ -642,9 +602,11 @@ pub const Host = struct {
         whose: []const u8,
     ) void = noDropped,
     /// Host.aside!: from `begin` to `end`, a failure is the aside's, kept
-    /// apart and said at `end`, never the request's; after one, the aside's
-    /// later calls do nothing, as after a request's failure.
-    aside: *const fn (ctx: *anyopaque, which: route_mod.Aside) route_mod.AsideEnd = noAside,
+    /// apart and answered at `end` (its error, which the seam hands the Roc
+    /// as a fault), never the request's; after one, the aside's later calls
+    /// do nothing, as after a request's failure. Asides nest: one begun
+    /// inside another ends first, its failure its own.
+    aside: *const fn (ctx: *anyopaque, which: route_mod.Aside) AsideOutcome = noAside,
     /// Host.check_online!, asked by the seam once for each of the Roc's ids:
     /// whether `id` was seen within the presence window of the request's
     /// time. A read of process-lifetime state; it cannot fail.
@@ -683,20 +645,12 @@ pub const Host = struct {
     render: *const fn (ctx: *anyopaque, markdown: []const u8) Rendered = noRender,
     /// Host.render_preview!: as `render`, and hostile markdown counted.
     render_preview: *const fn (ctx: *anyopaque, markdown: []const u8) Rendered = noRenderPreview,
-    /// Host.append_message!: `block` appended to topic `sid`'s transcript in
-    /// `conv`; the transcript's size after it, or `.failed` (the host has
-    /// failed the request; nothing stored). Metal-vmm QUEUE 287.
-    append_message: *const fn (
-        ctx: *anyopaque,
-        conv: Conv,
-        sid: []const u8,
-        block: []const u8,
-    ) AppendedAt = noAppendMessage,
     /// Host.index_message!: the search index told of `message`, topic `sid`
-    /// of `conv`. It cannot fail.
+    /// of the conversation whose folder is `dir` under the chat root (the
+    /// seam has checked both). It cannot fail.
     index_message: *const fn (
         ctx: *anyopaque,
-        conv: Conv,
+        dir: []const u8,
         sid: []const u8,
         message: Message,
     ) void = noIndexMessage,
@@ -708,16 +662,6 @@ pub const Host = struct {
         path: []const u8,
         bytes: []const u8,
     ) void = noWriteCache,
-    /// Host.append_entry!: `entry` appended to the feed file at `path`
-    /// under the chat root (the seam has checked it), `separator` first
-    /// when the file is not empty. **IT NEVER FAILS THE REQUEST**: a write
-    /// that failed is the fan-out's, its error handed back to be said.
-    append_entry: *const fn (
-        ctx: *anyopaque,
-        path: []const u8,
-        separator: []const u8,
-        entry: []const u8,
-    ) Appended = noAppendEntry,
     /// Host.report_fanout_failure!: `surface` failed for `member` with `e`, on
     /// topic `sid` of the conversation keyed `key`: counted and said, the
     /// operator's (/admin/host). **NEVER THE REQUEST'S FAILURE.**
@@ -780,12 +724,12 @@ fn noPublish(
 ) void {
     @panic("publish asked of a host that does not answer it");
 }
-fn noAppendLine(
+fn noAppend(
     _: *anyopaque,
     _: []const u8,
     _: []const u8,
-) route_mod.Done {
-    @panic("append_line asked of a host that does not answer it");
+) Appended {
+    @panic("append asked of a host that does not answer it");
 }
 fn noRetireAsked(_: *anyopaque) RetireAsked {
     @panic("retire_asked asked of a host that does not answer it");
@@ -872,7 +816,7 @@ fn noDropped(
 ) void {
     @panic("count_dropped asked of a host that does not answer it");
 }
-fn noAside(_: *anyopaque, _: route_mod.Aside) route_mod.AsideEnd {
+fn noAside(_: *anyopaque, _: route_mod.Aside) AsideOutcome {
     @panic("aside asked of a host that does not answer it");
 }
 fn noAccounts(_: *anyopaque) Accounts {
@@ -914,22 +858,11 @@ fn noRenderPreview(_: *anyopaque, _: []const u8) Rendered {
 fn noUnspent(_: *anyopaque) void {
     @panic("presence_unspent asked of a host that does not answer it");
 }
-fn noAppendMessage(_: *anyopaque, _: Conv, _: []const u8, _: []const u8) AppendedAt {
-    @panic("append_message asked of a host that does not answer it");
-}
-fn noIndexMessage(_: *anyopaque, _: Conv, _: []const u8, _: Message) void {
+fn noIndexMessage(_: *anyopaque, _: []const u8, _: []const u8, _: Message) void {
     @panic("index_message asked of a host that does not answer it");
 }
 fn noWriteCache(_: *anyopaque, _: []const u8, _: []const u8) void {
     @panic("write_cache asked of a host that does not answer it");
-}
-fn noAppendEntry(
-    _: *anyopaque,
-    _: []const u8,
-    _: []const u8,
-    _: []const u8,
-) Appended {
-    @panic("append_entry asked of a host that does not answer it");
 }
 fn noFanoutFailed(
     _: *anyopaque,
@@ -1075,7 +1008,7 @@ pub const Routing = struct {
     fn noAccount(_: *anyopaque) Accounts {
         return .{ .found = &.{} };
     }
-    fn asideDone(_: *anyopaque, _: route_mod.Aside) route_mod.AsideEnd {
+    fn asideDone(_: *anyopaque, _: route_mod.Aside) AsideOutcome {
         return .done;
     }
     fn admitted(_: *anyopaque) route_mod.Admission {
@@ -1261,14 +1194,17 @@ pub export fn roc_chat_remove(path: RocBytes) callconv(.c) route_mod.Done {
     return h.remove(h.ctx, path.slice());
 }
 
-pub export fn roc_chat_append_line(path: RocBytes, line: RocBytes) callconv(.c) route_mod.Done {
-    const h = current("append_line");
-    if (!underRoot(h, path.slice())) return .failed;
-    return h.append_line(
+pub export fn roc_chat_append(path: RocBytes, bytes: RocBytes) callconv(.c) AppendedRec {
+    const h = current("append");
+    if (!underRoot(h, path.slice())) return .{ .size = 0, .status = .failed };
+    return switch (h.append(
         h.ctx,
         path.slice(),
-        line.slice(),
-    );
+        bytes.slice(),
+    )) {
+        .appended => |size| .{ .size = size, .status = .appended },
+        .failed => .{ .size = 0, .status = .failed },
+    };
 }
 
 pub export fn roc_chat_list(path: RocBytes) callconv(.c) ListRec {
@@ -1312,6 +1248,7 @@ pub export fn roc_chat_fail(reason: route_mod.FailReason, whose: RocBytes) callc
         .no_author => h.fail(h.ctx, error.NoAuthor),
         .not_a_uid => h.fail(h.ctx, error.NotAUid),
         .not_utf8 => h.fail_text(h.ctx, whose.slice()),
+        .short_read => h.fail(h.ctx, error.ShortRead),
     }
 }
 
@@ -1329,9 +1266,12 @@ pub export fn roc_chat_count_dropped(what: route_mod.Dropped, whose: RocBytes) c
     );
 }
 
-pub export fn roc_chat_mark_aside(which: route_mod.Aside) callconv(.c) route_mod.AsideEnd {
+pub export fn roc_chat_mark_aside(which: route_mod.Aside) callconv(.c) AsideRec {
     const h = current("aside");
-    return h.aside(h.ctx, which);
+    return switch (h.aside(h.ctx, which)) {
+        .done => .{ .fault = 0, .status = .done },
+        .failed => |e| .{ .fault = faultOf(e), .status = .failed },
+    };
 }
 
 /// **ONE FLAG FOR EACH ID, IN ITS PLACE**: the Roc asks once for the whole
@@ -1433,35 +1373,18 @@ fn renderRec(r: Rendered) RenderRec {
     };
 }
 
-pub export fn roc_chat_append_message(conv: ConvRec, args: AppendMessageArgs) callconv(.c) AppendedAtRec {
-    const sid = args.sid;
-    const block = args.block;
-    const h = current("append_message");
-    if (!onePart(conv.key.slice()) or !onePart(sid.slice())) {
-        h.fail(h.ctx, error.PathOutsideChatRoot);
-        return .{ .size = 0, .status = .failed };
-    }
-    return switch (h.append_message(
-        h.ctx,
-        .of(conv),
-        sid.slice(),
-        block.slice(),
-    )) {
-        .appended => |size| .{ .size = size, .status = .appended },
-        .failed => .{ .size = 0, .status = .failed },
-    };
-}
-
-pub export fn roc_chat_index_message(conv: ConvRec, args: IndexMessageArgs) callconv(.c) void {
+/// **THE INDEX IS TOLD ONLY OF A FOLDER AND A TOPIC THAT ARE ONE**: after
+/// the store, nothing fails the send (STORED IS DONE), so a folder that
+/// would leave the chat root, or a topic that is not one part, is told
+/// nothing, never the request's failure.
+pub export fn roc_chat_index_message(dir: RocBytes, args: IndexMessageArgs) callconv(.c) void {
     const sid = args.sid;
     const message = args.message;
     const h = current("index_message");
-    // Its topic was the append's, which the seam checked: a bad one now is
-    // no topic, and the index is told of nothing.
-    if (!onePart(conv.key.slice()) or !onePart(sid.slice())) return;
+    if (!roc.inRoot(dir.slice()) or !onePart(sid.slice())) return;
     h.index_message(
         h.ctx,
-        .of(conv),
+        dir.slice(),
         sid.slice(),
         .of(message),
     );
@@ -1492,38 +1415,14 @@ fn errorOf(fault: u16) ?anyerror {
 }
 
 /// **A NAME THE HOST JOINS INTO A PATH IS ONE PART OF IT** (metal-vmm QUEUE
-/// 268, defense in depth): a conversation's key or a topic as the store
-/// takes them is checked as `underRoot` checks a path, and holds no `/`.
+/// 268, defense in depth): a topic as the index takes it is checked as
+/// `underRoot` checks a path, and holds no `/`.
 fn onePart(name: []const u8) bool {
     return roc.inRoot(name) and std.mem.indexOfScalar(
         u8,
         name,
         '/',
     ) == null;
-}
-
-/// **A FEED'S PATH THAT WOULD LEAVE THE CHAT ROOT IS A ROC BUG, SAID, NEVER
-/// THE SEND'S FAILURE**: the fan-out runs after the store, and **STORED IS
-/// DONE** (metal-vmm QUEUE 172), so the seam refuses it as `underRoot` does
-/// (the host never asked) but hands it back as the append's failure
-/// (error.PathOutsideChatRoot), which the Roc counts and says.
-pub export fn roc_chat_append_entry(path: RocBytes, args: AppendEntryArgs) callconv(.c) AppendRec {
-    const separator = args.separator;
-    const entry = args.entry;
-    const h = current("append_entry");
-    if (!roc.inRoot(path.slice())) return .{
-        .fault = faultOf(error.PathOutsideChatRoot),
-        .status = .failed,
-    };
-    return switch (h.append_entry(
-        h.ctx,
-        path.slice(),
-        separator.slice(),
-        entry.slice(),
-    )) {
-        .appended => .{ .fault = 0, .status = .appended },
-        .failed => |e| .{ .fault = faultOf(e), .status = .failed },
-    };
 }
 
 pub export fn roc_chat_report_fanout_failure(surface: route_mod.Surface, args: FanoutFailureArgs) callconv(.c) void {

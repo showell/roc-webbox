@@ -101,22 +101,57 @@ Files := [].{
 	remove! : Paths.ChatPath => Try({}, [Failed])
 	remove! = |path| Host.remove!(path.bytes())
 
-	## Host.append_line!: `line` and a newline appended.
-	append_line! : Paths.ChatPath, List(U8) => Try({}, [Failed])
-	append_line! = |path, line| Host.append_line!(path.bytes(), line)
-
-	## Host.append_entry!: a feed's entry appended, or failed with its fault.
-	append_entry! : Paths.ChatPath,
-	List(U8),
-	List(U8) => {
-		fault : U16,
-		status : [Appended, Failed],
+	## Host.append!: `bytes` at the end of the file, and its size after.
+	append! : Paths.ChatPath, List(U8) => Try(U64, [Failed])
+	append! = |path, bytes| {
+		got = Host.append!(path.bytes(), bytes)
+		match got.status {
+			Appended => Ok(got.size)
+			Failed => Err(Failed)
+		}
 	}
-	append_entry! = |
-		path,
-		separator,
-		entry,
-	| Host.append_entry!(path.bytes(), { separator, entry })
+
+	## **ONE LINE APPENDED TO AN APPEND-ONLY LINE FILE** (a topic's
+	## reactions): `line` and a newline. **A TORN LINE STAYS ITS OWN LINE**:
+	## an append a stop cut short leaves a line with no newline, and the next
+	## one glued to it is one line that reads as neither, two lost where one
+	## was; so a file whose last byte is not a newline gets one first. The
+	## last byte is read before the store, so a read that fails stores
+	## nothing: a stat that failed has failed the request, and a last byte
+	## the stat said is there and that will not read fails it (`ShortRead`).
+	append_line! : Paths.ChatPath, List(U8) => Try({}, [Failed])
+	append_line! = |path, line| {
+		end = match read_stat!(path) {
+			Ok(st) if st.size > 0 =>
+				match read_cache!(path, { offset: st.size - 1, max: 1 }) {
+					Ok([byte]) => Ok(Ends(byte))
+					_ => {
+						Host.fail!(ShortRead, path.bytes())
+						Err(Failed)
+					}
+				}
+			Ok(_) => Ok(Empty)
+			Err(Missing) => Ok(Empty)
+			Err(Failed) => Err(Failed)
+		}
+		_ = append!(path, line_bytes(end?, line))?
+		Ok({})
+	}
+
+	## **A FEED'S ENTRY APPENDED** (images_store `appendImagesEntry`,
+	## code_store `appendCodeEntry`): `separator` and `entry` when the file
+	## holds anything, else `entry` alone. Called inside the surface's aside:
+	## a stat or an append that fails is the aside's.
+	append_entry! : Paths.ChatPath, { separator : List(U8), entry : List(U8) } => Try({}, [Failed])
+	append_entry! = |path, parts| {
+		size = match read_stat!(path) {
+			Ok(st) => Ok(st.size)
+			Err(Missing) => Ok(0)
+			Err(Failed) => Err(Failed)
+		}
+		_ = append!(path, entry_bytes(size?, parts))?
+		Ok({})
+	}
 
 	## Host.serve_file!: the host loads the file and serves its bytes as the answer
 	## (Chat.served_plain), so Roc never copies a large transcript. `Serving`
@@ -147,6 +182,35 @@ Files := [].{
 	## A listing's entries named in text, and the names that were not.
 	Listing : { entries : List(Paths.Entry), not_utf8 : List(List(U8)) }
 }
+
+## **THE BYTES A LINE IS APPENDED AS**, given how the file ends (`Empty`:
+## no file, or no bytes; else its last byte): a newline first when the
+## file ends mid-line, then the line and its newline.
+line_bytes : [Empty, Ends(U8)], List(U8) -> List(U8)
+line_bytes = |end, line| {
+	lead = match end {
+		Ends(last) if last != '\n' => ['\n']
+		_ => []
+	}
+	lead.concat(line).append('\n')
+}
+
+## **THE BYTES A FEED'S ENTRY IS APPENDED AS**, given the file's size
+## before (0 for none): the separator first only after an entry.
+entry_bytes : U64, { separator : List(U8), entry : List(U8) } -> List(U8)
+entry_bytes = |size, { separator, entry }| if size > 0 separator.concat(entry) else entry
+
+# line_bytes: a torn line kept its own; a whole file, an empty one and none
+# take the line as it is.
+expect line_bytes(Ends('r'), Str.to_utf8("{}")) == Str.to_utf8("\n{}\n")
+expect line_bytes(Ends('\n'), Str.to_utf8("{}")) == Str.to_utf8("{}\n")
+expect line_bytes(Empty, Str.to_utf8("{}")) == Str.to_utf8("{}\n")
+expect line_bytes(Ends('\r'), []) == Str.to_utf8("\n\n")
+
+# entry_bytes: the separator only after an entry, a byte of one included.
+dashed_entry = { separator: Str.to_utf8("--"), entry: Str.to_utf8("e") }
+expect entry_bytes(0, dashed_entry) == Str.to_utf8("e")
+expect entry_bytes(1, dashed_entry) == Str.to_utf8("--e")
 
 ## A read's bytes as text, or `NotUtf8`; `Missing` and `Failed` stay
 ## themselves.

@@ -42,6 +42,9 @@ const Asker = struct {
 const Files = struct {
     asked: std.ArrayList(u8) = .empty,
     failed: ?anyerror = null,
+    /// Inside Host.aside!, and the aside's first failure.
+    aside: bool = false,
+    aside_failed: ?anyerror = null,
 
     fn host(f: *Files) abi.Host {
         var h = abi.askingOnly(f, yes);
@@ -56,10 +59,9 @@ const Files = struct {
         h.fail = fail;
         h.fail_account = failAccount;
         h.count_malformed_channel = malformed;
-        h.append_line = appendLine;
+        h.append = append;
         h.publish = publish;
         h.render = render;
-        h.append_message = appendMessage;
         h.serve_upload = serveUpload;
         h.read_upload = readUpload;
         h.reserve_upload = reserveUpload;
@@ -74,7 +76,7 @@ const Files = struct {
         h.serve_bundle = serveBundle;
         h.index_message = indexMessage;
         h.write_cache = writeCache;
-        h.append_entry = appendEntry;
+        h.aside = asideOf;
         h.report_fanout_failure = fanoutFailed;
         h.check_online = online;
         return h;
@@ -96,29 +98,20 @@ const Files = struct {
             "12",
         )) .online else .offline;
     }
-    /// `users/2/images.md` will not take an entry; any other path does.
-    /// **NEVER THE REQUEST'S FAILURE**: the error goes back, not to `fail`.
-    fn appendEntry(
-        ctx: *anyopaque,
-        path: []const u8,
-        separator: []const u8,
-        entry: []const u8,
-    ) abi.Appended {
-        of(ctx).asked.print(
-            testing.allocator,
-            "append_entry {s} {s} {s};",
-            .{
-                path,
-                separator,
-                entry,
+    /// An aside: a failure inside it is its own, answered at its end.
+    fn asideOf(ctx: *anyopaque, which: route.Aside) abi.AsideOutcome {
+        const f = of(ctx);
+        say(ctx, "aside", @tagName(which));
+        switch (which) {
+            .begin => f.aside = true,
+            .end => {
+                f.aside = false;
+                const e = f.aside_failed orelse return .done;
+                f.aside_failed = null;
+                return .{ .failed = e };
             },
-        ) catch @panic("oom");
-        if (std.mem.eql(
-            u8,
-            path,
-            "users/2/images.md",
-        )) return .{ .failed = error.IsDir };
-        return .appended;
+        }
+        return .done;
     }
     fn fanoutFailed(
         ctx: *anyopaque,
@@ -212,39 +205,10 @@ const Files = struct {
     fn serveBundle(ctx: *anyopaque, name: []const u8) void {
         say(ctx, "bundle", name);
     }
-    fn appendMessage(
-        ctx: *anyopaque,
-        conv: abi.Conv,
-        sid: []const u8,
-        block: []const u8,
-    ) abi.AppendedAt {
-        of(ctx).asked.print(
-            testing.allocator,
-            "append {t} {s} {s} {s},{s} {s} {s};",
-            .{
-                conv.family,
-                conv.key,
-                conv.base,
-                conv.members[0],
-                conv.members[1],
-                sid,
-                block,
-            },
-        ) catch @panic("oom");
-        if (std.mem.eql(
-            u8,
-            sid,
-            "Broken",
-        )) {
-            fail(ctx, error.IsDir);
-            return .failed;
-        }
-        return .{ .appended = 42 };
-    }
     /// Every field of the message in Chat.Message's order.
     fn indexMessage(
         ctx: *anyopaque,
-        conv: abi.Conv,
+        dir: []const u8,
         sid: []const u8,
         m: abi.Message,
     ) void {
@@ -252,7 +216,7 @@ const Files = struct {
             testing.allocator,
             "index {s} {s} id={s} from={s} at={s} uid={s} md={s};",
             .{
-                conv.key,
+                dir,
                 sid,
                 m.id,
                 m.from,
@@ -269,26 +233,27 @@ const Files = struct {
             .{ path, std.zig.fmtString(bytes) },
         ) catch @panic("oom");
     }
-    /// `users/1/broken` will not take a line; any other path does.
-    fn appendLine(
+    /// `users/1/broken`, `users/2/images.md` and topic `Broken`'s
+    /// transcript will not take bytes; any other file is 42 bytes after.
+    fn append(
         ctx: *anyopaque,
         path: []const u8,
-        line: []const u8,
-    ) route.Done {
+        bytes: []const u8,
+    ) abi.Appended {
         of(ctx).asked.print(
             testing.allocator,
-            "append_line {s} {s};",
-            .{ path, line },
+            "append {s} {f};",
+            .{ path, std.zig.fmtString(bytes) },
         ) catch @panic("oom");
-        if (std.mem.eql(
+        for ([_][]const u8{ "users/1/broken", "users/2/images.md", "1_2/sessions/Broken.md" }) |broken| if (std.mem.eql(
             u8,
             path,
-            "users/1/broken",
+            broken,
         )) {
             fail(ctx, error.IsDir);
             return .failed;
-        }
-        return .ok;
+        };
+        return .{ .appended = 42 };
     }
     fn publish(
         ctx: *anyopaque,
@@ -482,7 +447,12 @@ const Files = struct {
         return .serving;
     }
     fn fail(ctx: *anyopaque, e: anyerror) void {
-        if (of(ctx).failed == null) of(ctx).failed = e;
+        const f = of(ctx);
+        if (f.aside) {
+            if (f.aside_failed == null) f.aside_failed = e;
+            return;
+        }
+        if (f.failed == null) f.failed = e;
     }
 };
 
@@ -651,7 +621,7 @@ test "a path that would leave the chat root fails the request at the seam, the h
     );
 }
 
-test "a line appended: a path that would leave the root fails the request at the seam, the host never asked; under it, stored or failed; a count crosses with its conversation, never 0 for one that failed; a publish crosses key and bytes" {
+test "bytes appended: a path that would leave the root fails the request at the seam, the host never asked; under it, stored with the size after, or failed; a publish crosses key and bytes" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     roc.use(arena.allocator());
@@ -671,14 +641,14 @@ test "a line appended: a path that would leave the root fails the request at the
         );
     try probe(
         "/append/1_2/sessions/Plans.reactions.jsonl",
-        "done",
-        "append_line 1_2/sessions/Plans.reactions.jsonl {\"a\":1};",
+        "appended 42",
+        "append 1_2/sessions/Plans.reactions.jsonl {\\\"a\\\":1}\\n;",
         null,
     );
     try probe(
         "/append/users/1/broken",
         "failed",
-        "append_line users/1/broken {\"a\":1};",
+        "append users/1/broken {\\\"a\\\":1}\\n;",
         error.IsDir,
     );
     try probe(
@@ -689,7 +659,7 @@ test "a line appended: a path that would leave the root fails the request at the
     );
 }
 
-test "the fan-out's primitives cross the seam and never fail the request: a feed's entry appended or failed, that failure said; a feed's path outside the root the append's failure, the host never asked" {
+test "an append in an aside never fails the request: a feed's entry appended or failed, the failure the aside's, its fault crossing back at the aside's end to be said; a feed's path outside the root the aside's failure, the host never asked" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     roc.use(arena.allocator());
@@ -697,13 +667,13 @@ test "the fan-out's primitives cross the seam and never fail the request: a feed
     try probe(
         "/entry/users/1/images.md",
         "appended",
-        "append_entry users/1/images.md -- the entry;",
+        "aside begin;append users/1/images.md the entry;aside end;",
         null,
     );
     try probe(
         "/entry/users/2/images.md",
         "said",
-        "append_entry users/2/images.md -- the entry;fanout_failed images 2 1_2 Plans IsDir;",
+        "aside begin;append users/2/images.md the entry;aside end;fanout_failed images 2 1_2 Plans IsDir;",
         null,
     );
     for ([_][]const u8{
@@ -714,7 +684,7 @@ test "the fan-out's primitives cross the seam and never fail the request: a feed
         try probe(
             sub,
             "said",
-            "fanout_failed images 2 1_2 Plans PathOutsideChatRoot;",
+            "aside begin;aside end;fanout_failed images 2 1_2 Plans PathOutsideChatRoot;",
             null,
         );
 }
@@ -740,13 +710,13 @@ test "a message's render and store cross the seam: the HTML or a render that fai
     try probe(
         "/store/Plans",
         "appended 42",
-        "append dm 1_2 /chat/c/1_2 1,2 Plans the block;index 1_2 Plans " ++ fields ++ ";",
+        "append 1_2/sessions/Plans.md the block;index 1_2 Plans " ++ fields ++ ";",
         null,
     );
     try probe(
         "/store/Broken",
         "failed",
-        "append dm 1_2 /chat/c/1_2 1,2 Broken the block;",
+        "append 1_2/sessions/Broken.md the block;",
         error.IsDir,
     );
     // A cache under the root is written; one off it fails the request (the

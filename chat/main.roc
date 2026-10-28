@@ -13,12 +13,13 @@
 ## A topic's reactions, react, pin and unpin are the Roc's (docs/ROC-CHAT.md
 ## C4, `act!`); a reaction is the Roc's whole (its reactor, its bound, its
 ## stamp, its line and its frame), stored and sent through the primitives
-## (`append_line!`, `message_count!`, `publish!`); a message is the Roc's
-## too (`append_message!`: its author, number, stamp, block and frame), stored
-## through `store_block!` (the append, the count cache, the search index),
-## and its fan-out (Fanout.roc: every member's surfaces, their keys, events
-## and feed entries) through `publish!`, `append_entry!` and
-## `report_fanout_failure!`, the message's parts its own (Fanout.parts_of).
+## (Files' `append_line!`, `message_count!`, `publish!`); a message is the
+## Roc's too (`append_message!`: its author, number, stamp, block and frame),
+## stored through `store_block!` (the append, the count cache, the search
+## index), and its fan-out (Fanout.roc: every member's surfaces, their keys,
+## events and feed entries) through `publish!`, Files' `append_entry!`, each
+## in an aside, and `report_fanout_failure!`, the message's parts its own
+## (Fanout.parts_of).
 ## The files and folders it reads by name (the member's own, a
 ## conversation's topics, a channel's members, the rosters, a topic's
 ## reactions) it reads through the file primitives, the names and formats
@@ -214,7 +215,7 @@ presence! = |who|
 		CameOnline => {
 			_ = Host.mark_aside!(Begin)
 			told = came_online!(who)
-			match (Host.mark_aside!(End), told) {
+			match (Host.mark_aside!(End).status, told) {
 				(Done, Ok({})) => {}
 				_ => Host.presence_unspent!({})
 			}
@@ -1471,7 +1472,7 @@ welcome! : {} => Who
 welcome! = |{}| {
 	_ = Host.mark_aside!(Begin)
 	got = seed_welcome!({})
-	match (Host.mark_aside!(End), got) {
+	match (Host.mark_aside!(End).status, got) {
 		(Done, Ok(who)) => who
 		_ => Unasked
 	}
@@ -1883,7 +1884,7 @@ make_topic! = |
 								name,
 							},
 						)
-						match Host.mark_aside!(End) {
+						match Host.mark_aside!(End).status {
 							Done => {}
 							Failed => Host.count_dropped!(Announcement, topic.to_utf8())
 						}
@@ -2457,7 +2458,7 @@ append_message_by! = |
 									Fanout.parts_of(md),
 								)
 								store_block!(
-									{ conv, at: topic_at },
+									topic_at,
 									{
 										block,
 										index,
@@ -2491,39 +2492,31 @@ append_message_by! = |
 ## COUNT** leaves a count whose size is not the transcript's, which the next
 ## count refuses and recounts (Count.believed): the size is the protection,
 ## not the order. **STORED IS DONE**: the count and the index never fail it.
-## Where a block goes: its conversation, as the host takes it, and its topic.
-BlockAt : { conv : Chat.Conv, at : Paths.TopicAt }
-
-store_block! : BlockAt,
+store_block! : Paths.TopicAt,
 {
 	block : List(U8),
 	index : U64,
 	message : Chat.Message,
 } => Try({}, [Failed])
 store_block! = |
-	{ conv, at },
+	at,
 	{
 		block,
 		index,
 		message,
 	},
 | {
-	appended = Host.append_message!(conv, { sid: at.topic.to_utf8(), block })
-	match appended.status {
-		Failed => Err(Failed)
-		Appended => {
-			last = Known({
-				offset: appended.size - List.len(block),
-				uid: message.uid,
-			})
-			Files.write_cache!(
-				Paths.count_path(at),
-				Count.text(index + 1, { size: appended.size, last }),
-			)
-			Host.index_message!(conv, { sid: at.topic.to_utf8(), message })
-			Ok({})
-		}
-	}
+	size = Files.append!(Paths.transcript_path(at), block)?
+	last = Known({
+		offset: size - List.len(block),
+		uid: message.uid,
+	})
+	Files.write_cache!(
+		Paths.count_path(at),
+		Count.text(index + 1, { size, last }),
+	)
+	Host.index_message!(Paths.conv_folder(at.key).bytes(), { sid: at.topic.to_utf8(), message })
+	Ok({})
 }
 
 ## **THE FAN-OUT, CARRIED OUT IN ITS ORDER** (Fanout.steps): each publish
@@ -2538,25 +2531,31 @@ fan_out! = |at, steps|
 		[step, .. as rest] => {
 			match step {
 				Publish(on, bytes) => Host.publish!(on.bytes(), bytes)
-				AppendFeed(f) => {
-					got = Files.append_entry!(
-						f.path,
-						f.sep,
-						f.entry,
-					)
-					match got.status {
-						Appended => Host.publish!(f.key.bytes(), f.event)
-						Failed => Host.report_fanout_failure!(
-							f.surface,
-							{
-								member: f.member,
-								key: at.key.bytes(),
-								sid: at.topic.to_utf8(),
-								fault: got.fault,
-							},
-						)
+				# **EACH FEED'S ENTRY IN AN ASIDE OF ITS OWN** (metal-vmm QUEUE
+				# 172, 156(c)): a stat or an append that fails is that
+				# member's surface's, its fault counted and said, never the
+				# send's; the steps after it go on. A request that has failed
+				# already begins none.
+				AppendFeed(f) =>
+					match Host.mark_aside!(Begin).status {
+						Failed => {}
+						Done => {
+							_ = Files.append_entry!(f.path, { separator: f.sep, entry: f.entry })
+							ended = Host.mark_aside!(End)
+							match ended.status {
+								Done => Host.publish!(f.key.bytes(), f.event)
+								Failed => Host.report_fanout_failure!(
+									f.surface,
+									{
+										member: f.member,
+										key: at.key.bytes(),
+										sid: at.topic.to_utf8(),
+										fault: ended.fault,
+									},
+								)
+							}
+						}
 					}
-				}
 			}
 			fan_out!(at, rest)
 		}

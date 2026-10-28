@@ -41,7 +41,7 @@
   - `long_definitions` — definitions over 290 parse nodes, largest first
     (nodes, not lines: stacking adds lines and no code).
   - `fs_bypass` — a call to Host's file primitives (`read!`, `write!`,
-    `remove!`, `list!`, `append_line!`, `append_entry!`) outside
+    `remove!`, `list!`, `append!`) outside
     `chat/Files.roc` and `chat/test/` (Files.roc takes only the
     `Paths.ChatPath` that Paths.roc alone can make).
   - `html_trusted_nonliteral` — a call to `Html.trusted` whose argument is

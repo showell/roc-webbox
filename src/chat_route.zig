@@ -182,7 +182,9 @@ pub const AccountsStatus = enum(u8) { failed, found };
 /// returned; an account whose kind or name a lookup needed and which would
 /// not read is that read's own error, as the host kept it; a message with no
 /// author's name is error.NoAuthor, appendMessage's own; a file whose bytes
-/// are not UTF-8 is error.NotUtf8, about its path (Files.read!'s door).
+/// are not UTF-8 is error.NotUtf8, about its path (Files.read!'s door); a
+/// file whose last byte a stat said is there and which would not read is
+/// error.ShortRead (Files.append_line!'s torn-line check).
 pub const FailReason = enum(u8) {
     kind_unreadable,
     malformed_channel,
@@ -190,6 +192,7 @@ pub const FailReason = enum(u8) {
     no_author,
     not_a_uid,
     not_utf8,
+    short_read,
 };
 
 /// Host.roc's `render!` answer's `status`: the markdown rendered (the HTML
@@ -197,8 +200,9 @@ pub const FailReason = enum(u8) {
 /// never an empty page for one that failed.
 pub const RenderStatus = enum(u8) { failed, rendered };
 
-/// Host.roc's `append_entry!`: a feed's entry appended, or failed (its
-/// fault beside it): the fan-out's failure, counted, never the request's.
+/// Host.roc's `append!` answer's `status`: the bytes appended (the file's
+/// size beside it), or an append that failed (the host has failed the
+/// request, or the aside).
 pub const AppendStatus = enum(u8) { appended, failed };
 
 /// Host.roc's `report_fanout_failure!`: the fan-out's surfaces that can fail, a
@@ -233,8 +237,8 @@ pub const PresenceEdge = enum(u8) { came_online, steady };
 /// chat (a member, or the agent).
 pub const Membership = enum(u8) { member, outsider };
 
-/// Host.roc's `Try({}, [Failed])` answer (`append_line!`, `write!`,
-/// `remove!`, `store_message!`): `Err(Failed)` or `Ok({})`, both payloads
+/// Host.roc's `Try({}, [Failed])` answer (`write!`, `remove!`,
+/// `clear_welcome!`, `bundle_add!`): `Err(Failed)` or `Ok({})`, both payloads
 /// empty, so the tag alone crosses (`Err` first, as Roc sorts them).
 /// `failed` means the host has failed the request.
 pub const Done = enum(u8) { failed, ok };
@@ -302,8 +306,9 @@ pub const Dropped = enum(u8) {
 /// is its own, never the request's.
 pub const Aside = enum(u8) { begin, end };
 
-/// Host.roc's `aside!` answer: `End`'s, whether anything in the aside failed
-/// (`Begin`'s is `failed` only for a request that has failed already).
+/// Host.roc's `aside!` answer's `status`: `End`'s, whether anything in the
+/// aside failed, its fault beside it (`Begin`'s is `failed` only for a
+/// request that has failed already).
 pub const AsideEnd = enum(u8) { done, failed };
 
 comptime {

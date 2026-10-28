@@ -7,10 +7,10 @@ Plants := [].{
 	fires_write = |path| Host.write!(path, [])
 
 	fires_append : List(U8) => Bool
-	fires_append = |path| if Host.append_line!(path, []) Host.remove!(path) else Bool.False
+	fires_append = |path| if Host.append!(path, []).size > 0 Host.remove!(path) else Bool.False
 
-	fires_entry : List(U8) => List(U8)
-	fires_entry = |path| Host.append_entry!(path, [], []).bytes
+	fires_append_bytes : List(U8) => U64
+	fires_append_bytes = |path| Host.append!(path, [1]).size
 
 	fires_list : List(U8) => List(U8)
 	fires_list = |path| Host.list!(path).bytes

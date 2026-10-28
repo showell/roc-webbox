@@ -13,9 +13,7 @@ platform ""
 	provides { "roc_chat_handle": handle_for_host! }
 	hosted {
 		"roc_chat_admit": Host.admit!,
-		"roc_chat_append_entry": Host.append_entry!,
-		"roc_chat_append_line": Host.append_line!,
-		"roc_chat_append_message": Host.append_message!,
+		"roc_chat_append": Host.append!,
 		"roc_chat_bundle_add": Host.bundle_add!,
 		"roc_chat_check_hostile": Host.check_hostile!,
 		"roc_chat_check_member": Host.check_member!,
