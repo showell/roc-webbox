@@ -133,6 +133,26 @@ Host := [].{
 	## it failed.
 	remove! : List(U8) => Try({}, [Failed])
 
+	## **THE ADMIN RETIRE** (metal-vmm QUEUE 293), asked through the `Retire`
+	## area: how old is old (`days`), the names kept, one to a line, and now
+	## in unix seconds.
+	retire_asked! : {} => { days : U64, keep : List(U8), now : I64 }
+
+	## A step of the plan, said for the report: its kind and its name.
+	retire_note! : [ChannelMember, Dm, RefLastConv, RefLastSession, RefPinned, Topic, User], List(U8) => {}
+
+	## The file, or the folder and all in it, removed when the retire is
+	## confirmed (one not there is gone already); a dry run removes nothing.
+	## `Err(Failed)` when it failed: the confirm ends there.
+	retire_remove! : List(U8), [File, Tree] => Try({}, [Failed])
+
+	## The file written whole as `bytes` when the retire is confirmed.
+	retire_replace! : List(U8), List(U8) => Try({}, [Failed])
+
+	## The member `uid` retired when confirmed: everything of theirs the host
+	## keeps outside the chat now, their account once every step has gone.
+	retire_user! : List(U8) => Try({}, [Failed])
+
 	## The folder at `path` (checked as a file's is), each entry's name and
 	## kind in the order the disk gives them (`Found`); nothing there
 	## (`Missing`: webbox's store.list holds it empty); or a listing that

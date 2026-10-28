@@ -20,7 +20,27 @@ import pf.Host
 
 handle! : Chat.Request => Chat.Answer
 handle! = |req|
-	if starts(req.sub, "/read/") {
+	if req.area == Retire {
+		# The admin retire's area (metal-vmm QUEUE 293): every field of its
+		# ask said, then each step's call, so a record laid out wrong shows.
+		asked = Host.retire_asked!({})
+		Host.retire_note!(ChannelMember, Str.to_utf8("ops (1 dropped)"))
+		Host.retire_note!(User, Str.to_utf8("Spammer (uid 9)"))
+		removed = Host.retire_remove!(Str.to_utf8("1_9"), Tree)
+		file = Host.retire_remove!(Str.to_utf8("users/1/last-conv"), File)
+		replaced = Host.retire_replace!(Str.to_utf8("channels/ops.channel"), Str.to_utf8("1\n"))
+		user = Host.retire_user!(Str.to_utf8("9"))
+		said = |r| if r == Ok({}) " done" else " failed"
+		Chat.respond(
+			200,
+			[],
+			List.join([
+				Str.to_utf8("days ${U64.to_str(asked.days)} now ${I64.to_str(asked.now)} keep "),
+				asked.keep,
+				Str.to_utf8("${said(removed)}${said(file)}${said(replaced)}${said(user)}"),
+			]),
+		)
+	} else if starts(req.sub, "/read/") {
 		got = Host.read!(List.drop_first(req.sub, 6))
 		said = match got.status {
 			Found => "found "

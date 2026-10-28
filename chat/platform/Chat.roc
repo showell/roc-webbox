@@ -23,7 +23,7 @@ Chat := [].{
 	## angry-gopher's router cut it: "" or starting with "/", no query.
 	Request : {
 		sub : List(U8),
-		area : [Channel, Chat],
+		area : [Channel, Chat, Retire],
 		method : Method,
 	}
 

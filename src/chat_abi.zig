@@ -156,6 +156,9 @@ pub const UploadReadRec = extern struct {
 /// Host.roc's `store_upload!` answer: `{ name : List(U8), status : [Failed,
 /// Stored] }`, a ReadRec's shape.
 pub const StoredRec = extern struct { name: RocBytes, status: route_mod.UploadStored };
+/// Host.roc's `retire_asked!` answer (metal-vmm QUEUE 293): `{ days : U64,
+/// keep : List(U8), now : I64 }`, the numbers first by name, then the bytes.
+pub const RetireAskedRec = extern struct { days: u64, now: i64, keep: RocBytes };
 pub const UploadRec = extern struct {
     first: u64,
     last: u64,
@@ -279,6 +282,8 @@ comptime {
         @offsetOf(UploadReadRec, "status") == 8 + 6 * w and
         @sizeOf(UploadReadRec) == std.mem.alignForward(usize, 8 + 6 * w + 1, 8));
     std.debug.assert(@offsetOf(StoredRec, "name") == 0 and @offsetOf(StoredRec, "status") == 3 * w and @sizeOf(StoredRec) == 4 * w);
+    // retire_asked!'s (metal-vmm QUEUE 293).
+    std.debug.assert(@offsetOf(RetireAskedRec, "days") == 0 and @offsetOf(RetireAskedRec, "now") == 8 and @offsetOf(RetireAskedRec, "keep") == 16 and @sizeOf(RetireAskedRec) == 16 + 3 * w);
     // serve_upload!'s (metal-vmm QUEUE 291): three numbers, two lists, a tag.
     std.debug.assert(@offsetOf(UploadRec, "first") == 0 and
         @offsetOf(UploadRec, "last") == 8 and
@@ -441,6 +446,10 @@ pub const UploadRead = union(route_mod.UploadRead) {
     read: struct { size: u64, ext: []const u8, filename: []const u8 },
     unsupported,
 };
+
+/// Host.retire_asked!'s answer: the admin's days, the names kept (one to a
+/// line) and now.
+pub const RetireAsked = struct { days: u64, keep: []const u8, now: i64 };
 
 /// Host.store_upload!'s answer: the fresh name, or `.failed`.
 pub const Stored = union(route_mod.UploadStored) { failed, stored: []const u8 };
@@ -730,6 +739,16 @@ pub const Host = struct {
     bundle_add: *const fn (ctx: *anyopaque, name: []const u8, path: []const u8) route_mod.Done = noBundleAdd,
     /// Host.serve_bundle!: the bundle answered as `<name>.tar.gz`.
     serve_bundle: *const fn (ctx: *anyopaque, name: []const u8) void = noServeBundle,
+    /// Host.retire_asked!: the admin retire's days, names kept and now.
+    retire_asked: *const fn (ctx: *anyopaque) RetireAsked = noRetireAsked,
+    /// Host.retire_note!: a step of the retire's plan said for its report.
+    retire_note: *const fn (ctx: *anyopaque, kind: route_mod.RetireKind, label: []const u8) void = noRetireNote,
+    /// Host.retire_remove!: the file or folder removed on a confirm.
+    retire_remove: *const fn (ctx: *anyopaque, path: []const u8, what: route_mod.RetireRemoval) route_mod.Done = noRetireRemove,
+    /// Host.retire_replace!: the file written whole on a confirm.
+    retire_replace: *const fn (ctx: *anyopaque, path: []const u8, bytes: []const u8) route_mod.Done = noRetireReplace,
+    /// Host.retire_user!: the member retired outside the chat on a confirm.
+    retire_user: *const fn (ctx: *anyopaque, uid: []const u8) route_mod.Done = noRetireUser,
 };
 
 fn noPublish(
@@ -745,6 +764,21 @@ fn noAppendLine(
     _: []const u8,
 ) route_mod.Done {
     @panic("append_line asked of a host that does not answer it");
+}
+fn noRetireAsked(_: *anyopaque) RetireAsked {
+    @panic("retire_asked asked of a host that does not answer it");
+}
+fn noRetireNote(_: *anyopaque, _: route_mod.RetireKind, _: []const u8) void {
+    @panic("retire_note asked of a host that does not answer it");
+}
+fn noRetireRemove(_: *anyopaque, _: []const u8, _: route_mod.RetireRemoval) route_mod.Done {
+    @panic("retire_remove asked of a host that does not answer it");
+}
+fn noRetireReplace(_: *anyopaque, _: []const u8, _: []const u8) route_mod.Done {
+    @panic("retire_replace asked of a host that does not answer it");
+}
+fn noRetireUser(_: *anyopaque, _: []const u8) route_mod.Done {
+    @panic("retire_user asked of a host that does not answer it");
 }
 fn noReadUpload(_: *anyopaque) UploadRead {
     @panic("read_upload asked of a host that does not answer it");
@@ -1537,6 +1571,47 @@ export fn roc_chat_refuse_upload(why: route_mod.UploadRefusal, message: RocBytes
     h.refuse_upload(h.ctx, why, message.slice());
 }
 
+export fn roc_chat_retire_asked() callconv(.c) RetireAskedRec {
+    const h = current("retire_asked");
+    const it = h.retire_asked(h.ctx);
+    return .{ .days = it.days, .now = it.now, .keep = .from(it.keep) };
+}
+
+export fn roc_chat_retire_note(kind: route_mod.RetireKind, label: RocBytes) callconv(.c) void {
+    const h = current("retire_note");
+    h.retire_note(h.ctx, kind, label.slice());
+}
+
+export fn roc_chat_retire_remove(path: RocBytes, what: route_mod.RetireRemoval) callconv(.c) route_mod.Done {
+    const h = current("retire_remove");
+    if (!underRoot(h, path.slice())) return .failed;
+    return h.retire_remove(h.ctx, path.slice(), what);
+}
+
+export fn roc_chat_retire_replace(path: RocBytes, bytes: RocBytes) callconv(.c) route_mod.Done {
+    const h = current("retire_replace");
+    if (!underRoot(h, path.slice())) return .failed;
+    return h.retire_replace(h.ctx, path.slice(), bytes.slice());
+}
+
+/// **A UID THE HOST JOINS INTO EVERY ROOT IS ONE** (metal-vmm QUEUE 293):
+/// digits with no leading zero, as an account is made, or the request's
+/// failure, the host never asked.
+export fn roc_chat_retire_user(uid: RocBytes) callconv(.c) route_mod.Done {
+    const h = current("retire_user");
+    if (!isUid(uid.slice())) {
+        h.fail(h.ctx, error.NotAUid);
+        return .failed;
+    }
+    return h.retire_user(h.ctx, uid.slice());
+}
+
+fn isUid(s: []const u8) bool {
+    if (s.len == 0 or s[0] == '0') return false;
+    for (s) |c| if (c < '0' or c > '9') return false;
+    return true;
+}
+
 export fn roc_chat_reserve_upload(size: u64) callconv(.c) route_mod.Reservation {
     const h = current("reserve_upload");
     return h.reserve_upload(h.ctx, size);
@@ -1616,14 +1691,14 @@ fn crashed(message: []const u8) noreturn {
 /// not to one already gone.
 noinline fn guarded(
     sub: []const u8,
-    channel: bool,
+    area: route_mod.Area,
     method: Method,
     out: *Answer,
 ) bool {
     if (sljmp.setjmp(&jump) != 0) return false;
     out.* = roc_chat_handle(.{
         .sub = .from(sub),
-        .area = if (channel) .channel else .chat,
+        .area = area,
         .method = method,
     });
     return true;
@@ -1640,6 +1715,27 @@ pub fn decide(
     method: std.http.Method,
     with: Host,
 ) !Decision {
+    return call(alloc, sub, if (channel) .channel else .chat, method, with);
+}
+
+/// **THE ADMIN RETIRE** (metal-vmm QUEUE 293), asked of the one entry in
+/// its own area, so it shares the chat's guard (the crash's jump, one call
+/// at a time, the Roc's memory ended) and none of the chat's prelude: the
+/// Roc reads its days and names (Host.retire_asked!), plans, and hands each
+/// step to `with`. Its decision: a keep list refused (`respond` 400, the
+/// reason), the plan handed over (`respond` 200), or `answered` when the
+/// host failed it.
+pub fn retire(alloc: std.mem.Allocator, with: Host) !Decision {
+    return call(alloc, "", .retire, .POST, with);
+}
+
+fn call(
+    alloc: std.mem.Allocator,
+    sub: []const u8,
+    area: route_mod.Area,
+    method: std.http.Method,
+    with: Host,
+) !Decision {
     try roc.enter();
     defer roc.leave();
     host = with;
@@ -1651,7 +1747,7 @@ pub fn decide(
     var a: Answer = undefined;
     if (!guarded(
         sub,
-        channel,
+        area,
         .of(method),
         &a,
     )) return error.RocCrashed;

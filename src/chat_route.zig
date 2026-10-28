@@ -93,7 +93,7 @@ pub const Method = enum(u8) {
 };
 
 /// Chat.roc's `Request`'s `area`: the path is under /channel or /chat.
-pub const Area = enum(u8) { channel, chat };
+pub const Area = enum(u8) { channel, chat, retire };
 
 /// Chat.roc's `Sniff`: `forbid` when the answer says `nosniff`.
 pub const Sniff = enum(u8) { allow, forbid };
@@ -239,6 +239,21 @@ pub const Membership = enum(u8) { member, outsider };
 /// `failed` means the host has failed the request.
 pub const Done = enum(u8) { failed, ok };
 
+/// Host.roc's `retire_note!` kind (metal-vmm QUEUE 293): what a step of the
+/// admin retire's plan removes, as the report counts it.
+pub const RetireKind = enum(u8) {
+    channel_member,
+    dm,
+    ref_last_conv,
+    ref_last_session,
+    ref_pinned,
+    topic,
+    user,
+};
+
+/// Host.roc's `retire_remove!` what: one file, or a folder and all in it.
+pub const RetireRemoval = enum(u8) { file, tree };
+
 /// Host.roc's `welcome_pending!` answer (metal-vmm QUEUE 283): the member's
 /// welcome is pending, is not, or the look failed (the host has failed the
 /// request, or the aside).
@@ -330,6 +345,8 @@ comptime {
         UploadRefusal,
         Reservation,
         UploadStored,
+        RetireKind,
+        RetireRemoval,
         Dropped,
         Aside,
         AsideEnd,

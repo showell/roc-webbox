@@ -9,6 +9,7 @@ const abi = @import("chat_abi.zig");
 const route = @import("chat_route.zig");
 
 pub const decide = abi.decide;
+pub const retire = abi.retire;
 pub const Host = abi.Host;
 pub const askingOnly = abi.askingOnly;
 pub const Routing = abi.Routing;
@@ -54,6 +55,9 @@ pub const UploadRead = abi.UploadRead;
 pub const Stored = abi.Stored;
 pub const UploadRefusal = route.UploadRefusal;
 pub const Reservation = route.Reservation;
+pub const RetireAsked = abi.RetireAsked;
+pub const RetireKind = route.RetireKind;
+pub const RetireRemoval = route.RetireRemoval;
 pub const UploadServed = route.UploadServed;
 pub const Welcome = route.Welcome;
 pub const Serving = route.Serving;

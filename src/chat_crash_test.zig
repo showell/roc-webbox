@@ -65,6 +65,11 @@ const Files = struct {
         h.reserve_upload = reserveUpload;
         h.store_upload = storeUpload;
         h.refuse_upload = refuseUpload;
+        h.retire_asked = retireAsked;
+        h.retire_note = retireNote;
+        h.retire_remove = retireRemove;
+        h.retire_replace = retireReplace;
+        h.retire_user = retireUser;
         h.bundle_add = bundleAdd;
         h.serve_bundle = serveBundle;
         h.index_message = indexMessage;
@@ -173,6 +178,25 @@ const Files = struct {
     fn storeUpload(ctx: *anyopaque, folder: []const u8, ext: []const u8) abi.Stored {
         of(ctx).asked.print(testing.allocator, "store {s} {s};", .{ folder, ext }) catch @panic("oom");
         return .{ .stored = "0123456789abcdef0123456789abcdef.png" };
+    }
+    fn retireAsked(ctx: *anyopaque) abi.RetireAsked {
+        say(ctx, "retire asked", "");
+        return .{ .days = 30, .keep = "Steve\napoorva", .now = -1_700_000_000 };
+    }
+    fn retireNote(ctx: *anyopaque, kind: @import("chat_route.zig").RetireKind, label: []const u8) void {
+        of(ctx).asked.print(testing.allocator, "note {t} {s};", .{ kind, label }) catch @panic("oom");
+    }
+    fn retireRemove(ctx: *anyopaque, path: []const u8, what: @import("chat_route.zig").RetireRemoval) @import("chat_route.zig").Done {
+        of(ctx).asked.print(testing.allocator, "remove {t} {s};", .{ what, path }) catch @panic("oom");
+        return if (what == .tree) .ok else .failed;
+    }
+    fn retireReplace(ctx: *anyopaque, path: []const u8, bytes: []const u8) @import("chat_route.zig").Done {
+        of(ctx).asked.print(testing.allocator, "replace {s} {f};", .{ path, std.zig.fmtString(bytes) }) catch @panic("oom");
+        return .ok;
+    }
+    fn retireUser(ctx: *anyopaque, uid: []const u8) @import("chat_route.zig").Done {
+        say(ctx, "retire user", uid);
+        return .ok;
     }
     fn refuseUpload(ctx: *anyopaque, why: @import("chat_route.zig").UploadRefusal, message: []const u8) void {
         of(ctx).asked.print(testing.allocator, "refuse {t} {s};", .{ why, message }) catch @panic("oom");
@@ -1045,4 +1069,16 @@ test "memory that runs out inside a Roc call is error.RocCrashed for that reques
         );
     }
     try testing.expect(failed >= 2 and k < 64);
+}
+
+test "the admin retire's area reaches the app with every field of its ask in its place, each step's call and answer too (metal-vmm QUEUE 293)" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    var f: Files = .{};
+    defer f.asked.deinit(testing.allocator);
+    roc.use(arena.allocator());
+    const got = try abi.retire(arena.allocator(), f.host());
+    try testing.expectEqualStrings("days 30 now -1700000000 keep Steve\napoorva done failed done done", got.respond.body);
+    try testing.expectEqualStrings("retire asked ;note channel_member ops (1 dropped);note user Spammer (uid 9);remove tree 1_9;remove file users/1/last-conv;replace channels/ops.channel 1\\n;retire user 9;", f.asked.items);
+    try testing.expectEqual(@as(?anyerror, null), f.failed);
 }
