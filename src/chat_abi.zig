@@ -147,6 +147,9 @@ pub const AppendMessageArgs = extern struct { block: RocBytes, sid: RocBytes };
 /// Host.roc's `index_message!` record (metal-vmm QUEUE 297): `{ sid :
 /// List(U8), message : Chat.Message }`, by name.
 pub const IndexMessageArgs = extern struct { message: MessageRec, sid: RocBytes };
+/// Host.roc's `append_entry!` record (metal-vmm QUEUE 297): `{ separator,
+/// entry : List(U8) }`, the bytes by name.
+pub const AppendEntryArgs = extern struct { entry: RocBytes, separator: RocBytes };
 /// Host.roc's `serve_upload!` record (metal-vmm QUEUE 291): `{ first, last,
 /// size : U64, content_type, path : List(U8), part : [Range, Unsatisfiable,
 /// Whole] }`, the numbers first, the bytes by name, the tag last.
@@ -291,6 +294,7 @@ comptime {
     // The hosted effects' argument records (metal-vmm QUEUE 297).
     std.debug.assert(@offsetOf(AppendMessageArgs, "block") == 0 and @offsetOf(AppendMessageArgs, "sid") == 3 * w and @sizeOf(AppendMessageArgs) == 6 * w);
     std.debug.assert(@offsetOf(IndexMessageArgs, "message") == 0 and @offsetOf(IndexMessageArgs, "sid") == 15 * w and @sizeOf(IndexMessageArgs) == 18 * w);
+    std.debug.assert(@offsetOf(AppendEntryArgs, "entry") == 0 and @offsetOf(AppendEntryArgs, "separator") == 3 * w and @sizeOf(AppendEntryArgs) == 6 * w);
     // retire_asked!'s (metal-vmm QUEUE 293).
     std.debug.assert(@offsetOf(RetireAskedRec, "days") == 0 and @offsetOf(RetireAskedRec, "now") == 8 and @offsetOf(RetireAskedRec, "keep") == 16 and @sizeOf(RetireAskedRec) == 16 + 3 * w);
     // serve_upload!'s (metal-vmm QUEUE 291): three numbers, two lists, a tag.
@@ -1494,11 +1498,9 @@ fn onePart(name: []const u8) bool {
 /// DONE** (metal-vmm QUEUE 172), so the seam refuses it as `underRoot` does
 /// (the host never asked) but hands it back as the append's failure
 /// (error.PathOutsideChatRoot), which the Roc counts and says.
-export fn roc_chat_append_entry(
-    path: RocBytes,
-    separator: RocBytes,
-    entry: RocBytes,
-) callconv(.c) AppendRec {
+export fn roc_chat_append_entry(path: RocBytes, args: AppendEntryArgs) callconv(.c) AppendRec {
+    const separator = args.separator;
+    const entry = args.entry;
     const h = current("append_entry");
     if (!roc.inRoot(path.slice())) return .{
         .fault = faultOf(error.PathOutsideChatRoot),

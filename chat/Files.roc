@@ -116,11 +116,7 @@ Files := [].{
 		path,
 		separator,
 		entry,
-	| Host.append_entry!(
-		path.bytes(),
-		separator,
-		entry,
-	)
+	| Host.append_entry!(path.bytes(), { separator, entry })
 
 	## Host.serve_file!: the host loads the file and serves its bytes as the answer
 	## (Chat.served_plain), so Roc never copies a large transcript. `Serving`

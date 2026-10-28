@@ -199,8 +199,7 @@ handle! = |req|
 		# on 1_2/Plans with the fault it answered, the request never failed.
 		got = Host.append_entry!(
 			List.drop_first(req.sub, 7),
-			Str.to_utf8("--"),
-			Str.to_utf8("the entry"),
+			{ separator: Str.to_utf8("--"), entry: Str.to_utf8("the entry") },
 		)
 		match got.status {
 			Appended => Chat.respond(200, { content_type: [], body: Str.to_utf8("appended") })

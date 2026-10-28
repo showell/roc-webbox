@@ -363,7 +363,11 @@ Host := [].{
 	## failure, never the request's), its folders made: `separator` and
 	## `entry` when the file holds anything, else `entry` alone. `Failed`,
 	## with its fault, when it could not be.
-	append_entry! : List(U8), List(U8), List(U8) => { fault : U16, status : [Appended, Failed] }
+	append_entry! : List(U8),
+	{ separator : List(U8), entry : List(U8) } => {
+		fault : U16,
+		status : [Appended, Failed],
+	}
 
 	## **A SURFACE THAT FAILED FOR ONE MEMBER, COUNTED AND SAID** (angry-gopher
 	## chat_fanout `fanoutFailed`): `surface` for `member`, with `fault` (as a
