@@ -29,6 +29,7 @@ platform ""
 		"roc_chat_list_accounts": Host.list_accounts!,
 		"roc_chat_me": Host.me!,
 		"roc_chat_now": Host.now!,
+		"roc_chat_presence_unspent": Host.presence_unspent!,
 		"roc_chat_publish": Host.publish!,
 		"roc_chat_read": Host.read!,
 		"roc_chat_read_at": Host.read_at!,

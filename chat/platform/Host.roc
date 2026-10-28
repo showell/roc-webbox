@@ -10,9 +10,16 @@ Host := [].{
 	## may fetch, so a request for one does no identity reads.
 	check_member! : {} => [Member, Outsider]
 
-	## Count this request as the member's presence, now (the prelude's, for
-	## a request the Roc serves itself).
-	count_presence! : {} => {}
+	## **COUNT THIS REQUEST AS THE MEMBER'S PRESENCE**, now, in the online
+	## map (process-lifetime state, so the host's), and say whether it was
+	## the edge: offline until now (`CameOnline`, the Roc's to broadcast,
+	## metal-vmm QUEUE 288), or an edge whose broadcast was lost and is due
+	## again; else `Steady`.
+	count_presence! : {} => [CameOnline, Steady]
+
+	## **THE EDGE NOT SPENT**: its broadcast was lost (a read it needed
+	## failed), so a request 30 s on is the edge again, not every request.
+	presence_unspent! : {} => {}
 
 	## **EVERY ACCOUNT, THE ONE IDENTITY PRIMITIVE**: each account folder
 	## named as a counter names one (a canonical id), in the disk's order,

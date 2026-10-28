@@ -137,8 +137,8 @@ Chat := [].{
 	}
 
 	## What the answer is:
-	## - `Serve`: Zig serves `route` (marking presence first when `presence`
-	##   is `Counted`);
+	## - `Serve`: Zig serves `route` (its presence the Roc's, counted
+	##   first, metal-vmm QUEUE 288);
 	## - `Redirect`: a 303 to `location`;
 	## - `Respond`: `status` with `body`, and a content-type when
 	##   `content_type` (`sniff` `Forbid`: the browser told not to guess another);
@@ -171,9 +171,6 @@ Chat := [].{
 		Stream,
 	]
 
-	## Whether a request Zig serves counts as the member's presence.
-	Counting : [Counted, Uncounted]
-
 	## Whether the browser may guess a type other than `content_type`
 	## (`Forbid`: the answer says `nosniff`).
 	Sniff : [Allow, Forbid]
@@ -181,7 +178,6 @@ Chat := [].{
 	Answer : {
 		kind : Kind,
 		location : List(U8),
-		presence : Counting,
 		route : Route,
 		status : U16,
 		content_type : List(U8),
@@ -205,7 +201,6 @@ Chat := [].{
 	none = {
 		kind: Serve,
 		location: [],
-		presence: Uncounted,
 		route: family(NotFound),
 		status: 0,
 		content_type: [],
@@ -215,11 +210,10 @@ Chat := [].{
 	}
 
 	## Zig serves it.
-	zig : Route, Counting -> Answer
-	zig = |route, presence| {
+	zig : Route -> Answer
+	zig = |route| {
 		..none,
 		route,
-		presence,
 	}
 
 	## A 303 to `location`.

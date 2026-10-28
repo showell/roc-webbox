@@ -95,10 +95,6 @@ pub const Method = enum(u8) {
 /// Chat.roc's `Request`'s `area`: the path is under /channel or /chat.
 pub const Area = enum(u8) { channel, chat };
 
-/// Chat.roc's `Counting`: whether a request Zig serves counts as the
-/// member's presence (a stream does not).
-pub const Counting = enum(u8) { counted, uncounted };
-
 /// Chat.roc's `Sniff`: `forbid` when the answer says `nosniff`.
 pub const Sniff = enum(u8) { allow, forbid };
 
@@ -229,6 +225,10 @@ pub const HitWord = enum(u8) { found, missing };
 /// the request's time, or not (never seen is `offline`).
 pub const Presence = enum(u8) { offline, online };
 
+/// Host.roc's `count_presence!` answer (metal-vmm QUEUE 288): the member
+/// came online with this request (the Roc broadcasts), or was online.
+pub const PresenceEdge = enum(u8) { came_online, steady };
+
 /// Host.roc's `check_member!` answer: whether the one asking may use the
 /// chat (a member, or the agent).
 pub const Membership = enum(u8) { member, outsider };
@@ -279,7 +279,6 @@ comptime {
         Tail,
         Method,
         Area,
-        Counting,
         Sniff,
         Kind,
         Form,
@@ -296,6 +295,7 @@ comptime {
         AppendStatus,
         Surface,
         Presence,
+        PresenceEdge,
         Membership,
         Admission,
         WordsStatus,
@@ -381,13 +381,13 @@ pub const Route = struct {
 };
 
 /// What the router decided: the gate's 303 to the login page, or a route for
-/// Zig, with whether the request counts as presence (it is not a stream);
-/// or, for a route the Roc served itself, what to send.
+/// Zig (the Roc counted its presence first, metal-vmm QUEUE 288); or,
+/// for a route the Roc served itself, what to send.
 pub const Decision = union(enum) {
     /// A 303 to a path the Roc built from a conversation's base and a
     /// topic, which the store's names keep on the site.
     redirect: []const u8,
-    serve: struct { route: Route, presence: bool },
+    serve: struct { route: Route },
     /// A status and its body, typed `content_type` when it is not empty.
     respond: struct {
         status: u16,
@@ -436,7 +436,7 @@ pub const Decision = union(enum) {
                 l,
                 b.redirect,
             ),
-            .serve => |s| s.presence == b.serve.presence and s.route.eql(b.serve.route),
+            .serve => |s| s.route.eql(b.serve.route),
             .respond => |r| r.status == b.respond.status and r.nosniff == b.respond.nosniff and std.mem.eql(
                 u8,
                 r.content_type,
@@ -490,7 +490,7 @@ pub const Decision = union(enum) {
     pub fn format(d: Decision, w: *std.Io.Writer) std.Io.Writer.Error!void {
         switch (d) {
             .redirect => |l| try w.print("303 {s}", .{l}),
-            .serve => |s| try w.print("{f}{s}", .{ s.route, if (s.presence) " +presence" else "" }),
+            .serve => |s| try w.print("{f}", .{s.route}),
             .respond => |r| try w.print("{d} \"{s}\"{s} {d} bytes", .{
                 r.status,
                 r.content_type,

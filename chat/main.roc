@@ -52,6 +52,7 @@ import Saved
 import JsonOut
 import Limits
 import BusKey
+import ChatUrl
 import Search
 
 handle! : Chat.Request => Chat.Answer
@@ -67,7 +68,7 @@ handle! = |req|
 dispatch! : Chat.Request, Str => Chat.Answer
 dispatch! = |req, sub|
 	match (if req.area == Channel Err(NotAnAsset) else Route.asset(sub)) {
-		Ok(route) => zig(route, Uncounted)
+		Ok(route) => zig(route)
 		Err(NotAnAsset) =>
 			if Host.check_member!({}) == Outsider {
 				area = if req.area == Channel "/channel" else "/chat"
@@ -76,7 +77,11 @@ dispatch! = |req, sub|
 				route = if req.area == Channel Route.under_channel(sub) else Route.under_chat(sub)
 				match served_by(route) {
 					Roc => act!(req, route)
-					Zig => zig(route, if Route.is_stream(route) Uncounted else Counted)
+					# A stream is no presence (the Zig's streams were served uncounted).
+					Zig => {
+						if Route.is_stream(route) {} else presence!(Unasked)
+						zig(route)
+					}
 				}
 			}
 	}
@@ -121,8 +126,8 @@ not_found_page! = |
 	}
 
 ## The route handed back to the Zig, as the seam's bytes.
-zig : Route.R, Chat.Counting -> Chat.Answer
-zig = |route, counting| Chat.zig(Route.to_wire(route), counting)
+zig : Route.R -> Chat.Answer
+zig = |route| Chat.zig(Route.to_wire(route))
 
 ## Which side serves a route. The Roc serves: /chat and /chat/default, the recent,
 ## images and code pages and every stream (metal-vmm QUEUE 286), /chat/links,
@@ -157,7 +162,7 @@ act! = |req, route| {
 	# the member is counted online: login seeded it before they ever were.
 	who = if route.family == Default welcome!({}) else Unasked
 	# A stream is no presence (the Zig's streams were served uncounted).
-	if Route.is_stream(route) {} else Host.count_presence!({})
+	if Route.is_stream(route) {} else presence!(who)
 	match route.family {
 		Default => resume!(who)
 		Conversations => if req.method != Get Chat.not_allowed(Get) else serve_conversations!({})
@@ -188,6 +193,57 @@ act! = |req, route| {
 		NotFound => Chat.not_found
 		_ => serve_conversation!(req, route)
 	}
+}
+
+## **THE MEMBER COUNTED ONLINE** (metal-vmm QUEUE 288): the host marks
+## them (the online map lasts the process, so it is the host's); on the
+## edge, offline until now, the Roc tells every other member and the
+## agent, on their sidebar (the row's dot) and their status strip.
+## **BEST-EFFORT, IN AN ASIDE**: a read that fails tells no one and never
+## fails the request, and the edge is given back (`presence_unspent!`),
+## so a request 30 s on is the edge again.
+presence! : Who => {}
+presence! = |who|
+	match Host.count_presence!({}) {
+		Steady => {}
+		CameOnline => {
+			_ = Host.aside!(Begin)
+			told = came_online!(who)
+			match (Host.aside!(End), told) {
+				(Done, Ok({})) => {}
+				_ => Host.presence_unspent!({})
+			}
+		}
+	}
+
+## The came-online fan-out (the Zig's, gone): the member's name, then
+## every authorized account but theirs (listAuthorized: one that will not
+## read fails it), each told on its sidebar, then its status strip, with
+## a link to its DM with the member.
+came_online! : Who => Try({}, [Failed])
+came_online! = |who| {
+	me = load_uid!({})?
+	all = load_accounts!(who)?
+	name = fail_if_unreadable!(Accounts.name(all, me))?
+	roster = fail_if_unreadable!(Accounts.authorized(all))?
+	online = JsonOut.object([
+		("kind", JsonOut.string("user-online")),
+		("user_id", JsonOut.string(me.to_str())),
+		("user_name", JsonOut.string(name)),
+	]).bytes()
+	List.for_each!(
+		List.drop_if(roster, |u| u.id == me),
+		|u| {
+			Host.publish!(BusKey.sidebar(u.id).bytes(), online)
+			link = ChatUrl.conv(Dm(Paths.pair_key(u.id, me))).to_str()
+			strip = JsonOut.object([
+				("text", JsonOut.string("${name} has come online.")),
+				("link_url", JsonOut.string(link)),
+			])
+			Host.publish!(BusKey.notify(u.id).bytes(), strip.bytes())
+		},
+	)
+	Ok({})
 }
 
 ## **A MEMBER'S OWN STREAM** (metal-vmm QUEUE 286): their feed, their
@@ -396,7 +452,7 @@ serve_topic! = |
 	match route.tail {
 		# The tails the Zig serves, the conversation and the topic found
 		# the viewer's here.
-		Uploads | Upload | Download => zig(route, Uncounted)
+		Uploads | Upload | Download => zig(route)
 		# The topic's stream (metal-vmm QUEUE 286): its key and transcript
 		# the Roc's, the backlog's replay and the live stream the host's.
 		Stream =>

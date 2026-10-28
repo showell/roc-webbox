@@ -41,6 +41,7 @@ pub const Accounts = abi.Accounts;
 pub const AccountKind = route.AccountKind;
 pub const AccountRead = abi.AccountRead;
 pub const Presence = route.Presence;
+pub const PresenceEdge = route.PresenceEdge;
 pub const Admission = route.Admission;
 pub const Word = abi.Word;
 pub const Words = abi.Words;
@@ -101,7 +102,6 @@ fn expectRoute(
         .GET,
         routing.host(),
     );
-    if (got == .serve and routing.marked) got.serve.presence = true;
     // A path that names nothing is the Roc's own 404 (metal-vmm QUEUE 286),
     // its presence counted as the Zig's was.
     if (want.family == .not_found) {
@@ -109,12 +109,14 @@ fn expectRoute(
         std.debug.print("{s}: got {f}, want the Roc's 404\n", .{ sub, got });
         return error.TestUnexpectedResult;
     }
-    const expected: Decision = .{ .serve = .{ .route = want, .presence = presence } };
-    if (!got.eql(expected)) {
-        std.debug.print("{s}: got {f}, want {f}\n", .{
+    const expected: Decision = .{ .serve = .{ .route = want } };
+    if (!got.eql(expected) or routing.marked != presence) {
+        std.debug.print("{s}: got {f} (presence {}), want {f} (presence {})\n", .{
             sub,
             got,
+            routing.marked,
             expected,
+            presence,
         });
         return error.TestUnexpectedResult;
     }
@@ -288,6 +290,8 @@ const Scripted = struct {
     files: []const File = &.{},
     /// Whether a write or a remove succeeds.
     write_ok: bool = true,
+    /// What counting the member online says: the edge (they came online) or not.
+    edge: route.PresenceEdge = .steady,
     /// The members seen within the presence window; any other is offline.
     online_ids: []const []const u8 = &.{},
     is_async: bool = false,
@@ -322,6 +326,7 @@ const Scripted = struct {
             .ctx = self,
             .check_member = member,
             .count_presence = presence,
+            .presence_unspent = presenceUnspent,
             .list_accounts = accountsOf,
             .me = meId,
             .now = nowOf,
@@ -421,10 +426,18 @@ const Scripted = struct {
         );
         return .member;
     }
-    fn presence(ctx: *anyopaque) void {
+    fn presence(ctx: *anyopaque) route.PresenceEdge {
         say(
             ctx,
             "presence",
+            .{},
+        );
+        return me(ctx).edge;
+    }
+    fn presenceUnspent(ctx: *anyopaque) void {
+        say(
+            ctx,
+            "presence unspent",
             .{},
         );
     }
@@ -1225,7 +1238,7 @@ test "a topic's reactions, react, pin and unpin are the Roc's: presence, the con
             .part = .topic,
             .tail = .uploads,
             .rest = "a.png",
-        }, .presence = false } },
+        } } },
         dm_topic,
     );
     try expectAct(
@@ -1251,7 +1264,7 @@ test "a topic's reactions, react, pin and unpin are the Roc's: presence, the con
             .topic = "Plans",
             .part = .topic,
             .tail = .download,
-        }, .presence = false } },
+        } } },
         ops_topic,
     );
     try expectAct(

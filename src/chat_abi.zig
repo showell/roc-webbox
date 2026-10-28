@@ -50,7 +50,6 @@ pub const Answer = extern struct {
     status: u16,
     allow: Method,
     kind: route_mod.Kind,
-    presence: route_mod.Counting,
     sniff: route_mod.Sniff,
 };
 /// Host.roc's `read_body!` answer: `{ bytes : List(U8), status : [Answered, Read] }`.
@@ -463,8 +462,11 @@ pub const Host = struct {
     ctx: *anyopaque,
     /// Host.check_member!.
     check_member: *const fn (ctx: *anyopaque) route_mod.Membership,
-    /// Host.count_presence!.
-    count_presence: *const fn (ctx: *anyopaque) void,
+    /// Host.count_presence!: the member marked online now; whether this was
+    /// the edge (metal-vmm QUEUE 288).
+    count_presence: *const fn (ctx: *anyopaque) route_mod.PresenceEdge,
+    /// Host.presence_unspent!: the edge's broadcast lost; due again later.
+    presence_unspent: *const fn (ctx: *anyopaque) void = noUnspent,
     /// Host.list_accounts!: every account (canonical folders, in the disk's
     /// order), its kind and its name file's bytes; the Roc does every
     /// lookup. **NEVER A READ OF THE AUTH ROOT'S SECRETS**: the folders,
@@ -753,6 +755,9 @@ fn noNow(_: *anyopaque) i64 {
 fn noRender(_: *anyopaque, _: []const u8) Rendered {
     @panic("render asked of a host that does not answer it");
 }
+fn noUnspent(_: *anyopaque) void {
+    @panic("presence_unspent asked of a host that does not answer it");
+}
 fn noAppendMessage(_: *anyopaque, _: Conv, _: []const u8, _: []const u8) AppendedAt {
     @panic("append_message asked of a host that does not answer it");
 }
@@ -898,8 +903,9 @@ pub const Routing = struct {
         of(ctx).asked = true;
         return if (of(ctx).member) .member else .outsider;
     }
-    fn mark(ctx: *anyopaque) void {
+    fn mark(ctx: *anyopaque) route_mod.PresenceEdge {
         of(ctx).marked = true;
+        return .steady;
     }
     fn noDmId(_: *anyopaque) []const u8 {
         return "999";
@@ -952,7 +958,7 @@ pub const Routing = struct {
 /// router alone: any other hosted call is a panic.
 pub fn askingOnly(ctx: *anyopaque, ask: *const fn (ctx: *anyopaque) route_mod.Membership) Host {
     const No = struct {
-        fn presence(_: *anyopaque) void {
+        fn presence(_: *anyopaque) route_mod.PresenceEdge {
             @panic("count_presence asked of a host that only answers who is asking");
         }
         fn body(_: *anyopaque, _: route_mod.Form) ?[]const u8 {
@@ -983,9 +989,14 @@ export fn roc_chat_check_member() callconv(.c) route_mod.Membership {
     return h.check_member(h.ctx);
 }
 
-export fn roc_chat_count_presence() callconv(.c) void {
+export fn roc_chat_count_presence() callconv(.c) route_mod.PresenceEdge {
     const h = current("count_presence");
-    h.count_presence(h.ctx);
+    return h.count_presence(h.ctx);
+}
+
+export fn roc_chat_presence_unspent() callconv(.c) void {
+    const h = current("presence_unspent");
+    h.presence_unspent(h.ctx);
 }
 
 export fn roc_chat_list_accounts() callconv(.c) AccountsRec {
@@ -1483,7 +1494,7 @@ pub fn decide(
         &a,
     )) return error.RocCrashed;
     return switch (a.kind) {
-        .serve => .{ .serve = .{ .presence = a.presence == .counted, .route = .{
+        .serve => .{ .serve = .{ .route = .{
             .family = a.route.family,
             .part = a.route.part,
             .tail = a.route.tail,
