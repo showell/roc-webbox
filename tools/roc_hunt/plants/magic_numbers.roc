@@ -27,3 +27,19 @@ fires_local = |n| {
 	id = n + 47
 	id
 }
+
+fires_typed = |n| n.min(200.U8)
+
+fires_fraction = |x| x * 0.75
+
+fires_typed_fraction = |x| x * 0.5.F32
+
+quiet_typed_zero = |n| n.max(0.U8)
+
+# A known miss, kept so a change to it is seen: 0 and 1 are never numbers
+# here, so status codes that are only 0 and 1 go unflagged.
+quiet_status_codes = |status| match status {
+	0 => "ok"
+	1 => "bad"
+	_ => "unknown"
+}

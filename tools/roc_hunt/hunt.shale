@@ -7,8 +7,9 @@
 --   shale tools/roc_hunt/hunt.shale               every hunt over chat/'s production modules
 --   shale tools/roc_hunt/hunt.shale self_test=1   every hunt's plants first
 -- The trees are some 20,000 lines, read a line at a time: the default
--- 5,000,000 steps do not reach the end of them.
--- budget: steps=200000000
+-- 5,000,000 steps do not reach the end of them, and the strings the hunts
+-- make of them outgrow the default 16 MiB arena.
+-- budget: steps=200000000 arena_bytes=1000000000
 -- The production modules are chat/*.roc and chat/platform/*.roc, less
 -- twin.roc: tests may hold literal data.
 
@@ -24,6 +25,12 @@ const long_nodes = 290
 -- tabs), its file, and the definition it is in (`name`, or "").
 function read_trees(files)
   local dump = run({roc_ast}, {timeout_ms = 300000, stdin = join(files, "\n"), whole = 64000000})
+  -- A file that does not parse stops roc-ast there, its trees so far
+  -- printed: hunting those would pass the rest unread.
+  if dump.ended ~= "exit" or dump.code ~= 0 then
+    local said = lines(trim(dump.out))
+    fail("roc-ast: " .. (said[#said] or dump.ended))
+  end
   local text = lines(dump.out)
   local depth = {}
   local file = {}
@@ -119,8 +126,36 @@ function render(tree, at)
   end
   if starts_with(t, "(ty-tag-union ") then return "[" .. render(tree, kids[1]) .. "]" end
   if starts_with(t, "(anno-record-field ") then return name .. " : " .. render(tree, kids[1]) end
+  -- A function type, its arguments and result: two callbacks of different
+  -- types differ. roc-ast writes `->` and `=>` alike.
+  if starts_with(t, "(ty-fn ") then
+    local args = {}
+    local k = 1
+    while k < #kids do push(args, render(tree, kids[k])) k = k + 1 end
+    return "(" .. join(args, ", ") .. " -> " .. render(tree, kids[#kids]) .. ")"
+  end
   if name ~= nil and name ~= "" then return name end
+  -- A type variable (`ty-var`) carries its name as `raw`: `List(a)` and
+  -- `List(b)` differ.
+  local raw = between(t, "(raw \"", "\")")
+  if raw ~= nil and raw ~= "" then return raw end
   return split(t, " ")[1] .. ")"
+end
+
+-- Whether the type at `at` holds a `Bool` anywhere but inside a function
+-- type: `Bool`, `Try(Bool, _)`, `(Bool, U64)`, `List(Bool)`. A callback's
+-- Bool (`U8 -> Bool`) is its answer, a predicate's, not a flag; a record's
+-- fields are not looked into.
+function holds_bool(tree, at)
+  local t = head(tree, at)
+  if starts_with(t, "(ty-fn ") then return false end
+  -- A record's fields are judged one by one (`bools`' field check).
+  if starts_with(t, "(ty-record ") then return false end
+  if starts_with(t, "(ty ") and between(t, "(name \"", "\")") == "Bool" then return true end
+  for k in children(tree, at) do
+    if holds_bool(tree, k) then return true end
+  end
+  return false
 end
 
 -- Each annotated function's argument types: {at, args} where args are the
@@ -161,10 +196,22 @@ function same_typed_args(tree)
   return found
 end
 
--- **A NUMBER THAT MEANS SOMETHING IT DOES NOT SAY**: an integer literal
--- other than 0 and 1, in an expression or a pattern. One between 32 and 126
--- is most likely a byte, which a character literal ('_') says, and is
--- marked `'?`. A line a definition: where its first one is, then each.
+-- **A NUMBER THAT MEANS SOMETHING IT DOES NOT SAY**: a number literal, in
+-- an expression or a pattern: an integer, a typed one (`200.U8`), a
+-- fraction (`0.75`, `0.5.F32`). One between 32 and 126 is most likely a
+-- byte, which a character literal ('_') says, and is marked `'?`. A line a
+-- definition: where its first one is, then each.
+--
+-- **0 AND 1 ARE NEVER FLAGGED**, typed or not: they are the start, the
+-- step and the empty (`index + 1`, `len == 0`) on nearly every line that
+-- counts, and a hunt that flagged them would bury the numbers that mean
+-- something. The cost is a known miss: codes that are only 0 and 1 (a
+-- `match` over a status, `0 => "ok"`, `1 => "bad"`) are a closed set a tag
+-- would name, and go unflagged (plants/magic_numbers.roc's
+-- `quiet_status_codes` holds the miss).
+const number_nodes = {"(e-int ", "(p-int ", "(e-typed-int ", "(p-typed-int ", "(e-frac ", "(p-frac ", "(e-typed-frac ", "(p-typed-frac "}
+const zero_and_one = " 0 1 0.0 1.0 "
+
 function magic_numbers(tree)
   local order = {}
   local first = {}
@@ -172,11 +219,15 @@ function magic_numbers(tree)
   local i = 1
   while i <= #tree.text do
     local t = head(tree, i)
-    if starts_with(t, "(e-int ") or starts_with(t, "(p-int ") then
+    local number = false
+    for kind in number_nodes do if starts_with(t, kind) then number = true end end
+    if number then
       local raw = between(t, "(raw \"", "\")")
-      if raw ~= "0" and raw ~= "1" then
+      if not contains(zero_and_one, " " .. raw .. " ") then
         local n = parse_int(raw)
         if n ~= nil and n >= 32 and n <= 126 then raw = raw .. "'?" end
+        local typed = between(t, "(type \"", "\")")
+        if typed ~= nil and typed ~= "" then raw = raw .. "." .. typed end
         local key = tree.file[i] .. " " .. tree.within[i]
         if get(first, key) == nil then
           push(order, key)
@@ -193,14 +244,18 @@ function magic_numbers(tree)
   return found
 end
 
--- **A BOOL WHERE A TAG WOULD SAY WHICH**: a `Bool` argument, or a record
--- field of type `Bool`. A return of `Bool` is `bool_returns`' to judge.
+-- **A BOOL WHERE A TAG WOULD SAY WHICH**: an argument whose type holds a
+-- `Bool` (`Bool`, `(Bool, U64)`, `List(Bool)`; not a callback's answer), a
+-- record field whose type does, or a call handed a bare `True` or `False`,
+-- qualified or not (`decode(bytes, True)`, `JsonOut.bool(Bool.False)`),
+-- which finds the unannotated helper too. A return of `Bool` is
+-- `bool_returns`' to judge.
 function bools(tree)
   local found = {}
   for f in annotated_functions(tree) do
     local n = 1
     while n <= #f.args do
-      if render(tree, f.args[n]) == "Bool" then push(found, where(tree, f.at) .. ": argument " .. tostring(n) .. " is a Bool") end
+      if holds_bool(tree, f.args[n]) then push(found, where(tree, f.at) .. ": argument " .. tostring(n) .. " is a Bool") end
       n = n + 1
     end
   end
@@ -209,8 +264,32 @@ function bools(tree)
     local t = head(tree, i)
     if starts_with(t, "(anno-record-field ") then
       local kids = children(tree, i)
-      if #kids > 0 and render(tree, kids[1]) == "Bool" then
+      if #kids > 0 and holds_bool(tree, kids[1]) then
         push(found, where(tree, i) .. ": field " .. between(t, "(name \"", "\")") .. " is a Bool")
+      end
+    end
+    -- A call's arguments: an `e-apply`'s children after the callee (a tag
+    -- applied, `Ok(True)`, makes a value and is no call), or a method
+    -- call's `args`.
+    local callee = nil
+    local args = {}
+    if starts_with(t, "(e-apply ") then
+      local kids = children(tree, i)
+      if not starts_with(head(tree, kids[1]), "(e-tag ") then
+        callee = between(head(tree, kids[1]), "(raw \"", "\")") or "a function"
+        args = drop(kids, 1)
+      end
+    end
+    if starts_with(t, "(e-method-call ") then
+      callee = between(t, "(method \"", "\")")
+      for k in children(tree, i) do
+        if starts_with(head(tree, k), "(args") then args = children(tree, k) end
+      end
+    end
+    for a in args do
+      local tag = between(head(tree, a), "(raw \"", "\")")
+      if starts_with(head(tree, a), "(e-tag ") and (tag == "True" or tag == "False" or tag == "Bool.True" or tag == "Bool.False") then
+        push(found, where(tree, a) .. ": a bare " .. tag .. " passed to " .. callee)
       end
     end
     i = i + 1
@@ -250,17 +329,52 @@ function positional_lists(tree)
 end
 
 -- **AN IF CHAIN THAT A MATCH WOULD SAY**: an `if` whose `else` is another
--- `if`, three or more deep. Often a closed set of cases told apart by
--- comparing, where a tag and a `match` would be exhaustive.
+-- `if`, three or more deep, the `else` bare (`else if`) or a block holding
+-- that `if` alone (`else { if ... }`); or three or more guards in a row in
+-- one block, each an `if` with no `else` whose block ends in `return`.
+-- Often a closed set of cases told apart by comparing, where a tag and a
+-- `match` would be exhaustive.
+
+-- The `if` that the `if` at `at`'s `else` is, or nil.
+function else_if(tree, at)
+  local kids = children(tree, at)
+  local last = kids[#kids]
+  if last == nil then return nil end
+  if starts_with(head(tree, last), "(e-if-then-else ") then return last end
+  if starts_with(head(tree, last), "(e-block ") then
+    local block = children(tree, last)
+    if #block == 1 and starts_with(head(tree, block[1]), "(statements") then
+      local inside = children(tree, block[1])
+      if #inside == 1 and starts_with(head(tree, inside[1]), "(e-if-then-else ") then return inside[1] end
+    end
+  end
+  return nil
+end
+
+-- Whether the node at `at` is a guard: an `if` with no `else` whose block's
+-- last statement is a `return`.
+function guard(tree, at)
+  if not starts_with(head(tree, at), "(e-if-without-else ") then return false end
+  local kids = children(tree, at)
+  local block = kids[#kids]
+  if block == nil or not starts_with(head(tree, block), "(e-block ") then return false end
+  for s in children(tree, block) do
+    if starts_with(head(tree, s), "(statements") then
+      local body = children(tree, s)
+      return #body > 0 and starts_with(head(tree, body[#body]), "(s-return ")
+    end
+  end
+  return false
+end
+
 function if_chains(tree)
   local found = {}
   local inner = {}
   local i = 1
   while i <= #tree.text do
     if starts_with(head(tree, i), "(e-if-then-else ") then
-      local kids = children(tree, i)
-      local last = kids[#kids]
-      if last ~= nil and starts_with(head(tree, last), "(e-if-then-else ") then inner[tostring(last)] = true end
+      local next = else_if(tree, i)
+      if next ~= nil then inner[tostring(next)] = true end
     end
     i = i + 1
   end
@@ -268,15 +382,26 @@ function if_chains(tree)
   while i <= #tree.text do
     if starts_with(head(tree, i), "(e-if-then-else ") and get(inner, tostring(i)) == nil then
       local n = 1
-      local at = i
-      while true do
-        local kids = children(tree, at)
-        local last = kids[#kids]
-        if last == nil or not starts_with(head(tree, last), "(e-if-then-else ") then break end
+      local at = else_if(tree, i)
+      while at ~= nil do
         n = n + 1
-        at = last
+        at = else_if(tree, at)
       end
       if n >= 3 then push(found, where(tree, i) .. ": " .. tostring(n) .. " ifs in a chain") end
+    end
+    if starts_with(head(tree, i), "(statements") then
+      local run_start = nil
+      local n = 0
+      for s in children(tree, i) do
+        if guard(tree, s) then
+          if n == 0 then run_start = s end
+          n = n + 1
+        else
+          if n >= 3 then push(found, where(tree, run_start) .. ": " .. tostring(n) .. " guards that return, in a row") end
+          n = 0
+        end
+      end
+      if n >= 3 then push(found, where(tree, run_start) .. ": " .. tostring(n) .. " guards that return, in a row") end
     end
     i = i + 1
   end
@@ -381,13 +506,15 @@ end
 -- `can_`: `is_topic_id`, `channel_is_open`). Any other Bool return is a
 -- decision that wants a tag (`[Roc, Zig]`, not "true: the Roc serves it")
 -- or a failure that wants a `Try` (`appended!` answering false when the
--- store failed).
+-- store failed). The result counts when its type holds a `Bool` anywhere
+-- but in a function type: `Try(Bool, _)` and `(Bool, U64)` do; a `where`
+-- clause is no part of the result.
 function bool_returns(tree)
   local found = {}
   for f in annotated_functions(tree) do
     local kids = children(tree, f.at + 1)
     local name = between(head(tree, f.at), "(name \"", "\")") or ""
-    if #kids > 0 and render(tree, kids[#kids]) == "Bool" and re_find(name, "^is_|_is_|^has_|_has_|^can_|_can_") == nil then
+    if #kids > 0 and holds_bool(tree, kids[#kids]) and re_find(name, "^is_|_is_|^has_|_has_|^can_|_can_") == nil then
       push(found, where(tree, f.at) .. ": returns a Bool, and `" .. name .. "` is not a question's name")
     end
   end
@@ -432,27 +559,32 @@ end
 -- ── the plants, or the tree ──────────────────────────────────────────────
 
 if arg("self_test", "") ~= "" then
+  -- Every hunt's plants are judged before a failure stops the run, so one
+  -- run shows each plant that is wrong.
+  local wrong = {}
   for name in hunts do
     local plants = "tools/roc_hunt/plants/" .. name .. ".roc"
     local found = hunt(name, read_trees({plants}))
     local text = join(found, "\n")
     local fires = 0
     local counted = {}
+    local before = #wrong
     for line in lines(read(plants)) do
-      local name = trim(split(line, ":")[1])
       local named = trim(split(trim(line), " ")[1])
       if starts_with(named, "fires_") and get(counted, named) == nil then
         counted[named] = true
         fires = fires + 1
-        if not contains(text, " " .. named .. ":") then fail(name .. ": a plant did not fire: " .. named .. "\n" .. text) end
+        if not contains(text, " " .. named .. ":") then push(wrong, name .. ": a plant did not fire: " .. named) end
       end
     end
-    if fires == 0 then fail(name .. ": its plants hold no fires_ definition") end
+    if fires == 0 then push(wrong, name .. ": its plants hold no fires_ definition") end
     for f in found do
-      if contains(f, " quiet_") then fail(name .. ": a quiet plant fired: " .. f) end
+      if contains(f, " quiet_") then push(wrong, name .. ": a quiet plant fired: " .. f) end
     end
-    print(name .. ": its " .. tostring(fires) .. " plants fire, and the quiet ones stay quiet")
+    if #wrong == before then print(name .. ": its " .. tostring(fires) .. " plants fire, and the quiet ones stay quiet") end
   end
+  for w in wrong do print("FAIL " .. w) end
+  if #wrong > 0 then fail(tostring(#wrong) .. " plants wrong") end
   local r = run({"shale", "cookbook:roc/stack.shale", "self_test=1"}, {timeout_ms = 300000, tail = 40})
   if r.code ~= 0 then
     print(r.out)
