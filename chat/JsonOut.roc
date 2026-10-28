@@ -1,15 +1,16 @@
 ## **JSON BUILT, NOT SPLICED** (metal-vmm QUEUE 269): a value is made only
 ## by this module's builders (string, number, bool, array, object), so a
 ## JSON field's bytes are always a whole value, escaped as Zig's std.json
-## writes them (ZigText.json_string): no spaces, fields and items in the
+## writes them (the builtin `Json.to_str` of a Str, byte for byte; its
+## records' fields come out sorted, so a record goes through `object`, never
+## `Json.to_str`): no spaces, fields and items in the
 ## order given. Opaque (`::`); `bytes` is the only way out. Pure.
-import ZigText
 
 JsonOut :: List(U8).{
 
 	## A string, escaped.
 	string : Str -> JsonOut
-	string = |s| JsonOut.(ZigText.json_string(s))
+	string = |s| JsonOut.(Json.to_str(s).to_utf8())
 
 	## Bytes as a string, as chat_search.zig's `str` writes them: each byte
 	## that does not begin a whole UTF-8 sequence is U+FFFD (a word the
@@ -55,7 +56,7 @@ JsonOut :: List(U8).{
 				List.map(
 					fields,
 					|(name, value)| List.join([
-						ZigText.json_string(name),
+						Json.to_str(name).to_utf8(),
 						[':'],
 						bytes(value),
 					]),

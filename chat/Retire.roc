@@ -59,7 +59,7 @@ Retire := [].{
 		got = Host.retire_asked!({})
 		{
 			days: got.days,
-			keep: List.drop_if(Bytes.split_byte(got.keep, '\n'), |n| n == []),
+			keep: List.drop_if(List.split_on(got.keep, '\n'), |n| n == []),
 			now: got.now,
 		}
 	}
@@ -465,7 +465,7 @@ pruned_in! = |
 without : List(U8), List(Str) -> { kept : List(U8), dropped : U64 }
 without = |body, ids|
 	List.fold(
-		Bytes.split_byte(body, '\n'),
+		List.split_on(body, '\n'),
 		{ kept: [], dropped: 0 },
 		|got, raw| {
 			line = ZigText.trim(raw)

@@ -50,36 +50,6 @@ Saved := [].{
 	)
 }
 
-## Whether `word` is in `text` at `i`.
-has_at : List(U8), U64, List(U8) -> Bool
-has_at = |
-	text,
-	i,
-	word,
-| has_from(
-	text,
-	i,
-	word,
-	0,
-)
-
-has_from : List(U8), U64, List(U8), U64 -> Bool
-has_from = |
-	text,
-	i,
-	word,
-	k,
-|
-	match List.get(word, k) {
-		Err(_) => Bool.True
-		Ok(w) => if List.get(text, i + k) == Ok(w) has_from(
-			text,
-			i,
-			word,
-			k + 1,
-		) else Bool.False
-	}
-
 ## parseRefAt: `<conv>/<topic>#msg-<id>` from `start`, or nothing.
 ref_at : List(U8), U64 -> Try(Saved.Ref, [NotARef])
 ref_at = |text, start| {
@@ -98,11 +68,7 @@ ref_at = |text, start| {
 			is_path_seg,
 		)
 		anchor = "#msg-".to_utf8()
-		if topic_end == topic_start or !has_at(
-			text,
-			topic_end,
-			anchor,
-		) {
+		if topic_end == topic_start or !List.starts_with(List.drop_first(text, topic_end), anchor) {
 			Err(NotARef)
 		} else {
 			id_start = topic_end + List.len(anchor)

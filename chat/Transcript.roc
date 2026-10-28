@@ -40,7 +40,7 @@ Transcript := [].{
 	decode_file : List(U8) -> Try({ messages : List(Msg), refused : U64 }, [CorruptUid(List(U8))])
 	decode_file = |data|
 		List.fold_try(
-			Bytes.split_seq(data, sep),
+			List.split_on_list(data, sep),
 			{ messages: [], refused: 0 },
 			|acc, piece|
 				if ZigText.trim(piece) == [] {
@@ -74,7 +74,7 @@ Transcript := [].{
 		0,
 	) == Err(NotFound) body else Bytes.join_lines(
 		List.map(
-			Bytes.split_byte(body, '\n'),
+			List.split_on(body, '\n'),
 			escape_line,
 		),
 	)
@@ -212,7 +212,7 @@ unescape_lines = |body|
 		0,
 	) == Err(NotFound) body else Bytes.join_lines(
 		List.map(
-			Bytes.split_byte(body, '\n'),
+			List.split_on(body, '\n'),
 			unescape_line,
 		),
 	)

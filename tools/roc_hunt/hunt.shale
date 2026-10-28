@@ -695,8 +695,9 @@ end
 -- understand a code flow"): a module whose production references (a
 -- qualified `Module.name`, outside an `expect`) all come from one other
 -- module, `twin` counting as a caller, belongs with that caller, unless
--- `kept_alone` names it with its reason. `trees` are the production trees
--- and twin's.
+-- `kept_alone` names it with its reason. Only the trees' own modules are
+-- callees: a builtin (`Iter`, `List`) one module alone uses is no module to
+-- move. `trees` are the production trees and twin's.
 const kept_alone = {
   -- The platform: the app's boundary, whoever calls it.
   Chat = "the platform's types, the app's boundary",
@@ -735,12 +736,14 @@ function single_caller(trees)
   local callers = {}
   local counts = {}
   local first = {}
+  local own = {}
   for tree in trees do
     local expect_at = -1
     local i = 1
     while i <= #tree.text do
       local d = tree.depth[i]
       if expect_at >= 0 and d <= expect_at then expect_at = -1 end
+      own[module_of(tree.file[i])] = true
       local t = head(tree, i)
       if expect_at < 0 and starts_with(t, "(s-expect ") then expect_at = d end
       if expect_at < 0 and starts_with(t, "(e-ident ") then
@@ -765,7 +768,7 @@ function single_caller(trees)
   local found = {}
   for callee in sort(keys(callers)) do
     local from = sort(keys(callers[callee]))
-    if #from == 1 and get(kept_alone, callee) == nil then
+    if #from == 1 and get(own, callee) ~= nil and get(kept_alone, callee) == nil then
       push(found, callee .. ": single_caller: all " .. tostring(counts[callee]) .. " production references come from " .. from[1])
     end
   end
@@ -857,7 +860,7 @@ if arg("self_test", "") ~= "" then
   for p in folder do if not ends_with(p, "/twin.roc") then push(production, p) end end
   local said = join(single_caller({read_trees(production), read_trees({"tools/roc_hunt/plants/single_caller/twin.roc"})}), "\n")
   if not contains(said, "FiresSolo: single_caller") then push(wrong, "single_caller: a plant did not fire: FiresSolo") end
-  for quiet in {"QuietShared", "QuietKept", "QuietTested"} do
+  for quiet in {"QuietShared", "QuietKept", "QuietTested", "Iter"} do
     if contains(said, quiet .. ":") then push(wrong, "single_caller: a quiet plant fired: " .. quiet) end
   end
   if contains(said, "FiresSolo") and not contains(said, "Quiet") then print("single_caller: its plant fires, and the quiet ones stay quiet") end

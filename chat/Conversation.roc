@@ -23,9 +23,9 @@ Conversation := [].{
 	## yourself, so no one is sent a notice twice.
 	dm_members : List(U8) -> List(List(U8))
 	dm_members = |key|
-		match Paths.cut_first(key, '_') {
-			Ok((a, b)) => if a == b [a] else [a, b]
-			Err(NoSeparator) => [key]
+		match List.split_first(key, '_') {
+			Ok({ before: a, after: b }) => if a == b [a] else [a, b]
+			Err(NotFound) => [key]
 		}
 
 	## A DM's URL base.

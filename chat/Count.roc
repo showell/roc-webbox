@@ -22,7 +22,7 @@ Count := [].{
 	## that no number is given twice.
 	count_blocks : List(U8) -> U64
 	count_blocks = |raw| List.count_if(
-		Bytes.split_seq(raw, Transcript.sep),
+		List.split_on_list(raw, Transcript.sep),
 		|p| ZigText.trim(p) != [],
 	)
 
@@ -58,7 +58,7 @@ Count := [].{
 		if List.last(raw) != Ok('\n') {
 			Err(Malformed)
 		} else {
-			match Bytes.split_byte(raw, '\n') {
+			match List.split_on(raw, '\n') {
 				[
 					first,
 					second,
@@ -186,7 +186,7 @@ parse_last = |line| match tokens(line) {
 
 ## std.mem.tokenizeScalar on a space: the runs between, none empty.
 tokens : List(U8) -> List(List(U8))
-tokens = |line| List.keep_if(Bytes.split_byte(line, ' '), |t| t != [])
+tokens = |line| List.keep_if(List.split_on(line, ' '), |t| t != [])
 
 no_uid : List(U8)
 no_uid = Str.to_utf8("-")

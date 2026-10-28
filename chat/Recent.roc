@@ -201,7 +201,7 @@ signed = |digits| match digits {
 ## text]", another fence's lines as they are, each line ended.
 quotes : List(U8) -> List(U8)
 quotes = |md| quotes_from(
-	Bytes.split_byte(md, '\n'),
+	List.split_on(md, '\n'),
 	0,
 	[],
 )

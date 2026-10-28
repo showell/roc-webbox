@@ -54,12 +54,12 @@ Html :: List(U8).{
 
 	## The parts, one after another.
 	join : List(Html) -> Html
-	join = |parts| Html.(List.join(List.map(parts, |Html.(b)| b)))
+	join = |parts| Html.(List.join_map(parts, |Html.(b)| b))
 
 	## A template with each `{s}` slot filled in turn.
 	fill : Html, List(Html) -> Html
 	fill = |Html.(template), values| {
-		pieces = Bytes.split_seq(template, Str.to_utf8("{s}"))
+		pieces = List.split_on_list(template, Str.to_utf8("{s}"))
 		(out, _) = List.fold(
 			pieces,
 			([], 0),
@@ -97,7 +97,7 @@ Html :: List(U8).{
 	script_safe = |s| ScriptJson.(
 		List.join(
 			List.intersperse(
-				Bytes.split_seq(s, ['<']),
+				List.split_on_list(s, ['<']),
 				Str.to_utf8("\\u003c"),
 			),
 		),

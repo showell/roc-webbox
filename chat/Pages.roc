@@ -497,6 +497,6 @@ counted : List(List(U8)), U64 -> Try((List(Str), U64), [NotUtf8, NotACount])
 counted = |fields, i| {
 	n = ZigText.parse_u64(List.get(fields, i) ?? []).map_err(|_| NotACount)?
 	items = List.sublist(fields, { start: i + 1, len: n })
-	texts = List.keep_oks(items, Str.from_utf8)
-	if List.len(texts) == List.len(items) Ok((texts, i + 1 + n)) else Err(NotUtf8)
+	texts = List.map_try(items, Str.from_utf8).map_err(|_| NotUtf8)?
+	Ok((texts, i + 1 + n))
 }

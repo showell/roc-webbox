@@ -25,7 +25,7 @@ Form := [].{
 	field = |body, name| {
 		key = Str.to_utf8(name)
 		values = List.keep_oks(
-			Bytes.split_byte(body, '&'),
+			List.split_on(body, '&'),
 			|pair|
 				match Bytes.cut_seq(pair, ['=']) {
 					Ok((k, v)) if k == key => Ok(v)

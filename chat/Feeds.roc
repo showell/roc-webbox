@@ -132,7 +132,7 @@ Feeds := [].{
 	## images_store `encodeImagesEvent` writes it.
 	images_json : List((Header, List(Str))), U64 -> List(U8)
 	images_json = |entries, most| {
-		tail = List.drop_first(entries, List.len(entries) - smaller(most, List.len(entries)))
+		tail = List.drop_first(entries, List.len(entries) - U64.min(most, List.len(entries)))
 		JsonOut.array(List.map(tail, |(h, tags)| images_event(h, tags))).bytes()
 	}
 
@@ -244,7 +244,7 @@ blocks_of = |text|
 	if ZigText.trim(text) == [] {
 		[]
 	} else {
-		List.keep_if(List.map(Bytes.split_seq(text, Feeds.sep), ZigText.trim), |b| b != [])
+		List.keep_if(List.map(List.split_on_list(text, Feeds.sep), ZigText.trim), |b| b != [])
 	}
 
 tags_in : List(U8) -> List(Str)
@@ -309,12 +309,9 @@ img_tags_from = |
 		}
 	}
 
-smaller : U64, U64 -> U64
-smaller = |a, b| if a < b a else b
-
 blocks_in : List(U8) -> List(Block)
 blocks_in = |body| blocks_from(
-	Bytes.split_byte(body, '\n'),
+	List.split_on(body, '\n'),
 	0,
 	[],
 )

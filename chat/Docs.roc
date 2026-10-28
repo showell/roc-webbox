@@ -122,10 +122,9 @@ Docs := [].{
 	slug_of_title : Str -> Str
 	slug_of_title = |title| {
 		kept = List.fold(
-			ZigText.trim_str(title).to_utf8(),
+			ZigText.trim_str(title).with_ascii_lowercased().to_utf8(),
 			{ out: [], hyphen: Bool.False },
-			|acc, raw| {
-				c = if raw >= 'A' and raw <= 'Z' raw + 32 else raw
+			|acc, c| {
 				if (c >= 'a' and c <= 'z') or (c >= '0' and c <= '9') {
 					{ out: List.append(acc.out, c), hyphen: Bool.False }
 				} else if acc.hyphen or acc.out.is_empty() {
@@ -810,18 +809,14 @@ trim_hyphens = |bytes|
 
 ## oneLine: every line break a space, so a field cannot break the block.
 one_line : Str -> Str
-one_line = |s|
-	match Str.from_utf8(List.map(s.to_utf8(), |c| if c == '\n' or c == '\r' ' ' else c)) {
-		Ok(t) => t
-		Err(_) => crash "Docs.one_line: a space for an ASCII byte split a codepoint"
-	}
+one_line = |s| s.replace_each("\n", " ").replace_each("\r", " ")
 
 ## quoteFence: one `~` more than the longest run of three or more that
 ## starts a line of `body`, and never fewer than three.
 quote_fence : Str -> Str
 quote_fence = |body| {
 	longest = List.fold(
-		Bytes.split_byte(body.to_utf8(), '\n'),
+		List.split_on(body.to_utf8(), '\n'),
 		0,
 		|most, line| {
 			run = leading_tildes(line)

@@ -7,16 +7,16 @@ Time := [].{
 	## `2026-06-19T14:34:07Z` for `unix_secs`.
 	rfc3339 : I64 -> Str
 	rfc3339 = |unix_secs| {
-		days = div_floor(unix_secs, 86400)
+		days = I64.div_floor_by(unix_secs, 86400)
 		tod = unix_secs - days * 86400
 		c = civil_from_days(days)
-		"${year_text(c.year)}-${two(c.month)}-${two(c.day)}T${two(div_floor(tod, 3600))}:${two(div_floor(mod_floor(tod, 3600), 60))}:${two(mod_floor(tod, 60))}Z"
+		"${year_text(c.year)}-${two(c.month)}-${two(c.day)}T${two(I64.div_floor_by(tod, 3600))}:${two(I64.div_floor_by(I64.mod_by(tod, 3600), 60))}:${two(I64.mod_by(tod, 60))}Z"
 	}
 
 	## `2026-06-19` for `unix_secs`: a topic named for its day.
 	date : I64 -> Str
 	date = |unix_secs| {
-		c = civil_from_days(div_floor(unix_secs, 86400))
+		c = civil_from_days(I64.div_floor_by(unix_secs, 86400))
 		"${year_text(c.year)}-${two(c.month)}-${two(c.day)}"
 	}
 
@@ -190,16 +190,16 @@ digits = |
 civil_from_days : I64 -> Civil
 civil_from_days = |days| {
 	z = days + 719468
-	era = div_floor(z, 146097)
+	era = I64.div_floor_by(z, 146097)
 	doe = z - era * 146097
-	yoe = div_floor(
-		doe - div_floor(doe, 1460) + div_floor(doe, 36524) - div_floor(doe, 146096),
+	yoe = I64.div_floor_by(
+		doe - I64.div_floor_by(doe, 1460) + I64.div_floor_by(doe, 36524) - I64.div_floor_by(doe, 146096),
 		365,
 	)
 	y = yoe + era * 400
-	doy = doe - (365 * yoe + div_floor(yoe, 4) - div_floor(yoe, 100))
-	mp = div_floor(5 * doy + 2, 153)
-	d = doy - div_floor(153 * mp + 2, 5) + 1
+	doy = doe - (365 * yoe + I64.div_floor_by(yoe, 4) - I64.div_floor_by(yoe, 100))
+	mp = I64.div_floor_by(5 * doy + 2, 153)
+	d = doy - I64.div_floor_by(153 * mp + 2, 5) + 1
 	m = if mp < 10 mp + 3 else mp - 9
 	{
 		year: y + (if m <= 2 1 else 0),
@@ -215,23 +215,13 @@ days_from_civil = |
 	day,
 | {
 	y = year - (if month <= 2 1 else 0)
-	era = div_floor(y, 400)
+	era = I64.div_floor_by(y, 400)
 	yoe = y - era * 400
 	mp = if month > 2 month - 3 else month + 9
-	doy = div_floor(153 * mp + 2, 5) + day - 1
-	doe = yoe * 365 + div_floor(yoe, 4) - div_floor(yoe, 100) + doy
+	doy = I64.div_floor_by(153 * mp + 2, 5) + day - 1
+	doe = yoe * 365 + I64.div_floor_by(yoe, 4) - I64.div_floor_by(yoe, 100) + doy
 	era * 146097 + doe - 719468
 }
-
-## Zig's `@divFloor` and `@mod`: rounding toward minus infinity.
-div_floor : I64, I64 -> I64
-div_floor = |a, b| {
-	q = a // b
-	if (a % b != 0) and ((a < 0) != (b < 0)) q - 1 else q
-}
-
-mod_floor : I64, I64 -> I64
-mod_floor = |a, b| a - div_floor(a, b) * b
 
 ## `{d:0>2}`: at least two digits.
 two : I64 -> Str

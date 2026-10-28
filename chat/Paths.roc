@@ -189,9 +189,9 @@ Paths := [].{
 	## message's decimal number, cut at the last `_`.
 	is_valid_msg_ref_id : List(U8) -> Bool
 	is_valid_msg_ref_id = |id|
-		match cut_last(id, '_') {
-			Err(NoSeparator) => Bool.False
-			Ok((left, right)) =>
+		match List.split_last(id, '_') {
+			Err(NotFound) => Bool.False
+			Ok({ before: left, after: right }) =>
 				left != [] and right != [] and List.all(
 					left,
 					|c| is_alnum(c) or c == '-',
@@ -320,7 +320,7 @@ Paths := [].{
 	channel_members : Str -> Try(List(Uid), [Malformed])
 	channel_members = |file|
 		List.fold(
-			Bytes.split_byte(file.to_utf8(), '\n'),
+			List.split_on(file.to_utf8(), '\n'),
 			Ok([]),
 			|acc, raw|
 				match acc {
@@ -440,42 +440,6 @@ Paths := [].{
 	links_path : Uid -> ChatPath
 	links_path = |uid| ChatPath.("users/${uid.to_str()}/links.md")
 
-	## The bytes before and after the first `sep`.
-	cut_first : List(U8), U8 -> Try((List(U8), List(U8)), [NoSeparator])
-	cut_first = |s, sep| {
-		i = index_of(
-			s,
-			sep,
-			0,
-		)?
-		Ok((List.take_first(s, i), List.drop_first(s, i + 1)))
-	}
-
-	## The bytes before and after the last `sep`.
-	cut_last : List(U8), U8 -> Try((List(U8), List(U8)), [NoSeparator])
-	cut_last = |s, sep| {
-		(last, _) = List.fold(
-			s,
-			(Err(NoSeparator), 0),
-			|(found, i), c| (if c == sep Ok(i) else found, i + 1),
-		)
-		i = last?
-		Ok((List.take_first(s, i), List.drop_first(s, i + 1)))
-	}
-
-	index_of : List(U8), U8, U64 -> Try(U64, [NoSeparator])
-	index_of = |
-		s,
-		sep,
-		i,
-	| match List.get(s, i) {
-		Ok(c) => if c == sep Ok(i) else index_of(
-			s,
-			sep,
-			i + 1,
-		)
-		Err(_) => Err(NoSeparator)
-	}
 }
 
 ## A DM's or a channel's folder under the chat root: a DM's pair key

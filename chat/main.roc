@@ -1759,9 +1759,9 @@ redirect_to_msg! = |id|
 	if !Paths.is_valid_msg_ref_id(id) {
 		Chat.not_found
 	} else {
-		topic = match Paths.cut_last(id, '_') {
-			Ok((before, _)) => before
-			Err(NoSeparator) => []
+		topic = match List.split_last(id, '_') {
+			Ok({ before, after: _ }) => before
+			Err(NotFound) => []
 		}
 		at = |base, key| List.join([
 			Str.to_utf8(base),
