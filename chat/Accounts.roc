@@ -1,8 +1,10 @@
-## WHO HAS AN ACCOUNT, AND WHAT THEY ARE CALLED (angry-gopher users.zig
-## `principalExists`, `getUserName`, `listAuthorized`): the lookups over
-## every account as the host hands them (Host.list_accounts!, asked at most once
-## a request). Pure: angry-gopher's chat_twin_test.zig holds each to its Zig
-## over account trees on disk.
+## WHO HAS AN ACCOUNT, WHO MAY USE THE CHAT, AND WHAT THEY ARE CALLED
+## (angry-gopher users.zig `principalExists`, `principalAuthorized`,
+## `getUserName`, `listAuthorized`): the lookups over
+## every account as the host hands them (Host.list_accounts!, asked once a
+## request). Pure: angry-gopher's chat_twin_test.zig holds the lookups to
+## their Zig over account trees on disk, and its identityRun freezes the
+## door (`admits`) to the Zig's principalAuthorized.
 ##
 ## **ONLY CANONICAL IDS ARE ACCOUNTS HERE**: the host hands the folders
 ## named as a counter names one (digits, the first not zero), as
@@ -25,21 +27,56 @@ Accounts := [].{
 	## taken for one).
 	Account : {
 		id : Uid,
-		kind : [
-			Agent,
-			Guest,
-			Member,
-			Unreadable,
-		],
+		kind : Kind,
 		name : Str,
 		name_read : [Found, Unreadable],
 	}
+
+	## An account's kind as the host lists it.
+	Kind : [
+		Agent,
+		Guest,
+		Member,
+		Unreadable,
+	]
 
 	## **A LOOKUP THAT NEEDED A READ THAT FAILED HAS NO ANSWER**: account
 	## `id`'s kind or name would not read, so the request fails with that
 	## read's own error (Host.fail!), as the Zig failed it. Never "no such
 	## account", never a name of "".
 	Unreadable : [KindUnreadable(Uid), NameUnreadable(Uid)]
+
+	## **WHO MAY USE THE CHAT** (angry-gopher users.zig `userIsAuthorized`):
+	## a member or the agent, never a guest. The door (`admits`) and the
+	## roster (`authorized`) both ask it. Which account is the agent is the
+	## host's to say, in its kind.
+	can_use_chat : Kind -> Bool
+	can_use_chat = |kind| kind == Member or kind == Agent
+
+	## **THE DOOR'S DECISION** (users.zig `principalAuthorized`, which the
+	## Zig's chat asked of the id the host verified): `asking`, as the host
+	## said it, may use the chat when its account `can_use_chat`. An id that is
+	## no canonical uid, or names no account, is `Refused`, as is a guest.
+	## **AN ACCOUNT WHOSE KIND WILL NOT READ IS NO ANSWER**: the request fails
+	## with that read's error (`KindUnreadable`), as principalAuthorized's
+	## stat of the password failed it.
+	admits : List(Account), List(U8) -> Try([Admitted, Refused], Unreadable)
+	admits = |accounts, asking|
+		match Uid.from_utf8(asking) {
+			Err(NotAUid) => Ok(Refused)
+			Ok(id) =>
+				match List.keep_if(accounts, |a| a.id == id) {
+					[] => Ok(Refused)
+					[a, ..] =>
+						if a.kind == Unreadable {
+							Err(KindUnreadable(id))
+						} else if can_use_chat(a.kind) {
+							Ok(Admitted)
+						} else {
+							Ok(Refused)
+						}
+				}
+		}
 
 	## principalExists (userExists): `id` is one when it is among
 	## `accounts`, whatever its kind (a guest's DM is opened on purpose).
@@ -77,12 +114,7 @@ Accounts := [].{
 	## lists such a name as unreadable itself, with error.NotUtf8 kept.)
 	from_host : {
 		id : List(U8),
-		kind : [
-			Agent,
-			Guest,
-			Member,
-			Unreadable,
-		],
+		kind : Kind,
 		name : List(U8),
 		name_read : [Found, Unreadable],
 	} -> Try(Account, [NotAUid(List(U8))])
@@ -119,7 +151,7 @@ Accounts := [].{
 	authorized = |accounts|
 		match List.keep_if(
 			accounts,
-			|a| a.kind == Unreadable or (a.kind != Guest and a.name_read == Unreadable),
+			|a| a.kind == Unreadable or (can_use_chat(a.kind) and a.name_read == Unreadable),
 		) {
 			[a, ..] => Err(if a.kind == Unreadable KindUnreadable(a.id) else NameUnreadable(a.id))
 			[] => Ok(roster(accounts))
@@ -157,7 +189,8 @@ Accounts := [].{
 
 	roster : List(Account) -> List({ id : Uid, name : Str })
 	roster = |accounts|
-		List.keep_if(accounts, |a| a.kind != Guest)
+		# Never an unreadable kind: both callers failed on one first.
+		List.keep_if(accounts, |a| can_use_chat(a.kind))
 			|> List.map_with_index(
 				|a, i| {
 					a,
@@ -205,3 +238,35 @@ expect Accounts.from_host({
 	name: [0xff],
 	name_read: Found,
 }) == Err(NotAUid(Str.to_utf8("07")))
+
+## The door's decision over a member, the agent, a guest, an account whose
+## kind will not read, an id no account has, and one no uid.
+expect {
+	a = |id, kind| Accounts.from_host({
+		id: Str.to_utf8(id),
+		kind,
+		name: [],
+		name_read: Found,
+	})
+	all = List.keep_oks(
+		[
+			a("1", Member),
+			a("3", Agent),
+			a("5", Guest),
+			a("7", Unreadable),
+		],
+		|x| x,
+	)
+	is = |id| Accounts.admits(all, Str.to_utf8(id))
+	let_in = is("1") == Ok(Admitted) and is("3") == Ok(Admitted)
+	sent_away = List.all(
+		[
+			is("5"),
+			is("9"),
+			is("007"),
+			is(""),
+		],
+		|got| got == Ok(Refused),
+	)
+	let_in and sent_away and is("7").is_err()
+}
