@@ -1,7 +1,7 @@
 ## A TOPIC STREAM'S SSE FRAMES (angry-gopher chat_frame.zig): built once,
 ## the same for every viewer. The html is the caller's, rendered from the
 ## markdown; this module only lays the frame out.
-import JsonText
+import JsonOut
 import Uid
 
 Frame := [].{
@@ -14,25 +14,21 @@ Frame := [].{
 	## `from_uid` after `from`, `cid` last when there is one.
 	message : Message -> List(U8)
 	message = |m| {
-		index = Str.to_utf8(U64.to_str(m.index))
-		field = |name, value| List.join([Str.to_utf8(",\"${name}\":"), value])
-		List.join([
-			Str.to_utf8("id: "),
-			index,
-			Str.to_utf8("\ndata: {\"index\":"),
-			index,
-			Str.to_utf8(",\"from\":"),
-			JsonText.str(m.from),
-			Str.to_utf8(",\"from_uid\":"),
-			JsonText.str(m.from_uid.to_str()),
-			Str.to_utf8(",\"at\":"),
-			JsonText.str(m.at),
-			field("html", JsonText.str(m.html)),
-			field("markdown", JsonText.str(m.markdown)),
-			field("id", JsonText.str(m.id)),
-			if m.cid == "" [] else field("cid", JsonText.str(m.cid)),
-			Str.to_utf8("}\n\n"),
-		])
+		data = JsonOut.object(
+			List.join([
+				[
+					("index", JsonOut.number(m.index)),
+					("from", JsonOut.string(m.from)),
+					("from_uid", JsonOut.string(m.from_uid.to_str())),
+					("at", JsonOut.string(m.at)),
+					("html", JsonOut.string(m.html)),
+					("markdown", JsonOut.string(m.markdown)),
+					("id", JsonOut.string(m.id)),
+				],
+				if m.cid == "" [] else [("cid", JsonOut.string(m.cid))],
+			]),
+		)
+		List.join([Str.to_utf8("id: ${U64.to_str(m.index)}\ndata: "), data.bytes(), Str.to_utf8("\n\n")])
 	}
 
 	## reactionFrame: `event: reaction`, its data the sidecar's own line;

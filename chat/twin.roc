@@ -23,6 +23,7 @@ import Conversation
 import Accounts
 import Fanout
 import Uid
+import JsonOut
 
 call : { which : U8, args : List(List(U8)) } -> List(List(U8))
 call = |req| {
@@ -356,6 +357,25 @@ call = |req| {
 			match (Uid.from_utf8(arg(1)), decoded) {
 				(Ok(viewer), Ok(all)) if List.len(members) == n => [Fanout.recent_where({ key, members, topic: "", index: 0, id: "", from: "", at: "", uid: viewer, accounts: all }, viewer).to_utf8()]
 				_ => []
+			}
+		}
+		# JsonOut: the args, each text, as one object: their count, the
+		# first, all of them, and whether the count is even. An arg that is
+		# not UTF-8 is no case: the door refuses it.
+		70 => {
+			given_texts = List.keep_oks(req.args, Str.from_utf8)
+			n = List.len(given_texts)
+			if n != List.len(req.args) {
+				[]
+			} else {
+				[
+					JsonOut.object([
+						("n", JsonOut.number(n)),
+						("first", JsonOut.string(List.first(given_texts) ?? "")),
+						("all", JsonOut.array(List.map(given_texts, JsonOut.string))),
+						("even", JsonOut.bool(n % 2 == 0)),
+					]).bytes(),
+				]
 			}
 		}
 		_ => crash "twin: no function ${U8.to_str(req.which)}"
