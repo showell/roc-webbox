@@ -1,0 +1,46 @@
+-- **ROC GLUE'S SNAPSHOT OF THE CHAT'S SEAM, REGENERATED**: what
+-- src/chat_glue_test.zig holds chat_abi.zig to. Run from roc-webbox's root
+-- after any change to chat/platform/ (Host.roc's hosted functions, the
+-- platform's records):
+--   shale tools/chat_glue.shale
+-- No arguments. `roc glue` with the pinned compiler (roc-version) and the
+-- spec from roc's source at the same commit (tools:roc-<commit>, which the
+-- compiler does not ship), into .zig-cache/roc-glue, then `zig fmt` (glue's
+-- output is not formatted as the gate checks), then written over
+-- src/glue/chat_platform_abi.zig. Says whether the snapshot changed; commit
+-- it with the change that moved it.
+
+const out_dir = ".zig-cache/roc-glue"
+const snapshot = "src/glue/chat_platform_abi.zig"
+
+if not exists("chat/platform/main.roc") or not exists(snapshot) then
+  fail("chat_glue: run it from roc-webbox's root (no chat/platform/main.roc or " .. snapshot .. " here)")
+end
+
+-- The pin, `nightly-<date>-<commit>`, and the compiler on PATH must be it:
+-- glue from another Roc lays out another Roc's records.
+const pin = trim(read("roc-version"))
+local said = must(run({"roc", "version"}, {timeout_ms = 30000, whole = 1000}))
+if find(said.out, pin) == nil then
+  fail("chat_glue: `roc version` says " .. trim(said.out) .. ", roc-version pins " .. pin .. " (tools/get_roc.sh installs it)")
+end
+local parts = split(pin, "-")
+const spec = "tools:roc-" .. parts[#parts] .. "/src/glue/src/ZigGlue.roc"
+if not exists(spec) then
+  fail("chat_glue: no glue spec at " .. spec .. ": check out roc-lang/roc at " .. parts[#parts] .. " as ~/tools/roc-" .. parts[#parts])
+end
+
+if exists(out_dir) then remove_tree(out_dir) end
+mkdir(out_dir)
+must(run({"roc", "glue", real(spec), out_dir, "chat/platform/main.roc"}, {timeout_ms = 120000, tail = 20}))
+const made = out_dir .. "/roc_platform_abi.zig"
+must(run({"zig", "fmt", made}, {timeout_ms = 60000, tail = 20}))
+
+local before = read(snapshot)
+local after = read(made)
+if before == after then
+  print("chat_glue: " .. snapshot .. " unchanged (roc " .. pin .. ")")
+else
+  replace(snapshot, after)
+  print("chat_glue: " .. snapshot .. " regenerated (roc " .. pin .. "): `zig build test` checks the seam against it")
+end

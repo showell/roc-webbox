@@ -8,6 +8,11 @@
   `shale tools/chat_quick_gate.shale`, no arguments; one PASS or FAIL line.
   Its header says what it leaves to the full gates, and when a step needs
   them instead.
+- **`chat_glue.shale`**: `roc glue`'s snapshot of the chat's seam
+  (src/glue/chat_platform_abi.zig) regenerated with the pinned Roc, which
+  src/chat_glue_test.zig holds every `roc_chat_` function's records to.
+  `shale tools/chat_glue.shale`, no arguments, after any change to
+  chat/platform/; the quick gate runs it too.
 
 ## Reading Roc with Roc's own parser
 

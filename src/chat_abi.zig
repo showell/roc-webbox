@@ -13,6 +13,10 @@
 //! functions, inside the call, as §6.2's send will: a pump there runs the
 //! kernel's turn and its fixed Zig render, never a handler, and the busy
 //! word refuses any Roc call beside this one.
+//!
+//! **EVERY `roc_chat_` FUNCTION IS `pub`**: src/chat_glue_test.zig lists
+//! them so, and holds each, record by record, to what `roc glue` makes of
+//! Host.roc.
 
 const std = @import("std");
 const roc = @import("roc_abi.zig");
@@ -539,7 +543,7 @@ pub const Conv = struct {
     }
 };
 
-extern fn roc_chat_handle(req: Request) callconv(.c) Answer;
+pub extern fn roc_chat_handle(req: Request) callconv(.c) Answer;
 
 /// **WHAT ANSWERS THE HOSTED FUNCTIONS** during a call: the host's, with its
 /// own context (the request, its `Io`). Set by `decide` for the call alone.
@@ -1136,22 +1140,22 @@ fn got(bytes: ?[]const u8) Got {
     return .{ .bytes = .from(b), .status = .read };
 }
 
-export fn roc_chat_check_member() callconv(.c) route_mod.Membership {
+pub export fn roc_chat_check_member() callconv(.c) route_mod.Membership {
     const h = current("check_member");
     return h.check_member(h.ctx);
 }
 
-export fn roc_chat_count_presence() callconv(.c) route_mod.PresenceEdge {
+pub export fn roc_chat_count_presence() callconv(.c) route_mod.PresenceEdge {
     const h = current("count_presence");
     return h.count_presence(h.ctx);
 }
 
-export fn roc_chat_presence_unspent() callconv(.c) void {
+pub export fn roc_chat_presence_unspent() callconv(.c) void {
     const h = current("presence_unspent");
     h.presence_unspent(h.ctx);
 }
 
-export fn roc_chat_list_accounts() callconv(.c) AccountsRec {
+pub export fn roc_chat_list_accounts() callconv(.c) AccountsRec {
     const h = current("list_accounts");
     return switch (h.list_accounts(h.ctx)) {
         .found => |all| .{ .accounts = .from(all), .status = .found },
@@ -1159,12 +1163,12 @@ export fn roc_chat_list_accounts() callconv(.c) AccountsRec {
     };
 }
 
-export fn roc_chat_read_body(which: route_mod.Form) callconv(.c) Got {
+pub export fn roc_chat_read_body(which: route_mod.Form) callconv(.c) Got {
     const h = current("read_body");
     return got(h.read_body(h.ctx, which));
 }
 
-export fn roc_chat_publish(key: RocBytes, bytes: RocBytes) callconv(.c) void {
+pub export fn roc_chat_publish(key: RocBytes, bytes: RocBytes) callconv(.c) void {
     const h = current("publish");
     h.publish(
         h.ctx,
@@ -1184,7 +1188,7 @@ fn underRoot(h: Host, path: []const u8) bool {
     return false;
 }
 
-export fn roc_chat_read(path: RocBytes) callconv(.c) ReadRec {
+pub export fn roc_chat_read(path: RocBytes) callconv(.c) ReadRec {
     const h = current("read");
     if (!underRoot(h, path.slice())) return .{ .bytes = .from(""), .status = .failed };
     return switch (h.read(h.ctx, path.slice())) {
@@ -1194,7 +1198,7 @@ export fn roc_chat_read(path: RocBytes) callconv(.c) ReadRec {
     };
 }
 
-export fn roc_chat_read_stat(path: RocBytes) callconv(.c) StatRec {
+pub export fn roc_chat_read_stat(path: RocBytes) callconv(.c) StatRec {
     const h = current("stat");
     if (!underRoot(h, path.slice())) return .{
         .mtime = 0,
@@ -1222,7 +1226,7 @@ export fn roc_chat_read_stat(path: RocBytes) callconv(.c) StatRec {
 
 /// **NEVER MORE THAN `max`**: a host that hands back more is cut to it
 /// here, so the Roc's window is the window it asked for.
-export fn roc_chat_read_at(
+pub export fn roc_chat_read_at(
     path: RocBytes,
     offset: u64,
     max: u64,
@@ -1241,7 +1245,7 @@ export fn roc_chat_read_at(
     };
 }
 
-export fn roc_chat_write(path: RocBytes, bytes: RocBytes) callconv(.c) route_mod.Done {
+pub export fn roc_chat_write(path: RocBytes, bytes: RocBytes) callconv(.c) route_mod.Done {
     const h = current("write");
     if (!underRoot(h, path.slice())) return .failed;
     return h.write(
@@ -1251,13 +1255,13 @@ export fn roc_chat_write(path: RocBytes, bytes: RocBytes) callconv(.c) route_mod
     );
 }
 
-export fn roc_chat_remove(path: RocBytes) callconv(.c) route_mod.Done {
+pub export fn roc_chat_remove(path: RocBytes) callconv(.c) route_mod.Done {
     const h = current("remove");
     if (!underRoot(h, path.slice())) return .failed;
     return h.remove(h.ctx, path.slice());
 }
 
-export fn roc_chat_append_line(path: RocBytes, line: RocBytes) callconv(.c) route_mod.Done {
+pub export fn roc_chat_append_line(path: RocBytes, line: RocBytes) callconv(.c) route_mod.Done {
     const h = current("append_line");
     if (!underRoot(h, path.slice())) return .failed;
     return h.append_line(
@@ -1267,7 +1271,7 @@ export fn roc_chat_append_line(path: RocBytes, line: RocBytes) callconv(.c) rout
     );
 }
 
-export fn roc_chat_list(path: RocBytes) callconv(.c) ListRec {
+pub export fn roc_chat_list(path: RocBytes) callconv(.c) ListRec {
     const h = current("list");
     if (!underRoot(h, path.slice())) return .{ .entries = .from(&.{}), .status = .failed };
     return switch (h.list(h.ctx, path.slice())) {
@@ -1289,7 +1293,7 @@ export fn roc_chat_list(path: RocBytes) callconv(.c) ListRec {
 /// passes no argument for it (a byte read here was garbage). The reason is
 /// a byte only while FailReason has two tags or more, which the check below
 /// holds.
-export fn roc_chat_fail(reason: route_mod.FailReason, whose: RocBytes) callconv(.c) void {
+pub export fn roc_chat_fail(reason: route_mod.FailReason, whose: RocBytes) callconv(.c) void {
     comptime if (@typeInfo(route_mod.FailReason).@"enum".field_names.len < 2)
         @compileError("Host.fail!'s reason of one tag crosses as nothing: roc_chat_fail must not take it");
     const h = current("fail");
@@ -1311,12 +1315,12 @@ export fn roc_chat_fail(reason: route_mod.FailReason, whose: RocBytes) callconv(
     }
 }
 
-export fn roc_chat_count_malformed_channel(name: RocBytes) callconv(.c) void {
+pub export fn roc_chat_count_malformed_channel(name: RocBytes) callconv(.c) void {
     const h = current("count_malformed_channel");
     h.count_malformed_channel(h.ctx, name.slice());
 }
 
-export fn roc_chat_count_dropped(what: route_mod.Dropped, whose: RocBytes) callconv(.c) void {
+pub export fn roc_chat_count_dropped(what: route_mod.Dropped, whose: RocBytes) callconv(.c) void {
     const h = current("count_dropped");
     h.count_dropped(
         h.ctx,
@@ -1325,7 +1329,7 @@ export fn roc_chat_count_dropped(what: route_mod.Dropped, whose: RocBytes) callc
     );
 }
 
-export fn roc_chat_mark_aside(which: route_mod.Aside) callconv(.c) route_mod.AsideEnd {
+pub export fn roc_chat_mark_aside(which: route_mod.Aside) callconv(.c) route_mod.AsideEnd {
     const h = current("aside");
     return h.aside(h.ctx, which);
 }
@@ -1333,27 +1337,27 @@ export fn roc_chat_mark_aside(which: route_mod.Aside) callconv(.c) route_mod.Asi
 /// **ONE FLAG FOR EACH ID, IN ITS PLACE**: the Roc asks once for the whole
 /// roster, and the seam asks the host id by id, so the answer is exactly as
 /// long as the ids and never out of their order.
-export fn roc_chat_check_welcome() callconv(.c) route_mod.Welcome {
+pub export fn roc_chat_check_welcome() callconv(.c) route_mod.Welcome {
     const h = current("welcome_pending");
     return h.welcome_pending(h.ctx);
 }
 
-export fn roc_chat_clear_welcome() callconv(.c) route_mod.Done {
+pub export fn roc_chat_clear_welcome() callconv(.c) route_mod.Done {
     const h = current("welcome_done");
     return h.welcome_done(h.ctx);
 }
 
-export fn roc_chat_admit() callconv(.c) route_mod.Admission {
+pub export fn roc_chat_admit() callconv(.c) route_mod.Admission {
     const h = current("admit");
     return h.admit(h.ctx);
 }
 
-export fn roc_chat_read_query(name: RocBytes) callconv(.c) roc.RocBytesList {
+pub export fn roc_chat_read_query(name: RocBytes) callconv(.c) roc.RocBytesList {
     const h = current("read_query");
     return .from(h.read_query(h.ctx, name.slice()));
 }
 
-export fn roc_chat_search_words(key: RocBytes, most: u64) callconv(.c) WordsRec {
+pub export fn roc_chat_search_words(key: RocBytes, most: u64) callconv(.c) WordsRec {
     const h = current("search_words");
     const found = h.search_words(
         h.ctx,
@@ -1371,7 +1375,7 @@ export fn roc_chat_search_words(key: RocBytes, most: u64) callconv(.c) WordsRec 
     };
 }
 
-export fn roc_chat_search_messages(key: RocBytes, most: u64) callconv(.c) MessagesRec {
+pub export fn roc_chat_search_messages(key: RocBytes, most: u64) callconv(.c) MessagesRec {
     const h = current("search_messages");
     const found = h.search_messages(
         h.ctx,
@@ -1391,7 +1395,7 @@ export fn roc_chat_search_messages(key: RocBytes, most: u64) callconv(.c) Messag
     };
 }
 
-export fn roc_chat_check_online(ids: roc.RocBytesList) callconv(.c) PresenceList {
+pub export fn roc_chat_check_online(ids: roc.RocBytesList) callconv(.c) PresenceList {
     const h = current("check_online");
     const items = ids.slice();
     const flags = roc.alloc().alloc(
@@ -1402,22 +1406,22 @@ export fn roc_chat_check_online(ids: roc.RocBytesList) callconv(.c) PresenceList
     return .from(flags);
 }
 
-export fn roc_chat_read_uid() callconv(.c) RocBytes {
+pub export fn roc_chat_read_uid() callconv(.c) RocBytes {
     const h = current("me");
     return .from(h.me(h.ctx));
 }
 
-export fn roc_chat_read_time() callconv(.c) i64 {
+pub export fn roc_chat_read_time() callconv(.c) i64 {
     const h = current("now");
     return h.now(h.ctx);
 }
 
-export fn roc_chat_render(markdown: RocBytes) callconv(.c) RenderRec {
+pub export fn roc_chat_render(markdown: RocBytes) callconv(.c) RenderRec {
     const h = current("render");
     return renderRec(h.render(h.ctx, markdown.slice()));
 }
 
-export fn roc_chat_render_preview(markdown: RocBytes) callconv(.c) RenderRec {
+pub export fn roc_chat_render_preview(markdown: RocBytes) callconv(.c) RenderRec {
     const h = current("render_preview");
     return renderRec(h.render_preview(h.ctx, markdown.slice()));
 }
@@ -1429,7 +1433,7 @@ fn renderRec(r: Rendered) RenderRec {
     };
 }
 
-export fn roc_chat_append_message(conv: ConvRec, args: AppendMessageArgs) callconv(.c) AppendedAtRec {
+pub export fn roc_chat_append_message(conv: ConvRec, args: AppendMessageArgs) callconv(.c) AppendedAtRec {
     const sid = args.sid;
     const block = args.block;
     const h = current("append_message");
@@ -1448,7 +1452,7 @@ export fn roc_chat_append_message(conv: ConvRec, args: AppendMessageArgs) callco
     };
 }
 
-export fn roc_chat_index_message(conv: ConvRec, args: IndexMessageArgs) callconv(.c) void {
+pub export fn roc_chat_index_message(conv: ConvRec, args: IndexMessageArgs) callconv(.c) void {
     const sid = args.sid;
     const message = args.message;
     const h = current("index_message");
@@ -1463,7 +1467,7 @@ export fn roc_chat_index_message(conv: ConvRec, args: IndexMessageArgs) callconv
     );
 }
 
-export fn roc_chat_write_cache(path: RocBytes, bytes: RocBytes) callconv(.c) void {
+pub export fn roc_chat_write_cache(path: RocBytes, bytes: RocBytes) callconv(.c) void {
     const h = current("write_cache");
     if (!underRoot(h, path.slice())) return;
     h.write_cache(h.ctx, path.slice(), bytes.slice());
@@ -1503,7 +1507,7 @@ fn onePart(name: []const u8) bool {
 /// DONE** (metal-vmm QUEUE 172), so the seam refuses it as `underRoot` does
 /// (the host never asked) but hands it back as the append's failure
 /// (error.PathOutsideChatRoot), which the Roc counts and says.
-export fn roc_chat_append_entry(path: RocBytes, args: AppendEntryArgs) callconv(.c) AppendRec {
+pub export fn roc_chat_append_entry(path: RocBytes, args: AppendEntryArgs) callconv(.c) AppendRec {
     const separator = args.separator;
     const entry = args.entry;
     const h = current("append_entry");
@@ -1522,7 +1526,7 @@ export fn roc_chat_append_entry(path: RocBytes, args: AppendEntryArgs) callconv(
     };
 }
 
-export fn roc_chat_report_fanout_failure(surface: route_mod.Surface, args: FanoutFailureArgs) callconv(.c) void {
+pub export fn roc_chat_report_fanout_failure(surface: route_mod.Surface, args: FanoutFailureArgs) callconv(.c) void {
     const member = args.member;
     const key = args.key;
     const sid = args.sid;
@@ -1543,12 +1547,12 @@ export fn roc_chat_report_fanout_failure(surface: route_mod.Surface, args: Fanou
     );
 }
 
-export fn roc_chat_read_header(name: RocBytes) callconv(.c) roc.RocBytesList {
+pub export fn roc_chat_read_header(name: RocBytes) callconv(.c) roc.RocBytesList {
     const h = current("read_header");
     return .from(h.read_header(h.ctx, name.slice()));
 }
 
-export fn roc_chat_check_hostile(
+pub export fn roc_chat_check_hostile(
     markdown: RocBytes,
     refusal: RocBytes,
 ) callconv(.c) route_mod.Hostility {
@@ -1560,13 +1564,13 @@ export fn roc_chat_check_hostile(
     );
 }
 
-export fn roc_chat_serve_file(path: RocBytes) callconv(.c) route_mod.Serving {
+pub export fn roc_chat_serve_file(path: RocBytes) callconv(.c) route_mod.Serving {
     const h = current("serve_file");
     if (!underRoot(h, path.slice())) return .not_serving;
     return h.serve_file(h.ctx, path.slice());
 }
 
-export fn roc_chat_read_upload() callconv(.c) UploadReadRec {
+pub export fn roc_chat_read_upload() callconv(.c) UploadReadRec {
     const h = current("read_upload");
     return switch (h.read_upload(h.ctx)) {
         .read => |f| .{ .size = f.size, .ext = .from(f.ext), .filename = .from(f.filename), .status = .read },
@@ -1576,29 +1580,29 @@ export fn roc_chat_read_upload() callconv(.c) UploadReadRec {
     };
 }
 
-export fn roc_chat_refuse_upload(why: route_mod.UploadRefusal, message: RocBytes) callconv(.c) void {
+pub export fn roc_chat_refuse_upload(why: route_mod.UploadRefusal, message: RocBytes) callconv(.c) void {
     const h = current("refuse_upload");
     h.refuse_upload(h.ctx, why, message.slice());
 }
 
-export fn roc_chat_retire_asked() callconv(.c) RetireAskedRec {
+pub export fn roc_chat_retire_asked() callconv(.c) RetireAskedRec {
     const h = current("retire_asked");
     const it = h.retire_asked(h.ctx);
     return .{ .days = it.days, .now = it.now, .keep = .from(it.keep) };
 }
 
-export fn roc_chat_retire_note(kind: route_mod.RetireKind, label: RocBytes) callconv(.c) void {
+pub export fn roc_chat_retire_note(kind: route_mod.RetireKind, label: RocBytes) callconv(.c) void {
     const h = current("retire_note");
     h.retire_note(h.ctx, kind, label.slice());
 }
 
-export fn roc_chat_retire_remove(path: RocBytes, what: route_mod.RetireRemoval) callconv(.c) route_mod.Done {
+pub export fn roc_chat_retire_remove(path: RocBytes, what: route_mod.RetireRemoval) callconv(.c) route_mod.Done {
     const h = current("retire_remove");
     if (!underRoot(h, path.slice())) return .failed;
     return h.retire_remove(h.ctx, path.slice(), what);
 }
 
-export fn roc_chat_retire_replace(path: RocBytes, bytes: RocBytes) callconv(.c) route_mod.Done {
+pub export fn roc_chat_retire_replace(path: RocBytes, bytes: RocBytes) callconv(.c) route_mod.Done {
     const h = current("retire_replace");
     if (!underRoot(h, path.slice())) return .failed;
     return h.retire_replace(h.ctx, path.slice(), bytes.slice());
@@ -1607,7 +1611,7 @@ export fn roc_chat_retire_replace(path: RocBytes, bytes: RocBytes) callconv(.c) 
 /// **A UID THE HOST JOINS INTO EVERY ROOT IS ONE** (metal-vmm QUEUE 293):
 /// digits with no leading zero, as an account is made, or the request's
 /// failure, the host never asked.
-export fn roc_chat_retire_user(uid: RocBytes) callconv(.c) route_mod.Done {
+pub export fn roc_chat_retire_user(uid: RocBytes) callconv(.c) route_mod.Done {
     const h = current("retire_user");
     if (!isUid(uid.slice())) {
         h.fail(h.ctx, error.NotAUid);
@@ -1622,12 +1626,12 @@ fn isUid(s: []const u8) bool {
     return true;
 }
 
-export fn roc_chat_reserve_upload(size: u64) callconv(.c) route_mod.Reservation {
+pub export fn roc_chat_reserve_upload(size: u64) callconv(.c) route_mod.Reservation {
     const h = current("reserve_upload");
     return h.reserve_upload(h.ctx, size);
 }
 
-export fn roc_chat_store_upload(folder: RocBytes, ext: RocBytes) callconv(.c) StoredRec {
+pub export fn roc_chat_store_upload(folder: RocBytes, ext: RocBytes) callconv(.c) StoredRec {
     const h = current("store_upload");
     if (!underRoot(h, folder.slice())) return .{ .name = .from(""), .status = .failed };
     return switch (h.store_upload(h.ctx, folder.slice(), ext.slice())) {
@@ -1636,7 +1640,7 @@ export fn roc_chat_store_upload(folder: RocBytes, ext: RocBytes) callconv(.c) St
     };
 }
 
-export fn roc_chat_serve_upload(rec: UploadRec) callconv(.c) route_mod.UploadServed {
+pub export fn roc_chat_serve_upload(rec: UploadRec) callconv(.c) route_mod.UploadServed {
     const h = current("serve_upload");
     if (!underRoot(h, rec.path.slice())) return .gone;
     return h.serve_upload(h.ctx, .{
@@ -1649,24 +1653,24 @@ export fn roc_chat_serve_upload(rec: UploadRec) callconv(.c) route_mod.UploadSer
     });
 }
 
-export fn roc_chat_bundle_add(name: RocBytes, path: RocBytes) callconv(.c) route_mod.Done {
+pub export fn roc_chat_bundle_add(name: RocBytes, path: RocBytes) callconv(.c) route_mod.Done {
     const h = current("bundle_add");
     if (!underRoot(h, path.slice())) return .failed;
     return h.bundle_add(h.ctx, name.slice(), path.slice());
 }
 
-export fn roc_chat_serve_bundle(name: RocBytes) callconv(.c) void {
+pub export fn roc_chat_serve_bundle(name: RocBytes) callconv(.c) void {
     const h = current("serve_bundle");
     h.serve_bundle(h.ctx, name.slice());
 }
 
-export fn roc_chat_serve_rendered(path: RocBytes) callconv(.c) route_mod.Serving {
+pub export fn roc_chat_serve_rendered(path: RocBytes) callconv(.c) route_mod.Serving {
     const h = current("serve_rendered");
     if (!underRoot(h, path.slice())) return .not_serving;
     return h.serve_rendered(h.ctx, path.slice());
 }
 
-export fn roc_chat_list_srcs() callconv(.c) SrcList {
+pub export fn roc_chat_list_srcs() callconv(.c) SrcList {
     const h = current("srcs");
     return .from(h.srcs(h.ctx));
 }
