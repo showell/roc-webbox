@@ -99,7 +99,7 @@ Host := [].{
 	## its mtime in whole seconds since the epoch (`Found`), nothing there
 	## (`Missing`), or a stat that failed, a folder among them (`Failed`: the
 	## request has failed). Missing and failed are two answers, as `read!`'s.
-	stat! : List(U8) => {
+	read_stat! : List(U8) => {
 		mtime : I64,
 		size : U64,
 		status : [
@@ -233,7 +233,7 @@ Host := [].{
 	## request's do. `End` answers `Failed` when anything in it failed, and
 	## the request goes on. `Begin` answers `Failed` only for a request that
 	## has failed already.
-	aside! : [Begin, End] => [Done, Failed]
+	mark_aside! : [Begin, End] => [Done, Failed]
 
 	## **WHO IS ONLINE, AT THE REQUEST'S TIME** (angry-gopher presence.zig
 	## `isOnline`): for each of `ids`, in their order, whether it was seen
@@ -294,7 +294,7 @@ Host := [].{
 	## metal-vmm QUEUE 283): whether the member's welcome is pending, a fact
 	## signup wrote in the gopher's own users folder. `Failed` when the look
 	## failed (the host has failed the request).
-	welcome_pending! : {} => [
+	check_welcome! : {} => [
 		Failed,
 		None,
 		Pending,
@@ -302,11 +302,11 @@ Host := [].{
 
 	## The member's welcome given: the pending mark goes (one gone already
 	## is done). `Err(Failed)` when it failed.
-	welcome_done! : {} => Try({}, [Failed])
+	clear_welcome! : {} => Try({}, [Failed])
 
 	## Where a page names each script, by its name (a src's hash is of bytes
 	## the host holds).
-	srcs! : {} => List({ name : List(U8), src : List(U8) })
+	list_srcs! : {} => List({ name : List(U8), src : List(U8) })
 
 	## **AFTER A FAILURE THE HOST DOES NOTHING MORE** for the call: a hosted
 	## function the Roc calls once one has failed answers empty,
@@ -314,11 +314,11 @@ Host := [].{
 	## returns the failure.
 
 	## The member's own id.
-	me! : {} => List(U8)
+	read_uid! : {} => List(U8)
 
 	## The request's time, in Unix seconds: the one time everything it
 	## stamps carries (a new conversation's topic is named for its date).
-	now! : {} => I64
+	read_time! : {} => I64
 
 	## **THE ONE MARKDOWN PROCESSOR** (angry-gopher markdown.zig `render`):
 	## a message's markdown as the HTML its frame carries. `Failed` when it

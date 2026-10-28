@@ -119,7 +119,7 @@ not_found_page! = |who, { what, back }|
 			{
 				content_type: html,
 				body: Pages.not_found(
-					Chrome.src_in(Host.srcs!({})),
+					Chrome.src_in(Host.list_srcs!({})),
 					{
 						viewer,
 						what,
@@ -212,9 +212,9 @@ presence! = |who|
 	match Host.count_presence!({}) {
 		Steady => {}
 		CameOnline => {
-			_ = Host.aside!(Begin)
+			_ = Host.mark_aside!(Begin)
 			told = came_online!(who)
-			match (Host.aside!(End), told) {
+			match (Host.mark_aside!(End), told) {
 				(Done, Ok({})) => {}
 				_ => Host.presence_unspent!({})
 			}
@@ -417,7 +417,7 @@ serve_download! = |req, { route, found }|
 		at = { key: found.key, topic: route.topic }
 		sid = route.topic
 		md = Paths.transcript_path(at)
-		match Files.stat!(md) {
+		match Files.read_stat!(md) {
 			Err(Missing) => Chat.not_found
 			Err(Failed) => Chat.answered
 			Ok(_) =>
@@ -445,7 +445,7 @@ Paths.ChatPath => Try(
 bundle_files! = |at, md| {
 	sid = at.topic
 	reactions = Paths.reactions_path(at)
-	with_reactions = match Files.stat!(reactions) {
+	with_reactions = match Files.read_stat!(reactions) {
 		Ok(_) => Ok([{ name: "${sid}/${sid}.reactions.jsonl", path: reactions }])
 		Err(Missing) => Ok([])
 		Err(Failed) => Err(Failed)
@@ -871,7 +871,7 @@ store_reaction! = |
 					if r.msg == 0 or r.msg > count {
 						NoSuchMessage
 					} else {
-						at = Time.rfc3339(Host.now!({}))
+						at = Time.rfc3339(Host.read_time!({}))
 						line = Reaction.line({
 							msg: r.msg,
 							uid,
@@ -912,7 +912,7 @@ serve_links! = |rest|
 		match (Members.load_viewer!(Unasked), Members.load_uid!({})) {
 			(Err(Failed), _) | (Ok(_), Err(Failed)) => Chat.answered
 			(Ok(viewer), Ok(me)) => {
-				src = Chrome.src_in(Host.srcs!({}))
+				src = Chrome.src_in(Host.list_srcs!({}))
 				match Files.serve_rendered!(Paths.links_path(me)) {
 					Serving => {
 						(before, after) = Pages.links_around(src, viewer)
@@ -955,7 +955,7 @@ serve_recent! = |rest|
 					{
 						content_type: html,
 						body: Pages.recent(
-							Chrome.src_in(Host.srcs!({})),
+							Chrome.src_in(Host.list_srcs!({})),
 							{ viewer, json: Recent.json(me, got.rows) },
 						).bytes(),
 					},
@@ -1108,7 +1108,7 @@ gather_topics! = |
 				dm: conv.key.kind(),
 			}
 			rows =
-				match Last.of!(at, accounts)? {
+				match Last.read_message!(at, accounts)? {
 					Some(last) =>
 						match (
 							Time.unix_from_rfc3339(last.at),
@@ -1180,7 +1180,7 @@ gather_docs! = |
 ## it, so the two show the same data alike); no row for a file not there.
 by_file_time! : Paths.ChatPath, Recent.Written => Try(List(Recent.Written), [Failed])
 by_file_time! = |path, row|
-	match Files.stat!(path) {
+	match Files.read_stat!(path) {
 		Ok(st) => Ok([{ ..row, secs: secs_text(if st.mtime % 2 == 0 st.mtime else st.mtime - 1) }])
 		Err(Missing) => Ok([])
 		Err(Failed) => Err(Failed)
@@ -1233,7 +1233,7 @@ serve_feed! = |which, rest|
 					Ok(bytes) => bytes
 					Err(Missing) | Err(Failed) => []
 				}
-				src = Chrome.src_in(Host.srcs!({}))
+				src = Chrome.src_in(Host.list_srcs!({}))
 				(page, damaged) = match which {
 					Images => {
 						got = Feeds.images_of(file)
@@ -1283,7 +1283,7 @@ serve_landing! = |route, key|
 								{
 									content_type: html,
 									body: Pages.no_topics(
-										Chrome.src_in(Host.srcs!({})),
+										Chrome.src_in(Host.list_srcs!({})),
 										{
 											viewer,
 											base: key.base(),
@@ -1325,7 +1325,7 @@ serve_topic_page! = |route, at|
 					{
 						content_type: html,
 						body: Pages.conversation(
-							Chrome.src_in(Host.srcs!({})),
+							Chrome.src_in(Host.list_srcs!({})),
 							{ limits: Limits.page, v: view },
 						).bytes(),
 					},
@@ -1469,9 +1469,9 @@ json = Chat.json
 ## none, or the aside failed).
 welcome! : {} => Who
 welcome! = |{}| {
-	_ = Host.aside!(Begin)
+	_ = Host.mark_aside!(Begin)
 	got = seed_welcome!({})
-	match (Host.aside!(End), got) {
+	match (Host.mark_aside!(End), got) {
 		(Done, Ok(who)) => who
 		_ => Unasked
 	}
@@ -1508,7 +1508,7 @@ hello! = |accounts, { host, key }| {
 seed_welcome! : {} => Try(Who, [Failed])
 seed_welcome! = |{}| {
 	me = Members.load_uid!({})?
-	match Host.welcome_pending!({}) {
+	match Host.check_welcome!({}) {
 		Failed => Err(Failed)
 		None => Ok(Unasked)
 		Pending => {
@@ -1520,11 +1520,11 @@ seed_welcome! = |{}| {
 					if Paths.first_of(load_topics!(key)).is_empty() {
 						hello!(accounts, { host: host.id, key })?
 					}
-					Host.welcome_done!({})?
+					Host.clear_welcome!({})?
 					Ok(Known(accounts))
 				}
 				[_, ..] => {
-					Host.welcome_done!({})?
+					Host.clear_welcome!({})?
 					Ok(Known(accounts))
 				}
 				[] => Ok(Known(accounts))
@@ -1557,7 +1557,7 @@ resume! = |who|
 							{
 								content_type: html,
 								body: Pages.no_conversations(
-									Chrome.src_in(Host.srcs!({})),
+									Chrome.src_in(Host.list_srcs!({})),
 									viewer,
 								).bytes(),
 							},
@@ -1573,7 +1573,7 @@ resume! = |who|
 resume_at! : Uid, { pair : Paths.PairKey, topics : List(Str) } => Str
 resume_at! = |me, { pair, topics }| {
 	last = ChatState.bookmark(Files.read!(Paths.last_session_path(me, Dm(pair))))
-	ChatState.resume_topic(topics, { last, now_secs: Host.now!({}) })
+	ChatState.resume_topic(topics, { last, now_secs: Host.read_time!({}) })
 }
 
 ## /chat/conversations: a DM with every other member, where the member
@@ -1873,7 +1873,7 @@ make_topic! = |
 					# aside, best-effort, counted when it fails, never a 500
 					# whose retry is a 409.
 					if dm {
-						_ = Host.aside!(Begin)
+						_ = Host.mark_aside!(Begin)
 						_ = announce!(
 							key,
 							{
@@ -1883,7 +1883,7 @@ make_topic! = |
 								name,
 							},
 						)
-						match Host.aside!(End) {
+						match Host.mark_aside!(End) {
 							Done => {}
 							Failed => Host.count_dropped!(Announcement, topic.to_utf8())
 						}
@@ -2107,7 +2107,7 @@ search_words! = |req|
 			{ content_type: json, body: search_error("too many searches; wait a second") },
 		)
 	} else {
-		match Form.value(List.first(Host.read_query!(Str.to_utf8("prefix"))) ?? []) {
+		match Form.decode(List.first(Host.read_query!(Str.to_utf8("prefix"))) ?? []) {
 			Err(BadEscape) => Chat.malformed
 			Ok(typed) => {
 				key = Search.key(typed)
@@ -2146,7 +2146,7 @@ search_messages! = |req|
 			{ content_type: json, body: search_error("too many searches; wait a second") },
 		)
 	} else {
-		match Form.value(List.first(Host.read_query!(Str.to_utf8("word"))) ?? []) {
+		match Form.decode(List.first(Host.read_query!(Str.to_utf8("word"))) ?? []) {
 			Err(BadEscape) => Chat.malformed
 			Ok(typed) => {
 				key = Search.key(typed)
@@ -2387,7 +2387,7 @@ append_message_by! = |
 				# A count of the largest U64 has no next number: the call
 				# crashes into a 500, storing nothing.
 				id = "${topic}_${U64.to_str(index + 1)}"
-				stamp = Time.rfc3339(Host.now!({}))
+				stamp = Time.rfc3339(Host.read_time!({}))
 				message = {
 					id: id.to_utf8(),
 					from: name.to_utf8(),

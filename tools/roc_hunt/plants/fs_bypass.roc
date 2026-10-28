@@ -22,5 +22,5 @@ Plants := [].{
 	quiet_table = { read!: Host.read! }
 
 	quiet_me : {} => List(U8)
-	quiet_me = |_| Host.me!({})
+	quiet_me = |_| Host.read_uid!({})
 }

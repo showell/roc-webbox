@@ -54,12 +54,12 @@ Members := [].{
 		}
 	}
 
-	## **THE MEMBER'S ID, DECODED WHERE THE HOST HANDS IT** (Host.me!): a
+	## **THE MEMBER'S ID, DECODED WHERE THE HOST HANDS IT** (Host.read_uid!): a
 	## session is signed only for an id a counter made, so one that is no
 	## canonical uid fails the request (NotAUid, about the id), and `Failed`.
 	load_uid! : {} => Try(Uid, [Failed])
 	load_uid! = |{}| {
-		bytes = Host.me!({})
+		bytes = Host.read_uid!({})
 		match Uid.from_utf8(bytes) {
 			Ok(uid) => Ok(uid)
 			Err(NotAUid) => {

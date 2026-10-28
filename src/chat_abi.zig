@@ -1194,7 +1194,7 @@ export fn roc_chat_read(path: RocBytes) callconv(.c) ReadRec {
     };
 }
 
-export fn roc_chat_stat(path: RocBytes) callconv(.c) StatRec {
+export fn roc_chat_read_stat(path: RocBytes) callconv(.c) StatRec {
     const h = current("stat");
     if (!underRoot(h, path.slice())) return .{
         .mtime = 0,
@@ -1325,7 +1325,7 @@ export fn roc_chat_count_dropped(what: route_mod.Dropped, whose: RocBytes) callc
     );
 }
 
-export fn roc_chat_aside(which: route_mod.Aside) callconv(.c) route_mod.AsideEnd {
+export fn roc_chat_mark_aside(which: route_mod.Aside) callconv(.c) route_mod.AsideEnd {
     const h = current("aside");
     return h.aside(h.ctx, which);
 }
@@ -1333,12 +1333,12 @@ export fn roc_chat_aside(which: route_mod.Aside) callconv(.c) route_mod.AsideEnd
 /// **ONE FLAG FOR EACH ID, IN ITS PLACE**: the Roc asks once for the whole
 /// roster, and the seam asks the host id by id, so the answer is exactly as
 /// long as the ids and never out of their order.
-export fn roc_chat_welcome_pending() callconv(.c) route_mod.Welcome {
+export fn roc_chat_check_welcome() callconv(.c) route_mod.Welcome {
     const h = current("welcome_pending");
     return h.welcome_pending(h.ctx);
 }
 
-export fn roc_chat_welcome_done() callconv(.c) route_mod.Done {
+export fn roc_chat_clear_welcome() callconv(.c) route_mod.Done {
     const h = current("welcome_done");
     return h.welcome_done(h.ctx);
 }
@@ -1402,12 +1402,12 @@ export fn roc_chat_check_online(ids: roc.RocBytesList) callconv(.c) PresenceList
     return .from(flags);
 }
 
-export fn roc_chat_me() callconv(.c) RocBytes {
+export fn roc_chat_read_uid() callconv(.c) RocBytes {
     const h = current("me");
     return .from(h.me(h.ctx));
 }
 
-export fn roc_chat_now() callconv(.c) i64 {
+export fn roc_chat_read_time() callconv(.c) i64 {
     const h = current("now");
     return h.now(h.ctx);
 }
@@ -1666,7 +1666,7 @@ export fn roc_chat_serve_rendered(path: RocBytes) callconv(.c) route_mod.Serving
     return h.serve_rendered(h.ctx, path.slice());
 }
 
-export fn roc_chat_srcs() callconv(.c) SrcList {
+export fn roc_chat_list_srcs() callconv(.c) SrcList {
     const h = current("srcs");
     return .from(h.srcs(h.ctx));
 }

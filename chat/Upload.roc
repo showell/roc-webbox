@@ -172,7 +172,7 @@ Upload := [].{
 				Err(NotAnUpload) => Chat.not_found
 				Ok(typed) => {
 					path = Paths.upload_path(at, file)
-					match Files.stat!(path) {
+					match Files.read_stat!(path) {
 						Err(Missing) => Chat.not_found
 						Err(Failed) => Chat.answered
 						Ok(st) => {

@@ -16,9 +16,10 @@ Form := [].{
 	]
 
 	## A query's or a form's value, as written, decoded (formDecode: `+` a
-	## space, `%XX` a byte), or `BadEscape`.
-	value : List(U8) -> Try(List(U8), [BadEscape])
-	value = |raw| decode(raw)
+	## space, `%XX` a byte), or `BadEscape` for a `%` that is not two hex
+	## digits.
+	decode : List(U8) -> Try(List(U8), [BadEscape])
+	decode = |raw| decode_from(raw, { at: 0, out: [] })
 
 	## formField: the value of field `name`. A pair with no `=` is passed
 	## over.
@@ -44,10 +45,6 @@ Form := [].{
 		}
 	}
 }
-
-## formDecode, or `BadEscape` for a `%` that is not two hex digits.
-decode : List(U8) -> Try(List(U8), [BadEscape])
-decode = |raw| decode_from(raw, { at: 0, out: [] })
 
 decode_from : List(U8), { at : U64, out : List(U8) } -> Try(List(U8), [BadEscape])
 decode_from = |raw, { at: i, out }| match List.get(raw, i) {

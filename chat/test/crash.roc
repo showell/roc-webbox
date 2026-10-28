@@ -51,7 +51,7 @@ handle! = |req|
 		}
 		Chat.respond(200, { content_type: [], body: List.concat(Str.to_utf8(said), got.bytes) })
 	} else if starts(req.sub, "/stat/") {
-		got = Host.stat!(List.drop_first(req.sub, 6))
+		got = Host.read_stat!(List.drop_first(req.sub, 6))
 		said = match got.status {
 			Found => "found size=${U64.to_str(got.size)} mtime=${I64.to_str(got.mtime)}"
 			Missing => "missing size=${U64.to_str(got.size)} mtime=${I64.to_str(got.mtime)}"

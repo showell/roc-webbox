@@ -334,7 +334,7 @@ doc_there! = |me, slug|
 	match Paths.doc_path(me, slug) {
 		Err(NotASlug) => Ok(Free)
 		Ok(path) =>
-			match Files.stat!(path) {
+			match Files.read_stat!(path) {
 				Ok(_) => Ok(Taken)
 				Err(Missing) => Ok(Free)
 				Err(Failed) => Err(Failed)
@@ -374,7 +374,7 @@ save_slug! = |form, slug|
 						Malformed => Chat.malformed
 						Missing => Chat.refuse("not saved: no body\n")
 						Found(text) =>
-							match Files.stat!(path) {
+							match Files.read_stat!(path) {
 								Err(Missing) => Chat.respond(
 									404,
 									{ content_type: [], body: "no such doc\n".to_utf8() },
@@ -545,7 +545,7 @@ doc_touched! : Uid, Str => {}
 doc_touched! = |me, slug|
 	Host.publish!(
 		BusKey.recent(me).bytes(),
-		Docs.recent_frame(Time.rfc3339(Host.now!({})), slug),
+		Docs.recent_frame(Time.rfc3339(Host.read_time!({})), slug),
 	)
 
 ## **THE DOCS' READ PAGES** (docs.zig `handle`, metal-vmm QUEUE 289), each
@@ -609,7 +609,7 @@ last_touched! = |docs, best|
 	match docs {
 		[] => Ok(best)
 		[doc, .. as more] =>
-			match Files.stat!(doc.path) {
+			match Files.read_stat!(doc.path) {
 				Err(Failed) => Err(Failed)
 				Err(Missing) => last_touched!(more, best)
 				Ok(st) =>
@@ -712,7 +712,7 @@ docs_page! = |slugs, open|
 			{
 				content_type: Chat.html,
 				body: Docs.editor({
-					src: Chrome.src_in(Host.srcs!({})),
+					src: Chrome.src_in(Host.list_srcs!({})),
 					viewer,
 					slugs,
 					open,

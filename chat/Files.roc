@@ -53,10 +53,10 @@ Files := [].{
 		decoded(answer(got.status, got.bytes))
 	}
 
-	## Host.stat!: the file's size and its mtime in seconds.
-	stat! : Paths.ChatPath => Try({ size : U64, mtime : I64 }, [Missing, Failed])
-	stat! = |path| {
-		got = Host.stat!(path.bytes())
+	## Host.read_stat!: the file's size and its mtime in seconds.
+	read_stat! : Paths.ChatPath => Try({ size : U64, mtime : I64 }, [Missing, Failed])
+	read_stat! = |path| {
+		got = Host.read_stat!(path.bytes())
 		match got.status {
 			Found => Ok({ size: got.size, mtime: got.mtime })
 			Missing => Err(Missing)
