@@ -139,6 +139,9 @@ pub const MessageRec = extern struct {
 };
 /// Host.roc's `append_entry!` answer: `{ fault : U16, status : [Appended, Failed] }`.
 pub const AppendRec = extern struct { fault: u16, status: route_mod.AppendStatus };
+/// Host.roc's `append_message!` answer (metal-vmm QUEUE 287): `{ size : U64,
+/// status : [Appended, Failed] }`, the transcript's size after the append.
+pub const AppendedAtRec = extern struct { size: u64, status: route_mod.AppendStatus };
 /// Host.roc's `check_online!` answer, `List([Offline, Online])`: its elements one
 /// byte each, so laid out as a `List(U8)` is.
 pub const PresenceList = RocBytes;
@@ -246,6 +249,7 @@ comptime {
     const w = @sizeOf(usize);
     std.debug.assert(@sizeOf(RocBytes) == 3 * w and @sizeOf(Request) == 4 * w and @sizeOf(RouteRec) == 10 * w and @sizeOf(Answer) == 20 * w and @sizeOf(Got) == 4 * w and @sizeOf(ConvRec) == 10 * w and @sizeOf(ReadRec) == 4 * w and @sizeOf(EntryRec) == 4 * w and @sizeOf(SrcRec) == 6 * w and @sizeOf(ListRec) == 4 * w and @sizeOf(AccountRec) == 7 * w and @sizeOf(AccountsRec) == 4 * w and @sizeOf(RenderRec) == 4 * w and @sizeOf(MessageRec) == 15 * w);
     std.debug.assert(@sizeOf(AppendRec) == 4);
+    std.debug.assert(@sizeOf(AppendedAtRec) == 16 and @offsetOf(AppendedAtRec, "size") == 0 and @offsetOf(AppendedAtRec, "status") == 8);
     // search_words!'s (metal-vmm QUEUE 281): the 8-byte numbers at 0, the
     // bytes and the list after, the tag last.
     std.debug.assert(@offsetOf(
