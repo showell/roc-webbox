@@ -42,6 +42,11 @@ pub const ReadRec = extern struct { bytes: RocBytes, status: route_mod.ReadStatu
 pub const EntryRec = extern struct { name: RocBytes, kind: route_mod.EntryKind };
 /// Host.roc's `list!` answer: `{ entries : List(...), status : [Failed, Found, Missing] }`.
 pub const ListRec = extern struct { entries: EntryList, status: route_mod.ReadStatus };
+/// Host.roc's `stat!` answer: `{ mtime : I64, size : U64, status : [Failed,
+/// Found, Missing] }`. **THE 8-BYTE FIELDS FIRST, BY NAME, THEN THE TAG**
+/// (src/roc_abi.zig's rule): 24 bytes, the tag in the last word's first
+/// byte. A missing or failed stat's size and mtime are 0.
+pub const StatRec = extern struct { mtime: i64, size: u64, status: route_mod.ReadStatus };
 /// One of Host.roc's `srcs!` scripts: `{ name : List(U8), src : List(U8) }`.
 pub const SrcRec = extern struct { name: RocBytes, src: RocBytes };
 /// One of Host.roc's `gather_recent!` rows: seven `List(U8)` fields by name, then
@@ -117,6 +122,7 @@ comptime {
     const w = @sizeOf(usize);
     std.debug.assert(@sizeOf(RocBytes) == 3 * w and @sizeOf(Request) == 4 * w and @sizeOf(RouteRec) == 10 * w and @sizeOf(Answer) == 20 * w and @sizeOf(Got) == 4 * w and @sizeOf(ConvRec) == 10 * w and @sizeOf(ReadRec) == 4 * w and @sizeOf(EntryRec) == 4 * w and @sizeOf(SrcRec) == 6 * w and @sizeOf(RecentRec) == 22 * w and @sizeOf(ListRec) == 4 * w and @sizeOf(AccountRec) == 7 * w and @sizeOf(AccountsRec) == 4 * w and @sizeOf(CountRec) == 16 and @sizeOf(RenderRec) == 4 * w and @sizeOf(MessageRec) == 15 * w);
     std.debug.assert(@sizeOf(AppendRec) == 4);
+    std.debug.assert(@sizeOf(StatRec) == 24 and @offsetOf(StatRec, "size") == 8 and @offsetOf(StatRec, "status") == 16);
     std.debug.assert(@sizeOf(route_mod.Presence) == 1);
     // **A FAULT IS THE HOST'S ERROR, CARRIED BY THE ROC AS A NUMBER** it
     // never reads (`@intFromError`), handed back to say it: it fits a U16.
@@ -136,6 +142,9 @@ pub const Entry = struct { name: []const u8, kind: route_mod.EntryKind };
 /// gives them; nothing there; or a listing that failed (the host has failed
 /// the request). Missing and failed are never one answer.
 pub const Listing = union(route_mod.ReadStatus) { failed, found: []const Entry, missing };
+/// A file's size in bytes and its last change in whole seconds since the
+/// epoch, as stat! answers them.
+pub const Stat = union(route_mod.ReadStatus) { failed, found: struct { size: u64, mtime: i64 }, missing };
 
 /// A script a page names: its name and its src.
 pub const Src = struct { name: []const u8, src: []const u8 };
