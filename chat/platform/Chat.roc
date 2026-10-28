@@ -8,8 +8,9 @@ Chat := [].{
 
 	## **THE TAGS CROSS AS ONE BYTE EACH, NUMBERED ALPHABETICALLY** (Roc's
 	## layout of a tag union with no payloads): roc-webbox src/chat_route.zig
-	## and src/chat_abi.zig list each union's names in that order, and check
-	## at compile time that they do. A tag added here is added there.
+	## and src/chat_abi.zig list each union's names, and src/chat_glue_test.zig
+	## holds each tag's number to roc glue's at compile time. A tag added here
+	## is added there.
 
 	## A request's method, as the router tells them apart.
 	Method : [
@@ -31,98 +32,12 @@ Chat := [].{
 		method : Method,
 	}
 
-	## Which part of the chat a path names. `rest` (below) is the family's
-	## own remainder where it has one.
-	Family : [
-		NotFound,
-
-		## A static script, `rest` its name; served before the gate.
-		Asset,
-
-		## `/chat`, `/chat/`, `/chat/default`: the last conversation resumed.
-		Default,
-
-		## `rest` the path under `/docs` (and the four below likewise).
-		Docs,
-		Recent,
-		Images,
-		Code,
-		Links,
-
-		## `rest` the path after `/search`, with no boundary (`/searchX` is "X").
-		Search,
-		Conversations,
-
-		## `rest` the message id after `/msg/`.
-		Msg,
-
-		## A DM, `key` its pair as written.
-		Dm,
-
-		## A channel, `key` its name (already a valid one).
-		Channel,
-		Notifications,
-		SidebarStream,
-	]
-
-	## Which part of a conversation.
-	Part : [
-		## No topic named: its first topic, or the page offering one.
-		Landing,
-
-		## `.../new`: a topic made.
-		New,
-
-		## A topic id that is not one: refused after the conversation's own checks.
-		Invalid,
-
-		## `topic` a valid topic id, `tail` what of it.
-		Topic,
-	]
-
-	## What of a topic. `Invalid` is no tail Zig serves (refused once the
-	## topic is known to exist); `InvalidSend` the same under `send`, which
-	## skips that check (a send makes its topic).
-	Tail : [
-		Page,
-		Uploads,
-		Stream,
-		Send,
-		Upload,
-		Pin,
-		Unpin,
-		Raw,
-		Download,
-		Saved,
-		Reactions,
-		React,
-		Invalid,
-		InvalidSend,
-	]
-
-	## Where a request goes, as angry-gopher's Zig serves it (§5.2's
-	## `ZigRoute`, flattened so the host lays it out by hand): a family,
-	## and for a conversation its key, its part, and for a topic its id and
-	## tail. `rest` is the family's own remainder: an asset's name, the
-	## rest of a docs/recent/images/code/links/search path, a message id,
-	## an upload's file. Unused fields are empty, `Landing` and `Page`, so
-	## two routes are equal exactly when they go the same place.
-	Route : {
-		family : Family,
-		key : List(U8),
-		rest : List(U8),
-		topic : List(U8),
-		part : Part,
-		tail : Tail,
-	}
-
 	## A DM or channel the Roc found to be the member's (chat/main.roc
-	## `find!`), as the host takes it for an operation on it: `family` `Dm`
-	## or `Channel`, `key` its pair or name, `base` its URL base, `members`
-	## each member once (whom a message is fanned out to). The host keeps no
-	## conversation between calls: each operation is handed this.
+	## `find!`): which it is, `key` its pair or name, `base` its URL base,
+	## `members` each member once (whom a message is fanned out to). The
+	## host keeps no conversation between calls.
 	Conv : {
-		family : Family,
+		family : [Channel, Dm],
 		key : List(U8),
 		base : List(U8),
 		members : List(List(U8)),
@@ -141,8 +56,6 @@ Chat := [].{
 	}
 
 	## What the answer is:
-	## - `Serve`: Zig serves `route` (its presence the Roc's, counted
-	##   first, metal-vmm QUEUE 288);
 	## - `Redirect`: a 303 to `location`;
 	## - `Respond`: `status` with `body`, and a content-type when
 	##   `content_type` (`sniff` `Forbid`: the browser told not to guess another);
@@ -160,9 +73,8 @@ Chat := [].{
 	## - `Stream`: the live stream on the bus key `location`, held by the
 	##   host (metal-vmm QUEUE 286); a topic's, with its backlog replayed
 	##   first from the transcript at `body` (a path under the chat root),
-	##   its messages numbered in topic `route.topic`. `body` empty: live only.
+	##   its messages numbered in topic `topic`. `body` empty: live only.
 	Kind : [
-		Serve,
 		Redirect,
 		Respond,
 		NotAllowed,
@@ -182,7 +94,7 @@ Chat := [].{
 	Answer : {
 		kind : Kind,
 		location : List(U8),
-		route : Route,
+		topic : List(U8),
 		status : U16,
 		content_type : List(U8),
 		body : List(U8),
@@ -190,22 +102,12 @@ Chat := [].{
 		sniff : Sniff,
 	}
 
-	## A route of `family` with nothing else.
-	family : Family -> Route
-	family = |f| {
-		family: f,
-		key: [],
-		rest: [],
-		topic: [],
-		part: Landing,
-		tail: Page,
-	}
-
-	none : Answer
-	none = {
-		kind: Serve,
+	## webbox's plain "not found", and every other answer's empty fields.
+	not_found : Answer
+	not_found = {
+		kind: NotFound,
 		location: [],
-		route: family(NotFound),
+		topic: [],
 		status: 0,
 		content_type: [],
 		body: [],
@@ -213,17 +115,10 @@ Chat := [].{
 		sniff: Allow,
 	}
 
-	## Zig serves it.
-	zig : Route -> Answer
-	zig = |route| {
-		..none,
-		route,
-	}
-
 	## A 303 to `location`.
 	redirect : List(U8) -> Answer
 	redirect = |location| {
-		..none,
+		..not_found,
 		kind: Redirect,
 		location,
 	}
@@ -242,7 +137,7 @@ Chat := [].{
 	## `status` with `body`, typed `content_type` when it is not empty.
 	respond : U16, { content_type : List(U8), body : List(U8) } -> Answer
 	respond = |status, { content_type, body }| {
-		..none,
+		..not_found,
 		kind: Respond,
 		status,
 		content_type,
@@ -273,27 +168,23 @@ Chat := [].{
 	## A 405 naming `allow`.
 	not_allowed : Method -> Answer
 	not_allowed = |allow| {
-		..none,
+		..not_found,
 		kind: NotAllowed,
 		allow,
 	}
 
 	## The host answered inside the call, or failed there.
 	answered : Answer
-	answered = { ..none, kind: Answered }
+	answered = { ..not_found, kind: Answered }
 
 	## A malformed form: the site's 400, as for every form.
 	malformed : Answer
-	malformed = { ..none, kind: Malformed }
-
-	## webbox's plain "not found".
-	not_found : Answer
-	not_found = { ..none, kind: NotFound }
+	malformed = { ..not_found, kind: Malformed }
 
 	## A 302 to `location`.
 	found : List(U8) -> Answer
 	found = |location| {
-		..none,
+		..not_found,
 		kind: Found,
 		location,
 	}
@@ -302,7 +193,7 @@ Chat := [].{
 	## feed, notifications or sidebar.
 	stream : List(U8) -> Answer
 	stream = |key| {
-		..none,
+		..not_found,
 		kind: Stream,
 		location: key,
 	}
@@ -311,17 +202,17 @@ Chat := [].{
 	## transcript at `transcript`, numbered in `topic`.
 	topic_stream : List(U8), { transcript : List(U8), topic : List(U8) } -> Answer
 	topic_stream = |key, { transcript, topic }| {
-		..none,
+		..not_found,
 		kind: Stream,
 		location: key,
 		body: transcript,
-		route: { ..family(NotFound), topic },
+		topic,
 	}
 
 	## To the login page, to come back to `next` after.
 	to_login : List(U8) -> Answer
 	to_login = |next| {
-		..none,
+		..not_found,
 		kind: ToLogin,
 		location: next,
 	}

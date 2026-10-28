@@ -1,11 +1,10 @@
 ## WHERE A CHAT PATH GOES, BY ZIG'S RULES (angry-gopher chat.zig's dispatch
 ## as it was: `handle`, `handleChannel`, `convRoute`, `topicRoute`). Pure:
 ## the decisions that need the disk or the viewer (whether they are in the
-## DM, whether the account or the topic exists) stay in the Zig that serves
-## the route, so this says only what the path says.
+## DM, whether the account or the topic exists) are main.roc's, which
+## serves the route, so this says only what the path says.
 ##
-## A path is text (main.handle! checked it at the door); the route it makes
-## crosses back to the Zig as bytes (to_wire; Chat.roc's `Route`).
+## A path is text (main.handle! checked it at the door).
 import Paths
 
 Route := [].{
@@ -43,11 +42,11 @@ Route := [].{
 	under_channel : Str -> R
 	under_channel = |sub| conversation(Channel, segments(sub))
 
-	## A static script: `/<name>.js` under /chat, `rest` the name.
-	asset : Str -> Try(R, [NotAnAsset])
+	## A static script: `/<name>.js` under /chat, its name.
+	asset : Str -> Try(Str, [NotAnAsset])
 	asset = |sub|
 		if sub.count_utf8_bytes() > 1 and sub.ends_with(".js") {
-			Ok(with_rest(Asset, sub.drop_prefix("/")))
+			Ok(sub.drop_prefix("/"))
 		} else {
 			Err(NotAnAsset)
 		}
@@ -64,8 +63,11 @@ Route := [].{
 			_ => r.tail == Stream
 		}
 
-	## A route, as Chat.roc's `Route` (records are structural: the same
-	## type).
+	## A route: a family, and for a conversation its key, its part, and for
+	## a topic its id and tail. `rest` is the family's own remainder: the
+	## rest of a docs/recent/images/code/links/search path, a message id, an
+	## upload's file. Unused fields are empty, `Landing` and `Page`, so two
+	## routes are equal exactly when they go the same place.
 	R : {
 		family : Family,
 		key : Str,
@@ -75,28 +77,9 @@ Route := [].{
 		tail : Tail,
 	}
 
-	## The route as it crosses back to the Zig: Chat.roc's `Route`, bytes.
-	to_wire : R -> {
-		family : Family,
-		key : List(U8),
-		rest : List(U8),
-		topic : List(U8),
-		part : Part,
-		tail : Tail,
-	}
-	to_wire = |r| {
-		family: r.family,
-		key: r.key.to_utf8(),
-		rest: r.rest.to_utf8(),
-		topic: r.topic.to_utf8(),
-		part: r.part,
-		tail: r.tail,
-	}
-
-	## Chat.roc's, spelled again (aliases are structural: the same types).
+	## Which part of the chat a path names.
 	Family : [
 		NotFound,
-		Asset,
 		Default,
 		Docs,
 		Recent,
@@ -111,12 +94,20 @@ Route := [].{
 		Notifications,
 		SidebarStream,
 	]
+
+	## Which part of a conversation: none named (`Landing`), `.../new`, a
+	## topic id that is not one (refused after the conversation's own
+	## checks), or a topic, `tail` what of it.
 	Part : [
 		Landing,
 		New,
 		Invalid,
 		Topic,
 	]
+
+	## What of a topic. `Invalid` is no tail there is (refused once the
+	## topic is known to exist); `InvalidSend` the same under `send`, which
+	## skips that check (a send makes its topic).
 	Tail : [
 		Page,
 		Uploads,

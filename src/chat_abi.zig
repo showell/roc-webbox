@@ -6,11 +6,11 @@
 //! with any other Roc app in the binary.
 //!
 //! **THE DECISION LEAVES THE CALL**: `decide` copies what Roc answered into
-//! the caller's allocator and ends the call before it returns, so the Zig
-//! that serves a delegated route runs with no Roc call open (docs/ROC-CHAT.md
-//! R1): its writes, and on metal the network pumps inside them, nest
-//! nothing. A route the Roc serves itself (C4) writes through the hosted
-//! functions, inside the call, as §6.2's send will: a pump there runs the
+//! the caller's allocator and ends the call before it returns, so the host
+//! sends the answer with no Roc call open (docs/ROC-CHAT.md R1): its writes,
+//! and on metal the network pumps inside them, nest nothing. What the Roc
+//! has the host answer itself (an upload, a bundle, a script) is written
+//! through the hosted functions, inside the call: a pump there runs the
 //! kernel's turn and its fixed Zig render, never a handler, and the busy
 //! word refuses any Roc call beside this one.
 //!
@@ -22,12 +22,10 @@ const std = @import("std");
 const roc = @import("roc_abi.zig");
 const route_mod = @import("chat_route.zig");
 const sljmp = @import("sljmp.zig");
-pub const Route = route_mod.Route;
 pub const Decision = route_mod.Decision;
 
 pub const RocBytes = roc.RocBytes;
 
-const Family = route_mod.Family;
 const Method = route_mod.Method;
 
 /// Chat.roc's `Request`.
@@ -36,21 +34,12 @@ pub const Request = extern struct {
     area: route_mod.Area,
     method: Method,
 };
-/// Chat.roc's `Route`.
-pub const RouteRec = extern struct {
-    key: RocBytes,
-    rest: RocBytes,
-    topic: RocBytes,
-    family: Family,
-    part: route_mod.Part,
-    tail: route_mod.Tail,
-};
 /// Chat.roc's `Answer`.
 pub const Answer = extern struct {
     body: RocBytes,
     content_type: RocBytes,
     location: RocBytes,
-    route: RouteRec,
+    topic: RocBytes,
     status: u16,
     allow: Method,
     kind: route_mod.Kind,
@@ -276,7 +265,7 @@ pub const AccountList = RecList(AccountRec, Account, struct {
 
 comptime {
     const w = @sizeOf(usize);
-    std.debug.assert(@sizeOf(RocBytes) == 3 * w and @sizeOf(Request) == 4 * w and @sizeOf(RouteRec) == 10 * w and @sizeOf(Answer) == 20 * w and @sizeOf(Got) == 4 * w and @sizeOf(ReadRec) == 4 * w and @sizeOf(EntryRec) == 4 * w and @sizeOf(SrcRec) == 6 * w and @sizeOf(ListRec) == 4 * w and @sizeOf(AccountRec) == 7 * w and @sizeOf(AccountsRec) == 4 * w and @sizeOf(RenderRec) == 4 * w and @sizeOf(MessageRec) == 15 * w);
+    std.debug.assert(@sizeOf(RocBytes) == 3 * w and @sizeOf(Request) == 4 * w and @sizeOf(Answer) == 13 * w and @sizeOf(Got) == 4 * w and @sizeOf(ReadRec) == 4 * w and @sizeOf(EntryRec) == 4 * w and @sizeOf(SrcRec) == 6 * w and @sizeOf(ListRec) == 4 * w and @sizeOf(AccountRec) == 7 * w and @sizeOf(AccountsRec) == 4 * w and @sizeOf(RenderRec) == 4 * w and @sizeOf(MessageRec) == 15 * w);
     std.debug.assert(@sizeOf(AsideRec) == 4 and @offsetOf(AsideRec, "fault") == 0 and @offsetOf(AsideRec, "status") == 2);
     std.debug.assert(@sizeOf(AppendedRec) == 16 and @offsetOf(AppendedRec, "size") == 0 and @offsetOf(AppendedRec, "status") == 8);
     // read_upload!'s and store_upload!'s (metal-vmm QUEUE 292).
@@ -705,6 +694,9 @@ pub const Host = struct {
     bundle_add: *const fn (ctx: *anyopaque, name: []const u8, path: []const u8) route_mod.Done = noBundleAdd,
     /// Host.serve_bundle!: the bundle answered as `<name>.tar.gz`.
     serve_bundle: *const fn (ctx: *anyopaque, name: []const u8) void = noServeBundle,
+    /// Host.serve_script!: the script `name` of the host's table answered,
+    /// or `.missing` (nothing answered) when the table has none of the name.
+    serve_script: *const fn (ctx: *anyopaque, name: []const u8) route_mod.ScriptServed = noServeScript,
     /// Host.retire_asked!: the admin retire's days, names kept and now.
     retire_asked: *const fn (ctx: *anyopaque) RetireAsked = noRetireAsked,
     /// Host.retire_note!: a step of the retire's plan said for its report.
@@ -766,6 +758,9 @@ fn noBundleAdd(_: *anyopaque, _: []const u8, _: []const u8) route_mod.Done {
 }
 fn noServeBundle(_: *anyopaque, _: []const u8) void {
     @panic("serve_bundle asked of a host that does not answer it");
+}
+fn noServeScript(_: *anyopaque, _: []const u8) route_mod.ScriptServed {
+    @panic("serve_script asked of a host that does not answer it");
 }
 fn noServeRendered(_: *anyopaque, _: []const u8) route_mod.Serving {
     @panic("serve_rendered asked of a host that does not answer it");
@@ -953,13 +948,16 @@ var host: ?Host = null;
 
 /// **A HOST FOR THE ROUTER ALONE**, for a test of its decisions: it says
 /// whether the one asking is a member, records whether the Roc counted
-/// presence itself, and has no conversation for the member (no id, no
-/// channel), so a route the Roc serves goes to Zig as every other does.
+/// presence and which script it had served, and has no conversation for the
+/// member (no id, no channel), so a route meets nothing there.
 pub const Routing = struct {
     member: bool = true,
     asked: bool = false,
-    /// The Roc counted the request as presence itself (a route it serves).
+    /// The Roc counted the request as presence.
     marked: bool = false,
+    /// The script the Roc had served (Host.serve_script!), one of
+    /// `test_srcs`; null when it served none.
+    script: ?[]const u8 = null,
 
     pub fn host(r: *Routing) Host {
         var h = askingOnly(r, ask);
@@ -973,6 +971,7 @@ pub const Routing = struct {
         h.read = noFile;
         h.list = noFolder;
         h.srcs = everyScript;
+        h.serve_script = scriptOf;
         h.serve_rendered = holdsNone;
         // An aside (the welcome on /chat) that meets no host account does nothing.
         h.aside = asideDone;
@@ -1001,6 +1000,13 @@ pub const Routing = struct {
     }
     fn holdsNone(_: *anyopaque, _: []const u8) route_mod.Serving {
         return .not_serving;
+    }
+    fn scriptOf(ctx: *anyopaque, name: []const u8) route_mod.ScriptServed {
+        for (test_srcs) |s| if (std.mem.eql(u8, s.name, name)) {
+            of(ctx).script = s.name;
+            return .served;
+        };
+        return .missing;
     }
     fn noFile(_: *anyopaque, _: []const u8) Read {
         return .missing;
@@ -1563,6 +1569,11 @@ pub export fn roc_chat_serve_bundle(name: RocBytes) callconv(.c) void {
     h.serve_bundle(h.ctx, name.slice());
 }
 
+pub export fn roc_chat_serve_script(name: RocBytes) callconv(.c) route_mod.ScriptServed {
+    const h = current("serve_script");
+    return h.serve_script(h.ctx, name.slice());
+}
+
 pub export fn roc_chat_serve_rendered(path: RocBytes) callconv(.c) route_mod.Serving {
     const h = current("serve_rendered");
     if (!underRoot(h, path.slice())) return .not_serving;
@@ -1665,14 +1676,6 @@ fn call(
         &a,
     )) return error.RocCrashed;
     return switch (a.kind) {
-        .serve => .{ .serve = .{ .route = .{
-            .family = a.route.family,
-            .part = a.route.part,
-            .tail = a.route.tail,
-            .key = try alloc.dupe(u8, a.route.key.slice()),
-            .rest = try alloc.dupe(u8, a.route.rest.slice()),
-            .topic = try alloc.dupe(u8, a.route.topic.slice()),
-        } } },
         .redirect => .{ .redirect = try alloc.dupe(u8, a.location.slice()) },
         .respond => .{ .respond = .{
             .status = a.status,
@@ -1701,7 +1704,7 @@ fn call(
             break :blk .{ .stream = .{
                 .key = try alloc.dupe(u8, a.location.slice()),
                 .transcript = try alloc.dupe(u8, a.body.slice()),
-                .topic = try alloc.dupe(u8, a.route.topic.slice()),
+                .topic = try alloc.dupe(u8, a.topic.slice()),
             } };
         },
         .held => .{ .held = .{

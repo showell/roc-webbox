@@ -1,11 +1,11 @@
 ## THE ROC CHAT: the router (docs/ROC-CHAT.md §3, milestone 1). Every /chat
-## and /channel request angry-gopher has comes here first. The router runs
-## the prelude angry-gopher's chat.zig `handle` and `handleChannel` ran,
-## parses the path (Route.roc), and hands the route to Zig, which serves it
-## once this call has returned.
+## and /channel request angry-gopher has comes here, and the Roc answers
+## each: it runs the prelude angry-gopher's chat.zig `handle` and
+## `handleChannel` ran, parses the path (Route.roc), and serves the route.
 ##
 ## The prelude, in Zig's order:
-##   1. a static script under /chat (`/<name>.js`) is served to anyone;
+##   1. a static script under /chat (`/<name>.js`) is served to anyone, by
+##      any method (`script!`);
 ##   2. anyone not a member or the agent is sent to sign in, and returned;
 ##   3. every other request counts as presence, but a stream (by its route:
 ##      chat.zig read it from the path's spelling, so `.../stream/` counted).
@@ -78,22 +78,26 @@ handle! = |req|
 dispatch! : Chat.Request, Str => Chat.Answer
 dispatch! = |req, sub|
 	match (if req.area == Channel Err(NotAnAsset) else Route.asset(sub)) {
-		Ok(route) => zig(route)
+		Ok(name) => script!(name)
 		Err(NotAnAsset) =>
 			if Host.check_member!({}) == Outsider {
 				area = if req.area == Channel "/channel" else "/chat"
 				Chat.to_login(List.concat(Str.to_utf8(area), req.sub))
 			} else {
 				route = if req.area == Channel Route.under_channel(sub) else Route.under_chat(sub)
-				match served_by(route) {
-					Roc => act!(req, route)
-					# A stream is no presence (the Zig's streams were served uncounted).
-					Zig => {
-						if Route.is_stream(route) {} else presence!(Unasked)
-						zig(route)
-					}
-				}
+				act!(req, route)
 			}
+	}
+
+## **A STATIC SCRIPT, TO ANYONE, BY ANY METHOD** (chat.zig's `serveAsset`,
+## as it was): the host's script of the name, which the host answers with
+## its bytes, or webbox's plain 404 for a name its table has not. Nobody is
+## asked who they are, and no presence is counted.
+script! : Str => Chat.Answer
+script! = |name|
+	match Host.serve_script!(name.to_utf8()) {
+		Served => Chat.answered
+		Missing => Chat.not_found
 	}
 
 ## **NOT THE VIEWER'S, OR NOT A CONVERSATION**: a DM's is webbox's plain 404,
@@ -132,36 +136,11 @@ not_found_page! = |who, { what, back }|
 		Err(Failed) => Chat.answered
 	}
 
-## The route handed back to the Zig, as the seam's bytes.
-zig : Route.R -> Chat.Answer
-zig = |route| Chat.zig(Route.to_wire(route))
-
-## Which side serves a route. The Roc serves: /chat and /chat/default, the recent,
-## images and code pages and every stream (metal-vmm QUEUE 286), /chat/links,
-## /chat/conversations, /chat/msg/<id>; and every route of a DM or a
-## channel. Every other route is Zig's.
-served_by : Route.R -> [Roc, Zig]
-served_by = |r|
-	match r.family {
-		Default | Links | Conversations | Msg => Roc
-		# The pages and their streams (metal-vmm QUEUE 286): the Roc picks
-		# the member's bus key, the host holds the stream.
-		Recent | Images | Code | Notifications | SidebarStream => Roc
-		NotFound => Roc
-		# **THE ROC DECIDES EVERY CONVERSATION'S ROUTE** (metal-vmm QUEUE
-		# 271): whose it is, whether its topic is there, every 404, and
-		# each tail's work (the last, an upload's POST: QUEUE 292).
-		Dm | Channel => Roc
-		# The docs: posted to chat (metal-vmm QUEUE 278), the read pages
-		# (289), the writes and the live preview (290).
-		Docs => Roc
-		# Search's words and messages (metal-vmm QUEUE 281, 282), and the
-		# 404 for anything else under /chat/search.
-		Search => Roc
-		_ => Zig
-	}
-
-## The Roc's own routes: presence, then the route's own work.
+## **EVERY ROUTE PAST THE GATE IS THE ROC'S**: presence, then the route's
+## own work. A conversation's (metal-vmm QUEUE 271): whose it is, whether its
+## topic is there, every 404, each tail's work; the pages and their streams
+## (286: the Roc picks the member's bus key, the host holds the stream); the
+## docs (278, 289, 290); search's words and messages (281, 282).
 act! : Chat.Request, Route.R => Chat.Answer
 act! = |req, route| {
 	# **THE WELCOME DM ON THE FIRST /chat** (metal-vmm QUEUE 279), before

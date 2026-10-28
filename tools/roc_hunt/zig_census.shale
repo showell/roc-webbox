@@ -2,10 +2,9 @@
 -- parser (roc-ast) for the Roc, Zig's (zig_decls, zig_imports, zig_tokens)
 -- for angry-gopher's Zig. Four reports, then one number to watch:
 --
---   - **routes**: every route chat/main.roc's `served_by` decides, the
---     families, parts and tails from chat/Route.roc, each Roc's or handed to
---     Zig, and for Zig's the arm of chat.zig's `serve` (or `topicRoute`, while it lived)
---     that takes it;
+--   - **routes**: every route, the families, parts and tails from
+--     chat/Route.roc and the static scripts, each the Roc's: the census
+--     stops if the Roc can hand one back to Zig again;
 --   - **hosted functions**: each of chat/platform/Host.roc's, the
 --     chat_router.zig `Call` member that answers it, its own tokens plus
 --     what it calls one level deep (a Call member or a chat file's
@@ -17,8 +16,8 @@
 --     caller (login.zig's welcome DM, docs, the router);
 --   - **dead**: chat declarations no live root reaches, by file.
 --
--- **THE CHAT'S ZIG** is chat*.zig and `chat_set` below (its features behind
--- chat.serve); twins, tests and benches are never counted. **LIVE** is what
+-- **THE CHAT'S ZIG** is chat*.zig and `chat_set` below (the features the
+-- chat once served in Zig); twins, tests and benches are never counted. **LIVE** is what
 -- the roots reach, a top-level declaration a node: chat_router.zig's
 -- `handle` and every declaration a call from outside names, then each
 -- declaration's bare names in its file and `alias.name` through an import.
@@ -47,7 +46,7 @@ const src = gopher .. "/src/"
 const feature_tokens = 3600
 -- A dead declaration this size or more is named in the by-file report.
 const named_dead_tokens = 50
-const chat_set = " chat.zig presence.zig recent.zig recent_feed.zig reactions.zig images.zig images_store.zig code.zig code_store.zig docs.zig docs_store.zig search_index.zig search_tokens.zig "
+const chat_set = " presence.zig recent.zig recent_feed.zig reactions.zig images.zig images_store.zig code.zig code_store.zig docs.zig docs_store.zig search_index.zig search_tokens.zig "
 
 function is_aside(name)
   return ends_with(name, "_test.zig") or contains(name, "twin") or contains(name, "_bench") or contains(name, "probe") or name == "router_harness.zig"
@@ -216,80 +215,6 @@ end
 
 -- ── the Roc ──────────────────────────────────────────────────────────────
 
--- roc-ast's dump of `path`: its lines and their depths.
-function roc_tree(path)
-  local dump = run({roc_ast}, {timeout_ms = 300000, stdin = path, whole = 64000000})
-  local text = lines(dump.out)
-  local depth = {}
-  for line in text do
-    local d = 0
-    while sub(line, d + 1, d + 1) == "\t" do d = d + 1 end
-    push(depth, d)
-  end
-  return {text = text, depth = depth}
-end
-
-function kids(tree, at)
-  local out = {}
-  local i = at + 1
-  while i <= #tree.text and tree.depth[i] > tree.depth[at] do
-    if tree.depth[i] == tree.depth[at] + 1 then push(out, i) end
-    i = i + 1
-  end
-  return out
-end
-
-function hd(tree, at)
-  return trim(tree.text[at])
-end
-
--- `served_by`'s answer for route `r` ({family, part, tail, rest}),
--- evaluated over its tree from the node at `at`: a `match` on a field, its
--- branches' tags, `_`, the tags `Roc`/`Zig`, a block holding one of them,
--- and `if r.rest == "<lit>"` (or `!=`) choosing between two of them. Anything else stops the census:
--- the rule grew a shape it cannot read.
-function evaluate(tree, at, r)
-  local t = hd(tree, at)
-  if starts_with(t, "(e-tag ") then
-    local raw = between(t, "(raw \"", "\")")
-    if raw == "Roc" or raw == "Zig" then return raw end
-  end
-  if starts_with(t, "(e-block") or starts_with(t, "(statements") or starts_with(t, "(s-expr") then
-    local k = kids(tree, at)
-    return evaluate(tree, k[#k], r)
-  end
-  if starts_with(t, "(e-if-then-else") then
-    local k = kids(tree, at)
-    local cond = hd(tree, k[1])
-    local ck = kids(tree, k[1])
-    local field = between(hd(tree, ck[1] + 3), "(field \"", "\")")
-    local lit = between(hd(tree, ck[2] + 1), "(raw \"", "\")")
-    if starts_with(cond, "(e-binop ") and field == "rest" and lit ~= nil then
-      local equal = r.rest == lit
-      if contains(cond, "(op \"!=\")") then equal = not equal end
-      if equal then return evaluate(tree, k[2], r) end
-      return evaluate(tree, k[3], r)
-    end
-  end
-  if starts_with(t, "(e-match") then
-    local k = kids(tree, at)
-    local field = between(hd(tree, k[1] + 3), "(field \"", "\")")
-    local value = get(r, field)
-    for b in kids(tree, k[2]) do
-      local bk = kids(tree, b)
-      local p = hd(tree, bk[1])
-      local hit = false
-      if starts_with(p, "(p-underscore") then hit = true end
-      if starts_with(p, "(p-tag ") and between(p, "(raw \"", "\")") == value then hit = true end
-      if starts_with(p, "(p-alternatives") then
-        for a in kids(tree, bk[1]) do if between(hd(tree, a), "(raw \"", "\")") == value then hit = true end end
-      end
-      if hit then return evaluate(tree, bk[2], r) end
-    end
-  end
-  fail("served_by: a node the census cannot read: " .. t)
-end
-
 -- A type's tags, as chat/Route.roc spells them: `Family : [A, B, ...]`, on
 -- one line or stacked one a line (the trailing comma no tag).
 function tags(text, name)
@@ -297,61 +222,6 @@ function tags(text, name)
   if m == nil then fail("chat/Route.roc: no `" .. name .. " : [...]`") end
   local out = {}
   for s in split(m.group, ",") do if trim(s) ~= "" then push(out, trim(s)) end end
-  return out
-end
-
--- CamelCase to Zig's snake_case: `SidebarStream` -> `sidebar_stream`.
-function snake(s)
-  local out = ""
-  local i = 1
-  while i <= #s do
-    local c = sub(s, i, i)
-    if c ~= lower(c) then
-      if i > 1 then out = out .. "_" end
-      out = out .. lower(c)
-    else
-      out = out .. c
-    end
-    i = i + 1
-  end
-  return out
-end
-
--- The arms of the Zig `switch` inside declaration `fn` of chat.zig: tag ->
--- what the arm does (its first call, or `panic` for one that says it is the
--- Roc's).
-function arms(file, fn)
-  local d = file.decls[fn]
-  local out = {}
-  local i = d.first
-  while i <= d.last do
-    local line = file.text[i]
-    local m = re_find(line, "^\\s+(\\.[a-z_, .]+) =>")
-    if m ~= nil and not starts_with(trim(line), "//") then
-      local does = "?"
-      if contains(line, "panic") then
-        does = "panic (the Roc's)"
-      else
-        -- The arm's first call; in a block, its first line's that is not
-        -- the method's check (`isRead`).
-        local c = re_find(split(line, "=>")[2], "([a-zA-Z_][a-zA-Z_.]*)\\(")
-        if c ~= nil then does = c.group end
-        local j = i + 1
-        while c == nil and j <= d.last and not starts_with(trim(file.text[j]), "}") do
-          if not contains(file.text[j], "isRead") then
-            c = re_find(file.text[j], "([a-zA-Z_][a-zA-Z_.]*)\\(")
-            if c ~= nil then does = c.group end
-          end
-          j = j + 1
-        end
-      end
-      for tag in split(m.group, ",") do
-        local tg = trim(tag)
-        if starts_with(tg, ".") then out[sub(tg, 2)] = does end
-      end
-    end
-    i = i + 1
-  end
   return out
 end
 
@@ -389,62 +259,48 @@ for name in sort(names) do
 end
 local live = reach(chat, roots)
 
--- Routes.
+-- Routes. **A ROUTE IS ZIG'S ONLY IF THE ROC CAN HAND ONE BACK**: an
+-- answer that names a route for the host to serve (Chat.roc's `Answer`
+-- with a `route` field, its `Kind` a `Serve`) and the Zig that serves it
+-- (chat.zig). With none of them, every route chat/Route.roc parses is the
+-- Roc's, and the script before the gate (`Route.asset`, the host's bytes
+-- through `serve_script!`) too. One of them back stops the census: count
+-- its routes here again.
 local route_text = read("chat/Route.roc")
-local main = roc_tree("chat/main.roc")
-local serves_at = nil
-local i = 1
-while i < #main.text do
-  if starts_with(hd(main, i), "(s-decl ") and starts_with(hd(main, i + 1), "(p-ident ") and contains(hd(main, i + 1), "(raw \"served_by\")") then
-    serves_at = kids(main, i + 2)[2]
-  end
-  i = i + 1
+local chat_roc = read("chat/platform/Chat.roc")
+local main_text = read("chat/main.roc")
+if contains(chat_roc, "\n\t\tServe,") or contains(chat_roc, "\n\t\troute : ") or exists(src .. "chat.zig") then
+  fail("routes: the Roc can hand a route back to Zig again (Chat.roc's Answer has a route, or chat.zig is back): count them in the census")
 end
-if serves_at == nil then fail("chat/main.roc: no served_by") end
-local serve_arms = arms(all["chat.zig"], "serve")
--- A topic's tails: none left in the Zig since metal-vmm QUEUE 292.
-local tail_arms = {}
-if has_key(all["chat.zig"].decls, "topicRoute") then tail_arms = arms(all["chat.zig"], "topicRoute") end
+if not contains(main_text, "Route.asset(") or not contains(main_text, "Host.serve_script!(") then
+  fail("routes: chat/main.roc serves the static scripts some other way than Route.asset and Host.serve_script!: count them in the census")
+end
 local roc_routes = 0
-local zig_routes = 0
-print("== routes (chat/main.roc served_by; Zig's arm in chat.zig)")
+print("== routes (chat/Route.roc's, and the static scripts; Zig's: none can be handed back)")
+print("  Roc  Script (/chat/<name>.js)")
+roc_routes = roc_routes + 1
 for fam in tags(route_text, "Family") do
-  local variants = {}
+  local labels = {}
   if fam == "Dm" or fam == "Channel" then
     for part in tags(route_text, "Part") do
       if part == "Topic" then
-        for tail in tags(route_text, "Tail") do push(variants, {family = fam, part = part, tail = tail, rest = ""}) end
+        for tail in tags(route_text, "Tail") do push(labels, fam .. " " .. part .. " " .. tail) end
       else
-        push(variants, {family = fam, part = part, tail = "Page", rest = ""})
+        push(labels, fam .. " " .. part)
       end
     end
   elseif fam == "Recent" or fam == "Images" or fam == "Code" then
-    push(variants, {family = fam, part = "Landing", tail = "Page", rest = ""})
-    push(variants, {family = fam, part = "Landing", tail = "Page", rest = "/stream"})
+    push(labels, fam)
+    push(labels, fam .. " /stream")
   else
-    push(variants, {family = fam, part = "Landing", tail = "Page", rest = ""})
+    push(labels, fam)
   end
-  for r in variants do
-    local side = evaluate(main, serves_at, r)
-    local label = fam
-    if fam == "Dm" or fam == "Channel" then
-      label = fam .. " " .. r.part
-      if r.part == "Topic" then label = label .. " " .. r.tail end
-    end
-    if r.rest ~= "" then label = label .. " " .. r.rest end
-    if side == "Roc" then
-      roc_routes = roc_routes + 1
-      print("  Roc  " .. label)
-    else
-      zig_routes = zig_routes + 1
-      local does = get(serve_arms, snake(fam), "?")
-      if r.part == "Topic" then does = get(tail_arms, snake(r.tail), "?") end
-      if r.part == "Invalid" then does = "http.notFound" end
-      print("  Zig  " .. label .. "  -> " .. does)
-    end
+  for label in labels do
+    roc_routes = roc_routes + 1
+    print("  Roc  " .. label)
   end
 end
-print("  " .. tostring(roc_routes) .. " Roc's, " .. tostring(zig_routes) .. " Zig's")
+print("  " .. tostring(roc_routes) .. " Roc's, 0 Zig's")
 
 -- Hosted functions.
 print("")

@@ -56,6 +56,7 @@ platform ""
 		"roc_chat_serve_bundle": Host.serve_bundle!,
 		"roc_chat_serve_file": Host.serve_file!,
 		"roc_chat_serve_rendered": Host.serve_rendered!,
+		"roc_chat_serve_script": Host.serve_script!,
 		"roc_chat_serve_upload": Host.serve_upload!,
 		"roc_chat_store_upload": Host.store_upload!,
 		"roc_chat_write": Host.write!,

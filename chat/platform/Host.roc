@@ -448,6 +448,12 @@ Host := [].{
 	## attachment `<name>.tar.gz`.
 	serve_bundle! : List(U8) => {}
 
+	## **A STATIC SCRIPT SERVED**: the script `name` of the host's table (the
+	## chat client's bundles) answered as webbox serves every embedded file,
+	## its hash its ETag and its cache rule. `Missing` when the table has no
+	## script of the name: nothing is answered.
+	serve_script! : List(U8) => [Missing, Served]
+
 	## Whether markdown is hostile: `Fine`; `Refused`, the host having refused it
 	## (webbox's edge counter and its 400, saying `refusal`, the Roc's words);
 	## or `Failed`, the check itself.

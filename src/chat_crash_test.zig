@@ -951,7 +951,7 @@ test "a Roc crash is error.RocCrashed, its message kept, and the next call is se
         .GET,
         asker.member_(),
     );
-    try testing.expectEqual(abi.Route.eql(ok.serve.route, .{ .family = .default }), true);
+    try testing.expectEqualStrings("/ok", ok.found);
 
     try testing.expectError(error.RocCrashed, abi.decide(
         arena.allocator(),

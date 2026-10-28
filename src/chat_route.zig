@@ -1,79 +1,15 @@
-//! **WHERE A CHAT REQUEST GOES** (docs/ROC-CHAT.md §5.2's `ZigRoute`): the
-//! route the Roc router (chat/Route.roc) parses a /chat or /channel path
-//! into, as angry-gopher's Zig serves it. Plain data, the same type the Roc
-//! decision is read into (chat_abi.zig) and angry-gopher's own Zig parse,
-//! the router's twin, answers (A3), so the two compare with `eql`.
+//! **WHAT THE ROC CHAT ANSWERS, AND THE TAGS THAT CROSS THE SEAM**: the
+//! decision a /chat or /channel request's Roc call ends in, as the host
+//! sends it, and each tag union of Chat.roc's and Host.roc's, as an enum.
 //!
 //! **EVERY ENUM HERE IS A ROC TAG UNION, IN ROC'S ORDER.** A tag union
 //! whose tags carry nothing crosses the seam as one byte, its tags numbered
-//! in the order of their names (Roc's layout; probed with the pinned
-//! nightly). So each enum lists Chat.roc's tags, snake_case for PascalCase,
-//! in that order, with no numbers written: `assertRocOrder` checks it at
-//! compile time. A tag added in Chat.roc is added here, where it sorts.
+//! in the order of their names (Roc's layout). So each enum lists the tags,
+//! snake_case for PascalCase, in that order, with no numbers written:
+//! src/chat_glue_test.zig holds each one's numbers to roc glue's at compile
+//! time. A tag added in the Roc is added here, where it sorts.
 
 const std = @import("std");
-
-/// Chat.roc's `Family`: which part of the chat a path names.
-pub const Family = enum(u8) {
-    /// A static script, `rest` its name; served before the gate.
-    asset,
-    /// A channel, `key` its name (already a valid one).
-    channel,
-    code,
-    conversations,
-    /// `/chat`, `/chat/`, `/chat/default`: the last conversation resumed.
-    default,
-    /// A DM, `key` its pair as written (Zig checks the viewer is in it).
-    dm,
-    /// `rest` the path under `/docs` (and images, links, recent and code
-    /// likewise).
-    docs,
-    images,
-    links,
-    /// `rest` the message id after `/msg/`.
-    msg,
-    not_found,
-    notifications,
-    recent,
-    /// `rest` the path after `/search`, with no boundary (`/searchX` is "X").
-    search,
-    sidebar_stream,
-};
-
-/// Chat.roc's `Part`: which part of a conversation.
-pub const Part = enum(u8) {
-    /// A topic id that is not one: refused after the conversation's own
-    /// checks, as Zig always refused it.
-    invalid,
-    /// No topic named: its first topic, or the page offering one.
-    landing,
-    /// `.../new`: a topic made.
-    new,
-    /// `topic` a valid topic id, `tail` what of it.
-    topic,
-};
-
-/// Chat.roc's `Tail`: what of a topic.
-pub const Tail = enum(u8) {
-    download,
-    /// No tail Zig serves: refused once the topic is known to exist.
-    invalid,
-    /// The same, but under `send`, which skips that check (a send makes
-    /// its topic).
-    invalid_send,
-    page,
-    pin,
-    raw,
-    react,
-    reactions,
-    saved,
-    send,
-    stream,
-    unpin,
-    upload,
-    /// `rest` the file.
-    uploads,
-};
 
 /// Chat.roc's `Method`: a request's method, as the router tells them apart.
 pub const Method = enum(u8) {
@@ -108,7 +44,6 @@ pub const Kind = enum(u8) {
     not_found,
     redirect,
     respond,
-    serve,
     stream,
     to_login,
 };
@@ -280,6 +215,10 @@ pub const UploadPart = enum(u8) { range, unsatisfiable, whole };
 /// (nothing answered), or served.
 pub const UploadServed = enum(u8) { gone, served };
 
+/// Host.roc's `serve_script!` answer: no script of the name in the host's
+/// table (nothing answered), or served.
+pub const ScriptServed = enum(u8) { missing, served };
+
 /// Host.roc's `read_upload!` answer's `status` (metal-vmm QUEUE 292).
 pub const UploadRead = enum(u8) { answered, no_file, read, unsupported };
 
@@ -311,131 +250,12 @@ pub const Aside = enum(u8) { begin, end };
 /// request that has failed already).
 pub const AsideEnd = enum(u8) { done, failed };
 
-comptime {
-    @setEvalBranchQuota(20_000);
-    for (.{
-        Family,
-        Part,
-        Tail,
-        Method,
-        Area,
-        Sniff,
-        Kind,
-        Form,
-        BodyStatus,
-        CountStatus,
-        Hostility,
-        ReadStatus,
-        EntryKind,
-        AccountKind,
-        NameRead,
-        AccountsStatus,
-        FailReason,
-        RenderStatus,
-        AppendStatus,
-        Surface,
-        Presence,
-        PresenceEdge,
-        Membership,
-        Admission,
-        WordsStatus,
-        HitConv,
-        HitWord,
-        Done,
-        Welcome,
-        Serving,
-        UploadPart,
-        UploadServed,
-        UploadRead,
-        UploadRefusal,
-        Reservation,
-        UploadStored,
-        RetireKind,
-        RetireRemoval,
-        Dropped,
-        Aside,
-        AsideEnd,
-    }) |E| assertRocOrder(E);
-}
-
-/// That `E`'s values are Roc's for the same tags: numbered from 0 in the
-/// order of the tags' PascalCase names, compared byte by byte (`NotFound`
-/// before `Notifications`, `Invalid` before `InvalidSend`).
-pub fn assertRocOrder(comptime E: type) void {
-    const info = @typeInfo(E).@"enum";
-    for (info.field_names, info.field_values, 0..) |name, value, i| {
-        if (value != i) @compileError(@typeName(E) ++ "." ++ name ++ " has a number written: Roc's are its place in name order");
-        if (i > 0 and !std.mem.lessThan(
-            u8,
-            pascal(info.field_names[i - 1]),
-            pascal(name),
-        ))
-            @compileError(@typeName(E) ++ ": `" ++ name ++ "` must come before `" ++ info.field_names[i - 1] ++ "`, as Roc numbers its tags by name");
-    }
-}
-
-/// `not_found` as Roc spells the tag: `NotFound`.
-fn pascal(comptime snake: []const u8) []const u8 {
-    comptime {
-        var out: []const u8 = "";
-        var up = true;
-        for (snake) |c| {
-            if (c == '_') {
-                up = true;
-                continue;
-            }
-            out = out ++ &[_]u8{if (up) std.ascii.toUpper(c) else c};
-            up = false;
-        }
-        return out;
-    }
-}
-
-pub const Route = struct {
-    family: Family,
-    key: []const u8 = "",
-    rest: []const u8 = "",
-    topic: []const u8 = "",
-    part: Part = .landing,
-    tail: Tail = .page,
-
-    pub fn eql(a: Route, b: Route) bool {
-        return a.family == b.family and a.part == b.part and a.tail == b.tail and
-            std.mem.eql(
-                u8,
-                a.key,
-                b.key,
-            ) and std.mem.eql(
-            u8,
-            a.rest,
-            b.rest,
-        ) and std.mem.eql(
-            u8,
-            a.topic,
-            b.topic,
-        );
-    }
-
-    pub fn format(r: Route, w: *std.Io.Writer) std.Io.Writer.Error!void {
-        try w.print("{t} key=\"{s}\" rest=\"{s}\" topic=\"{s}\" {t} {t}", .{
-            r.family,
-            r.key,
-            r.rest,
-            r.topic,
-            r.part,
-            r.tail,
-        });
-    }
-};
-
-/// What the router decided: the gate's 303 to the login page, or a route for
-/// Zig (the Roc counted its presence first, metal-vmm QUEUE 288); or,
-/// for a route the Roc served itself, what to send.
+/// What the router decided: the gate's 303 to the login page, or what to
+/// send.
 pub const Decision = union(enum) {
     /// A 303 to a path the Roc built from a conversation's base and a
     /// topic, which the store's names keep on the site.
     redirect: []const u8,
-    serve: struct { route: Route },
     /// A status and its body, typed `content_type` when it is not empty.
     respond: struct {
         status: u16,
@@ -484,7 +304,6 @@ pub const Decision = union(enum) {
                 l,
                 b.redirect,
             ),
-            .serve => |s| s.route.eql(b.serve.route),
             .respond => |r| r.status == b.respond.status and r.nosniff == b.respond.nosniff and std.mem.eql(
                 u8,
                 r.content_type,
@@ -538,7 +357,6 @@ pub const Decision = union(enum) {
     pub fn format(d: Decision, w: *std.Io.Writer) std.Io.Writer.Error!void {
         switch (d) {
             .redirect => |l| try w.print("303 {s}", .{l}),
-            .serve => |s| try w.print("{f}", .{s.route}),
             .respond => |r| try w.print("{d} \"{s}\"{s} {d} bytes", .{
                 r.status,
                 r.content_type,

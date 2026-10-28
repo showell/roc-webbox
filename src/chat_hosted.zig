@@ -1,8 +1,7 @@
-//! **THE ROC CHAT'S ROUTER, AS ANGRY-GOPHER TAKES IT** (docs/ROC-CHAT.md
-//! §3, milestone 1): `decide`, the Roc router's decision for a /chat or
-//! /channel path (chat/main.roc, chat/Route.roc), and the route it is read
-//! into (chat_route.zig). angry-gopher serves the decision with its own Zig;
-//! nothing else here touches a request.
+//! **THE ROC CHAT, AS ANGRY-GOPHER TAKES IT** (docs/ROC-CHAT.md §3,
+//! milestone 1): `decide`, the Roc's answer to a /chat or /channel request
+//! (chat/main.roc), read into chat_route.zig's `Decision`, which angry-gopher
+//! sends; the hosted functions' types. Nothing else here touches a request.
 
 const std = @import("std");
 const abi = @import("chat_abi.zig");
@@ -14,10 +13,6 @@ pub const Host = abi.Host;
 pub const askingOnly = abi.askingOnly;
 pub const Routing = abi.Routing;
 pub const Decision = route.Decision;
-pub const Route = route.Route;
-pub const Family = route.Family;
-pub const Part = route.Part;
-pub const Tail = route.Tail;
 pub const Form = route.Form;
 pub const Count = abi.Count;
 pub const CountStatus = route.CountStatus;
@@ -58,6 +53,7 @@ pub const RetireAsked = abi.RetireAsked;
 pub const RetireKind = route.RetireKind;
 pub const RetireRemoval = route.RetireRemoval;
 pub const UploadServed = route.UploadServed;
+pub const ScriptServed = route.ScriptServed;
 pub const Welcome = route.Welcome;
 pub const Serving = route.Serving;
 pub const Dropped = route.Dropped;
@@ -93,45 +89,25 @@ fn answer(member: bool) Host {
     return askingOnly(&S.dummy, if (member) S.yes else S.no);
 }
 
-fn expectRoute(
-    sub: []const u8,
-    channel: bool,
-    want: Route,
-    presence: bool,
-) !void {
+/// A path that names nothing is the Roc's own 404 (metal-vmm QUEUE 286),
+/// its presence counted as the Zig's was.
+fn expectNotFound(sub: []const u8, channel: bool) !void {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
-    // A route the Roc serves itself counts presence itself, then, finding
-    // nothing, hands the route to Zig.
     var routing: Routing = .{};
-    var got = try decide(
+    const got = try decide(
         arena.allocator(),
         sub,
         channel,
         .GET,
         routing.host(),
     );
-    // A path that names nothing is the Roc's own 404 (metal-vmm QUEUE 286),
-    // its presence counted as the Zig's was.
-    if (want.family == .not_found) {
-        if (got == .not_found and routing.marked == presence) return;
-        std.debug.print("{s}: got {f}, want the Roc's 404\n", .{ sub, got });
-        return error.TestUnexpectedResult;
-    }
-    const expected: Decision = .{ .serve = .{ .route = want } };
-    if (!got.eql(expected) or routing.marked != presence) {
-        std.debug.print("{s}: got {f} (presence {}), want {f} (presence {})\n", .{
-            sub,
-            got,
-            routing.marked,
-            expected,
-            presence,
-        });
-        return error.TestUnexpectedResult;
-    }
+    if (got == .not_found and routing.marked) return;
+    std.debug.print("{s}: got {f} (presence {}), want the Roc's 404\n", .{ sub, got, routing.marked });
+    return error.TestUnexpectedResult;
 }
 
-test "the router: a topic's tails, a channel, an asset before the gate, the gate" {
+test "the router: a topic's tails, a channel, a script before the gate, the gate" {
     use(testing.allocator);
     defer @import("roc_abi.zig").deinit();
     // **THE ROC DECIDES A CONVERSATION'S ROUTES** (metal-vmm QUEUE 271): to
@@ -210,32 +186,11 @@ test "the router: a topic's tails, a channel, an asset before the gate, the gate
             return error.TestUnexpectedResult;
         }
     }
-    try expectRoute(
-        "/9ops/x",
-        true,
-        .{ .family = .not_found },
-        true,
-    );
-    try expectRoute(
-        "/docsX",
-        false,
-        .{ .family = .not_found },
-        true,
-    );
-    try expectRoute(
-        "/chat.js",
-        false,
-        .{ .family = .asset, .rest = "chat.js" },
-        false,
-    );
+    try expectNotFound("/9ops/x", true);
+    try expectNotFound("/docsX", false);
     // A docs path of two segments is the Roc's 404 (metal-vmm QUEUE 289),
     // its text whole.
-    try expectRoute(
-        "/docs/caf\xc3\xa9/\xf0\x9f\x91\x8d",
-        false,
-        .{ .family = .not_found },
-        true,
-    );
+    try expectNotFound("/docs/caf\xc3\xa9/\xf0\x9f\x91\x8d", false);
 
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
@@ -260,14 +215,18 @@ test "the router: a topic's tails, a channel, an asset before the gate, the gate
         answer(false),
     );
     try testing.expectEqualStrings("/chat/c/1_2/general", away.to_login);
-    const asset = try decide(
-        arena.allocator(),
-        "/chat.js",
-        false,
-        .GET,
-        answer(false),
-    );
-    try testing.expectEqual(Family.asset, asset.serve.route.family);
+    // **A SCRIPT BEFORE THE GATE**: served by the host to anyone, by any
+    // method, nobody asked and no presence counted; a name the host's table
+    // has not is webbox's 404, the same.
+    for ([_]bool{ false, true }) |member| for ([_]std.http.Method{ .GET, .POST }) |method| {
+        var routing: Routing = .{ .member = member };
+        const script = try decide(arena.allocator(), "/chat.js", false, method, routing.host());
+        try testing.expect(script == .answered and !routing.asked and !routing.marked);
+        try testing.expectEqualStrings("chat.js", routing.script.?);
+        var none: Routing = .{ .member = member };
+        const missing = try decide(arena.allocator(), "/nope.js", false, method, none.host());
+        try testing.expect(missing == .not_found and !none.asked and !none.marked and none.script == null);
+    };
 }
 
 /// A host whose answers a test sets, and which records what it was asked:
