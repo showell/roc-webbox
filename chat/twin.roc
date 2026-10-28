@@ -430,7 +430,7 @@ call = |req| {
 			match ChatState.pinned(
 				valid_text(arg(0)),
 				valid_text(arg(1)),
-				if arg(2) == [49] Pinned else Unpinned,
+				if arg(2) == [49] Pin else Unpin,
 			) {
 				Write(bytes) => [bytes]
 				Remove => []

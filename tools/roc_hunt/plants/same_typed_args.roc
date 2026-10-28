@@ -22,3 +22,26 @@ Plants := [].{
 
 	quiet_associated : I64, Str -> I64
 }
+
+# Two type variables tell their lists apart: List(a) is not List(b).
+quiet_type_variables_apart : List(a), List(b) -> List((a, b))
+
+# Two callbacks of different types are told apart by their types.
+quiet_callbacks_apart : (U8 -> Bool), (Str -> Str) -> U8
+
+# Two callbacks of one type are not.
+fires_callbacks_alike : (U8 -> Bool), (U8 -> Bool) -> U8
+
+# Names whose order the language fixes, or that no order changes: each a
+# line marked `# quiet`, since the name cannot carry `quiet_`.
+Num := [].{
+	is_eq : Num, Num -> Bool # quiet
+	is_lt : Num, Num -> Bool # quiet
+	plus : Num, Num -> Num # quiet
+	max : Num, Num -> Num # quiet
+	union : Num, Num -> Num # quiet
+	bitwise_xor : Num, Num -> Num # quiet
+	abs_diff : Num, Num -> Num # quiet
+	minus : Num, Num -> Num # quiet
+	fires_difference : Num, Num -> Num
+}
