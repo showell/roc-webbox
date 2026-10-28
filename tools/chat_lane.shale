@@ -1,0 +1,77 @@
+-- **A LANE: THE ROC CHAT'S CHECKOUTS AGAIN, FOR WORK BESIDE THE MAIN ONES.**
+-- `shale tools/chat_lane.shale name=<lane>` makes ~/build/lanes/<lane>/ with
+-- local clones of every sibling the chat's gates read: roc-webbox and
+-- angry-gopher on a branch `lane/<lane>` (from roc-webbox `main` and
+-- angry-gopher `box/roc-cleanup`), and zig-webbox, shale, cobble-webbox,
+-- chat-markdown, chat-client, zig-metal-unikernel and zig-coverage-sdk at
+-- their current commits. Clones, not
+-- worktrees: the quick gate refuses when two worktrees of angry-gopher hold
+-- the chat's host, since which one to judge would be a guess.
+--
+-- angry-gopher embeds front-end files git does not track (assets.zon's rows
+-- with `built_by`); the lane copies each from the main checkout
+-- (~/showell_repos/angry-gopher-chat), so its build has them.
+--
+-- The box merges a lane's branch back (`git fetch <lane>/roc-webbox
+-- lane/<lane>`), then removes the folder.
+-- budget: steps=50000000
+
+const name = arg("name", "")
+if name == "" then fail("chat_lane: name=<lane> names the lane") end
+const home = "/home/steve"
+const lane = home .. "/build/lanes/" .. name
+const branch = "lane/" .. name
+if exists("build:lanes/" .. name) then fail("chat_lane: " .. lane .. " is there already; remove it, or name another") end
+
+const repos = {
+  {"roc-webbox", "main", true},
+  {"angry-gopher", "box/roc-cleanup", true},
+  {"zig-webbox", "", false},
+  {"shale", "", false},
+  {"cobble-webbox", "", false},
+  {"chat-markdown", "", false},
+  {"chat-client", "", false},
+  -- roc-webbox's `zig build metal` names it (lazily, but a configure reads
+  -- its build.zig), and it names zig-coverage-sdk.
+  {"zig-metal-unikernel", "", false},
+  {"zig-coverage-sdk", "", false},
+}
+
+for r in repos do
+  local from = home .. "/showell_repos/" .. r[1]
+  local to = lane .. "/" .. r[1]
+  local args = {"git", "clone", "-q", "--local"}
+  if r[2] ~= "" then
+    args[#args + 1] = "--branch"
+    args[#args + 1] = r[2]
+  end
+  args[#args + 1] = from
+  args[#args + 1] = to
+  local c = run(args, {timeout_ms = 300000, whole = 4000})
+  if c.code ~= 0 then fail("chat_lane: cloning " .. r[1] .. ": " .. c.out) end
+  if r[3] then
+    local b = run({"git", "-C", to, "switch", "-q", "-c", branch}, {timeout_ms = 30000, whole = 2000})
+    if b.code ~= 0 then fail("chat_lane: branching " .. r[1] .. ": " .. b.out) end
+  end
+  print("cloned " .. r[1] .. (r[3] and (" on " .. branch) or ""))
+end
+
+-- The untracked front-end files angry-gopher embeds, from the main checkout.
+const main_gopher = "repos:angry-gopher-chat/"
+const lane_gopher = "build:lanes/" .. name .. "/angry-gopher/"
+local copied = 0
+for line in lines(read("repos:angry-gopher-chat/zig-server/assets.zon")) do
+  local at = find(line, ".path = \"")
+  if at and find(line, "built_by") then
+    local rest = sub(line, at + 9)
+    local rel = sub(rest, 1, find(rest, "\"") - 1)
+    -- assets.zon's paths are from zig-server/; these are from the repo's root.
+    if starts_with(rel, "../") then rel = sub(rel, 4) else rel = "zig-server/" .. rel end
+    if exists(main_gopher .. rel) and not exists(lane_gopher .. rel) then
+      create(lane_gopher .. rel, read(main_gopher .. rel))
+      copied = copied + 1
+    end
+  end
+end
+print("copied " .. copied .. " built front-end files")
+print("lane ready: " .. lane .. " (gate: cd " .. lane .. "/roc-webbox && shale tools/chat_quick_gate.shale)")
