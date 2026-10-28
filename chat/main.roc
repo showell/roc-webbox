@@ -2520,11 +2520,7 @@ store_block! = |
 				Paths.count_path(at),
 				Count.text(index + 1, { size: appended.size, last }),
 			)
-			Host.index_message!(
-				conv,
-				at.topic.to_utf8(),
-				message,
-			)
+			Host.index_message!(conv, { sid: at.topic.to_utf8(), message })
 			Ok({})
 		}
 	}

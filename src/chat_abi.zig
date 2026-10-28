@@ -144,6 +144,9 @@ pub const AppendedAtRec = extern struct { size: u64, status: route_mod.AppendSta
 /// Host.roc's `append_message!` record (metal-vmm QUEUE 297): `{ sid,
 /// block : List(U8) }`, the bytes by name.
 pub const AppendMessageArgs = extern struct { block: RocBytes, sid: RocBytes };
+/// Host.roc's `index_message!` record (metal-vmm QUEUE 297): `{ sid :
+/// List(U8), message : Chat.Message }`, by name.
+pub const IndexMessageArgs = extern struct { message: MessageRec, sid: RocBytes };
 /// Host.roc's `serve_upload!` record (metal-vmm QUEUE 291): `{ first, last,
 /// size : U64, content_type, path : List(U8), part : [Range, Unsatisfiable,
 /// Whole] }`, the numbers first, the bytes by name, the tag last.
@@ -287,6 +290,7 @@ comptime {
     std.debug.assert(@offsetOf(StoredRec, "name") == 0 and @offsetOf(StoredRec, "status") == 3 * w and @sizeOf(StoredRec) == 4 * w);
     // The hosted effects' argument records (metal-vmm QUEUE 297).
     std.debug.assert(@offsetOf(AppendMessageArgs, "block") == 0 and @offsetOf(AppendMessageArgs, "sid") == 3 * w and @sizeOf(AppendMessageArgs) == 6 * w);
+    std.debug.assert(@offsetOf(IndexMessageArgs, "message") == 0 and @offsetOf(IndexMessageArgs, "sid") == 15 * w and @sizeOf(IndexMessageArgs) == 18 * w);
     // retire_asked!'s (metal-vmm QUEUE 293).
     std.debug.assert(@offsetOf(RetireAskedRec, "days") == 0 and @offsetOf(RetireAskedRec, "now") == 8 and @offsetOf(RetireAskedRec, "keep") == 16 and @sizeOf(RetireAskedRec) == 16 + 3 * w);
     // serve_upload!'s (metal-vmm QUEUE 291): three numbers, two lists, a tag.
@@ -1435,11 +1439,9 @@ export fn roc_chat_append_message(conv: ConvRec, args: AppendMessageArgs) callco
     };
 }
 
-export fn roc_chat_index_message(
-    conv: ConvRec,
-    sid: RocBytes,
-    message: MessageRec,
-) callconv(.c) void {
+export fn roc_chat_index_message(conv: ConvRec, args: IndexMessageArgs) callconv(.c) void {
+    const sid = args.sid;
+    const message = args.message;
     const h = current("index_message");
     // Its topic was the append's, which the seam checked: a bad one now is
     // no topic, and the index is told of nothing.

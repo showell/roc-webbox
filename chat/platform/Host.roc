@@ -345,7 +345,7 @@ Host := [].{
 	## **THE SEARCH INDEX TOLD OF A MESSAGE AS IT LANDS** (search_index
 	## `noteAppend`): process-lifetime state, so a primitive. It never fails:
 	## an index that cannot take the message drops itself, to be rebuilt.
-	index_message! : Chat.Conv, List(U8), Chat.Message => {}
+	index_message! : Chat.Conv, { sid : List(U8), message : Chat.Message } => {}
 
 	## **A CACHE WRITTEN** (a topic's `.count`): the whole file as `bytes`,
 	## under the chat root. **NEVER THE REQUEST'S FAILURE**: a cache not

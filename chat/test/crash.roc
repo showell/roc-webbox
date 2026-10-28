@@ -113,11 +113,7 @@ handle! = |req|
 		got = Host.append_message!(dm12, { sid: topic, block: Str.to_utf8("the block") })
 		match got.status {
 			Appended => {
-				Host.index_message!(
-					dm12,
-					topic,
-					probe_message,
-				)
+				Host.index_message!(dm12, { sid: topic, message: probe_message })
 				Chat.respond(
 					200,
 					{ content_type: [], body: Str.to_utf8("appended ${U64.to_str(got.size)}") },
