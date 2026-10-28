@@ -11,10 +11,7 @@ app does not hand the host a description of work to do afterwards.
 ## Before you build
 
 - **Zig 0.17** (`build.zig.zon`).
-- **Sibling checkouts** under the same parent directory: `../zig-webbox`
-  for every build; `../zig-metal-unikernel` and the `../zig-coverage-sdk` it
-  depends on for `zig build metal` (a lazy dependency: only `metal` needs
-  them).
+- **A sibling checkout** under the same parent directory: `../zig-webbox`.
 - **Roc, the nightly `roc-version` pins** (`nightly-2026-10-09-258ab27`), as
   `roc` on the PATH or named with `-Droc=<path>`. Every build compiles
   `app/todo.roc`, and `build.zig` (`rocCompiler`) stops at configure time if
@@ -28,7 +25,6 @@ app does not hand the host a description of work to do afterwards.
 zig build test                          # the TODO app's and the chat seam's tests, then src/shared_check.zig
 zig build serve                         # http://localhost:9110
 zig build demo                          # the client test bench, zig-out/demo/ (below)
-zig build metal                         # zig-out/bin/roc-todo.elf
 ```
 
 `zig build -l` lists the steps. `test` runs the host's tests through the
@@ -62,18 +58,10 @@ unread.
 
 ### On the unikernel
 
-`zig build metal` builds the list as a
-[zig-metal-unikernel](../zig-metal-unikernel) kernel of its own, through its
-`addAppKernel`, as Dog Park does: `src/hosted.zig` gives the kernel the site
-and what only the app can say about itself, `assets.zon` what it serves
-besides its code, and the Roc is built for freestanding x86-64. It is
-always ReleaseSafe. The kernel needs a disk: a GPT disk whose partition 1
-is FAT16, empty to start; the lists are made on it under `data/lists/` and
-survive a reboot. Behind no HTTPS (QEMU on a laptop), a browser drops the
-Secure cookie, so every request is a new visitor; a script sends it back by
-hand. To boot it, from the folder that holds the checkouts:
-
-    shale repos:zig-metal-unikernel/tools/boot_app.shale elf=repos:roc-webbox/zig-out/bin/roc-todo.elf work=scratch:qemu/roc-todo port=9214
+This repository builds no kernel: a kernel's build depends on its apps, never
+the reverse. zig-metal-unikernel builds `gopher.elf` with the chat
+(`roc_chat_metal`), and dog-park's `metal-dogpark-todo` builds the list on
+metal (`roc_todo_metal`), each through zig-metal-unikernel.
 
 ## Combined with other webbox apps
 
