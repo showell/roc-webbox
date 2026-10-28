@@ -23,7 +23,10 @@ const glue = @import("glue/chat_platform_abi.zig");
 const GlueListing = @typeInfo(@TypeOf(glue.roc_chat_list)).@"fn".return_type.?;
 
 /// Glue's entry: the element of the answer's `entries`.
-const GlueEntry = @typeInfo(@typeInfo(@FieldType(@FieldType(GlueListing, "entries"), "elements_ptr")).optional.child).pointer.child;
+const GlueEntry = @typeInfo(@typeInfo(@FieldType(
+    @FieldType(GlueListing, "entries"),
+    "elements_ptr",
+)).optional.child).pointer.child;
 
 /// `Want` and `Got` lay out alike: one size, one alignment, the same fields
 /// by name at the same offsets, each field of one size.
@@ -63,14 +66,29 @@ fn sameTags(comptime Want: type, comptime Got: type) bool {
 }
 
 comptime {
-    if (!sameLayout(abi.EntryRec, GlueEntry)) @compileError("roc glue lays the listing's entry out unlike chat_abi.zig's EntryRec");
-    if (!sameTags(route.EntryKind, @FieldType(GlueEntry, "kind"))) @compileError("roc glue numbers the entry's kind unlike route.EntryKind");
+    if (!sameLayout(
+        abi.EntryRec,
+        GlueEntry,
+    )) @compileError("roc glue lays the listing's entry out unlike chat_abi.zig's EntryRec");
+    if (!sameTags(
+        route.EntryKind,
+        @FieldType(GlueEntry, "kind"),
+    )) @compileError("roc glue numbers the entry's kind unlike route.EntryKind");
     // And the answer that carries them, its status numbered alike.
-    if (!sameShape(abi.ListRec, GlueListing)) @compileError("roc glue lays the listing out unlike chat_abi.zig's ListRec");
-    if (!sameTags(route.ReadStatus, @FieldType(GlueListing, "status"))) @compileError("roc glue numbers the listing's status unlike route.ReadStatus");
+    if (!sameShape(
+        abi.ListRec,
+        GlueListing,
+    )) @compileError("roc glue lays the listing out unlike chat_abi.zig's ListRec");
+    if (!sameTags(
+        route.ReadStatus,
+        @FieldType(GlueListing, "status"),
+    )) @compileError("roc glue numbers the listing's status unlike route.ReadStatus");
     // The bytes: three words, as RocBytes's, though glue calls the first
     // `elements_ptr` where RocBytes says `ptr`.
-    if (!sameShape(abi.RocBytes, @FieldType(GlueEntry, "name"))) @compileError("roc glue lays List(U8) out unlike RocBytes");
+    if (!sameShape(
+        abi.RocBytes,
+        @FieldType(GlueEntry, "name"),
+    )) @compileError("roc glue lays List(U8) out unlike RocBytes");
 }
 
 test "roc glue's listing entry is chat_abi.zig's, field by field (metal-vmm QUEUE 280)" {

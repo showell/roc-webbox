@@ -12,11 +12,20 @@ Chat := [].{
 	## at compile time that they do. A tag added here is added there.
 
 	## A request's method, as the router tells them apart.
-	Method : [Get, Head, Post, Other]
+	Method : [
+		Get,
+		Head,
+		Post,
+		Other,
+	]
 
 	## `sub` is the path under /chat or /channel (`area` says which), as
 	## angry-gopher's router cut it: "" or starting with "/", no query.
-	Request : { sub : List(U8), area : [Channel, Chat], method : Method }
+	Request : {
+		sub : List(U8),
+		area : [Channel, Chat],
+		method : Method,
+	}
 
 	## Which part of the chat a path names. `rest` (below) is the family's
 	## own remainder where it has one.
@@ -70,7 +79,22 @@ Chat := [].{
 	## What of a topic. `Invalid` is no tail Zig serves (refused once the
 	## topic is known to exist); `InvalidSend` the same under `send`, which
 	## skips that check (a send makes its topic).
-	Tail : [Page, Uploads, Stream, Send, Upload, Pin, Unpin, Raw, Download, Saved, Reactions, React, Invalid, InvalidSend]
+	Tail : [
+		Page,
+		Uploads,
+		Stream,
+		Send,
+		Upload,
+		Pin,
+		Unpin,
+		Raw,
+		Download,
+		Saved,
+		Reactions,
+		React,
+		Invalid,
+		InvalidSend,
+	]
 
 	## Where a request goes, as angry-gopher's Zig serves it (§5.2's
 	## `ZigRoute`, flattened so the host lays it out by hand): a family,
@@ -79,20 +103,38 @@ Chat := [].{
 	## rest of a docs/recent/images/code/links/search path, a message id,
 	## an upload's file. Unused fields are empty, `Landing` and `Page`, so
 	## two routes are equal exactly when they go the same place.
-	Route : { family : Family, key : List(U8), rest : List(U8), topic : List(U8), part : Part, tail : Tail }
+	Route : {
+		family : Family,
+		key : List(U8),
+		rest : List(U8),
+		topic : List(U8),
+		part : Part,
+		tail : Tail,
+	}
 
 	## A DM or channel the Roc found to be the member's (chat/main.roc
 	## `find!`), as the host takes it for an operation on it: `family` `Dm`
 	## or `Channel`, `key` its pair or name, `base` its URL base, `members`
 	## each member once (whom a message is fanned out to). The host keeps no
 	## conversation between calls: each operation is handed this.
-	Conv : { family : Family, key : List(U8), base : List(U8), members : List(List(U8)) }
+	Conv : {
+		family : Family,
+		key : List(U8),
+		base : List(U8),
+		members : List(List(U8)),
+	}
 
 	## A message as the store keeps it (angry-gopher chat_store `ChatMessage`,
 	## the Roc's Transcript.Msg): its id (`<topic>_<n>`), its author's name as
 	## sent and account (`uid`), its stamp, its markdown. Handed to the store
 	## (the count and the search index take it) and to the fan-out.
-	Message : { id : List(U8), from : List(U8), at : List(U8), uid : List(U8), markdown : List(U8) }
+	Message : {
+		id : List(U8),
+		from : List(U8),
+		at : List(U8),
+		uid : List(U8),
+		markdown : List(U8),
+	}
 
 	## What the answer is:
 	## - `Serve`: Zig serves `route` (marking presence first when `presence`
@@ -111,7 +153,18 @@ Chat := [].{
 	##   out), then `location`.
 	## - `ToLogin`: a 303 to the login page, to come back to `location` after
 	##   (the request's own path, so the host checks that it is on the site).
-	Kind : [Serve, Redirect, Respond, NotAllowed, Answered, Malformed, NotFound, Found, Held, ToLogin]
+	Kind : [
+		Serve,
+		Redirect,
+		Respond,
+		NotAllowed,
+		Answered,
+		Malformed,
+		NotFound,
+		Found,
+		Held,
+		ToLogin,
+	]
 
 	## Whether a request Zig serves counts as the member's presence.
 	Counting : [Counted, Uncounted]
@@ -120,30 +173,79 @@ Chat := [].{
 	## (`Forbid`: the answer says `nosniff`).
 	Sniff : [Allow, Forbid]
 
-	Answer : { kind : Kind, location : List(U8), presence : Counting, route : Route, status : U16, content_type : List(U8), body : List(U8), allow : Method, sniff : Sniff }
+	Answer : {
+		kind : Kind,
+		location : List(U8),
+		presence : Counting,
+		route : Route,
+		status : U16,
+		content_type : List(U8),
+		body : List(U8),
+		allow : Method,
+		sniff : Sniff,
+	}
 
 	## A route of `family` with nothing else.
 	family : Family -> Route
-	family = |f| { family: f, key: [], rest: [], topic: [], part: Landing, tail: Page }
+	family = |f| {
+		family: f,
+		key: [],
+		rest: [],
+		topic: [],
+		part: Landing,
+		tail: Page,
+	}
 
 	none : Answer
-	none = { kind: Serve, location: [], presence: Uncounted, route: family(NotFound), status: 0, content_type: [], body: [], allow: Other, sniff: Allow }
+	none = {
+		kind: Serve,
+		location: [],
+		presence: Uncounted,
+		route: family(NotFound),
+		status: 0,
+		content_type: [],
+		body: [],
+		allow: Other,
+		sniff: Allow,
+	}
 
 	## Zig serves it.
 	zig : Route, Counting -> Answer
-	zig = |route, presence| { ..none, route, presence }
+	zig = |route, presence| {
+		..none,
+		route,
+		presence,
+	}
 
 	## A 303 to `location`.
 	redirect : List(U8) -> Answer
-	redirect = |location| { ..none, kind: Redirect, location }
+	redirect = |location| {
+		..none,
+		kind: Redirect,
+		location,
+	}
 
 	## `status` with `body`, typed `content_type` when it is not empty.
 	respond : U16, List(U8), List(U8) -> Answer
-	respond = |status, content_type, body| { ..none, kind: Respond, status, content_type, body }
+	respond = |
+		status,
+		content_type,
+		body,
+	| {
+		..none,
+		kind: Respond,
+		status,
+		content_type,
+		body,
+	}
 
 	## A 200 of text, as stored: plain UTF-8, never sniffed for another type.
 	plain : List(U8) -> Answer
-	plain = |body| { ..respond(200, Str.to_utf8("text/plain; charset=utf-8"), body), sniff: Forbid }
+	plain = |body| { ..respond(
+		200,
+		Str.to_utf8("text/plain; charset=utf-8"),
+		body,
+	), sniff: Forbid }
 
 	## A 200 of the bytes the host is serving (Files.serve_file!) as text, as
 	## stored, never sniffed.
@@ -153,11 +255,23 @@ Chat := [].{
 	## A 200 page: `before`, what the host is serving (Files.serve_rendered!),
 	## `after`.
 	served_html : List(U8), List(U8) -> Answer
-	served_html = |before, after| { ..respond(200, Str.to_utf8("text/html; charset=utf-8"), before), kind: Held, location: after }
+	served_html = |before, after| {
+		..respond(
+			200,
+			Str.to_utf8("text/html; charset=utf-8"),
+			before,
+		),
+		kind: Held,
+		location: after,
+	}
 
 	## A 405 naming `allow`.
 	not_allowed : Method -> Answer
-	not_allowed = |allow| { ..none, kind: NotAllowed, allow }
+	not_allowed = |allow| {
+		..none,
+		kind: NotAllowed,
+		allow,
+	}
 
 	## The host answered inside the call, or failed there.
 	answered : Answer
@@ -173,9 +287,17 @@ Chat := [].{
 
 	## A 302 to `location`.
 	found : List(U8) -> Answer
-	found = |location| { ..none, kind: Found, location }
+	found = |location| {
+		..none,
+		kind: Found,
+		location,
+	}
 
 	## To the login page, to come back to `next` after.
 	to_login : List(U8) -> Answer
-	to_login = |next| { ..none, kind: ToLogin, location: next }
+	to_login = |next| {
+		..none,
+		kind: ToLogin,
+		location: next,
+	}
 }

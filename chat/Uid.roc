@@ -9,7 +9,10 @@ Uid :: Str.{
 	from_str : Str -> Try(Uid, [NotAUid])
 	from_str = |text|
 		match text.to_utf8() {
-			[first, ..] if first != '0' and text.to_utf8().all(|c| c >= '0' and c <= '9') => Ok(Uid.(text))
+			[
+				first,
+				..,
+			] if first != '0' and text.to_utf8().all(|c| c >= '0' and c <= '9') => Ok(Uid.(text))
 			_ => Err(NotAUid)
 		}
 

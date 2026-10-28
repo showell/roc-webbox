@@ -26,21 +26,91 @@ Time := [].{
 	unix_from_rfc3339 : List(U8) -> Try(I64, [NotADate])
 	unix_from_rfc3339 = |t|
 		match t {
-			[_, _, _, _, '-', _, _, '-', _, _, sep, _, _, ':', _, _, ':', _, _, _, ..] if sep == 'T' or sep == 't' =>
-				match (digits(t, 0, 4), digits(t, 5, 2), digits(t, 8, 2), digits(t, 11, 2), digits(t, 14, 2), digits(t, 17, 2)) {
-					(Ok(year), Ok(month), Ok(day), Ok(hour), Ok(minute), Ok(second)) =>
+			[
+				_,
+				_,
+				_,
+				_,
+				'-',
+				_,
+				_,
+				'-',
+				_,
+				_,
+				sep,
+				_,
+				_,
+				':',
+				_,
+				_,
+				':',
+				_,
+				_,
+				_,
+				..,
+			] if sep == 'T' or sep == 't' =>
+				match (
+					digits(
+						t,
+						0,
+						4,
+					),
+					digits(
+						t,
+						5,
+						2,
+					),
+					digits(
+						t,
+						8,
+						2,
+					),
+					digits(
+						t,
+						11,
+						2,
+					),
+					digits(
+						t,
+						14,
+						2,
+					),
+					digits(
+						t,
+						17,
+						2,
+					),
+				) {
+					(
+						Ok(year),
+						Ok(month),
+						Ok(day),
+						Ok(hour),
+						Ok(minute),
+						Ok(second),
+					) =>
 						if month < 1 or month > 12 or day < 1 or day > 31 or hour > 23 or minute > 59 or second > 60 {
 							Err(NotADate)
 						} else {
 							offset = offset_of(List.drop_first(t, 19))?
-							Ok(days_from_civil(year, month, day) * 86400 + hour * 3600 + minute * 60 + second - offset)
+							Ok(
+								days_from_civil(
+									year,
+									month,
+									day,
+								) * 86400 + hour * 3600 + minute * 60 + second - offset,
+							)
 						}
 					_ => Err(NotADate)
 				}
 			_ => Err(NotADate)
 		}
 
-	Civil : { year : I64, month : I64, day : I64 }
+	Civil : {
+		year : I64,
+		month : I64,
+		day : I64,
+	}
 }
 
 offset_of : List(U8) -> Try(I64, [NotADate])
@@ -55,8 +125,28 @@ offset_of = |rest0| {
 	match rest {
 		Err(NotADate) => Err(NotADate)
 		Ok(['Z']) | Ok(['z']) => Ok(0)
-		Ok([sign, h1, h2, ':', m1, m2]) if sign == '+' or sign == '-' => {
-			match (digits([h1, h2], 0, 2), digits([m1, m2], 0, 2)) {
+		Ok(
+			[
+				sign,
+				h1,
+				h2,
+				':',
+				m1,
+				m2,
+			],
+		) if sign == '+' or sign == '-' => {
+			match (
+				digits(
+					[h1, h2],
+					0,
+					2,
+				),
+				digits(
+					[m1, m2],
+					0,
+					2,
+				),
+			) {
 				(Ok(oh), Ok(om)) =>
 					if oh > 23 or om > 59 {
 						Err(NotADate)
@@ -78,12 +168,22 @@ count_digits = |l, n| match List.get(l, n) {
 
 ## `len` decimal digits at `start`, as a number, or none.
 digits : List(U8), U64, U64 -> Try(I64, [NotDigits])
-digits = |t, start, len| {
+digits = |
+	t,
+	start,
+	len,
+| {
 	piece = List.sublist(t, { start, len })
 	if List.len(piece) != len or !List.all(piece, |c| c >= '0' and c <= '9') {
 		Err(NotDigits)
 	} else {
-		Ok(List.fold(piece, 0, |n, c| n * 10 + U8.to_i64(c - '0')))
+		Ok(
+			List.fold(
+				piece,
+				0,
+				|n, c| n * 10 + U8.to_i64(c - '0'),
+			),
+		)
 	}
 }
 
@@ -92,17 +192,28 @@ civil_from_days = |days| {
 	z = days + 719468
 	era = div_floor(z, 146097)
 	doe = z - era * 146097
-	yoe = div_floor(doe - div_floor(doe, 1460) + div_floor(doe, 36524) - div_floor(doe, 146096), 365)
+	yoe = div_floor(
+		doe - div_floor(doe, 1460) + div_floor(doe, 36524) - div_floor(doe, 146096),
+		365,
+	)
 	y = yoe + era * 400
 	doy = doe - (365 * yoe + div_floor(yoe, 4) - div_floor(yoe, 100))
 	mp = div_floor(5 * doy + 2, 153)
 	d = doy - div_floor(153 * mp + 2, 5) + 1
 	m = if mp < 10 mp + 3 else mp - 9
-	{ year: y + (if m <= 2 1 else 0), month: m, day: d }
+	{
+		year: y + (if m <= 2 1 else 0),
+		month: m,
+		day: d,
+	}
 }
 
 days_from_civil : I64, I64, I64 -> I64
-days_from_civil = |year, month, day| {
+days_from_civil = |
+	year,
+	month,
+	day,
+| {
 	y = year - (if month <= 2 1 else 0)
 	era = div_floor(y, 400)
 	yoe = y - era * 400

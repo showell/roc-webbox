@@ -87,7 +87,11 @@ dispatch! = |req, sub|
 not_yours! : Route.R => Chat.Answer
 not_yours! = |route|
 	if route.family == Channel {
-		not_found_page!(Unasked, "#${route.key} is not a channel you are a member of.", "/chat")
+		not_found_page!(
+			Unasked,
+			"#${route.key} is not a channel you are a member of.",
+			"/chat",
+		)
 	} else {
 		Chat.not_found
 	}
@@ -95,9 +99,24 @@ not_yours! = |route|
 ## **A 404 THAT SAYS WHY** (metal-vmm QUEUE 156(j)): `what` is not there, and
 ## `back` is where to go instead.
 not_found_page! : Who, Str, Str => Chat.Answer
-not_found_page! = |who, what, back|
+not_found_page! = |
+	who,
+	what,
+	back,
+|
 	match load_viewer!(who) {
-		Ok(viewer) => Chat.respond(404, html, Pages.not_found(Chrome.src_in(Host.srcs!({})), { viewer, what, back }).bytes())
+		Ok(viewer) => Chat.respond(
+			404,
+			html,
+			Pages.not_found(
+				Chrome.src_in(Host.srcs!({})),
+				{
+					viewer,
+					what,
+					back,
+				},
+			).bytes(),
+		)
 		Err(Failed) => Chat.answered
 	}
 
@@ -162,9 +181,17 @@ serve_conversation! = |req, route|
 		Err(Invalid) => not_yours!(route)
 		Ok(key) =>
 			if route.part == New {
-				create_topic!(req, route, key)
+				create_topic!(
+					req,
+					route,
+					key,
+				)
 			} else if route.tail == Send or route.tail == InvalidSend {
-				send!(req, route, key)
+				send!(
+					req,
+					route,
+					key,
+				)
 			} else if route.part == Landing {
 				serve_landing!(route, key)
 			} else {
@@ -182,11 +209,25 @@ serve_conversation! = |req, route|
 								Ok(t) => {
 									topics = load_topics!(key)
 									if Conversation.has_topic(topics, route.topic) {
-										serve_topic!(req, route, { key, conv, who, title: Conversation.topic_title(t, route.topic), topics })
+										serve_topic!(
+											req,
+											route,
+											{
+												key,
+												conv,
+												who,
+												title: Conversation.topic_title(t, route.topic),
+												topics,
+											},
+										)
 									} else {
 										# **A TOPIC THAT IS NOT THERE IS A 404 THAT SAYS SO**
 										# (metal-vmm QUEUE 156(j)).
-										not_found_page!(who, "There is no topic \u(201C)${route.topic}\u(201D) in this conversation.", key.base())
+										not_found_page!(
+											who,
+											"There is no topic \u(201C)${route.topic}\u(201D) in this conversation.",
+											key.base(),
+										)
 									}
 								}
 							}
@@ -209,7 +250,13 @@ conv_key = |route|
 
 ## A topic found: its conversation, the accounts as far as they were asked,
 ## its title, and the conversation's topics as they were listed to find it.
-AtTopic : { key : Paths.ConvKey, conv : Chat.Conv, who : Who, title : Str, topics : List(Str) }
+AtTopic : {
+	key : Paths.ConvKey,
+	conv : Chat.Conv,
+	who : Who,
+	title : Str,
+	topics : List(Str),
+}
 
 ## **THE IDS SAVED FROM THIS TOPIC** (GET <topic>/saved, metal-vmm QUEUE
 ## 273): the member's reading list read and its refs here taken
@@ -222,11 +269,28 @@ serve_saved! = |route|
 		Ok(me) =>
 			match Files.read_bytes!(Paths.reading_list_path(me)) {
 				Ok(text) => {
-					ids = Saved.ids(text, route.key.to_utf8(), route.topic.to_utf8())
+					ids = Saved.ids(
+						text,
+						route.key.to_utf8(),
+						route.topic.to_utf8(),
+					)
 					# An id is ASCII by its rule (Paths.is_valid_msg_ref_id).
-					Chat.respond(200, json, JsonOut.array(List.map(ids, |id| JsonOut.string(Str.from_utf8_lossy(id)))).bytes())
+					Chat.respond(
+						200,
+						json,
+						JsonOut.array(
+							List.map(
+								ids,
+								|id| JsonOut.string(Str.from_utf8_lossy(id)),
+							),
+						).bytes(),
+					)
 				}
-				Err(Missing) => Chat.respond(200, json, Str.to_utf8("[]"))
+				Err(Missing) => Chat.respond(
+					200,
+					json,
+					Str.to_utf8("[]"),
+				)
 				Err(Failed) => Chat.answered
 			}
 	}
@@ -270,7 +334,11 @@ believed_count! = |at, size|
 
 ## A topic's page, or its raw transcript: a read, then the work.
 serve_page_or_raw! : Chat.Request, Route.R, AtTopic => Chat.Answer
-serve_page_or_raw! = |req, route, found|
+serve_page_or_raw! = |
+	req,
+	route,
+	found,
+|
 	if req.method != Get and req.method != Head {
 		Chat.not_allowed(Get)
 	} else if route.tail == Page {
@@ -284,7 +352,11 @@ serve_page_or_raw! = |req, route, found|
 
 ## A topic that is there: the method, then the work.
 serve_topic! : Chat.Request, Route.R, AtTopic => Chat.Answer
-serve_topic! = |req, route, found| {
+serve_topic! = |
+	req,
+	route,
+	found,
+| {
 	who = found.who
 	match route.tail {
 		# The tails the Zig serves, the conversation and the topic found
@@ -292,16 +364,33 @@ serve_topic! = |req, route, found| {
 		Uploads | Upload | Stream | Download => zig(route, Uncounted)
 		Saved => if req.method != Get and req.method != Head Chat.not_allowed(Get) else serve_saved!(route)
 		Invalid => Chat.not_found
-		Page | Raw => serve_page_or_raw!(req, route, found)
+		Page | Raw => serve_page_or_raw!(
+			req,
+			route,
+			found,
+		)
 		Reactions =>
 			if req.method != Get {
 				Chat.not_allowed(Get)
 			} else {
 				# readReactions's: none yet is no events; bytes as stored (QUEUE 267).
 				ndjson = Str.to_utf8("application/x-ndjson; charset=utf-8")
-				match Files.read_bytes!(Paths.reactions_path({ key: found.key, topic: route.topic })) {
-					Ok(bytes) => Chat.respond(200, ndjson, bytes)
-					Err(Missing) => Chat.respond(200, ndjson, [])
+				match Files.read_bytes!(
+					Paths.reactions_path({
+						key: found.key,
+						topic: route.topic,
+					}),
+				) {
+					Ok(bytes) => Chat.respond(
+						200,
+						ndjson,
+						bytes,
+					)
+					Err(Missing) => Chat.respond(
+						200,
+						ndjson,
+						[],
+					)
 					Err(Failed) => Chat.answered
 				}
 			}
@@ -311,8 +400,16 @@ serve_topic! = |req, route, found| {
 			} else if route.tail == React {
 				react!(who, { key: found.key, topic: route.topic })
 			} else {
-				match pin!(found.key, route.topic, if route.tail == Pin Pinned else Unpinned) {
-					Ok({}) => Chat.respond(204, [], [])
+				match pin!(
+					found.key,
+					route.topic,
+					if route.tail == Pin Pinned else Unpinned,
+				) {
+					Ok({}) => Chat.respond(
+						204,
+						[],
+						[],
+					)
 					Err(Failed) => Chat.answered
 				}
 			}
@@ -337,7 +434,15 @@ find! = |key| {
 					match load_accounts!(Unasked) {
 						Ok(all) =>
 							if Accounts.has_account(all, other) {
-								Ok(({ family: Dm, key: bytes, base: Conversation.dm_base(bytes), members: Conversation.dm_members(bytes) }, Known(all)))
+								Ok((
+									{
+										family: Dm,
+										key: bytes,
+										base: Conversation.dm_base(bytes),
+										members: Conversation.dm_members(bytes),
+									},
+									Known(all),
+								))
 							} else {
 								Err(NotYours)
 							}
@@ -348,7 +453,15 @@ find! = |key| {
 		Channel(name) => {
 			members = load_channel_members!(name)?
 			if List.contains(members, me) {
-				Ok(({ family: Channel, key: bytes, base: Conversation.channel_base(bytes), members: List.map(members, |u| u.to_str().to_utf8()) }, Unasked))
+				Ok((
+					{
+						family: Channel,
+						key: bytes,
+						base: Conversation.channel_base(bytes),
+						members: List.map(members, |u| u.to_str().to_utf8()),
+					},
+					Unasked,
+				))
 			} else {
 				Err(NotYours)
 			}
@@ -473,8 +586,15 @@ load_channel_rosters! = |{}| {
 		Ok(listed) => {
 			# A channel whose name is not UTF-8 is skipped, and counted as a
 			# malformed one is.
-			List.for_each!(Paths.channel_names_not_utf8(listed.not_utf8), |name| Host.count_malformed_channel!(name))
-			load_rosters_from!(Paths.channel_names(listed.entries), 0, [])
+			List.for_each!(
+				Paths.channel_names_not_utf8(listed.not_utf8),
+				|name| Host.count_malformed_channel!(name),
+			)
+			load_rosters_from!(
+				Paths.channel_names(listed.entries),
+				0,
+				[],
+			)
 		}
 		Err(Missing) => Ok([])
 		Err(Failed) => Err(Failed)
@@ -482,7 +602,11 @@ load_channel_rosters! = |{}| {
 }
 
 load_rosters_from! : List(Str), U64, List(Paths.Roster) => Try(List(Paths.Roster), [Failed])
-load_rosters_from! = |names, i, out|
+load_rosters_from! = |
+	names,
+	i,
+	out,
+|
 	match List.get(names, i) {
 		Err(_) => Ok(out)
 		Ok(name) =>
@@ -497,18 +621,34 @@ load_rosters_from! = |names, i, out|
 						Err(NotUtf8) => Malformed
 					}
 					match part {
-						Listed(r) => load_rosters_from!(names, i + 1, List.append(out, r))
+						Listed(r) => load_rosters_from!(
+							names,
+							i + 1,
+							List.append(out, r),
+						)
 						Malformed => {
 							Host.count_malformed_channel!(name.to_utf8())
-							load_rosters_from!(names, i + 1, out)
+							load_rosters_from!(
+								names,
+								i + 1,
+								out,
+							)
 						}
-						Gone => load_rosters_from!(names, i + 1, out)
+						Gone => load_rosters_from!(
+							names,
+							i + 1,
+							out,
+						)
 						Failed => Err(Failed)
 					}
 				}
 				Err(Invalid) => {
 					Host.count_malformed_channel!(name.to_utf8())
-					load_rosters_from!(names, i + 1, out)
+					load_rosters_from!(
+						names,
+						i + 1,
+						out,
+					)
 				}
 			}
 	}
@@ -554,11 +694,25 @@ load_title! = |key, who|
 ## emptied, removed. A read that failed stops here: the set is not empty, it
 ## is unknown, and writing it would drop every pin. `Failed` when a step failed.
 pin! : Paths.ConvKey, Str, ChatState.Pin => Try({}, [Failed])
-pin! = |key, topic, pin| {
+pin! = |
+	key,
+	topic,
+	pin,
+| {
 	path = Paths.pinned_path(load_uid!({})?, key)
 	match Files.read!(path) {
-		Ok(stored) => write_pins!(path, stored, topic, pin)
-		Err(Missing) => write_pins!(path, "", topic, pin)
+		Ok(stored) => write_pins!(
+			path,
+			stored,
+			topic,
+			pin,
+		)
+		Err(Missing) => write_pins!(
+			path,
+			"",
+			topic,
+			pin,
+		)
 		Err(Failed) => Err(Failed)
 	}
 }
@@ -566,8 +720,17 @@ pin! = |key, topic, pin| {
 ## The pinned file at `path`, read as `stored`, with `topic` pinned or
 ## unpinned: written back, or, emptied, removed.
 write_pins! : Paths.ChatPath, Str, Str, ChatState.Pin => Try({}, [Failed])
-write_pins! = |path, stored, topic, pin|
-	match ChatState.pinned(stored, topic, pin) {
+write_pins! = |
+	path,
+	stored,
+	topic,
+	pin,
+|
+	match ChatState.pinned(
+		stored,
+		topic,
+		pin,
+	) {
 		Write(bytes) => Files.write!(path, bytes)
 		Remove => Files.remove!(path)
 	}
@@ -592,7 +755,10 @@ bookmark! = |key, topic| {
 ## disk requests each time.
 write_if_changed! : Paths.ChatPath, Str => Try({}, [Failed])
 write_if_changed! = |path, value|
-	if ChatState.is_changed(Files.read!(path), value) Files.write!(path, ChatState.bookmark_line(value)) else Ok({})
+	if ChatState.is_changed(Files.read!(path), value) Files.write!(
+		path,
+		ChatState.bookmark_line(value),
+	) else Ok({})
 
 ## POST .../react: the form, then the reaction stored and sent live.
 react! : Who, Paths.TopicAt => Chat.Answer
@@ -603,11 +769,27 @@ react! = |who, at| {
 	} else {
 		match Reaction.form(body.bytes) {
 			Malformed => Chat.malformed
-			Bad(why) => Chat.respond(400, [], why)
+			Bad(why) => Chat.respond(
+				400,
+				[],
+				why,
+			)
 			Reacted(r) =>
-				match store_reaction!(who, at, r) {
-					Stored => Chat.respond(204, [], [])
-					NoSuchMessage => Chat.respond(400, [], Str.to_utf8("react: no such message\n"))
+				match store_reaction!(
+					who,
+					at,
+					r,
+				) {
+					Stored => Chat.respond(
+						204,
+						[],
+						[],
+					)
+					NoSuchMessage => Chat.respond(
+						400,
+						[],
+						Str.to_utf8("react: no such message\n"),
+					)
 					Failed => Chat.answered
 				}
 		}
@@ -620,8 +802,22 @@ react! = |who, at| {
 ## time, then its sidecar line appended and its frame published on the
 ## topic's key. `Failed` when a step failed (the request has, with its
 ## error), and nothing after it is done.
-store_reaction! : Who, Paths.TopicAt, { msg : U64, emoji : Str, change : Reaction.Change } => [Stored, NoSuchMessage, Failed]
-store_reaction! = |who, topic_at, r|
+store_reaction! : Who,
+Paths.TopicAt,
+{
+	msg : U64,
+	emoji : Str,
+	change : Reaction.Change,
+} => [
+	Stored,
+	NoSuchMessage,
+	Failed,
+]
+store_reaction! = |
+	who,
+	topic_at,
+	r,
+|
 	match (load_viewer!(who), load_uid!({})) {
 		(Ok(name), Ok(uid)) => {
 			match count_messages!(topic_at) {
@@ -632,7 +828,14 @@ store_reaction! = |who, topic_at, r|
 						NoSuchMessage
 					} else {
 						at = Time.rfc3339(Host.now!({}))
-						line = Reaction.line({ msg: r.msg, uid, from: name, emoji: r.emoji, change: r.change, at })
+						line = Reaction.line({
+							msg: r.msg,
+							uid,
+							from: name,
+							emoji: r.emoji,
+							change: r.change,
+							at,
+						})
 						# **THE ECHO IS MADE BEFORE THE STORE** (metal-vmm QUEUE
 						# 177.1), as a message's: its key and frame, so nothing
 						# can fail between the append and the publish.
@@ -671,7 +874,15 @@ serve_links! = |rest|
 						(before, after) = Pages.links_around(src, viewer)
 						Chat.served_html(before, after)
 					}
-					NotServing => Chat.respond(200, html, Pages.links(src, viewer, NoLinks).bytes())
+					NotServing => Chat.respond(
+						200,
+						html,
+						Pages.links(
+							src,
+							viewer,
+							NoLinks,
+						).bytes(),
+					)
 				}
 			}
 		}
@@ -685,13 +896,26 @@ serve_recent! = |rest|
 		Chat.not_found
 	} else {
 		match load_recent!({}) {
-			Ok((me, viewer, written)) => {
+			Ok(
+				(
+					me,
+					viewer,
+					written,
+				),
+			) => {
 				# **ONE DAMAGED ROW IS ITS OWN** (QUEUE 267): a row whose
 				# text is not UTF-8 (a torn last block) is left out and
 				# counted, and the page served with the rest.
 				got = Recent.rows_of(written)
 				List.for_each!(got.damaged, |key| Host.count_dropped!(RecentRow, key))
-				Chat.respond(200, html, Pages.recent(Chrome.src_in(Host.srcs!({})), { viewer, json: Recent.json(me, got.rows) }).bytes())
+				Chat.respond(
+					200,
+					html,
+					Pages.recent(
+						Chrome.src_in(Host.srcs!({})),
+						{ viewer, json: Recent.json(me, got.rows) },
+					).bytes(),
+				)
 			}
 			Err(Failed) => Chat.answered
 		}
@@ -704,40 +928,107 @@ serve_recent! = |rest|
 ## their docs. `Failed` when a read failed (the request has, with its error).
 ## **ONE DAMAGED ROW IS ITS OWN** (QUEUE 267): a DM whose partner's name,
 ## or a row whose author's, will not read is left out and counted.
-load_recent! : {} => Try((Uid, Str, List(Recent.Written)), [Failed])
+load_recent! : {} => Try(
+	(
+		Uid,
+		Str,
+		List(Recent.Written),
+	),
+	[Failed],
+)
 load_recent! = |{}| {
 	me = load_uid!({})?
 	accounts = load_accounts!(Unasked)?
 	viewer = fail_if_unreadable!(Accounts.name(accounts, me))?
 	roster = fail_if_unreadable!(Accounts.roster_named(accounts))?
-	dms = List.keep_if(roster, |u| u.id != me) |> List.map(|u| { key: Dm(Paths.pair_key(me, u.id)), label: u.name.map_ok(|name| "to ${name}") })
-	from_dms = gather_convs!(me, accounts, dms, [])?
+	dms = List.keep_if(roster, |u| u.id != me)
+		|> List.map(
+			|u| {
+				key: Dm(Paths.pair_key(me, u.id)),
+				label: u.name.map_ok(|name| "to ${name}"),
+			},
+		)
+	from_dms = gather_convs!(
+		me,
+		accounts,
+		dms,
+		[],
+	)?
 	rosters = load_channel_rosters!({})?
-	channels = List.keep_oks(Paths.member_channels(rosters, me), |name| Paths.channel_name_from_str(name).map_ok(|valid| { key: Channel(valid), label: Ok("in ${name}") }))
-	from_channels = gather_convs!(me, accounts, channels, from_dms)?
-	docs = gather_docs!(me, Paths.docs(me, list!(Paths.docs_folder(me))), [])?
-	Ok((me, viewer, List.concat(from_channels, docs)))
+	channels = List.keep_oks(
+		Paths.member_channels(rosters, me),
+		|name| Paths.channel_name_from_str(name).map_ok(
+			|valid| {
+				key: Channel(valid),
+				label: Ok("in ${name}"),
+			},
+		),
+	)
+	from_channels = gather_convs!(
+		me,
+		accounts,
+		channels,
+		from_dms,
+	)?
+	docs = gather_docs!(
+		me,
+		Paths.docs(me, list!(Paths.docs_folder(me))),
+		[],
+	)?
+	Ok((
+		me,
+		viewer,
+		List.concat(from_channels, docs),
+	))
 }
 
 ## What a conversation's rows are labelled: "to <partner>" or "in <channel>".
 Labelled : { key : Paths.ConvKey, label : Try(Str, [Unreadable]) }
 
 ## A row for each topic of each conversation, after `out`.
-gather_convs! : Uid, List(Accounts.Account), List(Labelled), List(Recent.Written) => Try(List(Recent.Written), [Failed])
-gather_convs! = |me, accounts, convs, out|
+gather_convs! : Uid,
+List(Accounts.Account),
+List(Labelled),
+List(Recent.Written) => Try(
+	List(Recent.Written),
+	[Failed],
+)
+gather_convs! = |
+	me,
+	accounts,
+	convs,
+	out,
+|
 	match convs {
 		[] => Ok(out)
 		[conv, .. as more] => {
 			topics = load_topics!(conv.key)
 			rows =
 				match conv.label {
-					Ok(label) => gather_topics!(me, accounts, { key: conv.key, label }, topics, out)?
+					Ok(label) => gather_topics!(
+						me,
+						accounts,
+						{ key: conv.key, label },
+						topics,
+						out,
+					)?
 					Err(Unreadable) => {
-						List.for_each!(topics, |topic| Host.count_dropped!(RecentRow, Str.to_utf8("${conv.key.base()}/${topic}")))
+						List.for_each!(
+							topics,
+							|topic| Host.count_dropped!(
+								RecentRow,
+								Str.to_utf8("${conv.key.base()}/${topic}"),
+							),
+						)
 						out
 					}
 				}
-			gather_convs!(me, accounts, more, rows)
+			gather_convs!(
+				me,
+				accounts,
+				more,
+				rows,
+			)
 		}
 	}
 
@@ -746,18 +1037,52 @@ gather_convs! = |me, accounts, convs, out|
 ## one whose last date will not read (a transcript another writer made) is
 ## dated by its file too: at the epoch it would be buried, and its empty
 ## date would show as "NaNd".
-gather_topics! : Uid, List(Accounts.Account), { key : Paths.ConvKey, label : Str }, List(Str), List(Recent.Written) => Try(List(Recent.Written), [Failed])
-gather_topics! = |me, accounts, conv, topics, out|
+gather_topics! : Uid,
+List(Accounts.Account),
+{
+	key : Paths.ConvKey,
+	label : Str,
+},
+List(Str),
+List(Recent.Written) => Try(List(Recent.Written), [Failed])
+gather_topics! = |
+	me,
+	accounts,
+	conv,
+	topics,
+	out,
+|
 	match topics {
 		[] => Ok(out)
 		[topic, .. as more] => {
 			at = { key: conv.key, topic }
-			row = { ..no_row, key: Str.to_utf8("${conv.key.base()}/${topic}"), label: conv.label.to_utf8(), topic: topic.to_utf8(), dm: conv.key.kind() }
+			row = {
+				..no_row,
+				key: Str.to_utf8("${conv.key.base()}/${topic}"),
+				label: conv.label.to_utf8(),
+				topic: topic.to_utf8(),
+				dm: conv.key.kind(),
+			}
 			rows =
 				match Last.of!(at, accounts)? {
 					Some(last) =>
-						match (Time.unix_from_rfc3339(last.at), author_name(me, accounts, last.uid)) {
-							(Ok(secs), Ok(name)) => Ok([{ ..row, secs: secs_text(secs), uid: last.uid, name: name.to_utf8(), markdown: last.markdown }])
+						match (
+							Time.unix_from_rfc3339(last.at),
+							author_name(
+								me,
+								accounts,
+								last.uid,
+							),
+						) {
+							(Ok(secs), Ok(name)) => Ok([
+								{
+									..row,
+									secs: secs_text(secs),
+									uid: last.uid,
+									name: name.to_utf8(),
+									markdown: last.markdown,
+								},
+							])
 							(Ok(_), Err(Unreadable)) => {
 								Host.count_dropped!(RecentRow, row.key)
 								Ok([])
@@ -766,20 +1091,47 @@ gather_topics! = |me, accounts, conv, topics, out|
 						}
 					None => by_file_time!(Paths.transcript_path(at), row)
 				}?
-			gather_topics!(me, accounts, conv, more, List.concat(out, rows))
+			gather_topics!(
+				me,
+				accounts,
+				conv,
+				more,
+				List.concat(out, rows),
+			)
 		}
 	}
 
 ## The member's docs, each dated by its file; one gone since its folder
 ## was listed is left out.
-gather_docs! : Uid, List({ slug : Str, path : Paths.ChatPath }), List(Recent.Written) => Try(List(Recent.Written), [Failed])
-gather_docs! = |me, docs, out|
+gather_docs! : Uid,
+List(
+	{
+		slug : Str,
+		path : Paths.ChatPath,
+	},
+),
+List(Recent.Written) => Try(List(Recent.Written), [Failed])
+gather_docs! = |
+	me,
+	docs,
+	out,
+|
 	match docs {
 		[] => Ok(out)
 		[doc, .. as more] => {
-			row = { ..no_row, kind: Doc, uid: me.to_str().to_utf8(), key: doc.slug.to_utf8(), label: Recent.doc_title(doc.slug).to_utf8() }
+			row = {
+				..no_row,
+				kind: Doc,
+				uid: me.to_str().to_utf8(),
+				key: doc.slug.to_utf8(),
+				label: Recent.doc_title(doc.slug).to_utf8(),
+			}
 			rows = by_file_time!(doc.path, row)?
-			gather_docs!(me, more, List.concat(out, rows))
+			gather_docs!(
+				me,
+				more,
+				List.concat(out, rows),
+			)
 		}
 	}
 
@@ -799,14 +1151,28 @@ by_file_time! = |path, row|
 ## an empty Who cell, never an older author). An id that is no uid names
 ## no account, so no name.
 author_name : Uid, List(Accounts.Account), List(U8) -> Try(Str, [Unreadable])
-author_name = |me, accounts, uid|
+author_name = |
+	me,
+	accounts,
+	uid,
+|
 	match Uid.from_utf8(uid) {
 		Ok(id) if id != me => Accounts.name(accounts, id).map_err(|_| Unreadable)
 		_ => Ok("")
 	}
 
 no_row : Recent.Written
-no_row = { kind: Message, secs: [], uid: [], name: [], key: [], label: [], topic: [], markdown: [], dm: Channel }
+no_row = {
+	kind: Message,
+	secs: [],
+	uid: [],
+	name: [],
+	key: [],
+	label: [],
+	topic: [],
+	markdown: [],
+	dm: Channel,
+}
 
 ## A row's time as Recent.Written carries it: a signed decimal.
 secs_text : I64 -> List(U8)
@@ -835,15 +1201,25 @@ serve_feed! = |which, rest|
 				(page, damaged) = match which {
 					Images => {
 						got = Feeds.images_of(file)
-						(Pages.images(src, { viewer, json: Feeds.images_json(got.entries, 20) }), got.damaged)
+						(
+							Pages.images(src, { viewer, json: Feeds.images_json(got.entries, 20) }),
+							got.damaged,
+						)
 					}
 					Code => {
 						got = Feeds.code_of(file)
-						(Pages.code(src, { viewer, json: Feeds.code_json(got.entries) }), got.damaged)
+						(
+							Pages.code(src, { viewer, json: Feeds.code_json(got.entries) }),
+							got.damaged,
+						)
 					}
 				}
 				if damaged > 0 Host.count_dropped!(FeedEntry, path.bytes()) else {}
-				Chat.respond(200, html, page.bytes())
+				Chat.respond(
+					200,
+					html,
+					page.bytes(),
+				)
 			}
 		}
 	}
@@ -858,13 +1234,30 @@ serve_landing! = |route, key|
 		Ok((conv, who)) => {
 			first = Paths.first_of(load_topics!(key))
 			if !first.is_empty() {
-				Chat.redirect(List.join([conv.base, ['/'], first.to_utf8()]))
+				Chat.redirect(
+					List.join([
+						conv.base,
+						['/'],
+						first.to_utf8(),
+					]),
+				)
 			} else {
 				match load_title!(key, who) {
 					Err(Failed) => Chat.answered
 					Ok(title) =>
 						match load_viewer!(who) {
-							Ok(viewer) => Chat.respond(200, html, Pages.no_topics(Chrome.src_in(Host.srcs!({})), { viewer, base: key.base(), title }).bytes())
+							Ok(viewer) => Chat.respond(
+								200,
+								html,
+								Pages.no_topics(
+									Chrome.src_in(Host.srcs!({})),
+									{
+										viewer,
+										base: key.base(),
+										title,
+									},
+								).bytes(),
+							)
 							Err(Failed) => Chat.answered
 						}
 				}
@@ -884,8 +1277,24 @@ serve_topic_page! = |route, at|
 		match load_sidebar!(route.topic, at) {
 			Err(Failed) => Chat.answered
 			Ok((viewer, sb)) => {
-				view = { key: route.key, base: at.key.base(), topic: route.topic, title: at.title, uid: sb.uid, viewer, sidebar_json: Pages.sidebar_json(sb) }
-				Chat.respond(200, html, Pages.conversation(Chrome.src_in(Host.srcs!({})), Limits.page, view).bytes())
+				view = {
+					key: route.key,
+					base: at.key.base(),
+					topic: route.topic,
+					title: at.title,
+					uid: sb.uid,
+					viewer,
+					sidebar_json: Pages.sidebar_json(sb),
+				}
+				Chat.respond(
+					200,
+					html,
+					Pages.conversation(
+						Chrome.src_in(Host.srcs!({})),
+						Limits.page,
+						view,
+					).bytes(),
+				)
 			}
 		}
 	}
@@ -912,14 +1321,39 @@ load_sidebar! = |topic, at| {
 						Err(Failed) => Err(Failed)
 						Ok(roster) => {
 							others = List.drop_if(roster, |u| u.id == uid)
-							flags = Host.check_online!(List.map(others, |u| u.id.to_str().to_utf8()))
+							flags = Host.check_online!(
+								List.map(
+									others,
+									|u| u.id.to_str().to_utf8(),
+								),
+							)
 							match load_channel_rosters!({}) {
 								Err(Failed) => Err(Failed)
 								Ok(rosters) =>
 									match Files.read!(Paths.pinned_path(uid, at.key)) {
 										Err(Failed) => Err(Failed)
-										Ok(stored) => Ok((viewer, sidebar_of(uid, topic, at, with_online(others, flags), Paths.member_channels(rosters, uid), ChatState.pins(stored))))
-										Err(Missing) => Ok((viewer, sidebar_of(uid, topic, at, with_online(others, flags), Paths.member_channels(rosters, uid), [])))
+										Ok(stored) => Ok((
+											viewer,
+											sidebar_of(
+												uid,
+												topic,
+												at,
+												with_online(others, flags),
+												Paths.member_channels(rosters, uid),
+												ChatState.pins(stored),
+											),
+										))
+										Err(Missing) => Ok((
+											viewer,
+											sidebar_of(
+												uid,
+												topic,
+												at,
+												with_online(others, flags),
+												Paths.member_channels(rosters, uid),
+												[],
+											),
+										))
 									}
 							}
 						}
@@ -930,14 +1364,56 @@ load_sidebar! = |topic, at| {
 
 ## The other members, each beside its own flag (Host.check_online! answers one
 ## per id, in their order).
-with_online : List({ id : Uid, name : Str }), List([Offline, Online]) -> List({ id : Uid, name : Str, presence : [Online, Offline] })
+with_online : List({ id : Uid, name : Str }),
+List([Offline, Online]) -> List(
+	{
+		id : Uid,
+		name : Str,
+		presence : [Online, Offline],
+	},
+)
 with_online = |others, flags|
-	List.map_with_index(others, |u, i|
-		{ id: u.id, name: u.name, presence: if List.get(flags, i) == Ok(Online) Online else Offline })
+	List.map_with_index(
+		others,
+		|u, i|
+			{
+				id: u.id,
+				name: u.name,
+				presence: if List.get(flags, i) == Ok(Online) Online else Offline,
+			},
+	)
 
-sidebar_of : Uid, Str, AtTopic, List({ id : Uid, name : Str, presence : [Online, Offline] }), List(Str), List(Str) -> Pages.Sidebar
-sidebar_of = |me, topic, at, others, channels, pins|
-	{ uid: me, kind: if at.conv.family == Dm Dm else Channel, key: at.key.to_str(), base: at.key.base(), topic, others, channels, pins, topics: at.topics }
+sidebar_of : Uid,
+Str,
+AtTopic,
+List(
+	{
+		id : Uid,
+		name : Str,
+		presence : [Online, Offline],
+	},
+),
+List(Str),
+List(Str) -> Pages.Sidebar
+sidebar_of = |
+	me,
+	topic,
+	at,
+	others,
+	channels,
+	pins,
+|
+	{
+		uid: me,
+		kind: if at.conv.family == Dm Dm else Channel,
+		key: at.key.to_str(),
+		base: at.key.base(),
+		topic,
+		others,
+		channels,
+		pins,
+		topics: at.topics,
+	}
 
 json : List(U8)
 json = Str.to_utf8("application/json; charset=utf-8")
@@ -968,12 +1444,31 @@ welcome! = |{}| {
 
 ## The host's hello in the DM `key`, and the member's bookmark at it.
 hello! : List(Accounts.Account), Uid, Paths.ConvKey => Try({}, [Failed])
-hello! = |accounts, host, key| {
+hello! = |
+	accounts,
+	host,
+	key,
+| {
 	name = fail_if_unreadable!(Accounts.name(accounts, host))?
 	bytes = key.bytes()
-	conv = { family: Dm, key: bytes, base: Conversation.dm_base(bytes), members: Conversation.dm_members(bytes) }
+	conv = {
+		family: Dm,
+		key: bytes,
+		base: Conversation.dm_base(bytes),
+		members: Conversation.dm_members(bytes),
+	}
 	text = "Hi, this is an automated message from ${name}. Please say hello and ${name} will get back to you soon."
-	_ = append_message_by!(conv, Known(accounts), host, { at: { key, topic: "general" }, name, markdown: text, cid: "" })?
+	_ = append_message_by!(
+		conv,
+		Known(accounts),
+		host,
+		{
+			at: { key, topic: "general" },
+			name,
+			markdown: text,
+			cid: "",
+		},
+	)?
 	bookmark!(key, "general")
 }
 
@@ -990,7 +1485,11 @@ seed_welcome! = |{}| {
 					pair = Paths.pair_key(host.id, me)
 					key = Dm(pair)
 					if Paths.first_of(load_topics!(key)).is_empty() {
-						hello!(accounts, host.id, key)?
+						hello!(
+							accounts,
+							host.id,
+							key,
+						)?
 					}
 					Host.welcome_done!({})?
 					Ok(Known(accounts))
@@ -1024,7 +1523,11 @@ resume! = |who|
 				}
 				_ =>
 					match load_viewer!(who) {
-						Ok(viewer) => Chat.respond(200, html, Pages.no_conversations(Chrome.src_in(Host.srcs!({})), viewer).bytes())
+						Ok(viewer) => Chat.respond(
+							200,
+							html,
+							Pages.no_conversations(Chrome.src_in(Host.srcs!({})), viewer).bytes(),
+						)
 						Err(Failed) => Chat.answered
 					}
 			}
@@ -1034,9 +1537,17 @@ resume! = |who|
 ## Where member `me` resumes DM `conv`, whose topics are `topics`: the
 ## choice ChatState's, the last-viewed topic and the clock the host's.
 resume_at! : Uid, Paths.PairKey, List(Str) => Str
-resume_at! = |me, pair, topics| {
+resume_at! = |
+	me,
+	pair,
+	topics,
+| {
 	last = ChatState.bookmark(Files.read!(Paths.last_session_path(me, Dm(pair))))
-	ChatState.resume_topic(topics, last, Host.now!({}))
+	ChatState.resume_topic(
+		topics,
+		last,
+		Host.now!({}),
+	)
 }
 
 ## /chat/conversations: a DM with every other member, where the member
@@ -1044,7 +1555,19 @@ resume_at! = |me, pair, topics| {
 serve_conversations! : {} => Chat.Answer
 serve_conversations! = |{}|
 	match (load_roster!({}), load_uid!({})) {
-		(Ok(members), Ok(me)) => Chat.respond(200, json, Topics.conversations_json(me, load_dm_entries!(me, members, 0, [])))
+		(Ok(members), Ok(me)) => Chat.respond(
+			200,
+			json,
+			Topics.conversations_json(
+				me,
+				load_dm_entries!(
+					me,
+					members,
+					0,
+					[],
+				),
+			),
+		)
 		(Err(Failed), _) | (Ok(_), Err(Failed)) => Chat.answered
 	}
 
@@ -1058,17 +1581,53 @@ load_roster! = |{}|
 		Err(Failed) => Err(Failed)
 	}
 
-load_dm_entries! : Uid, List({ id : Uid, name : Str }), U64, List(Topics.Entry) => List(Topics.Entry)
-load_dm_entries! = |me, members, i, acc|
+load_dm_entries! : Uid,
+List(
+	{
+		id : Uid,
+		name : Str,
+	},
+),
+U64,
+List(Topics.Entry) => List(Topics.Entry)
+load_dm_entries! = |
+	me,
+	members,
+	i,
+	acc,
+|
 	match List.get(members, i) {
 		Ok({ id, name }) =>
 			if id == me {
-				load_dm_entries!(me, members, i + 1, acc)
+				load_dm_entries!(
+					me,
+					members,
+					i + 1,
+					acc,
+				)
 			} else {
 				pair = Paths.pair_key(me, id)
 				listed = load_topics!(Dm(pair))
-				default = resume_at!(me, pair, listed)
-				load_dm_entries!(me, members, i + 1, List.append(acc, { conv: pair, id, name, default, sessions: listed }))
+				default = resume_at!(
+					me,
+					pair,
+					listed,
+				)
+				load_dm_entries!(
+					me,
+					members,
+					i + 1,
+					List.append(
+						acc,
+						{
+							conv: pair,
+							id,
+							name,
+							default,
+							sessions: listed,
+						},
+					),
+				)
 			}
 		Err(_) => acc
 	}
@@ -1097,17 +1656,33 @@ redirect_to_msg! = |id|
 			Ok((before, _)) => before
 			Err(NoSeparator) => []
 		}
-		at = |base, key| List.join([Str.to_utf8(base), key, ['/'], topic, Str.to_utf8("#msg-"), id])
+		at = |base, key| List.join([
+			Str.to_utf8(base),
+			key,
+			['/'],
+			topic,
+			Str.to_utf8("#msg-"),
+			id,
+		])
 		match (load_uid!({}), load_roster!({})) {
 			(Err(Failed), _) | (Ok(_), Err(Failed)) => Chat.answered
 			(Ok(me), Ok(members)) =>
-				match find_dm!(me, members, topic, 0) {
+				match find_dm!(
+					me,
+					members,
+					topic,
+					0,
+				) {
 					Ok(conv) => Chat.found(at("/chat/c/", conv))
 					Err(NoSuchTopic) =>
 						match load_channel_rosters!({}) {
 							Err(Failed) => Chat.answered
 							Ok(rosters) =>
-								match find_channel!(Paths.member_channels(rosters, me), topic, 0) {
+								match find_channel!(
+									Paths.member_channels(rosters, me),
+									topic,
+									0,
+								) {
 									Ok(name) => Chat.found(at("/channel/", name))
 									Err(NoSuchTopic) => Chat.not_found
 								}
@@ -1117,20 +1692,42 @@ redirect_to_msg! = |id|
 	}
 
 find_dm! : Uid, List({ id : Uid, name : Str }), List(U8), U64 => Try(List(U8), [NoSuchTopic])
-find_dm! = |me, members, topic, i|
+find_dm! = |
+	me,
+	members,
+	topic,
+	i,
+|
 	match List.get(members, i) {
 		Ok({ id, name: _ }) =>
 			if id == me {
-				find_dm!(me, members, topic, i + 1)
+				find_dm!(
+					me,
+					members,
+					topic,
+					i + 1,
+				)
 			} else {
 				pair = Paths.pair_key(me, id)
-				if List.contains(List.map(load_topics!(Dm(pair)), Str.to_utf8), topic) Ok(pair.bytes()) else find_dm!(me, members, topic, i + 1)
+				if List.contains(
+					List.map(load_topics!(Dm(pair)), Str.to_utf8),
+					topic,
+				) Ok(pair.bytes()) else find_dm!(
+					me,
+					members,
+					topic,
+					i + 1,
+				)
 			}
 		Err(_) => Err(NoSuchTopic)
 	}
 
 find_channel! : List(Str), List(U8), U64 => Try(List(U8), [NoSuchTopic])
-find_channel! = |names, topic, i|
+find_channel! = |
+	names,
+	topic,
+	i,
+|
 	match List.get(names, i) {
 		Ok(name) =>
 			match Paths.channel_name_from_str(name) {
@@ -1138,7 +1735,11 @@ find_channel! = |names, topic, i|
 					if List.contains(List.map(load_topics!(Channel(valid)), Str.to_utf8), topic) {
 						Ok(name.to_utf8())
 					} else {
-						find_channel!(names, topic, i + 1)
+						find_channel!(
+							names,
+							topic,
+							i + 1,
+						)
 					}
 				# Every name here passed channel_name_from_str already
 				# (load_rosters_from! keeps no other).
@@ -1150,7 +1751,11 @@ find_channel! = |names, topic, i|
 ## POST <base>/new: a topic made with a first "hi", a DM's announced in its
 ## highest general<N>; the conversation and topic as JSON.
 create_topic! : Chat.Request, Route.R, Paths.ConvKey => Chat.Answer
-create_topic! = |req, route, key|
+create_topic! = |
+	req,
+	route,
+	key,
+|
 	match find!(key) {
 		Ok((conv, who)) =>
 			if req.method != Post {
@@ -1162,8 +1767,18 @@ create_topic! = |req, route, key|
 				} else {
 					match Form.field(body.bytes, "topic") {
 						Malformed => Chat.malformed
-						Found(raw) => make_topic!(key, conv, who, ZigText.trim_str(raw))
-						Missing => make_topic!(key, conv, who, "")
+						Found(raw) => make_topic!(
+							key,
+							conv,
+							who,
+							ZigText.trim_str(raw),
+						)
+						Missing => make_topic!(
+							key,
+							conv,
+							who,
+							"",
+						)
 					}
 				}
 			}
@@ -1172,13 +1787,30 @@ create_topic! = |req, route, key|
 	}
 
 make_topic! : Paths.ConvKey, Chat.Conv, Who, Str => Chat.Answer
-make_topic! = |key, conv, who, topic| {
+make_topic! = |
+	key,
+	conv,
+	who,
+	topic,
+| {
 	if !Paths.is_topic_id(topic) {
-		Chat.respond(400, [], Str.to_utf8("Topic must be letters, digits, and hyphens only — no spaces, underscores, or punctuation.\n"))
+		Chat.respond(
+			400,
+			[],
+			Str.to_utf8("Topic must be letters, digits, and hyphens only — no spaces, underscores, or punctuation.\n"),
+		)
 	} else if Topics.is_same_name(topic, "new") {
-		Chat.respond(400, [], Str.to_utf8("\"new\" is reserved — pick another topic name.\n"))
+		Chat.respond(
+			400,
+			[],
+			Str.to_utf8("\"new\" is reserved — pick another topic name.\n"),
+		)
 	} else if Conversation.has_topic(load_topics!(key), topic) {
-		Chat.respond(409, [], Str.to_utf8("That topic already exists.\n"))
+		Chat.respond(
+			409,
+			[],
+			Str.to_utf8("That topic already exists.\n"),
+		)
 	} else {
 		match load_viewer!(who) {
 			Err(Failed) => Chat.answered
@@ -1187,7 +1819,16 @@ make_topic! = |key, conv, who, topic| {
 				# The bookmark first, as a send's: one that fails makes no topic.
 				if dm and bookmark!(key, topic).is_err() {
 					Chat.answered
-				} else if append_message!(conv, who, { at: { key, topic }, name, markdown: "hi", cid: "" }).is_err() {
+				} else if append_message!(
+					conv,
+					who,
+					{
+						at: { key, topic },
+						name,
+						markdown: "hi",
+						cid: "",
+					},
+				).is_err() {
 					Chat.answered
 				} else {
 					# **STORED IS DONE** (metal-vmm QUEUE 267): the topic is
@@ -1196,7 +1837,13 @@ make_topic! = |key, conv, who, topic| {
 					# whose retry is a 409.
 					if dm {
 						_ = Host.aside!(Begin)
-						_ = announce!(key, conv, who, topic, name)
+						_ = announce!(
+							key,
+							conv,
+							who,
+							topic,
+							name,
+						)
 						match Host.aside!(End) {
 							Done => {}
 							Failed => Host.count_dropped!(Announcement, topic.to_utf8())
@@ -1204,7 +1851,11 @@ make_topic! = |key, conv, who, topic| {
 					} else {
 						{}
 					}
-					Chat.respond(200, json, Topics.made_json({ key, topic }))
+					Chat.respond(
+						200,
+						json,
+						Topics.made_json({ key, topic }),
+					)
 				}
 			}
 		}
@@ -1214,10 +1865,25 @@ make_topic! = |key, conv, who, topic| {
 ## A DM's new topic, said where the partner already watches: its highest
 ## general<N>, unless that is the topic made.
 announce! : Paths.ConvKey, Chat.Conv, Who, Str, Str => Try({}, [Failed])
-announce! = |key, conv, who, topic, name|
+announce! = |
+	key,
+	conv,
+	who,
+	topic,
+	name,
+|
 	match Topics.highest_general(load_topics!(key)) {
 		Ok(gen) if gen != topic =>
-			append_message!(conv, who, { at: { key, topic: gen }, name, markdown: "New topic: [${topic}](${key.base()}/${topic})", cid: "" }).map_ok(|_| {})
+			append_message!(
+				conv,
+				who,
+				{
+					at: { key, topic: gen },
+					name,
+					markdown: "New topic: [${topic}](${key.base()}/${topic})",
+					cid: "",
+				},
+			).map_ok(|_| {})
 		_ => Ok({})
 	}
 
@@ -1225,7 +1891,11 @@ announce! = |key, conv, who, topic, name|
 ## the host's. A send makes its topic, so no topic need be there; the
 ## conversation must be the member's.
 send! : Chat.Request, Route.R, Paths.ConvKey => Chat.Answer
-send! = |req, route, key|
+send! = |
+	req,
+	route,
+	key,
+|
 	match find!(key) {
 		Err(Failed) => Chat.answered
 		Ok((conv, who)) =>
@@ -1233,7 +1903,13 @@ send! = |req, route, key|
 		# it: a partner whose name will not read fails a send too.
 			match load_title!(key, who) {
 				Err(Failed) => Chat.answered
-				Ok(_) => receive_message!(req, route, { key, topic: route.topic }, conv, who)
+				Ok(_) => receive_message!(
+					req,
+					route,
+					{ key, topic: route.topic },
+					conv,
+					who,
+				)
 			}
 		Err(NotYours) => not_yours!(route)
 	}
@@ -1241,7 +1917,13 @@ send! = |req, route, key|
 ## A send in `conv`, found and titled: the tail, the method, the header,
 ## the body, the form.
 receive_message! : Chat.Request, Route.R, Paths.TopicAt, Chat.Conv, Who => Chat.Answer
-receive_message! = |req, route, at, conv, who|
+receive_message! = |
+	req,
+	route,
+	at,
+	conv,
+	who,
+|
 	if route.tail == InvalidSend {
 		Chat.not_found
 	} else if req.method != Post {
@@ -1259,15 +1941,31 @@ receive_message! = |req, route, at, conv, who|
 				Found(md) =>
 					match Form.field(body.bytes, "cid") {
 						Malformed => Chat.malformed
-						Found(cid) => store!(at, conv, who, send, { markdown: md, cid })
-						Missing => store!(at, conv, who, send, { markdown: md, cid: "" })
+						Found(cid) => store!(
+							at,
+							conv,
+							who,
+							send,
+							{ markdown: md, cid },
+						)
+						Missing => store!(
+							at,
+							conv,
+							who,
+							send,
+							{ markdown: md, cid: "" },
+						)
 					}
 			}
 		}
 	}
 
 refuse : Str -> Chat.Answer
-refuse = |why| Chat.respond(400, [], Str.to_utf8(why))
+refuse = |why| Chat.respond(
+	400,
+	[],
+	Str.to_utf8(why),
+)
 
 ## What the send form carried: the message's `markdown` and the sender's
 ## client id `cid`. Named fields because both are text. It becomes
@@ -1279,10 +1977,19 @@ Posted : { markdown : Str, cid : Str }
 ## store, so one that fails stores nothing; then 204 for an async sender,
 ## else back to the topic.
 store! : Paths.TopicAt, Chat.Conv, Who, [Async, Sync], Posted => Chat.Answer
-store! = |at, conv, who, send, { markdown: md, cid }|
+store! = |
+	at,
+	conv,
+	who,
+	send,
+	{ markdown: md, cid },
+|
 	if ZigText.trim(md.to_utf8()) == [] {
 		refuse("not sent: the message is empty\n")
-	} else if Host.check_hostile!(md.to_utf8(), Str.to_utf8("not sent: malformed markdown — too much formatting; break it into smaller messages\n")) != Fine {
+	} else if Host.check_hostile!(
+		md.to_utf8(),
+		Str.to_utf8("not sent: malformed markdown — too much formatting; break it into smaller messages\n"),
+	) != Fine {
 		Chat.answered
 	} else {
 		match load_viewer!(who) {
@@ -1290,10 +1997,23 @@ store! = |at, conv, who, send, { markdown: md, cid }|
 			Ok(name) =>
 				if conv.family == Dm and bookmark!(at.key, at.topic).is_err() {
 					Chat.answered
-				} else if append_message!(conv, who, { at, name, markdown: md, cid }).is_err() {
+				} else if append_message!(
+					conv,
+					who,
+					{
+						at,
+						name,
+						markdown: md,
+						cid,
+					},
+				).is_err() {
 					Chat.answered
 				} else if send == Async {
-					Chat.respond(204, [], [])
+					Chat.respond(
+						204,
+						[],
+						[],
+					)
 				} else {
 					Chat.redirect(List.concat(conv.base, "/${at.topic}".to_utf8()))
 				}
@@ -1321,7 +2041,11 @@ search_words! = |req|
 	if req.method != Get {
 		Chat.not_allowed(Get)
 	} else if Host.admit!({}) == Refused {
-		Chat.respond(429, json, Str.to_utf8("{\"error\":\"too many searches; wait a second\"}"))
+		Chat.respond(
+			429,
+			json,
+			Str.to_utf8("{\"error\":\"too many searches; wait a second\"}"),
+		)
 	} else {
 		match Form.value(List.first(Host.read_query!(Str.to_utf8("prefix"))) ?? []) {
 			Err(BadEscape) => Chat.malformed
@@ -1329,8 +2053,20 @@ search_words! = |req|
 				key = Search.key(typed)
 				got = Host.search_words!(key, if key == [] 0 else Search.most_words)
 				match got.status {
-					Ready => Chat.respond(200, json, Search.words_json(key, got.unreadable, got.words))
-					NotReady => Chat.respond(503, json, Str.to_utf8("{\"error\":\"search is not ready\"}"))
+					Ready => Chat.respond(
+						200,
+						json,
+						Search.words_json(
+							key,
+							got.unreadable,
+							got.words,
+						),
+					)
+					NotReady => Chat.respond(
+						503,
+						json,
+						Str.to_utf8("{\"error\":\"search is not ready\"}"),
+					)
 				}
 			}
 		}
@@ -1345,16 +2081,36 @@ search_messages! = |req|
 	if req.method != Get {
 		Chat.not_allowed(Get)
 	} else if Host.admit!({}) == Refused {
-		Chat.respond(429, json, Str.to_utf8("{\"error\":\"too many searches; wait a second\"}"))
+		Chat.respond(
+			429,
+			json,
+			Str.to_utf8("{\"error\":\"too many searches; wait a second\"}"),
+		)
 	} else {
 		match Form.value(List.first(Host.read_query!(Str.to_utf8("word"))) ?? []) {
 			Err(BadEscape) => Chat.malformed
 			Ok(typed) => {
 				key = Search.key(typed)
-				got = Host.search_messages!(key, if List.len(key) < Search.min_len 0 else Search.most_messages)
+				got = Host.search_messages!(
+					key,
+					if List.len(key) < Search.min_len 0 else Search.most_messages,
+				)
 				match got.status {
-					Ready => Chat.respond(200, json, Search.messages_json(key, got.matched, got.unreadable, got.hits))
-					NotReady => Chat.respond(503, json, Str.to_utf8("{\"error\":\"search is not ready\"}"))
+					Ready => Chat.respond(
+						200,
+						json,
+						Search.messages_json(
+							key,
+							got.matched,
+							got.unreadable,
+							got.hits,
+						),
+					)
+					NotReady => Chat.respond(
+						503,
+						json,
+						Str.to_utf8("{\"error\":\"search is not ready\"}"),
+					)
 				}
 			}
 		}
@@ -1410,7 +2166,10 @@ post_text! : Uid, Str => Chat.Answer
 post_text! = |me, md|
 	if ZigText.trim(md.to_utf8()) == [] {
 		refuse("doc is empty\n")
-	} else if Host.check_hostile!(md.to_utf8(), Str.to_utf8("not posted: too much markdown formatting; break the doc up\n")) != Fine {
+	} else if Host.check_hostile!(
+		md.to_utf8(),
+		Str.to_utf8("not posted: too much markdown formatting; break the doc up\n"),
+	) != Fine {
 		Chat.answered
 	} else {
 		match load_accounts!(Unasked) {
@@ -1419,9 +2178,17 @@ post_text! = |me, md|
 				match fail_if_unreadable!(Accounts.authorized(accounts)) {
 					Err(Failed) => Chat.answered
 					Ok(roster) =>
-						match List.keep_if(roster, |u| u.id != me and u.id.to_str() == default_partner(me)) {
+						match List.keep_if(
+							roster,
+							|u| u.id != me and u.id.to_str() == default_partner(me),
+						) {
 							[] => refuse("no default chat partner available\n")
-							[partner, ..] => post_to!(me, Known(accounts), Paths.pair_key(me, partner.id), md)
+							[partner, ..] => post_to!(
+								me,
+								Known(accounts),
+								Paths.pair_key(me, partner.id),
+								md,
+							)
 						}
 				}
 		}
@@ -1435,17 +2202,48 @@ default_partner = |me| if me.to_str() == "1" "2" else "1"
 ## name, with no client id; the bookmark left as it was (appendMessage
 ## wrote none).
 post_to! : Uid, Who, Paths.PairKey, Str => Chat.Answer
-post_to! = |me, who, pair, md| {
+post_to! = |
+	me,
+	who,
+	pair,
+	md,
+| {
 	key = Dm(pair)
-	topic = resume_at!(me, pair, load_topics!(key))
+	topic = resume_at!(
+		me,
+		pair,
+		load_topics!(key),
+	)
 	bytes = key.bytes()
-	conv = { family: Dm, key: bytes, base: Conversation.dm_base(bytes), members: Conversation.dm_members(bytes) }
+	conv = {
+		family: Dm,
+		key: bytes,
+		base: Conversation.dm_base(bytes),
+		members: Conversation.dm_members(bytes),
+	}
 	match load_viewer!(who) {
 		Err(Failed) => Chat.answered
 		Ok(name) =>
-			match append_message!(conv, who, { at: { key, topic }, name, markdown: md, cid: "" }) {
+			match append_message!(
+				conv,
+				who,
+				{
+					at: { key, topic },
+					name,
+					markdown: md,
+					cid: "",
+				},
+			) {
 				Err(Failed) => Chat.answered
-				Ok(id) => Chat.respond(200, json, JsonOut.object([("conv", JsonOut.string(pair.to_str())), ("session", JsonOut.string(topic)), ("id", JsonOut.string(id))]).bytes())
+				Ok(id) => Chat.respond(
+					200,
+					json,
+					JsonOut.object([
+						("conv", JsonOut.string(pair.to_str())),
+						("session", JsonOut.string(topic)),
+						("id", JsonOut.string(id)),
+					]).bytes(),
+				)
 			}
 	}
 }
@@ -1454,7 +2252,12 @@ post_to! = |me, who, pair, md| {
 ## topic), its author's `name`, its `markdown`, and the sender's client id
 ## `cid`. Named fields because three are byte lists: in a row of
 ## arguments, a swapped pair type-checks.
-Draft : { at : Paths.TopicAt, name : Str, markdown : Str, cid : Str }
+Draft : {
+	at : Paths.TopicAt,
+	name : Str,
+	markdown : Str,
+	cid : Str,
+}
 
 ## **A MESSAGE STORED, THEN SENT LIVE** (angry-gopher chat_store
 ## `appendMessage`, its comments the spec): by the member, named `name`, to
@@ -1469,12 +2272,31 @@ Draft : { at : Paths.TopicAt, name : Str, markdown : Str, cid : Str }
 ## before the store failed (the request has, with its error), and nothing
 ## was stored.
 append_message! : Chat.Conv, Who, Draft => Try(Str, [Failed])
-append_message! = |conv, who, draft| append_message_by!(conv, who, load_uid!({})?, draft)
+append_message! = |
+	conv,
+	who,
+	draft,
+| append_message_by!(
+	conv,
+	who,
+	load_uid!({})?,
+	draft,
+)
 
 ## append_message!, by the member `me` (the request's, or the host's for
 ## the welcome DM).
 append_message_by! : Chat.Conv, Who, Uid, Draft => Try(Str, [Failed])
-append_message_by! = |conv, who, me, { at: topic_at, name, markdown: md, cid }|
+append_message_by! = |
+	conv,
+	who,
+	me,
+	{
+		at: topic_at,
+		name,
+		markdown: md,
+		cid,
+	},
+|
 	# **NO MESSAGE WITHOUT AN AUTHOR** (the review of 156): the decoder
 	# refuses such a block on every read, so it would go out live and be
 	# gone on reload. A nameless member (a release cut short) cannot post.
@@ -1490,11 +2312,23 @@ append_message_by! = |conv, who, me, { at: topic_at, name, markdown: md, cid }|
 				# crashes into a 500, storing nothing.
 				id = "${topic}_${U64.to_str(index + 1)}"
 				stamp = Time.rfc3339(Host.now!({}))
-				message = { id: id.to_utf8(), from: name.to_utf8(), at: stamp.to_utf8(), uid: By(me), markdown: md.to_utf8() }
+				message = {
+					id: id.to_utf8(),
+					from: name.to_utf8(),
+					at: stamp.to_utf8(),
+					uid: By(me),
+					markdown: md.to_utf8(),
+				}
 				block = Transcript.stored_form(index, message)
 				# The store's record (Chat.Message, which the host reads): the
 				# same message, its author's digits.
-				stored = { id: message.id, from: message.from, at: message.at, uid: me.to_str().to_utf8(), markdown: message.markdown }
+				stored = {
+					id: message.id,
+					from: message.from,
+					at: message.at,
+					uid: me.to_str().to_utf8(),
+					markdown: message.markdown,
+				}
 				rendered = Host.render!(md.to_utf8())
 				# **THE HTML DECODED HERE, AT THE DOOR**: the renderer makes
 				# text of text, so html that is not UTF-8 is the host's fault,
@@ -1522,9 +2356,37 @@ append_message_by! = |conv, who, me, { at: topic_at, name, markdown: md, cid }|
 						named = if topic_at.key.kind() == Dm load_accounts!(who) else Ok([])
 						match (named, decode_members!(conv.members)) {
 							(Ok(all), Ok(members)) => {
-								frame = Frame.message({ index, from: name, from_uid: me, at: stamp, html: page_html, markdown: md, id, cid })
-								steps = Fanout.steps({ key: topic_at.key, members, topic, index, id, from: name, at: stamp, uid: me, accounts: all }, Fanout.parts_of(md))
-								Host.store_message!(conv, topic.to_utf8(), block, index, stored)?
+								frame = Frame.message({
+									index,
+									from: name,
+									from_uid: me,
+									at: stamp,
+									html: page_html,
+									markdown: md,
+									id,
+									cid,
+								})
+								steps = Fanout.steps(
+									{
+										key: topic_at.key,
+										members,
+										topic,
+										index,
+										id,
+										from: name,
+										at: stamp,
+										uid: me,
+										accounts: all,
+									},
+									Fanout.parts_of(md),
+								)
+								Host.store_message!(
+									conv,
+									topic.to_utf8(),
+									block,
+									index,
+									stored,
+								)?
 								# **STORED IS DONE** (metal-vmm QUEUE 172): from
 								# here nothing fails the send, which a client
 								# would answer by sending it again. The publish
@@ -1556,10 +2418,20 @@ fan_out! = |at, steps|
 			match step {
 				Publish(on, bytes) => Host.publish!(on.bytes(), bytes)
 				Feed(f) => {
-					got = Files.append_entry!(f.path, Feeds.sep, f.entry)
+					got = Files.append_entry!(
+						f.path,
+						Feeds.sep,
+						f.entry,
+					)
 					match got.status {
 						Appended => Host.publish!(f.key.bytes(), f.event)
-						Failed => Host.report_fanout_failure!(f.surface, f.member, at.key.bytes(), at.topic.to_utf8(), got.fault)
+						Failed => Host.report_fanout_failure!(
+							f.surface,
+							f.member,
+							at.key.bytes(),
+							at.topic.to_utf8(),
+							got.fault,
+						)
 					}
 				}
 			}

@@ -27,7 +27,11 @@ handle! = |req|
 			Missing => "missing"
 			Failed => "failed"
 		}
-		Chat.respond(200, [], List.concat(Str.to_utf8(said), got.bytes))
+		Chat.respond(
+			200,
+			[],
+			List.concat(Str.to_utf8(said), got.bytes),
+		)
 	} else if starts(req.sub, "/stat/") {
 		got = Host.stat!(List.drop_first(req.sub, 6))
 		said = match got.status {
@@ -35,54 +39,124 @@ handle! = |req|
 			Missing => "missing size=${U64.to_str(got.size)} mtime=${I64.to_str(got.mtime)}"
 			Failed => "failed"
 		}
-		Chat.respond(200, [], Str.to_utf8(said))
+		Chat.respond(
+			200,
+			[],
+			Str.to_utf8(said),
+		)
 	} else if starts(req.sub, "/read_at/") {
 		# /read_at/<offset>/<max>/<path>: one digit each.
 		rest = List.drop_first(req.sub, 9)
 		offset = U8.to_u64((List.get(rest, 0) ?? '0') - '0')
 		max = U8.to_u64((List.get(rest, 2) ?? '0') - '0')
-		got = Host.read_at!(List.drop_first(rest, 4), offset, max)
+		got = Host.read_at!(
+			List.drop_first(rest, 4),
+			offset,
+			max,
+		)
 		said = match got.status {
 			Found => "found "
 			Missing => "missing"
 			Failed => "failed"
 		}
-		Chat.respond(200, [], List.concat(Str.to_utf8(said), got.bytes))
+		Chat.respond(
+			200,
+			[],
+			List.concat(Str.to_utf8(said), got.bytes),
+		)
 	} else if starts(req.sub, "/write/") {
-		Chat.respond(200, [], done(Host.write!(List.drop_first(req.sub, 7), Str.to_utf8("bytes"))))
+		Chat.respond(
+			200,
+			[],
+			done(Host.write!(List.drop_first(req.sub, 7), Str.to_utf8("bytes"))),
+		)
 	} else if starts(req.sub, "/append/") {
-		Chat.respond(200, [], done(Host.append_line!(List.drop_first(req.sub, 8), Str.to_utf8("{\"a\":1}"))))
+		Chat.respond(
+			200,
+			[],
+			done(Host.append_line!(List.drop_first(req.sub, 8), Str.to_utf8("{\"a\":1}"))),
+		)
 	} else if starts(req.sub, "/publish/") {
 		Host.publish!(List.drop_first(req.sub, 9), Str.to_utf8("event: reaction\ndata: x\n\n"))
-		Chat.respond(200, [], Str.to_utf8("published"))
+		Chat.respond(
+			200,
+			[],
+			Str.to_utf8("published"),
+		)
 	} else if starts(req.sub, "/render/") {
 		got = Host.render!(List.drop_first(req.sub, 8))
 		said = match got.status {
 			Rendered => "rendered "
 			Failed => "failed"
 		}
-		Chat.respond(200, [], List.concat(Str.to_utf8(said), got.html))
+		Chat.respond(
+			200,
+			[],
+			List.concat(Str.to_utf8(said), got.html),
+		)
 	} else if starts(req.sub, "/store/") {
 		# Message 9 of DM 1_2's topic `<topic>`: every field of the message a
 		# different string, so a record laid out wrong shows.
-		Chat.respond(200, [], done(Host.store_message!(dm12, List.drop_first(req.sub, 7), Str.to_utf8("the block"), 8, probe_message)))
+		Chat.respond(
+			200,
+			[],
+			done(
+				Host.store_message!(
+					dm12,
+					List.drop_first(req.sub, 7),
+					Str.to_utf8("the block"),
+					8,
+					probe_message,
+				),
+			),
+		)
 	} else if starts(req.sub, "/entry/") {
 		# An entry appended to `<path>`; one that failed is said for member 2
 		# on 1_2/Plans with the fault it answered, the request never failed.
-		got = Host.append_entry!(List.drop_first(req.sub, 7), Str.to_utf8("--"), Str.to_utf8("the entry"))
+		got = Host.append_entry!(
+			List.drop_first(req.sub, 7),
+			Str.to_utf8("--"),
+			Str.to_utf8("the entry"),
+		)
 		match got.status {
-			Appended => Chat.respond(200, [], Str.to_utf8("appended"))
+			Appended => Chat.respond(
+				200,
+				[],
+				Str.to_utf8("appended"),
+			)
 			Failed => {
-				Host.report_fanout_failure!(Images, Str.to_utf8("2"), Str.to_utf8("1_2"), Str.to_utf8("Plans"), got.fault)
-				Chat.respond(200, [], Str.to_utf8("said"))
+				Host.report_fanout_failure!(
+					Images,
+					Str.to_utf8("2"),
+					Str.to_utf8("1_2"),
+					Str.to_utf8("Plans"),
+					got.fault,
+				)
+				Chat.respond(
+					200,
+					[],
+					Str.to_utf8("said"),
+				)
 			}
 		}
 	} else if starts(req.sub, "/raw/") {
-		Chat.respond(200, [], served(Host.serve_file!(List.drop_first(req.sub, 5))))
+		Chat.respond(
+			200,
+			[],
+			served(Host.serve_file!(List.drop_first(req.sub, 5))),
+		)
 	} else if starts(req.sub, "/links/") {
-		Chat.respond(200, [], served(Host.serve_rendered!(List.drop_first(req.sub, 7))))
+		Chat.respond(
+			200,
+			[],
+			served(Host.serve_rendered!(List.drop_first(req.sub, 7))),
+		)
 	} else if starts(req.sub, "/remove/") {
-		Chat.respond(200, [], done(Host.remove!(List.drop_first(req.sub, 8))))
+		Chat.respond(
+			200,
+			[],
+			done(Host.remove!(List.drop_first(req.sub, 8))),
+		)
 	} else if starts(req.sub, "/list/") {
 		got = Host.list!(List.drop_first(req.sub, 6))
 		said = match got.status {
@@ -106,7 +180,11 @@ handle! = |req|
 				),
 			),
 		)
-		Chat.respond(200, [], List.concat(Str.to_utf8(said), each))
+		Chat.respond(
+			200,
+			[],
+			List.concat(Str.to_utf8(said), each),
+		)
 	} else if req.sub == Str.to_utf8("/accounts") {
 		got = Host.list_accounts!({})
 		said = match got.status {
@@ -138,7 +216,11 @@ handle! = |req|
 				]),
 			),
 		)
-		Chat.respond(200, [], List.concat(Str.to_utf8(said), each))
+		Chat.respond(
+			200,
+			[],
+			List.concat(Str.to_utf8(said), each),
+		)
 	} else if starts(req.sub, "/fail/") {
 		# `/fail/<reason>/<whose>`, the reason `malformed`, `kind` or `name`.
 		rest = List.drop_first(req.sub, 6)
@@ -153,7 +235,11 @@ handle! = |req|
 		} else {
 			crash "crash.roc: /fail/ with no reason"
 		}
-		Chat.respond(200, [], Str.to_utf8("failed"))
+		Chat.respond(
+			200,
+			[],
+			Str.to_utf8("failed"),
+		)
 	} else if starts(req.sub, "/online/") {
 		# `/online/<id>,<id>,...`: each id's flag in its place, ` <id>:on` or
 		# ` <id>:off`, so a list that crossed short, long or shifted shows.
@@ -172,14 +258,25 @@ handle! = |req|
 				),
 			]),
 		)
-		Chat.respond(200, [], List.concat(Str.to_utf8("flags ${U64.to_str(List.len(flags))}"), List.join(said)))
+		Chat.respond(
+			200,
+			[],
+			List.concat(Str.to_utf8("flags ${U64.to_str(List.len(flags))}"), List.join(said)),
+		)
 	} else if starts(req.sub, "/malformed/") {
 		Host.count_malformed_channel!(List.drop_first(req.sub, 11))
-		Chat.respond(200, [], Str.to_utf8("counted"))
+		Chat.respond(
+			200,
+			[],
+			Str.to_utf8("counted"),
+		)
 	} else if req.sub == Str.to_utf8("/crash") {
 		crash "a planted crash"
 	} else if req.sub == Str.to_utf8("/crash-after-asking") {
-		if Host.check_member!({}) == Member crash "a planted crash, after asking" else Chat.zig(Chat.family(NotFound), Uncounted)
+		if Host.check_member!({}) == Member crash "a planted crash, after asking" else Chat.zig(
+			Chat.family(NotFound),
+			Uncounted,
+		)
 	} else if req.sub == Str.to_utf8("/crash-after-asking-big") {
 		# A list grown a byte at a time, through many allocations, then a
 		# crash: each allocation is one a test can make fail. Bytes, said:
@@ -188,8 +285,15 @@ handle! = |req|
 		# reads the elements with aligned loads (a fault, where the linker
 		# happens to put it on a 16-byte boundary).
 		big : List(U8)
-		big = List.fold(List.repeat(7, 20000), [], |acc, b| List.append(acc, b))
-		if Host.check_member!({}) == Member and List.len(big) == 20000 crash "a planted crash, after a big list" else Chat.zig(Chat.family(NotFound), Uncounted)
+		big = List.fold(
+			List.repeat(7, 20000),
+			[],
+			|acc, b| List.append(acc, b),
+		)
+		if Host.check_member!({}) == Member and List.len(big) == 20000 crash "a planted crash, after a big list" else Chat.zig(
+			Chat.family(NotFound),
+			Uncounted,
+		)
 	} else {
 		Chat.zig(Chat.family(Default), Counted)
 	}
@@ -210,15 +314,30 @@ split_on = |l, sep|
 			if b == sep {
 				List.append(acc, [])
 			} else {
-				List.update(acc, List.len(acc) - 1, |last| List.append(last, b)) ?? acc
+				List.update(
+					acc,
+					List.len(acc) - 1,
+					|last| List.append(last, b),
+				) ?? acc
 			},
 	)
 
 dm12 : Chat.Conv
-dm12 = { family: Dm, key: Str.to_utf8("1_2"), base: Str.to_utf8("/chat/c/1_2"), members: [Str.to_utf8("1"), Str.to_utf8("2")] }
+dm12 = {
+	family: Dm,
+	key: Str.to_utf8("1_2"),
+	base: Str.to_utf8("/chat/c/1_2"),
+	members: [Str.to_utf8("1"), Str.to_utf8("2")],
+}
 
 probe_message : Chat.Message
-probe_message = { id: Str.to_utf8("Plans_9"), from: Str.to_utf8("Steve"), at: Str.to_utf8("2026-10-26T00:00:00Z"), uid: Str.to_utf8("1"), markdown: Str.to_utf8("**hi**") }
+probe_message = {
+	id: Str.to_utf8("Plans_9"),
+	from: Str.to_utf8("Steve"),
+	at: Str.to_utf8("2026-10-26T00:00:00Z"),
+	uid: Str.to_utf8("1"),
+	markdown: Str.to_utf8("**hi**"),
+}
 
 done : Try({}, [Failed]) -> List(U8)
 done = |got|

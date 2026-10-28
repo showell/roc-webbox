@@ -66,20 +66,84 @@ Route := [].{
 
 	## A route, as Chat.roc's `Route` (records are structural: the same
 	## type).
-	R : { family : Family, key : Str, rest : Str, topic : Str, part : Part, tail : Tail }
+	R : {
+		family : Family,
+		key : Str,
+		rest : Str,
+		topic : Str,
+		part : Part,
+		tail : Tail,
+	}
 
 	## The route as it crosses back to the Zig: Chat.roc's `Route`, bytes.
-	to_wire : R -> { family : Family, key : List(U8), rest : List(U8), topic : List(U8), part : Part, tail : Tail }
-	to_wire = |r| { family: r.family, key: r.key.to_utf8(), rest: r.rest.to_utf8(), topic: r.topic.to_utf8(), part: r.part, tail: r.tail }
+	to_wire : R -> {
+		family : Family,
+		key : List(U8),
+		rest : List(U8),
+		topic : List(U8),
+		part : Part,
+		tail : Tail,
+	}
+	to_wire = |r| {
+		family: r.family,
+		key: r.key.to_utf8(),
+		rest: r.rest.to_utf8(),
+		topic: r.topic.to_utf8(),
+		part: r.part,
+		tail: r.tail,
+	}
 
 	## Chat.roc's, spelled again (aliases are structural: the same types).
-	Family : [NotFound, Asset, Default, Docs, Recent, Images, Code, Links, Search, Conversations, Msg, Dm, Channel, Notifications, SidebarStream]
-	Part : [Landing, New, Invalid, Topic]
-	Tail : [Page, Uploads, Stream, Send, Upload, Pin, Unpin, Raw, Download, Saved, Reactions, React, Invalid, InvalidSend]
+	Family : [
+		NotFound,
+		Asset,
+		Default,
+		Docs,
+		Recent,
+		Images,
+		Code,
+		Links,
+		Search,
+		Conversations,
+		Msg,
+		Dm,
+		Channel,
+		Notifications,
+		SidebarStream,
+	]
+	Part : [
+		Landing,
+		New,
+		Invalid,
+		Topic,
+	]
+	Tail : [
+		Page,
+		Uploads,
+		Stream,
+		Send,
+		Upload,
+		Pin,
+		Unpin,
+		Raw,
+		Download,
+		Saved,
+		Reactions,
+		React,
+		Invalid,
+		InvalidSend,
+	]
 
 	## A route of `family` with nothing else.
 	family : Family -> R
-	family = |f| { family: f, key: "", rest: "", topic: "", part: Landing, tail: Page }
+	family = |f| {
+		family: f,
+		key: "",
+		rest: "",
+		topic: "",
+		part: Landing,
+		tail: Page,
+	}
 
 	## A DM's or a channel's route from its path's segments.
 	conversation : Family, List(Str) -> R
@@ -98,7 +162,14 @@ Route := [].{
 						} else if !Paths.is_topic_id(first) {
 							{ ..base, part: Invalid }
 						} else {
-							tail_of({ ..base, part: Topic, topic: first }, after)
+							tail_of(
+								{
+									..base,
+									part: Topic,
+									topic: first,
+								},
+								after,
+							)
 						}
 				}
 			}
@@ -109,7 +180,13 @@ Route := [].{
 ## boundary (`/docsX` is none of them).
 family_under : Str -> Try(R, [NotUnderAPrefix])
 family_under = |sub| {
-	named = [("/docs", Docs), ("/recent", Recent), ("/images", Images), ("/code", Code), ("/links", Links)]
+	named = [
+		("/docs", Docs),
+		("/recent", Recent),
+		("/images", Images),
+		("/code", Code),
+		("/links", Links),
+	]
 	List.fold(
 		named,
 		Err(NotUnderAPrefix),
@@ -119,7 +196,12 @@ family_under = |sub| {
 				Err(NotUnderAPrefix) =>
 					if sub.starts_with(prefix) {
 						rest = sub.drop_prefix(prefix)
-						if rest.is_empty() or rest.starts_with("/") Ok(with_rest(f, rest)) else Err(NotUnderAPrefix)
+						if rest.is_empty() or rest.starts_with("/") Ok(
+							with_rest(
+								f,
+								rest,
+							),
+						) else Err(NotUnderAPrefix)
 					} else {
 						Err(NotUnderAPrefix)
 					}
@@ -135,7 +217,11 @@ tail_of = |r, segs|
 		[] => r
 		[first, ..] if first == "uploads" =>
 			match segs {
-				[_, file] => { ..r, tail: Uploads, rest: file }
+				[_, file] => {
+					..r,
+					tail: Uploads,
+					rest: file,
+				}
 				_ => { ..r, tail: Invalid }
 			}
 		[first] => { ..r, tail: named_tail(first) }
@@ -145,7 +231,18 @@ tail_of = |r, segs|
 ## The tail one segment names, or `Invalid`.
 named_tail : Str -> Tail
 named_tail = |seg| {
-	tails = [("stream", Stream), ("send", Send), ("upload", Upload), ("pin", Pin), ("unpin", Unpin), ("raw", Raw), ("download", Download), ("saved", Saved), ("reactions", Reactions), ("react", React)]
+	tails = [
+		("stream", Stream),
+		("send", Send),
+		("upload", Upload),
+		("pin", Pin),
+		("unpin", Unpin),
+		("raw", Raw),
+		("download", Download),
+		("saved", Saved),
+		("reactions", Reactions),
+		("react", React),
+	]
 	List.fold(tails, Invalid, |found, (name, tail)|
 		if found == Invalid and name == seg tail else found)
 }

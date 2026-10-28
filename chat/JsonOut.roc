@@ -15,7 +15,13 @@ JsonOut :: List(U8).{
 	## that does not begin a whole UTF-8 sequence is U+FFFD (a word the
 	## index read from a transcript, a key typed as `%FF`).
 	lossy : List(U8) -> JsonOut
-	lossy = |b| string(whole_or_replaced(b, 0, ""))
+	lossy = |b| string(
+		whole_or_replaced(
+			b,
+			0,
+			"",
+		),
+	)
 
 	## A whole number, in decimal.
 	number : U64 -> JsonOut
@@ -31,12 +37,33 @@ JsonOut :: List(U8).{
 
 	## The values in order: `[a,b]`.
 	array : List(JsonOut) -> JsonOut
-	array = |items| JsonOut.(List.join([['['], comma(List.map(items, bytes)), [']']]))
+	array = |items| JsonOut.(
+		List.join([
+			['['],
+			comma(List.map(items, bytes)),
+			[']'],
+		]),
+	)
 
 	## The fields in order, each a name and a value: `{"name":value,...}`.
 	## A name is escaped as a string is.
 	object : List((Str, JsonOut)) -> JsonOut
-	object = |fields| JsonOut.(List.join([['{'], comma(List.map(fields, |(name, value)| List.join([ZigText.json_string(name), [':'], bytes(value)]))), ['}']]))
+	object = |fields| JsonOut.(
+		List.join([
+			['{'],
+			comma(
+				List.map(
+					fields,
+					|(name, value)| List.join([
+						ZigText.json_string(name),
+						[':'],
+						bytes(value),
+					]),
+				),
+			),
+			['}'],
+		]),
+	)
 
 	## The value's bytes.
 	bytes : JsonOut -> List(U8)
@@ -44,15 +71,32 @@ JsonOut :: List(U8).{
 }
 
 whole_or_replaced : List(U8), U64, Str -> Str
-whole_or_replaced = |b, i, out|
+whole_or_replaced = |
+	b,
+	i,
+	out,
+|
 	match List.get(b, i) {
 		Err(_) => out
 		Ok(c) => {
 			n = sequence_length(c)
-			whole = if n > 0 and i + n <= List.len(b) Str.from_utf8(List.sublist(b, { start: i, len: n })) else Err(Short)
+			whole = if n > 0 and i + n <= List.len(b) Str.from_utf8(
+				List.sublist(
+					b,
+					{ start: i, len: n },
+				),
+			) else Err(Short)
 			match whole {
-				Ok(text) => whole_or_replaced(b, i + n, Str.concat(out, text))
-				Err(_) => whole_or_replaced(b, i + 1, Str.concat(out, "\u(fffd)"))
+				Ok(text) => whole_or_replaced(
+					b,
+					i + n,
+					Str.concat(out, text),
+				)
+				Err(_) => whole_or_replaced(
+					b,
+					i + 1,
+					Str.concat(out, "\u(fffd)"),
+				)
 			}
 		}
 	}
@@ -76,9 +120,18 @@ sequence_length = |c|
 comma : List(List(U8)) -> List(U8)
 comma = |items| List.join(List.intersperse(items, [',']))
 
-expect JsonOut.object([("a", JsonOut.number(1)), ("b", JsonOut.array([JsonOut.string("x\"y"), JsonOut.bool(Bool.False)]))]).bytes() == Str.to_utf8("{\"a\":1,\"b\":[\"x\\\"y\",false]}")
+expect JsonOut.object([
+	("a", JsonOut.number(1)),
+	("b", JsonOut.array([JsonOut.string("x\"y"), JsonOut.bool(Bool.False)])),
+]).bytes() == Str.to_utf8("{\"a\":1,\"b\":[\"x\\\"y\",false]}")
 expect JsonOut.object([]).bytes() == Str.to_utf8("{}")
 expect JsonOut.array([]).bytes() == Str.to_utf8("[]")
 expect JsonOut.signed(-3).bytes() == Str.to_utf8("-3")
 # lossy: a torn sequence is one U+FFFD a byte; a whole one passes.
-expect JsonOut.lossy([0x6C, 0x61, 0xFF, 0xE2, 0x82]).bytes() == Str.to_utf8("\"la\u(fffd)\u(fffd)\u(fffd)\"") and JsonOut.lossy(Str.to_utf8("caf\u(e9)")).bytes() == Str.to_utf8("\"caf\u(e9)\"")
+expect JsonOut.lossy([
+	0x6C,
+	0x61,
+	0xFF,
+	0xE2,
+	0x82,
+]).bytes() == Str.to_utf8("\"la\u(fffd)\u(fffd)\u(fffd)\"") and JsonOut.lossy(Str.to_utf8("caf\u(e9)")).bytes() == Str.to_utf8("\"caf\u(e9)\"")

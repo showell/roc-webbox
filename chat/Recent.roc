@@ -14,11 +14,31 @@ Recent := [].{
 	## One gathered row (recent.zig `Row`): `key` a chat row's URL or a doc's
 	## slug, `label` its "to …"/"in …" or the doc's title; `dm` as
 	## ChatEvent's.
-	Row : { kind : [Doc, Message], secs : I64, uid : Str, name : Str, key : Str, label : Str, topic : Str, markdown : Str, dm : [Dm, Channel] }
+	Row : {
+		kind : [Doc, Message],
+		secs : I64,
+		uid : Str,
+		name : Str,
+		key : Str,
+		label : Str,
+		topic : Str,
+		markdown : Str,
+		dm : [Dm, Channel],
+	}
 
 	## A row as it is gathered (main.roc `load_recent!`), its text the
 	## store's bytes: `secs` a signed decimal.
-	Written : { kind : [Doc, Message], secs : List(U8), uid : List(U8), name : List(U8), key : List(U8), label : List(U8), topic : List(U8), markdown : List(U8), dm : [Dm, Channel] }
+	Written : {
+		kind : [Doc, Message],
+		secs : List(U8),
+		uid : List(U8),
+		name : List(U8),
+		key : List(U8),
+		label : List(U8),
+		topic : List(U8),
+		markdown : List(U8),
+		dm : [Dm, Channel],
+	}
 
 	## The host's rows, read. **EACH ROW'S TEXT DECODED HERE, AT THE
 	## DOOR**: it is gathered from stored files and names, so a field
@@ -45,7 +65,17 @@ Recent := [].{
 	decoded : Written -> Try(Row, [NotUtf8(List(U8))])
 	decoded = |w| {
 		text = |bytes| Str.from_utf8(bytes).map_err(|_| NotUtf8(bytes))
-		Ok({ kind: w.kind, secs: signed(w.secs), uid: text(w.uid)?, name: text(w.name)?, key: text(w.key)?, label: text(w.label)?, topic: text(w.topic)?, markdown: text(w.markdown)?, dm: w.dm })
+		Ok({
+			kind: w.kind,
+			secs: signed(w.secs),
+			uid: text(w.uid)?,
+			name: text(w.name)?,
+			key: text(w.key)?,
+			label: text(w.label)?,
+			topic: text(w.topic)?,
+			markdown: text(w.markdown)?,
+			dm: w.dm,
+		})
 	}
 
 	## The page's JSON: every row newest first (a tie by its URL or slug,
@@ -58,15 +88,38 @@ Recent := [].{
 	event = |me, r| {
 		at = JsonText.str(Time.rfc3339(r.secs))
 		if r.kind == Doc {
-			JsonText.obj(List.join([[("kind", JsonText.str("doc")), ("at", at)], JsonText.opt("who", "You"), JsonText.opt("slug", r.key), JsonText.opt("title", r.label)]))
+			JsonText.obj(
+				List.join([
+					[("kind", JsonText.str("doc")), ("at", at)],
+					JsonText.opt("who", "You"),
+					JsonText.opt("slug", r.key),
+					JsonText.opt("title", r.label),
+				]),
+			)
 		} else {
 			who = if r.uid == "" "" else if r.uid == me.to_str() "You" else r.name
-			chat_event({ at: Time.rfc3339(r.secs), url: r.key, who, label: r.label, topic: r.topic, excerpt: excerpt(r.markdown), dm: r.dm })
+			chat_event({
+				at: Time.rfc3339(r.secs),
+				url: r.key,
+				who,
+				label: r.label,
+				topic: r.topic,
+				excerpt: excerpt(r.markdown),
+				dm: r.dm,
+			})
 		}
 	}
 
 	## One chat message's row, its fields as written (`at` already a stamp).
-	ChatEvent : { at : Str, url : Str, who : Str, label : Str, topic : Str, excerpt : Str, dm : [Dm, Channel] }
+	ChatEvent : {
+		at : Str,
+		url : Str,
+		who : Str,
+		label : Str,
+		topic : Str,
+		excerpt : Str,
+		dm : [Dm, Channel],
+	}
 
 	## recent_feed `encodeChatEvent`: `kind` and `at`, then url, who, where,
 	## topic and excerpt each left out when empty, then `"dm":true` for a
@@ -102,15 +155,27 @@ Recent := [].{
 
 	## `newestFirst`'s order of two rows: the newer first, a tie by the key's
 	## bytes.
-	order : Row, Row -> [Before, Same, After]
-	order = |x, y| if x.secs > y.secs Before else if x.secs < y.secs After else Bytes.compare(x.key.to_utf8(), y.key.to_utf8())
+	order : Row,
+	Row -> [
+		Before,
+		Same,
+		After,
+	]
+	order = |x, y| if x.secs > y.secs Before else if x.secs < y.secs After else Bytes.compare(
+		x.key.to_utf8(),
+		y.key.to_utf8(),
+	)
 
 	## docs_store `titleFromSlug`: hyphens to spaces, the first letter
 	## upper-cased (a slug is ASCII: text in, text out).
 	doc_title : Str -> Str
 	doc_title = |slug| {
 		spaced = List.map(slug.to_utf8(), |c| if c == '-' ' ' else c)
-		titled = List.update(spaced, 0, |c| if c >= 'a' and c <= 'z' c - 32 else c) ?? spaced
+		titled = List.update(
+			spaced,
+			0,
+			|c| if c >= 'a' and c <= 'z' c - 32 else c,
+		) ?? spaced
 		match Str.from_utf8(titled) {
 			Ok(title) => title
 			Err(_) => crash "Recent.doc_title: an ASCII edit split a codepoint"
@@ -136,31 +201,65 @@ Recent := [].{
 ## A signed decimal, as the host writes one.
 signed : List(U8) -> I64
 signed = |digits| match digits {
-	['-', .. as rest] => 0 - List.fold(rest, 0, |n, c| n * 10 + U8.to_i64(c - '0'))
-	_ => List.fold(digits, 0, |n, c| n * 10 + U8.to_i64(c - '0'))
+	['-', .. as rest] => 0 - List.fold(
+		rest,
+		0,
+		|n, c| n * 10 + U8.to_i64(c - '0'),
+	)
+	_ => List.fold(
+		digits,
+		0,
+		|n, c| n * 10 + U8.to_i64(c - '0'),
+	)
 }
 
 ## `collapseQuotes`: line by line, a quote fence's span to "[quoted
 ## text]", another fence's lines as they are, each line ended.
 quotes : List(U8) -> List(U8)
-quotes = |md| quotes_from(Bytes.split_byte(md, '\n'), 0, [])
+quotes = |md| quotes_from(
+	Bytes.split_byte(md, '\n'),
+	0,
+	[],
+)
 
 quotes_from : List(List(U8)), U64, List(U8) -> List(U8)
-quotes_from = |ls, i, out|
+quotes_from = |
+	ls,
+	i,
+	out,
+|
 	match List.get(ls, i) {
 		Err(_) => out
 		Ok(line) =>
 			match Feeds.fence_open(line) {
-				Err(NotAFence) => quotes_from(ls, i + 1, List.append(List.concat(out, line), '\n'))
+				Err(NotAFence) => quotes_from(
+					ls,
+					i + 1,
+					List.append(List.concat(out, line), '\n'),
+				)
 				Ok(fo) => {
-					j = Feeds.close_at(ls, fo.char, fo.count, i + 1)
+					j = Feeds.close_at(
+						ls,
+						fo.char,
+						fo.count,
+						i + 1,
+					)
 					kept =
 						if fo.lang == Str.to_utf8("quote") {
 							Str.to_utf8("[quoted text]\n")
 						} else {
-							List.join(List.map(List.sublist(ls, { start: i, len: j + 1 - i }), |l| List.append(l, '\n')))
+							List.join(
+								List.map(
+									List.sublist(ls, { start: i, len: j + 1 - i }),
+									|l| List.append(l, '\n'),
+								),
+							)
 						}
-					quotes_from(ls, j + 1, List.concat(out, kept))
+					quotes_from(
+						ls,
+						j + 1,
+						List.concat(out, kept),
+					)
 				}
 			}
 	}
@@ -168,20 +267,50 @@ quotes_from = |ls, i, out|
 ## `replaceImgHtml`: `<img` (any case) not followed by a word byte, to
 ## the next `>`.
 html_images : List(U8) -> List(U8)
-html_images = |s| html_from(s, 0, [], Unknown)
+html_images = |s| html_from(
+	s,
+	0,
+	[],
+	Unknown,
+)
 
 ## Linear (metal-vmm QUEUE 268): where the next `>` is, or that there is
 ## none, is remembered across openers (Feeds.find_seen).
 html_from : List(U8), U64, List(U8), Feeds.Seen -> List(U8)
-html_from = |s, i, out, gt_seen|
+html_from = |
+	s,
+	i,
+	out,
+	gt_seen,
+|
 	match List.get(s, i) {
 		Err(_) => out
 		Ok(c) => {
-			opens = i + 4 <= List.len(s) and Feeds.lower(List.sublist(s, { start: i, len: 4 })) == Str.to_utf8("<img") and !is_word_byte(List.get(s, i + 4) ?? ' ')
-			(found, seen) = if opens Feeds.find_seen(s, '>', i + 4, gt_seen) else (Err(NotFound), gt_seen)
+			opens = i + 4 <= List.len(s) and Feeds.lower(
+				List.sublist(
+					s,
+					{ start: i, len: 4 },
+				),
+			) == Str.to_utf8("<img") and !is_word_byte(List.get(s, i + 4) ?? ' ')
+			(found, seen) = if opens Feeds.find_seen(
+				s,
+				'>',
+				i + 4,
+				gt_seen,
+			) else (Err(NotFound), gt_seen)
 			match found {
-				Ok(gt) => html_from(s, gt + 1, List.concat(out, Str.to_utf8("[image]")), seen)
-				Err(NotFound) => html_from(s, i + 1, List.append(out, c), seen)
+				Ok(gt) => html_from(
+					s,
+					gt + 1,
+					List.concat(out, Str.to_utf8("[image]")),
+					seen,
+				)
+				Err(NotFound) => html_from(
+					s,
+					i + 1,
+					List.append(out, c),
+					seen,
+				)
 			}
 		}
 	}
@@ -191,33 +320,76 @@ is_word_byte = |c| (c >= 'A' and c <= 'Z') or (c >= 'a' and c <= 'z') or (c >= '
 
 ## `replaceImgMarkdown`: `![…](…)`.
 md_images : List(U8) -> List(U8)
-md_images = |s| md_from(s, 0, [], { br: Unknown, pa: Unknown })
+md_images = |s| md_from(
+	s,
+	0,
+	[],
+	{ br: Unknown, pa: Unknown },
+)
 
 ## Linear (metal-vmm QUEUE 268): where the next `]` and `)` are, or that
 ## there are none, is remembered across `![`s (Feeds.find_seen); every
 ## search from a later `![` starts at or after the one before it.
 md_from : List(U8), U64, List(U8), { br : Feeds.Seen, pa : Feeds.Seen } -> List(U8)
-md_from = |s, i, out, seen|
+md_from = |
+	s,
+	i,
+	out,
+	seen,
+|
 	match List.get(s, i) {
 		Err(_) => out
 		Ok(c) => {
-			(end, after) = if c == '!' and List.get(s, i + 1) == Ok('[') md_image(s, i, seen) else (Err(NotAnImage), seen)
+			(end, after) = if c == '!' and List.get(s, i + 1) == Ok('[') md_image(
+				s,
+				i,
+				seen,
+			) else (Err(NotAnImage), seen)
 			match end {
-				Ok(e) => md_from(s, e, List.concat(out, Str.to_utf8("[image]")), after)
-				Err(NotAnImage) => md_from(s, i + 1, List.append(out, c), after)
+				Ok(e) => md_from(
+					s,
+					e,
+					List.concat(out, Str.to_utf8("[image]")),
+					after,
+				)
+				Err(NotAnImage) => md_from(
+					s,
+					i + 1,
+					List.append(out, c),
+					after,
+				)
 			}
 		}
 	}
 
-md_image : List(U8), U64, { br : Feeds.Seen, pa : Feeds.Seen } -> (Try(U64, [NotAnImage]), { br : Feeds.Seen, pa : Feeds.Seen })
-md_image = |s, start, seen|
-	match Feeds.find_seen(s, ']', start + 2, seen.br) {
+md_image : List(U8),
+U64,
+{ br : Feeds.Seen, pa : Feeds.Seen } -> (
+	Try(U64, [NotAnImage]),
+	{ br : Feeds.Seen, pa : Feeds.Seen },
+)
+md_image = |
+	s,
+	start,
+	seen,
+|
+	match Feeds.find_seen(
+		s,
+		']',
+		start + 2,
+		seen.br,
+	) {
 		(Err(NotFound), br) => (Err(NotAnImage), { ..seen, br })
 		(Ok(alt_end), br) =>
 			if List.get(s, alt_end + 1) != Ok('(') {
 				(Err(NotAnImage), { ..seen, br })
 			} else {
-				match Feeds.find_seen(s, ')', alt_end + 2, seen.pa) {
+				match Feeds.find_seen(
+					s,
+					')',
+					alt_end + 2,
+					seen.pa,
+				) {
 					(Ok(url_end), pa) => (Ok(url_end + 1), { br, pa })
 					(Err(NotFound), pa) => (Err(NotAnImage), { br, pa })
 				}
@@ -244,15 +416,35 @@ collapse_ws = |s| {
 ## `capCodepoints`: at most `most` codepoints (a byte that starts none is
 ## one), else the head with its trailing spaces gone and "…".
 cap : List(U8), U64 -> List(U8)
-cap = |s, most| cap_from(s, most, 0, 0)
+cap = |s, most| cap_from(
+	s,
+	most,
+	0,
+	0,
+)
 
 cap_from : List(U8), U64, U64, U64 -> List(U8)
-cap_from = |s, most, i, count|
+cap_from = |
+	s,
+	most,
+	i,
+	count,
+|
 	match List.get(s, i) {
 		Err(OutOfBounds) => s
 		Ok(_) if count == most => {
 			head = List.take_first(s, i)
-			List.concat(List.drop_last(head, Feeds.count_back(head, |c| c == ' ', 0)), Str.to_utf8("…"))
+			List.concat(
+				List.drop_last(
+					head,
+					Feeds.count_back(
+						head,
+						|c| c == ' ',
+						0,
+					),
+				),
+				Str.to_utf8("…"),
+			)
 		}
 		Ok(b) => {
 			n = match b {
@@ -262,21 +454,50 @@ cap_from = |s, most, i, count|
 				_ if b >= 240 and b < 248 => 4
 				_ => 1
 			}
-			cap_from(s, most, i + n, count + 1)
+			cap_from(
+				s,
+				most,
+				i + n,
+				count + 1,
+			)
 		}
 	}
 
 # excerpt cuts at a codepoint: a multi-byte character at and past the cut
 # (two bytes, four bytes) comes out whole or not at all, so its Str holds.
-expect Recent.excerpt(Str.concat(Str.repeat("a", 349), "\u(e9)\u(e9)")) == Str.concat(Str.repeat("a", 349), "\u(e9)…")
+expect Recent.excerpt(
+	Str.concat(
+		Str.repeat("a", 349),
+		"\u(e9)\u(e9)",
+	),
+) == Str.concat(Str.repeat("a", 349), "\u(e9)…")
 expect Recent.excerpt(Str.repeat("👍", 351)) == Str.concat(Str.repeat("👍", 350), "…")
-expect Recent.excerpt(Str.concat(Str.repeat("a", 348), " \u(e9)\u(e9)")) == Str.concat(Str.repeat("a", 348), " \u(e9)…")
+expect Recent.excerpt(
+	Str.concat(
+		Str.repeat("a", 348),
+		" \u(e9)\u(e9)",
+	),
+) == Str.concat(Str.repeat("a", 348), " \u(e9)…")
 expect Recent.excerpt(Str.repeat("\u(e9)", 350)) == Str.repeat("\u(e9)", 350)
 expect Recent.excerpt("caf\u(e9) ![x](y.png)  <img src=a>\n```quote\nhi\n```") == "caf\u(e9) [image] [image] [quoted text]"
 # rows_of: a row with a field torn mid-character is left out and its key kept for the count; the rest are read.
 expect {
-	w = |key, md| { kind: Message, secs: Str.to_utf8("1"), uid: Str.to_utf8("1"), name: Str.to_utf8("ann"), key: Str.to_utf8(key), label: Str.to_utf8("to x"), topic: Str.to_utf8("t"), markdown: md, dm: Dm }
-	got = Recent.rows_of([w("/a", Str.to_utf8("hi")), w("/b", [0xe2, 0x82]), w("/c", Str.to_utf8("ok"))])
+	w = |key, md| {
+		kind: Message,
+		secs: Str.to_utf8("1"),
+		uid: Str.to_utf8("1"),
+		name: Str.to_utf8("ann"),
+		key: Str.to_utf8(key),
+		label: Str.to_utf8("to x"),
+		topic: Str.to_utf8("t"),
+		markdown: md,
+		dm: Dm,
+	}
+	got = Recent.rows_of([
+		w("/a", Str.to_utf8("hi")),
+		w("/b", [0xe2, 0x82]),
+		w("/c", Str.to_utf8("ok")),
+	])
 	List.map(got.rows, |r| r.key) == ["/a", "/c"] and got.damaged == [Str.to_utf8("/b")]
 }
 # doc_title: hyphens to spaces, the first letter up; a digit first stays.

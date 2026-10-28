@@ -23,6 +23,16 @@ Limits := [].{
 	search_min = 2
 
 	## The four, as the conversation page takes them.
-	page : { image_max : U64, video_max : U64, accept : List(U8), search_min : U64 }
-	page = { image_max, video_max, accept: accept.to_utf8(), search_min }
+	page : {
+		image_max : U64,
+		video_max : U64,
+		accept : List(U8),
+		search_min : U64,
+	}
+	page = {
+		image_max,
+		video_max,
+		accept: accept.to_utf8(),
+		search_min,
+	}
 }

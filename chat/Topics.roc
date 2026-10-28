@@ -24,7 +24,10 @@ Topics := [].{
 				if s.starts_with("general") {
 					# std.fmt.parseInt's grammar is ZigText's, a byte parser.
 					match ZigText.parse_u64(Str.to_utf8(s.drop_prefix("general"))) {
-						Ok(k) if k <= 9223372036854775807 and U64.to_i128(k) > n => (Ok(s), U64.to_i128(k))
+						Ok(k) if k <= 9223372036854775807 and U64.to_i128(k) > n => (
+							Ok(s),
+							U64.to_i128(k),
+						)
 						_ => (b, n)
 					}
 				} else {
@@ -36,7 +39,13 @@ Topics := [].{
 
 	## One DM in /chat/conversations: its pair, the partner, where the member
 	## resumes it, and its topics.
-	Entry : { conv : Paths.PairKey, id : Uid, name : Str, default : Str, sessions : List(Str) }
+	Entry : {
+		conv : Paths.PairKey,
+		id : Uid,
+		name : Str,
+		default : Str,
+		sessions : List(Str),
+	}
 
 	## chatConversations' JSON: the member, then a DM with every other.
 	conversations_json : Uid, List(Entry) -> List(U8)
@@ -44,16 +53,28 @@ Topics := [].{
 		one = |e|
 			JsonText.obj([
 				("conv", JsonText.str(e.conv.to_str())),
-				("partner", JsonText.obj([("id", JsonText.str(e.id.to_str())), ("name", JsonText.str(e.name))])),
+				(
+					"partner",
+					JsonText.obj([
+						("id", JsonText.str(e.id.to_str())),
+						("name", JsonText.str(e.name)),
+					]),
+				),
 				("default", JsonText.str(e.default)),
 				("sessions", JsonText.arr(List.map(e.sessions, JsonText.str))),
 			])
-		JsonText.obj([("me", JsonText.str(me.to_str())), ("conversations", JsonText.arr(List.map(entries, one)))])
+		JsonText.obj([
+			("me", JsonText.str(me.to_str())),
+			("conversations", JsonText.arr(List.map(entries, one))),
+		])
 	}
 
 	## newTopic's answer: the conversation and the topic made.
 	made_json : { key : Paths.ConvKey, topic : Str } -> List(U8)
-	made_json = |{ key, topic }| JsonText.obj([("conv", JsonText.str(key.to_str())), ("sid", JsonText.str(topic))])
+	made_json = |{ key, topic }| JsonText.obj([
+		("conv", JsonText.str(key.to_str())),
+		("sid", JsonText.str(topic)),
+	])
 }
 
 # is_same_name: ASCII case folds, nothing past ASCII does.
@@ -63,7 +84,14 @@ expect !Topics.is_same_name("caf\u(e9)", "caf\u(c9)")
 expect !Topics.is_same_name("new", "new ")
 
 # highest_general: the largest N by the Zig's grammar, the first of equals.
-expect Topics.highest_general(["general2", "general10", "General99", "general+5", "general1_0", "general"]) == Ok("general10")
+expect Topics.highest_general([
+	"general2",
+	"general10",
+	"General99",
+	"general+5",
+	"general1_0",
+	"general",
+]) == Ok("general10")
 expect Topics.highest_general(["general\u(e9)", "Plans"]) == Err(NoGeneral)
 expect Topics.highest_general(["general007", "general7"]) == Ok("general007")
 expect Topics.highest_general(["general9223372036854775808", "general1"]) == Ok("general1")

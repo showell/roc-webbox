@@ -10,14 +10,26 @@ import Uid
 Transcript := [].{
 
 	## A message: every field but its author the bytes they were.
-	Msg : { id : List(U8), from : List(U8), at : List(U8), uid : Author, markdown : List(U8) }
+	Msg : {
+		id : List(U8),
+		from : List(U8),
+		at : List(U8),
+		uid : Author,
+		markdown : List(U8),
+	}
 
 	## Who sent a message: a block from before `uid:` was written, or one
 	## whose `uid:` line is empty, is `Unattributed`.
 	Author : [By(Uid), Unattributed]
 
 	## A block as it reads, its `uid:` the bytes after it, empty when none.
-	Block : { id : List(U8), from : List(U8), at : List(U8), uid : List(U8), markdown : List(U8) }
+	Block : {
+		id : List(U8),
+		from : List(U8),
+		at : List(U8),
+		uid : List(U8),
+		markdown : List(U8),
+	}
 
 	## decodeChatFile: the messages, and how many blocks were refused (not
 	## messages: no id, author or date). A piece that is only whitespace is
@@ -56,7 +68,16 @@ Transcript := [].{
 	## A body's lines escaped as a block's are (chat_codec escapeBodyLine),
 	## so none is the 13 hyphens alone; the Code feed's bodies too.
 	escape_body : List(U8) -> List(U8)
-	escape_body = |body| if Bytes.find(body, dashes, 0) == Err(NotFound) body else Bytes.join_lines(List.map(Bytes.split_byte(body, '\n'), escape_line))
+	escape_body = |body| if Bytes.find(
+		body,
+		dashes,
+		0,
+	) == Err(NotFound) body else Bytes.join_lines(
+		List.map(
+			Bytes.split_byte(body, '\n'),
+			escape_line,
+		),
+	)
 
 	## `escape_body` undone (chat_codec unescapeBodyLine).
 	unescape_body : List(U8) -> List(U8)
@@ -67,7 +88,13 @@ Transcript := [].{
 message_of : Block -> Try(Msg, [CorruptUid(List(U8))])
 message_of = |b| {
 	uid = if b.uid == [] Unattributed else By(Uid.from_utf8(b.uid).map_err(|_| CorruptUid(b.uid))?)
-	Ok({ id: b.id, from: b.from, at: b.at, uid, markdown: b.markdown })
+	Ok({
+		id: b.id,
+		from: b.from,
+		at: b.at,
+		uid,
+		markdown: b.markdown,
+	})
 }
 
 is_message : Block -> Bool
@@ -84,7 +111,17 @@ decode_block = |piece| {
 		Ok(rest) => (rest, List.len(first) + 1)
 		Err(NoMatch) => ([], 0)
 	}
-	headers(piece, start, { id, from: [], at: [], uid: [], markdown: [] })
+	headers(
+		piece,
+		start,
+		{
+			id,
+			from: [],
+			at: [],
+			uid: [],
+			markdown: [],
+		},
+	)
 }
 
 msg_prefix : List(U8)
@@ -92,18 +129,40 @@ msg_prefix = Str.to_utf8("MSG_")
 
 ## The line of `piece` that begins at `at`, without its newline.
 line_at : List(U8), U64 -> List(U8)
-line_at = |piece, at| List.sublist(piece, { start: at, len: line_len(piece, at, 0) })
+line_at = |piece, at| List.sublist(
+	piece,
+	{
+		start: at,
+		len: line_len(
+			piece,
+			at,
+			0,
+		),
+	},
+)
 
 line_len : List(U8), U64, U64 -> U64
-line_len = |piece, at, n| match List.get(piece, at + n) {
-	Ok(c) if c != '\n' => line_len(piece, at, n + 1)
+line_len = |
+	piece,
+	at,
+	n,
+| match List.get(piece, at + n) {
+	Ok(c) if c != '\n' => line_len(
+		piece,
+		at,
+		n + 1,
+	)
 	_ => n
 }
 
 ## The header lines from offset `at` to the blank one, then the body:
 ## everything after the blank line (none when there is no blank line).
 headers : List(U8), U64, Block -> Block
-headers = |piece, at, m|
+headers = |
+	piece,
+	at,
+	m,
+|
 	if at > List.len(piece) {
 		m
 	} else {
@@ -114,14 +173,32 @@ headers = |piece, at, m|
 			next = match Bytes.cut_seq(l, Str.to_utf8(": ")) {
 				Ok((k, v)) =>
 					match k {
-						['f', 'r', 'o', 'm'] => { ..m, from: v }
-						['d', 'a', 't', 'e'] => { ..m, at: v }
-						['u', 'i', 'd'] => { ..m, uid: v }
+						[
+							'f',
+							'r',
+							'o',
+							'm',
+						] => { ..m, from: v }
+						[
+							'd',
+							'a',
+							't',
+							'e',
+						] => { ..m, at: v }
+						[
+							'u',
+							'i',
+							'd',
+						] => { ..m, uid: v }
 						_ => m
 					}
 				Err(NotFound) => m
 			}
-			headers(piece, at + List.len(l) + 1, next)
+			headers(
+				piece,
+				at + List.len(l) + 1,
+				next,
+			)
 		}
 	}
 
@@ -129,7 +206,16 @@ headers = |piece, at, m|
 ## is the bytes it was.
 unescape_lines : List(U8) -> List(U8)
 unescape_lines = |body|
-	if Bytes.find(body, escaped_dashes, 0) == Err(NotFound) body else Bytes.join_lines(List.map(Bytes.split_byte(body, '\n'), unescape_line))
+	if Bytes.find(
+		body,
+		escaped_dashes,
+		0,
+	) == Err(NotFound) body else Bytes.join_lines(
+		List.map(
+			Bytes.split_byte(body, '\n'),
+			unescape_line,
+		),
+	)
 
 escaped_dashes : List(U8)
 escaped_dashes = List.prepend(dashes, '\\')
@@ -139,12 +225,24 @@ escaped_dashes = List.prepend(dashes, '\\')
 encode_block : Msg -> List(U8)
 encode_block = |m| {
 	body = Transcript.escape_body(m.markdown)
-	head = List.join([Str.to_utf8("MSG_"), m.id, Str.to_utf8("\nfrom: "), m.from, Str.to_utf8("\ndate: "), m.at])
+	head = List.join([
+		Str.to_utf8("MSG_"),
+		m.id,
+		Str.to_utf8("\nfrom: "),
+		m.from,
+		Str.to_utf8("\ndate: "),
+		m.at,
+	])
 	uid = match m.uid {
 		By(u) => Str.to_utf8("\nuid: ${u.to_str()}")
 		Unattributed => []
 	}
-	List.join([head, uid, Str.to_utf8("\n\n"), body])
+	List.join([
+		head,
+		uid,
+		Str.to_utf8("\n\n"),
+		body,
+	])
 }
 
 dashes : List(U8)
@@ -153,14 +251,22 @@ dashes = Str.to_utf8("-------------")
 ## A line of one or more backslashes then exactly the dashes loses one.
 unescape_line : List(U8) -> List(U8)
 unescape_line = |line| {
-	k = Bytes.leading(line, '\\', 0)
+	k = Bytes.leading(
+		line,
+		'\\',
+		0,
+	)
 	if k >= 1 and List.drop_first(line, k) == dashes List.drop_first(line, 1) else line
 }
 
 ## A line of any backslashes then exactly the dashes gains one.
 escape_line : List(U8) -> List(U8)
 escape_line = |line| {
-	k = Bytes.leading(line, '\\', 0)
+	k = Bytes.leading(
+		line,
+		'\\',
+		0,
+	)
 	if List.drop_first(line, k) == dashes List.prepend(line, '\\') else line
 }
 
