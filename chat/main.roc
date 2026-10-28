@@ -235,7 +235,8 @@ serve_saved! = |route|
 ## QUEUE 275): the N that numbers the next one. **THE SIDECAR IS A CACHE;
 ## THE TRANSCRIPT IS THE TRUTH**: the `.count` is believed only when the
 ## transcript is still the size it was taken at (one stat), else the
-## transcript is read and its blocks counted (Count.count_blocks). No
+## transcript is read and its blocks counted (Count.count_blocks): a sidecar
+## whose read failed among them, a miss (metal-vmm QUEUE 284). No
 ## transcript is no messages; one that will not be looked at or read fails
 ## the request, never 0, which would number the next message onto the last.
 ## The Roc only reads the sidecar; the host writes it with every message.
@@ -248,7 +249,6 @@ count_messages! = |at| {
 		Ok({ size, mtime: _ }) =>
 			match believed_count!(at, size) {
 				Ok(n) => Ok(n)
-				Err(Failed) => Err(Failed)
 				Err(Recount) =>
 					match Files.read_bytes!(transcript) {
 						Ok(raw) => Ok(Count.count_blocks(raw))
@@ -262,13 +262,11 @@ count_messages! = |at| {
 
 ## The sidecar's count when it was taken at `size` (readCount, then
 ## believedCount, Last.sidecar!): a sidecar missing, past readCount's 1 KiB,
-## or that does not parse is a recount.
-believed_count! : Paths.TopicAt, U64 => Try(U64, [Recount, Failed])
+## that does not parse, or whose read failed (metal-vmm QUEUE 284) is a
+## recount.
+believed_count! : Paths.TopicAt, U64 => Try(U64, [Recount])
 believed_count! = |at, size|
-	match Last.sidecar!(at) {
-		Ok(counted) => Count.believed(counted, size).map_err(|_| Recount)
-		Err(Failed) => Err(Failed)
-	}
+	Count.believed(Last.sidecar!(at), size).map_err(|_| Recount)
 
 ## A topic's page, or its raw transcript: a read, then the work.
 serve_page_or_raw! : Chat.Request, Route.R, AtTopic => Chat.Answer

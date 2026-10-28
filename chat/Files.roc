@@ -57,11 +57,19 @@ Files := [].{
 		}
 	}
 
-	## Host.read_at!: at most `max` bytes from `offset`, as bytes.
-	read_at! : Paths.ChatPath, U64, U64 => Try(List(U8), [Missing, Failed])
-	read_at! = |path, offset, max| {
+	## **A CACHE'S READ** (Host.read_at!, metal-vmm QUEUE 284): at most `max`
+	## bytes from `offset`, or `Miss`. A cache not there and a cache whose
+	## read failed are one answer, and neither fails the request: the
+	## caller recounts or reads the truth, as for any miss. The chat's
+	## caches are the .count sidecar and the last message's window; every
+	## other read is the truth's, and its failure fails the request.
+	read_cache! : Paths.ChatPath, U64, U64 => Try(List(U8), [Miss])
+	read_cache! = |path, offset, max| {
 		got = Host.read_at!(path.bytes(), offset, max)
-		answer(got.status, got.bytes)
+		match got.status {
+			Found => Ok(got.bytes)
+			Missing | Failed => Err(Miss)
+		}
 	}
 
 	## Host.write!: the whole file as `bytes`.

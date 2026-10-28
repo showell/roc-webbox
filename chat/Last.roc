@@ -21,14 +21,14 @@ Last := [].{
 	Message : { markdown : List(U8), at : List(U8), uid : List(U8), number : U64 }
 
 	## The topic's last message, `None` for a topic with none (no
-	## transcript, or no message in it). `Failed` when a read failed (the
-	## request has, with its error).
+	## transcript, or no message in it). `Failed` when the transcript's read
+	## failed (the request has, with its error); a cache's never does.
 	of! : Paths.TopicAt, List(Accounts.Account) => Try([Some(Message), None], [Failed])
 	of! = |at, accounts| {
-		counted = sidecar!(at)?
+		counted = sidecar!(at)
 		match counted {
 			Ok({ count, size: _, last: Known(l) }) if count > 0 =>
-				match Files.read_at!(Paths.transcript_path(at), l.offset, tail_window) {
+				match Files.read_cache!(Paths.transcript_path(at), l.offset, tail_window) {
 					Ok(window) => {
 						fill = if List.len(window) == tail_window Full else Partial
 						match Count.window_last(count, window, fill, at.topic.to_utf8()) {
@@ -47,23 +47,22 @@ Last := [].{
 							Err(CorruptUid(bytes)) => corrupt!(bytes)
 						}
 					}
-					# The record is a cache: a window not there is the whole read.
-					Err(Missing) => whole!(at, counted, accounts)
-					Err(Failed) => Err(Failed)
+					# The record is a cache: a window not there, or not read, is
+					# the whole read.
+					Err(Miss) => whole!(at, counted, accounts)
 				}
 			_ => whole!(at, counted, accounts)
 		}
 	}
 
 	## **THE SIDECAR AS readCount READS IT**: parsed, or `Malformed` for
-	## one missing, past 1 KiB, or that does not parse (a recount, never
-	## the request's failure). `Failed` when its read failed.
-	sidecar! : Paths.TopicAt => Try(Try(Count.Counted, [Malformed]), [Failed])
+	## one missing, past 1 KiB, that does not parse, or whose read failed
+	## (a recount, never the request's failure: Files.read_cache!).
+	sidecar! : Paths.TopicAt => Try(Count.Counted, [Malformed])
 	sidecar! = |at|
-		match Files.read_at!(Paths.count_path(at), 0, 1025) {
-			Ok(raw) if List.len(raw) <= 1024 => Ok(Count.parse(raw))
-			Ok(_) | Err(Missing) => Ok(Err(Malformed))
-			Err(Failed) => Err(Failed)
+		match Files.read_cache!(Paths.count_path(at), 0, 1025) {
+			Ok(raw) if List.len(raw) <= 1024 => Count.parse(raw)
+			_ => Err(Malformed)
 		}
 }
 

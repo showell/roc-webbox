@@ -70,7 +70,9 @@ Host := [].{
 
 	## **AT MOST `max` OF A FILE'S BYTES, FROM `offset`** under the chat
 	## root, the path checked as `read!`'s is: fewer where the file ends
-	## first (none past its end), `Missing` and `Failed` as `read!`'s.
+	## first (none past its end), `Missing` as `read!`'s. **A CACHE'S READ**
+	## (metal-vmm QUEUE 284): `Failed` is the read's alone, logged by the
+	## host, never the request's failure (Files.read_cache!).
 	read_at! : List(U8), U64, U64 => { bytes : List(U8), status : [Failed, Found, Missing] }
 
 	## Write the whole file as `bytes`, its folders made as needed; `Err(Failed)`
