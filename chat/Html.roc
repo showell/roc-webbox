@@ -69,10 +69,13 @@ Html :: List(U8).{
 	bytes : Html -> List(U8)
 	bytes = |Html.(b)| b
 
-	## scriptSafe: every `</` as `<\/`, the one sequence that could end the
-	## element early.
+	## zig-webbox html `scriptSafe`: every `<` as `\u003c`, which JSON reads
+	## back as the same `<`. Escaping only `</` was not enough (metal-vmm
+	## QUEUE 266): `<!--` then `<script` puts the HTML tokenizer in its
+	## double-escaped state, where the page's own `</script>` no longer ends
+	## the element. With no `<`, no tag or comment can start. JSON only.
 	script_safe : List(U8) -> ScriptJson
-	script_safe = |s| ScriptJson.(List.join(List.intersperse(Bytes.split_seq(s, ['<', '/']), ['<', '\\', '/'])))
+	script_safe = |s| ScriptJson.(List.join(List.intersperse(Bytes.split_seq(s, ['<']), Str.to_utf8("\\u003c"))))
 
 	## The script element `open` (a trusted `<script ...>`), `json` in it,
 	## and its close.
@@ -104,4 +107,6 @@ expect Html.bytes(Html.host_markup(Str.to_utf8("<b>&"))) == Str.to_utf8("<b>&")
 expect Html.bytes(Html.fill(Html.trusted("a{s}b{s}c"), [Html.trusted("1")])) == Str.to_utf8("a1bc")
 
 # json_script: `</` cannot close the element early.
-expect Html.bytes(Html.json_script(Html.trusted("<script>"), Html.script_safe(Str.to_utf8("\"</script>\"")))) == Str.to_utf8("<script>\"<\\/script>\"</script>")
+expect Html.bytes(Html.json_script(Html.trusted("<script>"), Html.script_safe(Str.to_utf8("\"</script>\"")))) == Str.to_utf8("<script>\"\\u003c/script>\"</script>")
+# The double-escaped state's way in: no `<` is left, so neither starts.
+expect Html.bytes(Html.json_script(Html.trusted("<script>"), Html.script_safe(Str.to_utf8("\"<!--<script>\"")))) == Str.to_utf8("<script>\"\\u003c!--\\u003cscript>\"</script>")
