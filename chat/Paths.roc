@@ -355,6 +355,19 @@ Paths := [].{
 	reading_list_path : Uid -> ChatPath
 	reading_list_path = |uid| ChatPath.("users/${uid.to_str()}/docs/reading-list.md")
 
+	## The member's docs folder (docs_store `userDocsDir`): users/<uid>/docs.
+	docs_folder : Uid -> ChatPath
+	docs_folder = |uid| ChatPath.("users/${uid.to_str()}/docs")
+
+	## **THE MEMBER'S DOCS** (docs_store `listUserDocs`): of their docs
+	## folder's entries, every one that is not a folder whose name is a
+	## slug (is_doc_slug) and `.md`, sorted by slug, beside its file.
+	docs : Uid, List(Entry) -> List({ slug : Str, path : ChatPath })
+	docs = |uid, entries|
+		sort_by_bytes(List.keep_oks(entries, |e| if e.kind == Dir Err(NoSuffix) else str_suffix(e.name, ".md")))
+			|> List.keep_if(is_doc_slug)
+			|> List.map(|slug| { slug, path: ChatPath.("users/${uid.to_str()}/docs/${slug}.md") })
+
 	## A topic's message count sidecar (countPath, chat_count.zig):
 	## {conv_dir}/sessions/<topic>.count.
 	count_path : TopicAt -> ChatPath
@@ -398,6 +411,17 @@ conv_dir = |key|
 ## `name` without `suffix`, when it ends in it.
 str_suffix : Str, Str -> Try(Str, [NoSuffix])
 str_suffix = |name, suffix| if name.ends_with(suffix) Ok(name.drop_suffix(suffix)) else Err(NoSuffix)
+
+## validDocSlug: 1 to 80 lowercase letters and digits, joined by single
+## hyphens, none first or last; anything else no slugifyTitle made.
+is_doc_slug : Str -> Bool
+is_doc_slug = |slug| {
+	b = slug.to_utf8()
+	n = List.len(b)
+	in_set = List.all(b, |c| c == '-' or (c >= 'a' and c <= 'z') or (c >= '0' and c <= '9'))
+	doubled = List.fold(b, { found: Bool.False, prev: 0 }, |s, c| { found: s.found or (c == '-' and s.prev == '-'), prev: c }).found
+	n > 0 and n <= 80 and in_set and !doubled and List.first(b) != Ok('-') and List.last(b) != Ok('-')
+}
 
 ## channelMembers's trim: spaces, tabs and CRs (a line split on newlines
 ## has none of those).
@@ -563,4 +587,14 @@ expect Paths.channel_name_from_str("").is_err()
 expect match (Paths.pair_key_from_str("3_7"), Paths.channel_name_from_str("general")) {
 	(Ok(pair), Ok(name)) => (Paths.ConvKey.Dm(pair).base() == "/chat/c/3_7") and (Paths.ConvKey.Channel(name).base() == "/channel/general")
 	_ => Bool.False
+}
+
+# docs: a folder, a name that is no slug and a file not `.md` are no docs; the rest sorted by slug.
+expect match Uid.from_str("3") {
+	Ok(three) => {
+		e = |kind, name| { kind, name }
+		got = Paths.docs(three, [e(File, "zeta.md"), e(Dir, "folder.md"), e(File, "Bad_Slug.md"), e(File, "plain.txt"), e(Other, "a-b.md"), e(File, "-x.md"), e(File, "a--b.md"), e(File, ".md")])
+		List.map(got, |d| d.slug) == ["a-b", "zeta"] and List.map(got, |d| d.path.bytes()) == [Str.to_utf8("users/3/docs/a-b.md"), Str.to_utf8("users/3/docs/zeta.md")]
+	}
+	Err(_) => Bool.False
 }

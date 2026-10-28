@@ -92,6 +92,21 @@ Accounts := [].{
 			[] => Ok(roster(accounts))
 		}
 
+	## **A NAME THAT WILL NOT READ IS ITS MEMBER'S ROW ALONE** (/chat/recent,
+	## metal-vmm QUEUE 267, 277): the roster as `authorized` orders it, each
+	## member's name `Unreadable` where it would not read, so only what is
+	## labelled by it is left out; an account whose kind will not read still
+	## fails it, as listAuthorized did.
+	roster_named : List(Account) -> Try(List({ id : Uid, name : Try(Str, [Unreadable]) }), Unreadable)
+	roster_named = |accounts|
+		match List.keep_if(accounts, |a| a.kind == Unreadable) {
+			[a, ..] => Err(KindUnreadable(a.id))
+			[] => {
+				unnamed = List.keep_if(accounts, |a| a.name_read == Unreadable) |> List.map(|a| a.id)
+				Ok(List.map(roster(accounts), |u| { id: u.id, name: if List.contains(unnamed, u.id) Err(Unreadable) else Ok(u.name) }))
+			}
+		}
+
 	roster : List(Account) -> List({ id : Uid, name : Str })
 	roster = |accounts|
 		List.keep_if(accounts, |a| a.kind != Guest)

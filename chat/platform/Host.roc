@@ -193,11 +193,6 @@ Host := [].{
 	## (Chat.served_html) (`NotServing` when the read failed, too).
 	serve_rendered! : List(U8) => [Serving, NotServing]
 
-	## The member's recent feed as gathered (angry-gopher recent.zig
-	## `gatherRows`), each field as the host writes it: `secs` a signed
-	## decimal. None when it failed.
-	gather_recent! : {} => List({ kind : [Doc, Message], secs : List(U8), uid : List(U8), name : List(U8), key : List(U8), label : List(U8), topic : List(U8), markdown : List(U8), dm : [Dm, Channel] })
-
 	## Whether markdown is hostile: `Fine`; `Refused`, the host having refused it
 	## (webbox's edge counter and its 400); or `Failed`, the check itself.
 	check_hostile! : List(U8) => [Fine, Refused, Failed]

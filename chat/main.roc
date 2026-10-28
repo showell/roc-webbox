@@ -668,25 +668,140 @@ serve_links! = |rest|
 		}
 	}
 
-## /chat/recent by any method, as the Zig had it: what the host gathered,
+## /chat/recent by any method, as the Zig had it: its rows gathered,
 ## named, dated, excerpted and ordered here; nothing below it but its stream.
 serve_recent! : List(U8) => Chat.Answer
 serve_recent! = |rest|
 	if rest != [] {
 		Chat.not_found
 	} else {
-		match (load_viewer!(Unasked), load_uid!({})) {
-			(Ok(viewer), Ok(me)) => {
+		match load_recent!({}) {
+			Ok((me, viewer, written)) => {
 				# **ONE DAMAGED ROW IS ITS OWN** (QUEUE 267): a row whose
 				# text is not UTF-8 (a torn last block) is left out and
 				# counted, and the page served with the rest.
-				got = Recent.rows_of(Host.gather_recent!({}))
+				got = Recent.rows_of(written)
 				List.for_each!(got.damaged, |key| Host.count_dropped!(RecentRow, key))
 				Chat.respond(200, html, Pages.recent(Chrome.src_in(Host.srcs!({})), { viewer, json: Recent.json(me, got.rows) }).bytes())
 			}
-			_ => Chat.answered
+			Err(Failed) => Chat.answered
 		}
 	}
+
+## The member, their name, and the rows of their feed (recent.zig's
+## `gatherRows`, metal-vmm QUEUE 277), read in the Zig's order: the viewer's
+## name; a DM with every other authorized member (listAuthorized), then the
+## member's channels (listUserChannels), each topic's last message; then
+## their docs. `Failed` when a read failed (the request has, with its error).
+## **ONE DAMAGED ROW IS ITS OWN** (QUEUE 267): a DM whose partner's name,
+## or a row whose author's, will not read is left out and counted.
+load_recent! : {} => Try((Uid, Str, List(Recent.Written)), [Failed])
+load_recent! = |{}| {
+	me = load_uid!({})?
+	accounts = load_accounts!(Unasked)?
+	viewer = fail_if_unreadable!(Accounts.name(accounts, me))?
+	roster = fail_if_unreadable!(Accounts.roster_named(accounts))?
+	dms = List.keep_if(roster, |u| u.id != me) |> List.map(|u| { key: Dm(Paths.pair_key(me, u.id)), label: u.name.map_ok(|name| "to ${name}") })
+	from_dms = gather_convs!(me, accounts, dms, [])?
+	rosters = load_channel_rosters!({})?
+	channels = List.keep_oks(Paths.member_channels(rosters, me), |name| Paths.channel_name_from_str(name).map_ok(|valid| { key: Channel(valid), label: Ok("in ${name}") }))
+	from_channels = gather_convs!(me, accounts, channels, from_dms)?
+	docs = gather_docs!(me, Paths.docs(me, list!(Paths.docs_folder(me))), [])?
+	Ok((me, viewer, List.concat(from_channels, docs)))
+}
+
+## What a conversation's rows are labelled: "to <partner>" or "in <channel>".
+Labelled : { key : Paths.ConvKey, label : Try(Str, [Unreadable]) }
+
+## A row for each topic of each conversation, after `out`.
+gather_convs! : Uid, List(Accounts.Account), List(Labelled), List(Recent.Written) => Try(List(Recent.Written), [Failed])
+gather_convs! = |me, accounts, convs, out|
+	match convs {
+		[] => Ok(out)
+		[conv, .. as more] => {
+			topics = load_topics!(conv.key)
+			rows =
+				match conv.label {
+					Ok(label) => gather_topics!(me, accounts, { key: conv.key, label }, topics, out)?
+					Err(Unreadable) => {
+						List.for_each!(topics, |topic| Host.count_dropped!(RecentRow, Str.to_utf8("${conv.key.base()}/${topic}")))
+						out
+					}
+				}
+			gather_convs!(me, accounts, more, rows)
+		}
+	}
+
+## gatherConvTopics: each topic's last message, when it was sent and by
+## whom. **A TOPIC NOBODY HAS WRITTEN TO STILL BELONGS ON THE PAGE**, and
+## one whose last date will not read (a transcript another writer made) is
+## dated by its file too: at the epoch it would be buried, and its empty
+## date would show as "NaNd".
+gather_topics! : Uid, List(Accounts.Account), { key : Paths.ConvKey, label : Str }, List(Str), List(Recent.Written) => Try(List(Recent.Written), [Failed])
+gather_topics! = |me, accounts, conv, topics, out|
+	match topics {
+		[] => Ok(out)
+		[topic, .. as more] => {
+			at = { key: conv.key, topic }
+			row = { ..no_row, key: Str.to_utf8("${conv.key.base()}/${topic}"), label: conv.label.to_utf8(), topic: topic.to_utf8(), dm: conv.key.kind() }
+			rows =
+				match Last.of!(at, accounts)? {
+					Some(last) =>
+						match (Time.unix_from_rfc3339(last.at), author_name(me, accounts, last.uid)) {
+							(Ok(secs), Ok(name)) => Ok([{ ..row, secs: secs_text(secs), uid: last.uid, name: name.to_utf8(), markdown: last.markdown }])
+							(Ok(_), Err(Unreadable)) => {
+								Host.count_dropped!(RecentRow, row.key)
+								Ok([])
+							}
+							(Err(NotADate), _) => by_file_time!(Paths.transcript_path(at), row)
+						}
+					None => by_file_time!(Paths.transcript_path(at), row)
+				}?
+			gather_topics!(me, accounts, conv, more, List.concat(out, rows))
+		}
+	}
+
+## The member's docs, each dated by its file; one gone since its folder
+## was listed is left out.
+gather_docs! : Uid, List({ slug : Str, path : Paths.ChatPath }), List(Recent.Written) => Try(List(Recent.Written), [Failed])
+gather_docs! = |me, docs, out|
+	match docs {
+		[] => Ok(out)
+		[doc, .. as more] => {
+			row = { ..no_row, kind: Doc, uid: me.to_str().to_utf8(), key: doc.slug.to_utf8(), label: Recent.doc_title(doc.slug).to_utf8() }
+			rows = by_file_time!(doc.path, row)?
+			gather_docs!(me, more, List.concat(out, rows))
+		}
+	}
+
+## byFileTime: `row` dated by `path`'s modification time, **IN EVEN
+## SECONDS, AS FAT KEEPS IT** (recent.zig `fileSeconds`: every host floors
+## it, so the two show the same data alike); no row for a file not there.
+by_file_time! : Paths.ChatPath, Recent.Written => Try(List(Recent.Written), [Failed])
+by_file_time! = |path, row|
+	match Files.stat!(path) {
+		Ok(st) => Ok([{ ..row, secs: secs_text(if st.mtime % 2 == 0 st.mtime else st.mtime - 1) }])
+		Err(Missing) => Ok([])
+		Err(Failed) => Err(Failed)
+	}
+
+## authorName: the last author's name, read only for someone other than the
+## viewer ("" for the viewer, whom the page calls "You", and for nobody:
+## an empty Who cell, never an older author). An id that is no uid names
+## no account, so no name.
+author_name : Uid, List(Accounts.Account), List(U8) -> Try(Str, [Unreadable])
+author_name = |me, accounts, uid|
+	match Uid.from_utf8(uid) {
+		Ok(id) if id != me => Accounts.name(accounts, id).map_err(|_| Unreadable)
+		_ => Ok("")
+	}
+
+no_row : Recent.Written
+no_row = { kind: Message, secs: [], uid: [], name: [], key: [], label: [], topic: [], markdown: [], dm: Channel }
+
+## A row's time as Recent.Written carries it: a signed decimal.
+secs_text : I64 -> List(U8)
+secs_text = |secs| I64.to_str(secs).to_utf8()
 
 ## /chat/images (the newest 20 entries) or /chat/code (every one), by any
 ## method, as the Zig had them; nothing below them but their streams.

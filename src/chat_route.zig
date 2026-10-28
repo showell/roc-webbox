@@ -203,15 +203,9 @@ pub const Aside = enum(u8) { begin, end };
 /// (`Begin`'s is `failed` only for a request that has failed already).
 pub const AsideEnd = enum(u8) { done, failed };
 
-/// Host.roc's `gather_recent!`: each row's `kind`, a doc or a chat message.
-pub const RowKind = enum(u8) { doc, message };
-
-/// Host.roc's `gather_recent!`: each row's `dm`, a DM's or a channel's.
-pub const RowConv = enum(u8) { channel, dm };
-
 comptime {
     @setEvalBranchQuota(20_000);
-    for (.{ Family, Part, Tail, Method, Area, Counting, Sniff, Kind, Form, BodyStatus, CountStatus, Hostility, ReadStatus, EntryKind, AccountKind, NameRead, AccountsStatus, FailReason, RenderStatus, AppendStatus, Surface, Presence, RowKind, RowConv, Membership, Done, Serving, Dropped, Aside, AsideEnd }) |E| assertRocOrder(E);
+    for (.{ Family, Part, Tail, Method, Area, Counting, Sniff, Kind, Form, BodyStatus, CountStatus, Hostility, ReadStatus, EntryKind, AccountKind, NameRead, AccountsStatus, FailReason, RenderStatus, AppendStatus, Surface, Presence, Membership, Done, Serving, Dropped, Aside, AsideEnd }) |E| assertRocOrder(E);
 }
 
 /// That `E`'s values are Roc's for the same tags: numbered from 0 in the

@@ -49,9 +49,6 @@ pub const ListRec = extern struct { entries: EntryList, status: route_mod.ReadSt
 pub const StatRec = extern struct { mtime: i64, size: u64, status: route_mod.ReadStatus };
 /// One of Host.roc's `srcs!` scripts: `{ name : List(U8), src : List(U8) }`.
 pub const SrcRec = extern struct { name: RocBytes, src: RocBytes };
-/// One of Host.roc's `gather_recent!` rows: seven `List(U8)` fields by name, then
-/// its two tags, `dm : [Channel, Dm]` and `kind : [Doc, Message]`, by name.
-pub const RecentRec = extern struct { key: RocBytes, label: RocBytes, markdown: RocBytes, name: RocBytes, secs: RocBytes, topic: RocBytes, uid: RocBytes, dm: route_mod.RowConv, kind: route_mod.RowKind };
 /// One of Host.roc's `list_accounts!` accounts: `{ id : List(U8), kind : [Agent, Guest, Member, Unreadable], name : List(U8), name_read : [Found, Unreadable] }`.
 pub const AccountRec = extern struct { id: RocBytes, name: RocBytes, kind: route_mod.AccountKind, name_read: route_mod.NameRead };
 /// Host.roc's `list_accounts!` answer: `{ accounts : List(...), status : [Failed, Found] }`.
@@ -101,12 +98,6 @@ pub const SrcList = RecList(SrcRec, Src, struct {
     }
 }.rec);
 
-pub const RecentList = RecList(RecentRec, RecentRow, struct {
-    fn rec(it: RecentRow) RecentRec {
-        return .{ .dm = it.dm, .kind = it.kind, .key = .from(it.key), .label = .from(it.label), .markdown = .from(it.markdown), .name = .from(it.name), .secs = .from(it.secs), .topic = .from(it.topic), .uid = .from(it.uid) };
-    }
-}.rec);
-
 pub const AccountList = RecList(AccountRec, Account, struct {
     fn rec(it: Account) AccountRec {
         return switch (it.name) {
@@ -118,7 +109,7 @@ pub const AccountList = RecList(AccountRec, Account, struct {
 
 comptime {
     const w = @sizeOf(usize);
-    std.debug.assert(@sizeOf(RocBytes) == 3 * w and @sizeOf(Request) == 4 * w and @sizeOf(RouteRec) == 10 * w and @sizeOf(Answer) == 20 * w and @sizeOf(Got) == 4 * w and @sizeOf(ConvRec) == 10 * w and @sizeOf(ReadRec) == 4 * w and @sizeOf(EntryRec) == 4 * w and @sizeOf(SrcRec) == 6 * w and @sizeOf(RecentRec) == 22 * w and @sizeOf(ListRec) == 4 * w and @sizeOf(AccountRec) == 7 * w and @sizeOf(AccountsRec) == 4 * w and @sizeOf(RenderRec) == 4 * w and @sizeOf(MessageRec) == 15 * w);
+    std.debug.assert(@sizeOf(RocBytes) == 3 * w and @sizeOf(Request) == 4 * w and @sizeOf(RouteRec) == 10 * w and @sizeOf(Answer) == 20 * w and @sizeOf(Got) == 4 * w and @sizeOf(ConvRec) == 10 * w and @sizeOf(ReadRec) == 4 * w and @sizeOf(EntryRec) == 4 * w and @sizeOf(SrcRec) == 6 * w and @sizeOf(ListRec) == 4 * w and @sizeOf(AccountRec) == 7 * w and @sizeOf(AccountsRec) == 4 * w and @sizeOf(RenderRec) == 4 * w and @sizeOf(MessageRec) == 15 * w);
     std.debug.assert(@sizeOf(AppendRec) == 4);
     std.debug.assert(@sizeOf(StatRec) == 24 and @offsetOf(StatRec, "size") == 8 and @offsetOf(StatRec, "status") == 16);
     std.debug.assert(@sizeOf(route_mod.Presence) == 1);
@@ -146,10 +137,6 @@ pub const Stat = union(route_mod.ReadStatus) { failed, found: struct { size: u64
 
 /// A script a page names: its name and its src.
 pub const Src = struct { name: []const u8, src: []const u8 };
-
-/// A recent row as the host writes it (angry-gopher recent.zig `Row`):
-/// `secs` a signed decimal.
-pub const RecentRow = struct { kind: route_mod.RowKind, secs: []const u8, uid: []const u8, name: []const u8, key: []const u8, label: []const u8, topic: []const u8, markdown: []const u8, dm: route_mod.RowConv };
 
 /// An account as the host read it: its id (a canonical folder's name), its
 /// kind (`.unreadable` when its password's stat failed), its `name` file's
@@ -328,8 +315,6 @@ pub const Host = struct {
     /// chat root (the seam has checked it) rendered as the server's own
     /// markdown, for a `held` answer.
     serve_rendered: *const fn (ctx: *anyopaque, path: []const u8) route_mod.Serving = noServeRendered,
-    /// Host.gather_recent!: the member's recent rows, or none.
-    gather_recent: *const fn (ctx: *anyopaque) []const RecentRow = noRecent,
 };
 
 fn noPublish(_: *anyopaque, _: []const u8, _: []const u8) void {
@@ -412,9 +397,6 @@ fn noFanoutFailed(_: *anyopaque, _: route_mod.Surface, _: []const u8, _: []const
 fn noOnline(_: *anyopaque, _: []const u8) route_mod.Presence {
     @panic("check_online asked of a host that does not answer it");
 }
-fn noRecent(_: *anyopaque) []const RecentRow {
-    @panic("gather_recent asked of a host that does not answer it");
-}
 fn noSrcs(_: *anyopaque) []const Src {
     @panic("srcs asked of a host that does not answer it");
 }
@@ -455,7 +437,6 @@ pub const Routing = struct {
         h.list = noFolder;
         h.srcs = everyScript;
         h.serve_rendered = holdsNone;
-        h.gather_recent = nothing;
         return h;
     }
     fn of(ctx: *anyopaque) *Routing {
@@ -470,9 +451,6 @@ pub const Routing = struct {
     }
     fn noDmId(_: *anyopaque) []const u8 {
         return "999";
-    }
-    fn nothing(_: *anyopaque) []const RecentRow {
-        return &.{};
     }
     fn holdsNone(_: *anyopaque, _: []const u8) route_mod.Serving {
         return .not_serving;
@@ -754,11 +732,6 @@ export fn roc_chat_serve_file(path: RocBytes) callconv(.c) route_mod.Serving {
     const h = current("serve_file");
     if (!underRoot(h, path.slice())) return .not_serving;
     return h.serve_file(h.ctx, path.slice());
-}
-
-export fn roc_chat_gather_recent() callconv(.c) RecentList {
-    const h = current("gather_recent");
-    return .from(h.gather_recent(h.ctx));
 }
 
 export fn roc_chat_serve_rendered(path: RocBytes) callconv(.c) route_mod.Serving {

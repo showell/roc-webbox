@@ -1,5 +1,5 @@
 ## THE MEMBER'S RECENT FEED (angry-gopher recent.zig, recent_feed.zig): the
-## rows the host gathered, each named for the viewer, dated, excerpted and
+## rows main.roc gathered, each named for the viewer, dated, excerpted and
 ## put newest first, as the JSON /chat/recent boots with, byte for byte.
 ## Pure; angry-gopher's chat_twin_test.zig holds it to the Zig.
 import JsonText
@@ -16,11 +16,12 @@ Recent := [].{
 	## ChatEvent's.
 	Row : { kind : [Doc, Message], secs : I64, uid : Str, name : Str, key : Str, label : Str, topic : Str, markdown : Str, dm : [Dm, Channel] }
 
-	## A row as the host writes it (Host.gather_recent!): `secs` a signed decimal.
+	## A row as it is gathered (main.roc `load_recent!`), its text the
+	## store's bytes: `secs` a signed decimal.
 	Written : { kind : [Doc, Message], secs : List(U8), uid : List(U8), name : List(U8), key : List(U8), label : List(U8), topic : List(U8), markdown : List(U8), dm : [Dm, Channel] }
 
 	## The host's rows, read. **EACH ROW'S TEXT DECODED HERE, AT THE
-	## DOOR**: the host gathers it from stored files and names, so a field
+	## DOOR**: it is gathered from stored files and names, so a field
 	## that is not UTF-8 is corrupt data, and `NotUtf8` with its bytes.
 	rows : List(Written) -> Try(List(Row), [NotUtf8(List(U8))])
 	rows = |ws| List.map_try(ws, decoded)
@@ -103,6 +104,18 @@ Recent := [].{
 	## bytes.
 	order : Row, Row -> [Before, Same, After]
 	order = |x, y| if x.secs > y.secs Before else if x.secs < y.secs After else Bytes.compare(x.key.to_utf8(), y.key.to_utf8())
+
+	## docs_store `titleFromSlug`: hyphens to spaces, the first letter
+	## upper-cased (a slug is ASCII: text in, text out).
+	doc_title : Str -> Str
+	doc_title = |slug| {
+		spaced = List.map(slug.to_utf8(), |c| if c == '-' ' ' else c)
+		titled = List.update(spaced, 0, |c| if c >= 'a' and c <= 'z' c - 32 else c) ?? spaced
+		match Str.from_utf8(titled) {
+			Ok(title) => title
+			Err(_) => crash "Recent.doc_title: an ASCII edit split a codepoint"
+		}
+	}
 
 	## recent_feed `recentExcerpt`: a quote fence becomes "[quoted text]",
 	## an image "[image]", whitespace one space, cut at 350 codepoints.
@@ -266,3 +279,5 @@ expect {
 	got = Recent.rows_of([w("/a", Str.to_utf8("hi")), w("/b", [0xe2, 0x82]), w("/c", Str.to_utf8("ok"))])
 	List.map(got.rows, |r| r.key) == ["/a", "/c"] and got.damaged == [Str.to_utf8("/b")]
 }
+# doc_title: hyphens to spaces, the first letter up; a digit first stays.
+expect Recent.doc_title("reading-list") == "Reading list" and Recent.doc_title("2026-plans") == "2026 plans" and Recent.doc_title("") == ""
