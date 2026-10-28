@@ -46,6 +46,7 @@ import Frame
 import Time
 import Transcript
 import Fanout
+import BusKey
 
 handle! : Chat.Request => Chat.Answer
 handle! = |req|
@@ -531,12 +532,12 @@ store_reaction! = |conv, who, topic_at, r|
 						# **THE ECHO IS MADE BEFORE THE STORE** (metal-vmm QUEUE
 						# 177.1), as a message's: its key and frame, so nothing
 						# can fail between the append and the publish.
-						key = Fanout.topic_key(topic_at)
+						key = BusKey.topic(topic_at)
 						frame = Frame.reaction(line)
 						match Files.append_line!(Paths.reactions_path(topic_at), line) {
 							Ok({}) => {
 								# **STORED IS DONE**: the live publish cannot fail.
-								Host.publish!(key, frame)
+								Host.publish!(key.bytes(), frame)
 								Stored
 							}
 							Err(Failed) => Failed
@@ -1075,7 +1076,7 @@ append_message! = |conv, who, { at: topic_at, name, markdown: md, cid }|
 						# publish that failed after the store answered success
 						# with no echo on the sender's stream, whose client then
 						# sent the message again: a duplicate.
-						key = Fanout.topic_key(topic_at)
+						key = BusKey.topic(topic_at)
 						# **THE FAN-OUT IS MADE BEFORE THE STORE TOO**: every
 						# member's events and feed entries, so what runs after
 						# the store only sends and appends. A DM's accounts are
@@ -1092,7 +1093,7 @@ append_message! = |conv, who, { at: topic_at, name, markdown: md, cid }|
 								# would answer by sending it again. The publish
 								# cannot fail; the fan-out is best-effort, each
 								# failure counted and said.
-								Host.publish!(key, frame)
+								Host.publish!(key.bytes(), frame)
 								fan_out!(topic_at, steps)
 								Ok({})
 							}
@@ -1116,11 +1117,11 @@ fan_out! = |at, steps|
 		[] => {}
 		[step, .. as rest] => {
 			match step {
-				Publish(on, bytes) => Host.publish!(on, bytes)
+				Publish(on, bytes) => Host.publish!(on.bytes(), bytes)
 				Feed(f) => {
 					got = Files.append_entry!(f.path, Feeds.sep, f.entry)
 					match got.status {
-						Appended => Host.publish!(f.key, f.event)
+						Appended => Host.publish!(f.key.bytes(), f.event)
 						Failed => Host.report_fanout_failure!(f.surface, f.member, at.key.bytes(), at.topic.to_utf8(), got.fault)
 					}
 				}

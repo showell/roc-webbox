@@ -12,6 +12,8 @@ import Accounts
 import JsonText
 import Paths
 import Uid
+import BusKey
+import ChatUrl
 
 Fanout := [].{
 
@@ -34,8 +36,8 @@ Fanout := [].{
 	##   its event published; an append that failed is that surface's
 	##   failure, counted, and its event never sent.
 	Step : [
-		Publish(List(U8), List(U8)),
-		Feed({ surface : Surface, member : List(U8), path : Paths.ChatPath, entry : List(U8), key : List(U8), event : List(U8) }),
+		Publish(BusKey, List(U8)),
+		Feed({ surface : Surface, member : List(U8), path : Paths.ChatPath, entry : List(U8), key : BusKey, event : List(U8) }),
 	]
 
 	## A message stored in a conversation (its key and its members), as the
@@ -53,7 +55,7 @@ Fanout := [].{
 	steps : Sent, Parts -> List(Step)
 	steps = |m, parts| {
 		at = { key: m.key, topic: m.topic }
-		url = topic_url(at)
+		url = ChatUrl.topic(at).to_str()
 		notify = notify_event(at, notify_text(m.from, at))
 		added = topic_added(at)
 		head = { from: m.from, at: m.at, source_id: m.id, conv: m.key.to_str() }
@@ -64,56 +66,27 @@ Fanout := [].{
 					List.join([
 						# **THE AUTHOR IS NEVER NOTIFIED** of their own message: the
 						# favicon dot means a partner did something.
-						if uid == m.uid [] else [Publish(notify_key(uid), notify)],
+						if uid == m.uid [] else [Publish(BusKey.notify(uid), notify)],
 						# A topic is added to the sidebar by its first message alone.
-						if m.index == 0 [Publish(sidebar_key(uid), added)] else [],
+						if m.index == 0 [Publish(BusKey.sidebar(uid), added)] else [],
 						# **EVERY MEMBER SEES THE ROW, THE AUTHOR AS "YOU"**.
 						{
 							who = if uid == m.uid "You" else m.from
-							[Publish(recent_key(uid), Recent.chat_event({ at: m.at, url, who, label: recent_where(m, uid), topic: m.topic, excerpt: parts.excerpt, dm: m.key.kind() }))]
+							[Publish(BusKey.recent(uid), Recent.chat_event({ at: m.at, url, who, label: recent_where(m, uid), topic: m.topic, excerpt: parts.excerpt, dm: m.key.kind() }))]
 						},
 						# The feeds only when the message has what they keep.
 						match parts.images {
 							[] => []
-							tags => [Feed({ surface: Images, member: uid.to_str().to_utf8(), path: Paths.feed_path(uid, Images), entry: Feeds.images_entry(head, tags), key: images_key(uid), event: Feeds.images_event(head, tags) })]
+							tags => [Feed({ surface: Images, member: uid.to_str().to_utf8(), path: Paths.feed_path(uid, Images), entry: Feeds.images_entry(head, tags), key: BusKey.images(uid), event: Feeds.images_event(head, tags) })]
 						},
 						match parts.code {
 							[] => []
-							blocks => [Feed({ surface: Code, member: uid.to_str().to_utf8(), path: Paths.feed_path(uid, Code), entry: Feeds.code_entry(head, blocks), key: code_key(uid), event: Feeds.code_event(head, blocks) })]
+							blocks => [Feed({ surface: Code, member: uid.to_str().to_utf8(), path: Paths.feed_path(uid, Code), entry: Feeds.code_entry(head, blocks), key: BusKey.code(uid), event: Feeds.code_event(head, blocks) })]
 						},
 					]),
 			),
 		)
 	}
-
-	## **THE PER-MEMBER BUS KEYS** (chat_fanout `notifyBusKey`,
-	## `sidebarBusKey`, `recentBusKey`, `imagesBusKey`, `codeBusKey`): each
-	## namespaced, so none meets a topic's `<key>/<topic>` (topic_key). The Zig streams
-	## that serve them subscribe with the Zig's own, held equal by the twins.
-	notify_key : Uid -> List(U8)
-	notify_key = |uid| "ntf:${uid.to_str()}".to_utf8()
-
-	sidebar_key : Uid -> List(U8)
-	sidebar_key = |uid| "sb:${uid.to_str()}".to_utf8()
-
-	recent_key : Uid -> List(U8)
-	recent_key = |uid| "rec:${uid.to_str()}".to_utf8()
-
-	images_key : Uid -> List(U8)
-	images_key = |uid| "img:${uid.to_str()}".to_utf8()
-
-	code_key : Uid -> List(U8)
-	code_key = |uid| "code:${uid.to_str()}".to_utf8()
-
-	## The topic's live bus key, where its messages and reactions are
-	## published: `<key>/<topic>`.
-	topic_key : Paths.TopicAt -> List(U8)
-	topic_key = |{ key, topic }| "${key.to_str()}/${topic}".to_utf8()
-
-	## The topic's page: the conversation's URL root (Feeds.base_url,
-	## convKeyBaseURL), then the topic.
-	topic_url : Paths.TopicAt -> Str
-	topic_url = |at| "${at.key.base()}/${at.topic}"
 
 	## The status strip's line: a DM's "X sent you a message on <topic>.", a
 	## channel's "X posted to <key> > <topic>.".
@@ -124,13 +97,13 @@ Fanout := [].{
 			Channel(name) => "${from} posted to ${name.to_str()} > ${at.topic}."
 		}
 
-	## The notify stream's event: conv, session, text, link_url (topic_url).
+	## The notify stream's event: conv, session, text, link_url (ChatUrl.topic).
 	notify_event : Paths.TopicAt, Str -> List(U8)
-	notify_event = |at, text| JsonText.obj([("conv", JsonText.str(at.key.to_str())), ("session", JsonText.str(at.topic)), ("text", JsonText.str(text)), ("link_url", JsonText.str(topic_url(at)))])
+	notify_event = |at, text| JsonText.obj([("conv", JsonText.str(at.key.to_str())), ("session", JsonText.str(at.topic)), ("text", JsonText.str(text)), ("link_url", JsonText.str(ChatUrl.topic(at).to_str()))])
 
-	## The sidebar stream's topic-added: kind, conv, sid, url (topic_url).
+	## The sidebar stream's topic-added: kind, conv, sid, url (ChatUrl.topic).
 	topic_added : Paths.TopicAt -> List(U8)
-	topic_added = |at| JsonText.obj([("kind", JsonText.str("topic-added")), ("conv", JsonText.str(at.key.to_str())), ("sid", JsonText.str(at.topic)), ("url", JsonText.str(topic_url(at)))])
+	topic_added = |at| JsonText.obj([("kind", JsonText.str("topic-added")), ("conv", JsonText.str(at.key.to_str())), ("sid", JsonText.str(at.topic)), ("url", JsonText.str(ChatUrl.topic(at).to_str()))])
 
 	## chat_fanout `recentWhere`, for `viewer`: a channel names itself ("in
 	## <key>"); a DM names the other member ("to <name>"; the DM with

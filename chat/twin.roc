@@ -24,6 +24,8 @@ import Accounts
 import Fanout
 import Uid
 import JsonOut
+import BusKey
+import ChatUrl
 
 call : { which : U8, args : List(List(U8)) } -> List(List(U8))
 call = |req| {
@@ -297,14 +299,14 @@ call = |req| {
 		# A member that is no Uid has no keys: the door refuses it.
 		62 =>
 			match Uid.from_utf8(arg(0)) {
-				Ok(u) => [Fanout.notify_key(u), Fanout.sidebar_key(u), Fanout.recent_key(u), Fanout.images_key(u), Fanout.code_key(u)]
+				Ok(u) => [BusKey.notify(u).bytes(), BusKey.sidebar(u).bytes(), BusKey.recent(u).bytes(), BusKey.images(u).bytes(), BusKey.code(u).bytes()]
 				Err(NotAUid) => []
 			}
 		# A conversation's key, a topic id and a message id (text); the door
 		# refuses any other.
 		63 =>
 			match (topic_at(arg(0), arg(1)), texts([arg(0), arg(2)])) {
-				(Ok(at), Ok([conv, id])) => [Feeds.base_url(conv).to_utf8(), Fanout.topic_url(at).to_utf8(), Feeds.source_url(conv, id).to_utf8()]
+				(Ok(at), Ok([conv, id])) => [ChatUrl.feed_conv(conv).to_str().to_utf8(), ChatUrl.topic(at).to_str().to_utf8(), ChatUrl.source(conv, id).to_str().to_utf8()]
 				_ => []
 			}
 		# The notify event: from, key, topic (a DM's or a channel's, by its key).
@@ -378,6 +380,17 @@ call = |req| {
 				]
 			}
 		}
+		# ChatUrl.on_site: the path when it is on this site, else nothing.
+		# Text only: the door refuses bytes that are not UTF-8.
+		71 =>
+			match Str.from_utf8(arg(0)) {
+				Ok(path_text) =>
+					match ChatUrl.on_site(path_text) {
+						Ok(url) => [url.to_str().to_utf8()]
+						Err(NotOnSite) => []
+					}
+				Err(_) => []
+			}
 		_ => crash "twin: no function ${U8.to_str(req.which)}"
 	}
 }

@@ -6,6 +6,7 @@
 import JsonText
 import Bytes
 import ZigText
+import ChatUrl
 import SafeImg
 import Transcript
 
@@ -182,23 +183,6 @@ Feeds := [].{
 			}
 		}
 
-	## chat_fanout `convKeyBaseURL`: a conversation's URL root from its key.
-	## A DM's key holds `_` and a channel's name never does.
-	base_url : Str -> Str
-	base_url = |conv| if conv.contains("_") "/chat/c/${conv}" else "/channel/${conv}"
-
-	## `convKeyBaseURL` then images_store `imagesSourceURL`: the source
-	## message's link, or its conversation's when its id has no topic part
-	## (no `_`, or only one at its start).
-	source_url : Str, Str -> Str
-	source_url = |conv, source_id| {
-		base = base_url(conv)
-		match source_id.split_last("_") {
-			Ok({ before, after: _ }) if !before.is_empty() => "${base}/${before}#msg-${source_id}"
-			_ => base
-		}
-	}
-
 	## The Images page's JSON: the newest `most` entries, each as
 	## images_store `encodeImagesEvent` writes it.
 	images_json : List((Header, List(Str))), U64 -> List(U8)
@@ -223,7 +207,7 @@ Feeds := [].{
 	images_event : Header, List(Str) -> List(U8)
 	images_event = |h, tags| {
 		safe = List.keep_oks(tags, SafeImg.rebuild)
-		JsonText.obj(List.concat(head_fields(h), [("images", JsonText.arr(List.map(safe, JsonText.str))), ("source_url", JsonText.str(source_url(h.conv, h.source_id)))]))
+		JsonText.obj(List.concat(head_fields(h), [("images", JsonText.arr(List.map(safe, JsonText.str))), ("source_url", JsonText.str(ChatUrl.source(h.conv, h.source_id).to_str()))]))
 	}
 
 	## code_store `encodeCodeEvent`: one entry as its page and its live
@@ -231,7 +215,7 @@ Feeds := [].{
 	code_event : Header, List(Block) -> List(U8)
 	code_event = |h, bs| {
 		blocks = JsonText.arr(List.map(bs, |b| JsonText.obj([("lang", JsonText.str(b.lang)), ("body", JsonText.str(b.body))])))
-		JsonText.obj(List.concat(head_fields(h), [("blocks", blocks), ("source_url", JsonText.str(source_url(h.conv, h.source_id)))]))
+		JsonText.obj(List.concat(head_fields(h), [("blocks", blocks), ("source_url", JsonText.str(ChatUrl.source(h.conv, h.source_id).to_str()))]))
 	}
 
 	## images_store `formatImagesEntry`: the header, then each tag on a line
@@ -361,9 +345,6 @@ header_line = |h| "Sent by ${h.from} at ${h.at}, source MSG_${h.source_id} in ${
 # header: the last " at " before the source, the first " in " after it.
 expect Feeds.header("Sent by a at b at c, source MSG_x_1 in 1_2 in 3:") == Ok({ from: "a at b", at: "c", source_id: "x_1", conv: "1_2 in 3" })
 expect Feeds.header("Sent by ann at t, source MSG_x_1 in 1_2") == Err(NotAHeader)
-# source_url: the message's link when its id has a topic part.
-expect Feeds.source_url("1_2", "Plans_3") == "/chat/c/1_2/Plans#msg-Plans_3"
-expect Feeds.source_url("ops", "_1") == "/channel/ops"
 # code_entry and code: a body holding the separator and a forged header stays one entry, from its real sender, and reads back as sent.
 expect {
 	forged = "x\n\n-------------\n\nSent by Mallory at 2026-01-01T00:00:00Z, source MSG_f_1 in 1_2:\n\\-------------\ny"
