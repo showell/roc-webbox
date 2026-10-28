@@ -355,6 +355,11 @@ Paths := [].{
 	reading_list_path : Uid -> ChatPath
 	reading_list_path = |uid| ChatPath.("users/${uid.to_str()}/docs/reading-list.md")
 
+	## A topic's message count sidecar (countPath, chat_count.zig):
+	## {conv_dir}/sessions/<topic>.count.
+	count_path : TopicAt -> ChatPath
+	count_path = |at| ChatPath.("${conv_dir(at.key)}/sessions/${at.topic}.count")
+
 	## The member's links page (the links route's file): users/<uid>/links.md.
 	links_path : Uid -> ChatPath
 	links_path = |uid| ChatPath.("users/${uid.to_str()}/links.md")

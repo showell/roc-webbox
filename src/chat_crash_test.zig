@@ -52,7 +52,6 @@ const Files = struct {
         h.count_malformed_channel = malformed;
         h.append_line = appendLine;
         h.publish = publish;
-        h.message_count = count;
         h.render = render;
         h.store_message = storeMessage;
         h.append_entry = appendEntry;
@@ -106,14 +105,6 @@ const Files = struct {
         of(ctx).asked.print(testing.allocator, "publish {s} {f};", .{ key, std.zig.fmtString(bytes) }) catch @panic("oom");
     }
     /// Topic `Plans` has 7 messages; `Broken` will not count.
-    fn count(ctx: *anyopaque, conv: abi.Conv, sid: []const u8) abi.Count {
-        of(ctx).asked.print(testing.allocator, "count {t} {s} {s} {s},{s} {s};", .{ conv.family, conv.key, conv.base, conv.members[0], conv.members[1], sid }) catch @panic("oom");
-        if (std.mem.eql(u8, sid, "Broken")) {
-            fail(ctx, error.IsDir);
-            return .failed;
-        }
-        return .{ .counted = 7 };
-    }
     /// An account's kind kept as error.SymLinkLoop, its name as
     /// error.IsDir: which one the request fails with shows which read the
     /// seam asked for.
@@ -246,8 +237,6 @@ test "a line appended: a path that would leave the root fails the request at the
         try probe(sub, "failed", "", error.PathOutsideChatRoot);
     try probe("/append/1_2/sessions/Plans.reactions.jsonl", "done", "append_line 1_2/sessions/Plans.reactions.jsonl {\"a\":1};", null);
     try probe("/append/users/1/broken", "failed", "append_line users/1/broken {\"a\":1};", error.IsDir);
-    try probe("/count/Plans", "counted 7", "count dm 1_2 /chat/c/1_2 1,2 Plans;", null);
-    try probe("/count/Broken", "failed", "count dm 1_2 /chat/c/1_2 1,2 Broken;", error.IsDir);
     try probe("/publish/1_2/Plans", "published", "publish 1_2/Plans event: reaction\\ndata: x\\n\\n;", null);
 }
 

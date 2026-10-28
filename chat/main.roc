@@ -46,6 +46,7 @@ import Frame
 import Time
 import Transcript
 import Fanout
+import Count
 import Saved
 import JsonOut
 import Limits
@@ -218,6 +219,50 @@ serve_saved! = |route|
 			}
 	}
 
+## **HOW MANY MESSAGES A TOPIC HOLDS** (chat_count.messageCount, metal-vmm
+## QUEUE 275): the N that numbers the next one. **THE SIDECAR IS A CACHE;
+## THE TRANSCRIPT IS THE TRUTH**: the `.count` is believed only when the
+## transcript is still the size it was taken at (one stat), else the
+## transcript is read and its blocks counted (Count.count_blocks). No
+## transcript is no messages; one that will not be looked at or read fails
+## the request, never 0, which would number the next message onto the last.
+## The Roc only reads the sidecar; the host writes it with every message.
+count_messages! : Paths.TopicAt => Try(U64, [Failed])
+count_messages! = |at| {
+	transcript = Paths.transcript_path(at)
+	match Files.stat!(transcript) {
+		Err(Missing) => Ok(0)
+		Err(Failed) => Err(Failed)
+		Ok({ size, mtime: _ }) =>
+			match believed_count!(at, size) {
+				Ok(n) => Ok(n)
+				Err(Failed) => Err(Failed)
+				Err(Recount) =>
+					match Files.read_bytes!(transcript) {
+						Ok(raw) => Ok(Count.count_blocks(raw))
+						# Gone since the stat: no messages.
+						Err(Missing) => Ok(0)
+						Err(Failed) => Err(Failed)
+					}
+			}
+	}
+}
+
+## The sidecar's count when it was taken at `size` (readCount, then
+## believedCount): a sidecar missing, past readCount's 1 KiB, or that does
+## not parse (Count.parse) is a recount.
+believed_count! : Paths.TopicAt, U64 => Try(U64, [Recount, Failed])
+believed_count! = |at, size|
+	match Files.read_at!(Paths.count_path(at), 0, 1025) {
+		Ok(raw) if List.len(raw) <= 1024 =>
+			match Count.parse(raw) {
+				Ok(counted) if counted.size == size => Ok(counted.count)
+				_ => Err(Recount)
+			}
+		Ok(_) | Err(Missing) => Err(Recount)
+		Err(Failed) => Err(Failed)
+	}
+
 ## A topic's page, or its raw transcript: a read, then the work.
 serve_page_or_raw! : Chat.Request, Route.R, AtTopic => Chat.Answer
 serve_page_or_raw! = |req, route, found|
@@ -235,7 +280,6 @@ serve_page_or_raw! = |req, route, found|
 ## A topic that is there: the method, then the work.
 serve_topic! : Chat.Request, Route.R, AtTopic => Chat.Answer
 serve_topic! = |req, route, found| {
-	conv = found.conv
 	who = found.who
 	match route.tail {
 		# The tails the Zig serves, the conversation and the topic found
@@ -260,7 +304,7 @@ serve_topic! = |req, route, found| {
 			if req.method != Post {
 				Chat.not_allowed(Post)
 			} else if route.tail == React {
-				react!(conv, who, { key: found.key, topic: route.topic })
+				react!(who, { key: found.key, topic: route.topic })
 			} else {
 				match pin!(found.key, route.topic, if route.tail == Pin Pinned else Unpinned) {
 					Ok({}) => Chat.respond(204, [], [])
@@ -546,8 +590,8 @@ write_if_changed! = |path, value|
 	if ChatState.is_changed(Files.read!(path), value) Files.write!(path, ChatState.bookmark_line(value)) else Ok({})
 
 ## POST .../react: the form, then the reaction stored and sent live.
-react! : Chat.Conv, Who, Paths.TopicAt => Chat.Answer
-react! = |conv, who, at| {
+react! : Who, Paths.TopicAt => Chat.Answer
+react! = |who, at| {
 	body = Host.read_body!(Reaction)
 	if body.status == Answered {
 		Chat.answered
@@ -556,7 +600,7 @@ react! = |conv, who, at| {
 			Malformed => Chat.malformed
 			Bad(why) => Chat.respond(400, [], why)
 			Reacted(r) =>
-				match store_reaction!(conv, who, at, r) {
+				match store_reaction!(who, at, r) {
 					Stored => Chat.respond(204, [], [])
 					NoSuchMessage => Chat.respond(400, [], Str.to_utf8("react: no such message\n"))
 					Failed => Chat.answered
@@ -571,16 +615,15 @@ react! = |conv, who, at| {
 ## time, then its sidecar line appended and its frame published on the
 ## topic's key. `Failed` when a step failed (the request has, with its
 ## error), and nothing after it is done.
-store_reaction! : Chat.Conv, Who, Paths.TopicAt, { msg : U64, emoji : Str, change : Reaction.Change } => [Stored, NoSuchMessage, Failed]
-store_reaction! = |conv, who, topic_at, r|
+store_reaction! : Who, Paths.TopicAt, { msg : U64, emoji : Str, change : Reaction.Change } => [Stored, NoSuchMessage, Failed]
+store_reaction! = |who, topic_at, r|
 	match (load_viewer!(who), load_uid!({})) {
 		(Ok(name), Ok(uid)) => {
-			counted = Host.message_count!(conv, topic_at.topic.to_utf8())
-			match counted.status {
-				Failed => Failed
-				Counted =>
+			match count_messages!(topic_at) {
+				Err(Failed) => Failed
+				Ok(count) =>
 				# Message numbers start at 1 (the N of MSG_<topic>_N).
-					if r.msg == 0 or r.msg > counted.count {
+					if r.msg == 0 or r.msg > count {
 						NoSuchMessage
 					} else {
 						at = Time.rfc3339(Host.now!({}))
@@ -1101,10 +1144,9 @@ append_message! = |conv, who, { at: topic_at, name, markdown: md, cid }|
 		Err(Failed)
 	} else {
 		topic = topic_at.topic
-		counted = Host.message_count!(conv, topic.to_utf8())
-		match (counted.status, load_uid!({})) {
-			(Counted, Ok(me)) => {
-				index = counted.count
+		match (count_messages!(topic_at), load_uid!({})) {
+			(Ok(count), Ok(me)) => {
+				index = count
 				# A count of the largest U64 has no next number: the call
 				# crashes into a 500, storing nothing.
 				id = "${topic}_${U64.to_str(index + 1)}"

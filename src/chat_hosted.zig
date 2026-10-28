@@ -182,7 +182,7 @@ const Scripted = struct {
     const Channel = struct { name: []const u8, read: abi.Read };
 
     fn host(self: *Scripted) Host {
-        return .{ .ctx = self, .check_member = member, .count_presence = presence, .list_accounts = accountsOf, .me = meId, .now = nowOf, .read_body = bodyOf, .publish = publish, .append_line = appendLine, .message_count = messageCount, .read = readOf, .write = writeOf, .remove = removeOf, .list = listOf, .fail = failOf, .fail_text = failTextOf, .fail_account = failAccountOf, .count_malformed_channel = malformed, .count_dropped = dropped, .aside = asideOf, .check_online = onlineOf, .read_header = header, .check_hostile = hostile, .render = render, .store_message = storeMessage, .append_entry = appendEntry, .report_fanout_failure = fanoutFailed, .serve_file = raw, .serve_rendered = links, .srcs = srcs };
+        return .{ .ctx = self, .check_member = member, .count_presence = presence, .list_accounts = accountsOf, .me = meId, .now = nowOf, .read_body = bodyOf, .publish = publish, .append_line = appendLine, .stat = statOf, .read_at = readAtOf, .read = readOf, .write = writeOf, .remove = removeOf, .list = listOf, .fail = failOf, .fail_text = failTextOf, .fail_account = failAccountOf, .count_malformed_channel = malformed, .count_dropped = dropped, .aside = asideOf, .check_online = onlineOf, .read_header = header, .check_hostile = hostile, .render = render, .store_message = storeMessage, .append_entry = appendEntry, .report_fanout_failure = fanoutFailed, .serve_file = raw, .serve_rendered = links, .srcs = srcs };
     }
     fn me(ctx: *anyopaque) *Scripted {
         return @ptrCast(@alignCast(ctx));
@@ -225,10 +225,24 @@ const Scripted = struct {
         say(ctx, "append_line {s} {s}", .{ path, line });
         return if (me(ctx).append_line_ok) .ok else .failed;
     }
-    fn messageCount(ctx: *anyopaque, conv: Conv, sid: []const u8) abi.Count {
-        sayConv(ctx, "count", conv);
-        say(ctx, " {s}", .{sid});
-        return me(ctx).count;
+    /// A transcript (`<dir>/sessions/<topic>.md`) is 7 bytes, but where
+    /// `count` failed (its stat fails); its sidecar says
+    /// `count` at 7, so it is believed. Any other path is not there.
+    fn statOf(ctx: *anyopaque, path: []const u8) abi.Stat {
+        say(ctx, "stat {s}", .{path});
+        if (!std.mem.endsWith(u8, path, ".md")) return .missing;
+        return switch (me(ctx).count) {
+            .counted => .{ .found = .{ .size = 7, .mtime = 1761400000 } },
+            .failed => .failed,
+        };
+    }
+    fn readAtOf(ctx: *anyopaque, path: []const u8, _: u64, _: u64) abi.Read {
+        say(ctx, "read_at {s}", .{path});
+        if (!std.mem.endsWith(u8, path, ".count")) return .missing;
+        return switch (me(ctx).count) {
+            .counted => |n| .{ .found = std.fmt.allocPrint(me(ctx).alloc, "{d} 7\n", .{n}) catch @panic("oom") },
+            .failed => .missing,
+        };
     }
     fn nowOf(_: *anyopaque) i64 {
         return 1761400000;
@@ -384,7 +398,7 @@ fn frameSaid(comptime line: []const u8) []const u8 {
 const thumbs_line = "{\"msg\":3,\"uid\":\"1\",\"from\":\"Steve\",\"emoji\":\"\u{1F44D}\",\"on\":false,\"at\":\"2025-10-25T13:46:40Z\"}";
 /// What storing it in DM 1_2's topic Plans asks: the count, the line
 /// appended to the sidecar, then its frame on the topic's key.
-const stored_thumbs = "count dm 1_2 /chat/c/1_2 [1,2] Plans;append_line 1_2/sessions/Plans.reactions.jsonl " ++ thumbs_line ++ ";publish 1_2/Plans " ++ frameSaid(thumbs_line) ++ ";";
+const stored_thumbs = "stat 1_2/sessions/Plans.md;read_at 1_2/sessions/Plans.count;append_line 1_2/sessions/Plans.reactions.jsonl " ++ thumbs_line ++ ";publish 1_2/Plans " ++ frameSaid(thumbs_line) ++ ";";
 
 test "a topic's reactions, react, pin and unpin are the Roc's: presence, the conversation and topic found, the method, then the work" {
     use(testing.allocator);
@@ -404,38 +418,38 @@ test "a topic's reactions, react, pin and unpin are the Roc's: presence, the con
         var s = a;
         s.body = "msg=4&emoji=%F0%9F%91%8D";
         break :blk s;
-    }, .{ .respond = .{ .status = 400, .body = "react: no such message\n" } }, ops_topic ++ "body;accounts;count channel ops /channel/ops [1,3] Plans;");
+    }, .{ .respond = .{ .status = 400, .body = "react: no such message\n" } }, ops_topic ++ "body;accounts;stat channels/ops/sessions/Plans.md;read_at channels/ops/sessions/Plans.count;");
     try expectAct("/ops/Plans/react", true, .POST, blk: {
         var s = a;
         s.body = "msg=0&emoji=%F0%9F%91%8D";
         break :blk s;
-    }, .{ .respond = .{ .status = 400, .body = "react: no such message\n" } }, ops_topic ++ "body;accounts;count channel ops /channel/ops [1,3] Plans;");
+    }, .{ .respond = .{ .status = 400, .body = "react: no such message\n" } }, ops_topic ++ "body;accounts;stat channels/ops/sessions/Plans.md;read_at channels/ops/sessions/Plans.count;");
     // Message 1 is the first; a topic with none has no message 1.
     try expectAct("/ops/Plans/react", true, .POST, blk: {
         var s = a;
         s.body = "msg=1&emoji=%F0%9F%91%8D";
         break :blk s;
-    }, .{ .respond = .{ .status = 204 } }, ops_topic ++ "body;accounts;count channel ops /channel/ops [1,3] Plans;append_line channels/ops/sessions/Plans.reactions.jsonl {\"msg\":1,\"uid\":\"1\",\"from\":\"Steve\",\"emoji\":\"\u{1F44D}\",\"on\":true,\"at\":\"2025-10-25T13:46:40Z\"};publish ops/Plans " ++ comptime frameSaid("{\"msg\":1,\"uid\":\"1\",\"from\":\"Steve\",\"emoji\":\"\u{1F44D}\",\"on\":true,\"at\":\"2025-10-25T13:46:40Z\"}") ++ ";");
+    }, .{ .respond = .{ .status = 204 } }, ops_topic ++ "body;accounts;stat channels/ops/sessions/Plans.md;read_at channels/ops/sessions/Plans.count;append_line channels/ops/sessions/Plans.reactions.jsonl {\"msg\":1,\"uid\":\"1\",\"from\":\"Steve\",\"emoji\":\"\u{1F44D}\",\"on\":true,\"at\":\"2025-10-25T13:46:40Z\"};publish ops/Plans " ++ comptime frameSaid("{\"msg\":1,\"uid\":\"1\",\"from\":\"Steve\",\"emoji\":\"\u{1F44D}\",\"on\":true,\"at\":\"2025-10-25T13:46:40Z\"}") ++ ";");
     try expectAct("/ops/Plans/react", true, .POST, blk: {
         var s = a;
         s.body = "msg=1&emoji=%F0%9F%91%8D";
         s.count = .{ .counted = 0 };
         break :blk s;
-    }, .{ .respond = .{ .status = 400, .body = "react: no such message\n" } }, ops_topic ++ "body;accounts;count channel ops /channel/ops [1,3] Plans;");
+    }, .{ .respond = .{ .status = 400, .body = "react: no such message\n" } }, ops_topic ++ "body;accounts;stat channels/ops/sessions/Plans.md;read_at channels/ops/sessions/Plans.count;");
     // **A COUNT THAT FAILED IS NO ANSWER**: nothing stored, nothing sent.
     try expectAct("/c/1_2/Plans/react", false, .POST, blk: {
         var s = a;
         s.body = thumbs;
         s.count = .failed;
         break :blk s;
-    }, .answered, dm_topic ++ "body;count dm 1_2 /chat/c/1_2 [1,2] Plans;");
+    }, .answered, dm_topic ++ "body;stat 1_2/sessions/Plans.md;");
     // **A LINE NOT STORED IS NEVER SENT**: no publish after a failed append.
     try expectAct("/c/1_2/Plans/react", false, .POST, blk: {
         var s = a;
         s.body = thumbs;
         s.append_line_ok = false;
         break :blk s;
-    }, .answered, dm_topic ++ "body;count dm 1_2 /chat/c/1_2 [1,2] Plans;append_line 1_2/sessions/Plans.reactions.jsonl " ++ thumbs_line ++ ";");
+    }, .answered, dm_topic ++ "body;stat 1_2/sessions/Plans.md;read_at 1_2/sessions/Plans.count;append_line 1_2/sessions/Plans.reactions.jsonl " ++ thumbs_line ++ ";");
     // The reactor's name that will not read: the request fails with it, and
     // nothing is counted, stored or sent.
     try expectAct("/ops/Plans/react", true, .POST, blk: {
@@ -682,7 +696,10 @@ fn sent(comptime conv: []const u8, comptime key: []const u8, comptime sid: []con
     const frame = "id: 3\ndata: {\"index\":3,\"from\":\"" ++ name ++ "\",\"from_uid\":\"1\",\"at\":\"" ++ at ++ "\",\"html\":\"<p>" ++ md ++ "</p>\",\"markdown\":\"" ++ md ++ "\",\"id\":\"" ++ id ++ "\"" ++ (if (cid.len == 0) "" else ",\"cid\":\"" ++ cid ++ "\"") ++ "}\n\n";
     const message = id ++ "|" ++ name ++ "|" ++ at ++ "|1|" ++ md;
     return comptime .{
-        .count = "count " ++ conv ++ " " ++ sid ++ ";",
+        .count = blk: {
+            const dir = if (std.mem.startsWith(u8, conv, "dm ")) key else "channels/" ++ key;
+            break :blk "stat " ++ dir ++ "/sessions/" ++ sid ++ ".md;read_at " ++ dir ++ "/sessions/" ++ sid ++ ".count;";
+        },
         .render = "render " ++ md ++ ";",
         .store = std.fmt.comptimePrint("store {s} {s} {f} 3 {s};", .{ conv, sid, std.zig.fmtString(block), message }),
         .publish = std.fmt.comptimePrint("publish {s}/{s} {f};", .{ key, sid, std.zig.fmtString(frame) }),
@@ -764,7 +781,7 @@ test "a message is the Roc's: no author, no message; the count, the id, the stam
         var s = a;
         s.count = .failed;
         break :blk s;
-    }, .answered, before ++ plans.count);
+    }, .answered, before ++ "stat 1_2/sessions/Plans.md;");
     // **THE FRAME IS MADE BEFORE THE STORE**: a render that failed stores nothing.
     try expectAct("/c/1_2/Plans/send", false, .POST, blk: {
         var s = a;

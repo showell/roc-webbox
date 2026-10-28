@@ -26,7 +26,6 @@ platform ""
 		"roc_chat_list": Host.list!,
 		"roc_chat_list_accounts": Host.list_accounts!,
 		"roc_chat_me": Host.me!,
-		"roc_chat_message_count": Host.message_count!,
 		"roc_chat_now": Host.now!,
 		"roc_chat_publish": Host.publish!,
 		"roc_chat_read": Host.read!,

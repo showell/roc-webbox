@@ -56,8 +56,6 @@ pub const RecentRec = extern struct { key: RocBytes, label: RocBytes, markdown: 
 pub const AccountRec = extern struct { id: RocBytes, name: RocBytes, kind: route_mod.AccountKind, name_read: route_mod.NameRead };
 /// Host.roc's `list_accounts!` answer: `{ accounts : List(...), status : [Failed, Found] }`.
 pub const AccountsRec = extern struct { accounts: AccountList, status: route_mod.AccountsStatus };
-/// Host.roc's `message_count!` answer: `{ count : U64, status : [Counted, Failed] }`.
-pub const CountRec = extern struct { count: u64, status: route_mod.CountStatus };
 /// Host.roc's `render!` answer: `{ html : List(U8), status : [Failed, Rendered] }`.
 pub const RenderRec = extern struct { html: RocBytes, status: route_mod.RenderStatus };
 /// Chat.roc's `Message`: `{ id, from, at, uid, markdown }`, every field
@@ -120,7 +118,7 @@ pub const AccountList = RecList(AccountRec, Account, struct {
 
 comptime {
     const w = @sizeOf(usize);
-    std.debug.assert(@sizeOf(RocBytes) == 3 * w and @sizeOf(Request) == 4 * w and @sizeOf(RouteRec) == 10 * w and @sizeOf(Answer) == 20 * w and @sizeOf(Got) == 4 * w and @sizeOf(ConvRec) == 10 * w and @sizeOf(ReadRec) == 4 * w and @sizeOf(EntryRec) == 4 * w and @sizeOf(SrcRec) == 6 * w and @sizeOf(RecentRec) == 22 * w and @sizeOf(ListRec) == 4 * w and @sizeOf(AccountRec) == 7 * w and @sizeOf(AccountsRec) == 4 * w and @sizeOf(CountRec) == 16 and @sizeOf(RenderRec) == 4 * w and @sizeOf(MessageRec) == 15 * w);
+    std.debug.assert(@sizeOf(RocBytes) == 3 * w and @sizeOf(Request) == 4 * w and @sizeOf(RouteRec) == 10 * w and @sizeOf(Answer) == 20 * w and @sizeOf(Got) == 4 * w and @sizeOf(ConvRec) == 10 * w and @sizeOf(ReadRec) == 4 * w and @sizeOf(EntryRec) == 4 * w and @sizeOf(SrcRec) == 6 * w and @sizeOf(RecentRec) == 22 * w and @sizeOf(ListRec) == 4 * w and @sizeOf(AccountRec) == 7 * w and @sizeOf(AccountsRec) == 4 * w and @sizeOf(RenderRec) == 4 * w and @sizeOf(MessageRec) == 15 * w);
     std.debug.assert(@sizeOf(AppendRec) == 4);
     std.debug.assert(@sizeOf(StatRec) == 24 and @offsetOf(StatRec, "size") == 8 and @offsetOf(StatRec, "status") == 16);
     std.debug.assert(@sizeOf(route_mod.Presence) == 1);
@@ -255,9 +253,6 @@ pub const Host = struct {
     /// primitives' are), a newline first when the file ends mid-line. `.failed`
     /// when it failed (the host has failed the request).
     append_line: *const fn (ctx: *anyopaque, path: []const u8, line: []const u8) route_mod.Done = noAppendLine,
-    /// Host.message_count!: topic `sid` of `conv`'s message count, or
-    /// `.failed` (the host has failed the request).
-    message_count: *const fn (ctx: *anyopaque, conv: Conv, sid: []const u8) Count = noCount,
     /// **THE FILE PRIMITIVES** (Host.read!, Host.write!, Host.remove!): a
     /// file under the chat root, `path` relative to it, its bytes and its
     /// name the Roc's. Every path is checked here first (`inRoot`); the host
@@ -342,9 +337,6 @@ fn noPublish(_: *anyopaque, _: []const u8, _: []const u8) void {
 }
 fn noAppendLine(_: *anyopaque, _: []const u8, _: []const u8) route_mod.Done {
     @panic("append_line asked of a host that does not answer it");
-}
-fn noCount(_: *anyopaque, _: Conv, _: []const u8) Count {
-    @panic("message_count asked of a host that does not answer it");
 }
 fn noServeRendered(_: *anyopaque, _: []const u8) route_mod.Serving {
     @panic("serve_rendered asked of a host that does not answer it");
@@ -547,18 +539,6 @@ export fn roc_chat_read_body(which: route_mod.Form) callconv(.c) Got {
 export fn roc_chat_publish(key: RocBytes, bytes: RocBytes) callconv(.c) void {
     const h = current("publish");
     h.publish(h.ctx, key.slice(), bytes.slice());
-}
-
-export fn roc_chat_message_count(conv: ConvRec, sid: RocBytes) callconv(.c) CountRec {
-    const h = current("message_count");
-    if (!onePart(conv.key.slice()) or !onePart(sid.slice())) {
-        h.fail(h.ctx, error.PathOutsideChatRoot);
-        return .{ .count = 0, .status = .failed };
-    }
-    return switch (h.message_count(h.ctx, .of(conv), sid.slice())) {
-        .counted => |n| .{ .count = n, .status = .counted },
-        .failed => .{ .count = 0, .status = .failed },
-    };
 }
 
 /// **A PATH THAT WOULD LEAVE THE CHAT ROOT IS A ROC BUG, NEVER A MISSING

@@ -48,12 +48,6 @@ Host := [].{
 	## failed (the request has failed).
 	append_line! : List(U8), List(U8) => Try({}, [Failed])
 
-	## Topic `sid` of `conv`'s message count (the store's count cache,
-	## believed only while the transcript is the size it was counted at, or
-	## the transcript recounted). `Failed` when it could not be counted (the
-	## request has failed): **NEVER 0 FOR A COUNT THAT FAILED**.
-	message_count! : Chat.Conv, List(U8) => { count : U64, status : [Counted, Failed] }
-
 	## **THE FILES, AS PRIMITIVES**: a file or folder under the chat root,
 	## `path` relative to it (ChatState.roc, Feeds.roc and Paths.roc name
 	## them), its bytes as
