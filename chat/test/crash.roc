@@ -336,7 +336,8 @@ handle! = |req|
 	} else if req.sub == Str.to_utf8("/crash") {
 		crash "a planted crash"
 	} else if req.sub == Str.to_utf8("/crash-after-asking") {
-		if Host.check_member!({}) == Member {
+		asking = Host.identify!({})
+		if asking.status == Known and asking.uid == Str.to_utf8("1") {
 			crash "a planted crash, after asking"
 		} else {
 			Chat.zig(Chat.family(NotFound))
@@ -354,7 +355,7 @@ handle! = |req|
 			[],
 			|acc, b| List.append(acc, b),
 		)
-		if Host.check_member!({}) == Member and List.len(big) == 20000 {
+		if Host.identify!({}).status == Known and List.len(big) == 20000 {
 			crash "a planted crash, after a big list"
 		} else {
 			Chat.zig(Chat.family(NotFound))

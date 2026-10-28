@@ -703,6 +703,52 @@ pub const RocEnv = struct {
     roc_io: RocIo,
 };
 
+/// Element type for __AnonStruct_470fbd29d33a29d7
+pub const __AnonStruct_470fbd29d33a29d7 = if (@sizeOf(usize) == 4) extern struct {
+    uid: RocListWith(u8, false),
+    status: FailedOrKnownOrStranger,
+    /// Recursively decrement Roc-owned fields.
+    pub fn decref(self: @This(), roc_host: *RocHost) void {
+        const value = self;
+        value.uid.decref(roc_host);
+        value.status.decref(roc_host);
+    }
+
+    /// Increment Roc-owned fields.
+    pub fn incref(self: @This(), amount: isize) void {
+        const value = self;
+        value.uid.incref(amount);
+        value.status.incref(amount);
+    }
+} else extern struct {
+    uid: RocListWith(u8, false),
+    status: FailedOrKnownOrStranger,
+    /// Recursively decrement Roc-owned fields.
+    pub fn decref(self: @This(), roc_host: *RocHost) void {
+        const value = self;
+        value.uid.decref(roc_host);
+        value.status.decref(roc_host);
+    }
+
+    /// Increment Roc-owned fields.
+    pub fn incref(self: @This(), amount: isize) void {
+        const value = self;
+        value.uid.incref(amount);
+        value.status.incref(amount);
+    }
+};
+
+comptime {
+    if (@sizeOf(usize) == 8) {
+        if (@sizeOf(__AnonStruct_470fbd29d33a29d7) != 32) @compileError("__AnonStruct_470fbd29d33a29d7 size mismatch");
+        if (@alignOf(__AnonStruct_470fbd29d33a29d7) != 8) @compileError("__AnonStruct_470fbd29d33a29d7 alignment mismatch");
+    }
+    if (@sizeOf(usize) == 4) {
+        if (@sizeOf(__AnonStruct_470fbd29d33a29d7) != 16) @compileError("__AnonStruct_470fbd29d33a29d7 size mismatch");
+        if (@alignOf(__AnonStruct_470fbd29d33a29d7) != 4) @compileError("__AnonStruct_470fbd29d33a29d7 alignment mismatch");
+    }
+}
+
 /// Element type for __AnonStruct_c9a11dffdfba9204
 pub const __AnonStruct_c9a11dffdfba9204 = if (@sizeOf(usize) == 4) extern struct {
     accounts: RocList(__AnonStruct_7f5e7edef150bb3f),
@@ -1452,7 +1498,7 @@ pub const __AnonStruct_a2123aaef2c5be3d = if (@sizeOf(usize) == 4) extern struct
         const value = self;
         value.base.decref(roc_host);
         value.key.decref(roc_host);
-        decrefListOfListOfType7(value.members, roc_host);
+        decrefListOfListOfType3(value.members, roc_host);
         value.family.decref(roc_host);
     }
 
@@ -1474,7 +1520,7 @@ pub const __AnonStruct_a2123aaef2c5be3d = if (@sizeOf(usize) == 4) extern struct
         const value = self;
         value.base.decref(roc_host);
         value.key.decref(roc_host);
-        decrefListOfListOfType7(value.members, roc_host);
+        decrefListOfListOfType3(value.members, roc_host);
         value.family.decref(roc_host);
     }
 
@@ -2155,10 +2201,11 @@ comptime {
     }
 }
 
-/// Tag union: MemberOrOutsider
-pub const MemberOrOutsider = enum(u8) {
-    member = 0,
-    outsider = 1,
+/// Tag union: FailedOrKnownOrStranger
+pub const FailedOrKnownOrStranger = enum(u8) {
+    failed = 0,
+    known = 1,
+    stranger = 2,
     /// Recursively decrement Roc-owned payloads.
     pub fn decref(self: @This(), roc_host: *RocHost) void {
         _ = self;
@@ -2174,12 +2221,12 @@ pub const MemberOrOutsider = enum(u8) {
 
 comptime {
     if (@sizeOf(usize) == 8) {
-        if (@sizeOf(MemberOrOutsider) != 1) @compileError("MemberOrOutsider size mismatch");
-        if (@alignOf(MemberOrOutsider) != 1) @compileError("MemberOrOutsider alignment mismatch");
+        if (@sizeOf(FailedOrKnownOrStranger) != 1) @compileError("FailedOrKnownOrStranger size mismatch");
+        if (@alignOf(FailedOrKnownOrStranger) != 1) @compileError("FailedOrKnownOrStranger alignment mismatch");
     }
     if (@sizeOf(usize) == 4) {
-        if (@sizeOf(MemberOrOutsider) != 1) @compileError("MemberOrOutsider size mismatch");
-        if (@alignOf(MemberOrOutsider) != 1) @compileError("MemberOrOutsider alignment mismatch");
+        if (@sizeOf(FailedOrKnownOrStranger) != 1) @compileError("FailedOrKnownOrStranger size mismatch");
+        if (@alignOf(FailedOrKnownOrStranger) != 1) @compileError("FailedOrKnownOrStranger alignment mismatch");
     }
 }
 
@@ -3377,6 +3424,27 @@ comptime {
     }
 }
 
+/// Return type record for Host.identify!
+/// Fields ordered by compiler-emitted ABI offsets.
+pub const HostIdentifyRetRecord = if (@sizeOf(usize) == 4) extern struct {
+    uid: RocListWith(u8, false),
+    status: FailedOrKnownOrStranger,
+} else extern struct {
+    uid: RocListWith(u8, false),
+    status: FailedOrKnownOrStranger,
+};
+
+comptime {
+    if (@sizeOf(usize) == 8) {
+        if (@sizeOf(HostIdentifyRetRecord) != 32) @compileError("HostIdentifyRetRecord size mismatch");
+        if (@alignOf(HostIdentifyRetRecord) != 8) @compileError("HostIdentifyRetRecord alignment mismatch");
+    }
+    if (@sizeOf(usize) == 4) {
+        if (@sizeOf(HostIdentifyRetRecord) != 16) @compileError("HostIdentifyRetRecord size mismatch");
+        if (@alignOf(HostIdentifyRetRecord) != 4) @compileError("HostIdentifyRetRecord alignment mismatch");
+    }
+}
+
 /// Return type record for Host.list!
 /// Fields ordered by compiler-emitted ABI offsets.
 pub const HostListRetRecord = if (@sizeOf(usize) == 4) extern struct {
@@ -4014,6 +4082,7 @@ pub const HostAppend_message = __AnonStruct_64274bf2f7c0abad;
 pub const HostBundle_addResult = HostAppend_lineResult;
 pub const HostCheck_online = OfflineOrOnline;
 pub const HostClear_welcomeResult = HostAppend_lineResult;
+pub const HostIdentify = __AnonStruct_470fbd29d33a29d7;
 pub const HostIndex_messageArg0 = __AnonStruct_a2123aaef2c5be3d;
 pub const HostIndex_messageArg1 = __AnonStruct_a1e45760313971e2;
 pub const HostIndex_messageArg1Message = __AnonStruct_f8c5938ec6752e0;
@@ -4047,6 +4116,12 @@ pub const Handle_for_host = __AnonStruct_5fb6707f6cc20700;
 pub const Handle_for_hostRoute = __AnonStruct_419326ade7e9137;
 
 // Generated Refcount Helpers
+
+pub const __AnonStruct_470fbd29d33a29d7Release = struct {
+    pub fn release(value: __AnonStruct_470fbd29d33a29d7, roc_host: *RocHost) void {
+        value.decref(roc_host);
+    }
+};
 
 pub const __AnonStruct_c9a11dffdfba9204Release = struct {
     pub fn release(value: __AnonStruct_c9a11dffdfba9204, roc_host: *RocHost) void {
@@ -4236,7 +4311,7 @@ pub fn decrefListOf__AnonStruct_9379215c6a8da602(value: RocList(__AnonStruct_937
 ///
 /// The allocation's final reference is claimed atomically before any element
 /// is read, so concurrent owners cannot skip or duplicate element teardown.
-pub fn decrefListOfListOfType7(value: RocList(RocListWith(u8, false)), roc_host: *RocHost) void {
+pub fn decrefListOfListOfType3(value: RocList(RocListWith(u8, false)), roc_host: *RocHost) void {
     value.deinitWith(RocListSpineRelease(RocListWith(u8, false)), roc_host);
 }
 
@@ -4266,10 +4341,11 @@ pub fn decrefListOf__AnonStruct_7dfaf577f6008fb0(value: RocList(__AnonStruct_7df
 
 fn rocReleasePolicy(comptime T: type) type {
     if (T == RocStr) return RocStrRelease;
+    if (T == __AnonStruct_470fbd29d33a29d7) return __AnonStruct_470fbd29d33a29d7Release;
+    if (T == RocListWith(u8, false)) return RocListSpineRelease(RocListWith(u8, false));
     if (T == __AnonStruct_c9a11dffdfba9204) return __AnonStruct_c9a11dffdfba9204Release;
     if (T == RocList(__AnonStruct_7f5e7edef150bb3f)) return RocListRelease(RocList(__AnonStruct_7f5e7edef150bb3f), __AnonStruct_7f5e7edef150bb3fRelease);
     if (T == __AnonStruct_7f5e7edef150bb3f) return __AnonStruct_7f5e7edef150bb3fRelease;
-    if (T == RocListWith(u8, false)) return RocListSpineRelease(RocListWith(u8, false));
     if (T == __AnonStruct_c97b7474ae2183dc) return __AnonStruct_c97b7474ae2183dcRelease;
     if (T == __AnonStruct_90d88876906216c3) return __AnonStruct_90d88876906216c3Release;
     if (T == __AnonStruct_308de772291a51ac) return __AnonStruct_308de772291a51acRelease;
@@ -4368,15 +4444,11 @@ pub extern fn roc_chat_bundle_add(arg0: RocListWith(u8, false), arg1: RocListWit
 ///     arg1.decref(roc_host);
 pub extern fn roc_chat_check_hostile(arg0: RocListWith(u8, false), arg1: RocListWith(u8, false)) callconv(.c) FailedOrFineOrRefused;
 
-/// Hosted symbol for Host.check_member!
-/// Roc signature: {} => [Member, Outsider]
-pub extern fn roc_chat_check_member() callconv(.c) MemberOrOutsider;
-
 /// Hosted symbol for Host.check_online!
 /// Roc signature: List(List(U8)) => List([Offline, Online])
 /// Owned arguments. Release each exactly once before returning, unless it is
 /// moved into storage or into the result:
-///     decrefListOfListOfType7(arg0, roc_host);
+///     decrefListOfListOfType3(arg0, roc_host);
 /// The result is owned by Roc: return exactly one owned reference.
 pub extern fn roc_chat_check_online(arg0: RocList(RocListWith(u8, false))) callconv(.c) RocListWith(OfflineOrOnline, false);
 
@@ -4414,6 +4486,11 @@ pub extern fn roc_chat_count_presence() callconv(.c) CameOnlineOrSteady;
 ///     arg0.decref(roc_host);
 ///     arg1.decref(roc_host);
 pub extern fn roc_chat_fail(arg0: KindUnreadableOrMalformedChannelOrNameUnreadableOrNoAuthorOrNotAUidOrNotUtf8, arg1: RocListWith(u8, false)) callconv(.c) void;
+
+/// Hosted symbol for Host.identify!
+/// Roc signature: {} => { status : [Failed, Known, Stranger], uid : List(U8) }
+/// The result is owned by Roc: return exactly one owned reference.
+pub extern fn roc_chat_identify() callconv(.c) __AnonStruct_470fbd29d33a29d7;
 
 /// Hosted symbol for Host.index_message!
 /// Roc signature: { base : List(U8), family : [Asset, Channel, Code, Conversations, Default, Dm, Docs, Images, Links, Msg, NotFound, Notifications, Recent, Search, SidebarStream], key : List(U8), members : List(List(U8)) }, { message : { at : List(U8), from : List(U8), id : List(U8), markdown : List(U8), uid : List(U8) }, sid : List(U8) } => {}

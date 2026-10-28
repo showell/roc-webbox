@@ -4,11 +4,22 @@ import Chat
 
 Host := [].{
 
-	## Whether the one asking may use the chat (`Member`): a member, or the agent
-	## (angry-gopher's `users.principalAuthorized` of who the request's
-	## cookie or API key names). Asked after the static assets, which anyone
-	## may fetch, so a request for one does no identity reads.
-	check_member! : {} => [Member, Outsider]
+	## **WHO IS ASKING, AND NOTHING MORE** (angry-gopher's
+	## `users.currentUserID`): the account id the request's session cookie,
+	## API key or guest cookie names, verified by the host, which alone holds
+	## the secrets (`Known`, the id beside it); no one (`Stranger`); or the
+	## look failed (`Failed`: the request has failed). Whether that one may
+	## use the chat is the Roc's (Members.admit!), from `list_accounts!`.
+	## Asked after the static assets, which anyone may fetch, so a request
+	## for one does no identity reads.
+	identify! : {} => {
+		uid : List(U8),
+		status : [
+			Failed,
+			Known,
+			Stranger,
+		],
+	}
 
 	## **COUNT THIS REQUEST AS THE MEMBER'S PRESENCE**, now, in the online
 	## map (process-lifetime state, so the host's), and say whether it was
@@ -33,8 +44,9 @@ Host := [].{
 	## read (`fail!`). `Failed` when the accounts could not be listed at all:
 	## the request has failed, and the list is no answer. **NEVER THE AUTH
 	## ROOT ITSELF**: the host reads only the folders, whether each has a
-	## password, and each name, never a password or a key. Asked at most once
-	## a request.
+	## password, and each name, never a password or a key. Asked once a
+	## request: at the chat's door (Members.admit!), every route then looking
+	## up in that one listing; once by the admin retire.
 	list_accounts! : {} => {
 		accounts : List(
 			{

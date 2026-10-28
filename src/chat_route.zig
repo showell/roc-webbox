@@ -229,9 +229,11 @@ pub const Presence = enum(u8) { offline, online };
 /// came online with this request (the Roc broadcasts), or was online.
 pub const PresenceEdge = enum(u8) { came_online, steady };
 
-/// Host.roc's `check_member!` answer: whether the one asking may use the
-/// chat (a member, or the agent).
-pub const Membership = enum(u8) { member, outsider };
+/// Host.roc's `identify!` answer's `status`: who is asking was verified
+/// (`known`, the id beside it), no one is (`stranger`), or the look failed
+/// (`failed`: the host has failed the request). Whether that one may use the
+/// chat is the Roc's.
+pub const Identity = enum(u8) { failed, known, stranger };
 
 /// Host.roc's `Try({}, [Failed])` answer (`append_line!`, `write!`,
 /// `remove!`, `store_message!`): `Err(Failed)` or `Ok({})`, both payloads
@@ -331,7 +333,7 @@ comptime {
         Surface,
         Presence,
         PresenceEdge,
-        Membership,
+        Identity,
         Admission,
         WordsStatus,
         HitConv,

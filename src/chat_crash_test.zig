@@ -15,7 +15,7 @@ const Asker = struct {
     nest: bool = false,
     nested: ?anyerror = null,
 
-    fn ask(ctx: *anyopaque) route.Membership {
+    fn ask(ctx: *anyopaque) abi.Asking {
         const self: *Asker = @ptrCast(@alignCast(ctx));
         if (self.nest) {
             var inner: Asker = .{};
@@ -27,7 +27,7 @@ const Asker = struct {
                 inner.member_(),
             )) |_| {} else |e| self.nested = e;
         }
-        return if (self.member) .member else .outsider;
+        return if (self.member) .{ .known = "1" } else .stranger;
     }
 
     fn member_(self: *Asker) abi.Host {
@@ -360,8 +360,8 @@ const Files = struct {
     fn of(ctx: *anyopaque) *Files {
         return @ptrCast(@alignCast(ctx));
     }
-    fn yes(_: *anyopaque) route.Membership {
-        return .member;
+    fn yes(_: *anyopaque) abi.Asking {
+        return .{ .known = "1" };
     }
     fn say(
         ctx: *anyopaque,

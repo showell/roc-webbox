@@ -52,8 +52,11 @@ route (`chat/Route.roc`, pure, by the old Zig dispatch's rules) and runs the
 prelude in Zig's order:
 1. a static script under `/chat` (`/<name>.js`) goes to Zig, before the gate;
 2. anyone not a member or the agent gets a 303 to `/login/full?next=`
-   (`Host.check_member!`, asked only after the scripts, so a script's request does
-   no identity reads);
+   (`Members.admit!`, asked only after the scripts, so a script's request does
+   no identity reads): the host says who is asking (`Host.identify!`, the
+   session cookie and API key verified where the secrets are), and the Roc
+   decides from the accounts (`Host.list_accounts!`, listed once a request
+   and handed to every route);
 3. every other request counts as presence, but a stream (judged by its
    route, not the path's spelling).
 

@@ -173,6 +173,9 @@ pub const UploadReadRec = extern struct {
 /// Host.roc's `store_upload!` answer: `{ name : List(U8), status : [Failed,
 /// Stored] }`, a ReadRec's shape.
 pub const StoredRec = extern struct { name: RocBytes, status: route_mod.UploadStored };
+/// Host.roc's `identify!` answer: `{ uid : List(U8), status : [Failed,
+/// Known, Stranger] }`, a StoredRec's shape.
+pub const IdentityRec = extern struct { uid: RocBytes, status: route_mod.Identity };
 /// Host.roc's `retire_asked!` answer (metal-vmm QUEUE 293): `{ days : U64,
 /// keep : List(U8), now : I64 }`, the numbers first by name, then the bytes.
 pub const RetireAskedRec = extern struct { days: u64, now: i64, keep: RocBytes };
@@ -299,6 +302,7 @@ comptime {
         @offsetOf(UploadReadRec, "status") == 8 + 6 * w and
         @sizeOf(UploadReadRec) == std.mem.alignForward(usize, 8 + 6 * w + 1, 8));
     std.debug.assert(@offsetOf(StoredRec, "name") == 0 and @offsetOf(StoredRec, "status") == 3 * w and @sizeOf(StoredRec) == 4 * w);
+    std.debug.assert(@offsetOf(IdentityRec, "uid") == 0 and @offsetOf(IdentityRec, "status") == 3 * w and @sizeOf(IdentityRec) == 4 * w);
     // The hosted effects' argument records (metal-vmm QUEUE 297).
     std.debug.assert(@offsetOf(AppendMessageArgs, "block") == 0 and @offsetOf(AppendMessageArgs, "sid") == 3 * w and @sizeOf(AppendMessageArgs) == 6 * w);
     std.debug.assert(@offsetOf(IndexMessageArgs, "message") == 0 and @offsetOf(IndexMessageArgs, "sid") == 15 * w and @sizeOf(IndexMessageArgs) == 18 * w);
@@ -452,6 +456,11 @@ pub const Name = union(route_mod.NameRead) { found: []const u8, unreadable };
 /// the request): never "no accounts" for a listing that failed.
 pub const Accounts = union(route_mod.AccountsStatus) { failed, found: []const Account };
 
+/// **WHO IS ASKING, AS THE HOST VERIFIED IT**: an account id (`known`), no
+/// one (`stranger`), or a look that failed (the host has failed the
+/// request): never a stranger for a look that failed.
+pub const Asking = union(route_mod.Identity) { failed, known: []const u8, stranger };
+
 /// **A TOPIC'S MESSAGES AS THE HOST COUNTED THEM**, or a count that failed
 /// (the host has failed the request): never 0 for a count that failed.
 pub const Count = union(route_mod.CountStatus) { counted: u64, failed };
@@ -551,8 +560,9 @@ pub extern fn roc_chat_handle(req: Request) callconv(.c) Answer;
 /// are the host's, copied into the call here.
 pub const Host = struct {
     ctx: *anyopaque,
-    /// Host.check_member!.
-    check_member: *const fn (ctx: *anyopaque) route_mod.Membership,
+    /// Host.identify!: who is asking, verified; never whether they may use
+    /// the chat, which is the Roc's.
+    identify: *const fn (ctx: *anyopaque) Asking,
     /// Host.count_presence!: the member marked online now; whether this was
     /// the edge (metal-vmm QUEUE 288).
     count_presence: *const fn (ctx: *anyopaque) route_mod.PresenceEdge,
@@ -1018,10 +1028,11 @@ pub fn everyScript(_: *anyopaque) []const Src {
 
 var host: ?Host = null;
 
-/// **A HOST FOR THE ROUTER ALONE**, for a test of its decisions: it says
-/// whether the one asking is a member, records whether the Roc counted
-/// presence itself, and has no conversation for the member (no id, no
-/// channel), so a route the Roc serves goes to Zig as every other does.
+/// **A HOST FOR THE ROUTER ALONE**, for a test of its decisions: the one
+/// asking is a member (their one account listed) or a stranger, it records
+/// whether the Roc counted presence itself, and has no conversation for the
+/// member (no id, no channel), so a route the Roc serves goes to Zig as
+/// every other does.
 pub const Routing = struct {
     member: bool = true,
     asked: bool = false,
@@ -1030,13 +1041,13 @@ pub const Routing = struct {
 
     pub fn host(r: *Routing) Host {
         var h = askingOnly(r, ask);
+        h.list_accounts = onlyMe;
         h.count_presence = mark;
         // The routes the Roc serves outright meet a member with nothing: an
         // id in no route's DM (so no DM is theirs; an id is always a uid,
         // or the Roc fails the request), no files (no last DM, no feed, no
         // channel), no folders (no topics, no channels), no other members.
         h.me = noDmId;
-        h.list_accounts = noAccount;
         h.read = noFile;
         h.list = noFolder;
         h.srcs = everyScript;
@@ -1055,9 +1066,9 @@ pub const Routing = struct {
     fn of(ctx: *anyopaque) *Routing {
         return @ptrCast(@alignCast(ctx));
     }
-    fn ask(ctx: *anyopaque) route_mod.Membership {
+    fn ask(ctx: *anyopaque) Asking {
         of(ctx).asked = true;
-        return if (of(ctx).member) .member else .outsider;
+        return if (of(ctx).member) .{ .known = "999" } else .stranger;
     }
     fn mark(ctx: *anyopaque) route_mod.PresenceEdge {
         of(ctx).marked = true;
@@ -1072,8 +1083,9 @@ pub const Routing = struct {
     fn noFile(_: *anyopaque, _: []const u8) Read {
         return .missing;
     }
-    fn noAccount(_: *anyopaque) Accounts {
-        return .{ .found = &.{} };
+    /// The member's own account, nameless, and no other.
+    fn onlyMe(_: *anyopaque) Accounts {
+        return .{ .found = &.{.{ .id = "999", .kind = .member, .name = .{ .found = "" } }} };
     }
     fn asideDone(_: *anyopaque, _: route_mod.Aside) route_mod.AsideEnd {
         return .done;
@@ -1112,7 +1124,7 @@ pub const Routing = struct {
 
 /// A host that answers who is asking and nothing else, for a test of the
 /// router alone: any other hosted call is a panic.
-pub fn askingOnly(ctx: *anyopaque, ask: *const fn (ctx: *anyopaque) route_mod.Membership) Host {
+pub fn askingOnly(ctx: *anyopaque, ask: *const fn (ctx: *anyopaque) Asking) Host {
     const No = struct {
         fn presence(_: *anyopaque) route_mod.PresenceEdge {
             @panic("count_presence asked of a host that only answers who is asking");
@@ -1123,7 +1135,7 @@ pub fn askingOnly(ctx: *anyopaque, ask: *const fn (ctx: *anyopaque) route_mod.Me
     };
     return .{
         .ctx = ctx,
-        .check_member = ask,
+        .identify = ask,
         .count_presence = No.presence,
         .read_body = No.body,
     };
@@ -1140,9 +1152,13 @@ fn got(bytes: ?[]const u8) Got {
     return .{ .bytes = .from(b), .status = .read };
 }
 
-pub export fn roc_chat_check_member() callconv(.c) route_mod.Membership {
-    const h = current("check_member");
-    return h.check_member(h.ctx);
+pub export fn roc_chat_identify() callconv(.c) IdentityRec {
+    const h = current("identify");
+    return switch (h.identify(h.ctx)) {
+        .known => |uid| .{ .uid = .from(uid), .status = .known },
+        .stranger => .{ .uid = .from(""), .status = .stranger },
+        .failed => .{ .uid = .from(""), .status = .failed },
+    };
 }
 
 pub export fn roc_chat_count_presence() callconv(.c) route_mod.PresenceEdge {

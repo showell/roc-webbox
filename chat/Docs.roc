@@ -4,6 +4,7 @@
 ## is Chrome.roc's.
 import pf.Chat
 import pf.Host
+import Accounts
 import BusKey
 import Bytes
 import ChatUrl
@@ -224,8 +225,8 @@ Docs := [].{
 	## the writes (a new doc, a save, a message saved to the reading list),
 	## the live preview, then the read pages. Posting a doc to chat is the
 	## chat's (main.roc `post_doc!`).
-	docs! : Chat.Request, Str => Chat.Answer
-	docs! = |req, rest|
+	docs! : Chat.Request, { rest : Str, accounts : List(Accounts.Account) } => Chat.Answer
+	docs! = |req, { rest, accounts }|
 		if rest == "/new" {
 			new_doc!(req)
 		} else if rest == "/save" {
@@ -235,7 +236,7 @@ Docs := [].{
 		} else if rest == "/save_to_reading_list" {
 			save_to_reading_list!(req)
 		} else {
-			docs_read!(req, rest)
+			docs_read!(req, { rest, accounts })
 		}
 
 }
@@ -551,13 +552,13 @@ doc_touched! = |me, slug|
 ## **THE DOCS' READ PAGES** (docs.zig `handle`, metal-vmm QUEUE 289), each
 ## the member's own, never another's: the landing, the list's JSON, a doc's
 ## raw markdown, its editor. One segment after /docs: a nested one is a 404.
-docs_read! : Chat.Request, Str => Chat.Answer
-docs_read! = |req, rest|
+docs_read! : Chat.Request, { rest : Str, accounts : List(Accounts.Account) } => Chat.Answer
+docs_read! = |req, { rest, accounts }|
 	match Members.load_uid!({}) {
 		Err(Failed) => Chat.answered
 		Ok(me) =>
 			if rest == "" or rest == "/" {
-				docs_landing!(me)
+				docs_landing!(me, accounts)
 			} else {
 				seg = rest.drop_prefix("/")
 				if seg == "list" {
@@ -567,7 +568,7 @@ docs_read! = |req, rest|
 				} else if seg.ends_with(".md") {
 					raw_doc!(me, seg.drop_suffix(".md"))
 				} else {
-					docs_editor!(me, ZigText.trim_str(seg))
+					docs_editor!(me, { slug: ZigText.trim_str(seg), accounts })
 				}
 			}
 	}
@@ -585,15 +586,15 @@ load_docs! = |me|
 ## **THE DOC TOUCHED LAST** (mostRecentDocSlug), the landing's 303, a
 ## reading list just saved among them; with none, the editor with nothing
 ## open.
-docs_landing! : Uid => Chat.Answer
-docs_landing! = |me|
+docs_landing! : Uid, List(Accounts.Account) => Chat.Answer
+docs_landing! = |me, accounts|
 	match load_docs!(me) {
 		Err(Failed) => Chat.answered
 		Ok(docs) =>
 			match last_touched!(docs, Err(None)) {
 				Err(Failed) => Chat.answered
 				Ok(Ok(last)) => Chat.redirect("/chat/docs/${last.slug}".to_utf8())
-				Ok(Err(None)) => docs_page!(sorted_slugs(docs), Nothing)
+				Ok(Err(None)) => docs_page!(sorted_slugs(docs), { open: Nothing, accounts })
 			}
 	}
 
@@ -657,17 +658,24 @@ raw_doc! = |me, slug|
 
 ## renderDocsEditor: the editor with `slug` open; one no slug, or not
 ## among the member's docs, is back to the bare editor (303).
-docs_editor! : Uid, Str => Chat.Answer
-docs_editor! = |me, slug|
+docs_editor! : Uid, { slug : Str, accounts : List(Accounts.Account) } => Chat.Answer
+docs_editor! = |me, { slug, accounts }|
 	match load_docs!(me) {
 		Err(Failed) => Chat.answered
 		Ok(docs) => {
 			slugs = sorted_slugs(docs)
 			if slug == "" {
-				docs_page!(slugs, Nothing)
+				docs_page!(slugs, { open: Nothing, accounts })
 			} else {
 				match (Paths.doc_path(me, slug), slugs.contains(slug)) {
-					(Ok(path), Bool.True) => open_doc!(slugs, { slug, path })
+					(Ok(path), Bool.True) => open_doc!(
+						slugs,
+						{
+							slug,
+							path,
+							accounts,
+						},
+					)
 					_ => Chat.redirect("/chat/docs".to_utf8())
 				}
 			}
@@ -676,8 +684,20 @@ docs_editor! = |me, slug|
 
 ## The editor with the doc at `path` open: its markdown (a doc gone since
 ## the listing is empty) and that rendered, the preview's first paint.
-open_doc! : List(Str), { slug : Str, path : Paths.ChatPath } => Chat.Answer
-open_doc! = |slugs, { slug, path }| {
+open_doc! : List(Str),
+{
+	slug : Str,
+	path : Paths.ChatPath,
+	accounts : List(Accounts.Account),
+} => Chat.Answer
+open_doc! = |
+	slugs,
+	{
+		slug,
+		path,
+		accounts,
+	},
+| {
 	stored = match Files.read_bytes!(path) {
 		Ok(bytes) => Ok(bytes)
 		Err(Missing) => Ok([])
@@ -691,11 +711,14 @@ open_doc! = |slugs, { slug, path }| {
 				Failed => Chat.answered
 				Rendered => docs_page!(
 					slugs,
-					Doc({
-						slug,
-						markdown,
-						rendered: Chrome.rendered(rendered.html),
-					}),
+					{
+						open: Doc({
+							slug,
+							markdown,
+							rendered: Chrome.rendered(rendered.html),
+						}),
+						accounts,
+					},
 				)
 			}
 		}
@@ -703,9 +726,9 @@ open_doc! = |slugs, { slug, path }| {
 }
 
 ## The docs page for the member, `open` among their `slugs`.
-docs_page! : List(Str), Docs.Open => Chat.Answer
-docs_page! = |slugs, open|
-	match Members.load_viewer!(Unasked) {
+docs_page! : List(Str), { open : Docs.Open, accounts : List(Accounts.Account) } => Chat.Answer
+docs_page! = |slugs, { open, accounts }|
+	match Members.load_viewer!(accounts) {
 		Err(Failed) => Chat.answered
 		Ok(viewer) => Chat.respond(
 			200,
