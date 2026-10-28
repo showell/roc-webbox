@@ -40,7 +40,14 @@ Files := [].{
 	## Host.read!'s answer as text, **BYTES THAT ARE NOT UTF-8 AN ANSWER**
 	## (`NotUtf8`), not the request's failure: for a file one of many, which
 	## a listing skips as damaged and counts (a channel's member file).
-	read_text! : Paths.ChatPath => Try(Str, [Missing, Failed, NotUtf8])
+	read_text! : Paths.ChatPath => Try(
+		Str,
+		[
+			Missing,
+			Failed,
+			NotUtf8,
+		],
+	)
 	read_text! = |path| {
 		got = Host.read!(path.bytes())
 		decoded(answer(got.status, got.bytes))
@@ -64,8 +71,16 @@ Files := [].{
 	## caches are the .count sidecar and the last message's window; every
 	## other read is the truth's, and its failure fails the request.
 	read_cache! : Paths.ChatPath, U64, U64 => Try(List(U8), [Miss])
-	read_cache! = |path, offset, max| {
-		got = Host.read_at!(path.bytes(), offset, max)
+	read_cache! = |
+		path,
+		offset,
+		max,
+	| {
+		got = Host.read_at!(
+			path.bytes(),
+			offset,
+			max,
+		)
 		match got.status {
 			Found => Ok(got.bytes)
 			Missing | Failed => Err(Miss)
@@ -85,8 +100,21 @@ Files := [].{
 	append_line! = |path, line| Host.append_line!(path.bytes(), line)
 
 	## Host.append_entry!: a feed's entry appended, or failed with its fault.
-	append_entry! : Paths.ChatPath, List(U8), List(U8) => { fault : U16, status : [Appended, Failed] }
-	append_entry! = |path, separator, entry| Host.append_entry!(path.bytes(), separator, entry)
+	append_entry! : Paths.ChatPath,
+	List(U8),
+	List(U8) => {
+		fault : U16,
+		status : [Appended, Failed],
+	}
+	append_entry! = |
+		path,
+		separator,
+		entry,
+	| Host.append_entry!(
+		path.bytes(),
+		separator,
+		entry,
+	)
 
 	## Host.serve_file!: the host loads the file and serves its bytes as the answer
 	## (Chat.served_plain), so Roc never copies a large transcript. `Serving`
@@ -120,7 +148,14 @@ Files := [].{
 
 ## A read's bytes as text, or `NotUtf8`; `Missing` and `Failed` stay
 ## themselves.
-decoded : Try(List(U8), [Missing, Failed]) -> Try(Str, [Missing, Failed, NotUtf8])
+decoded : Try(List(U8), [Missing, Failed]) -> Try(
+	Str,
+	[
+		Missing,
+		Failed,
+		NotUtf8,
+	],
+)
 decoded = |got|
 	match got {
 		Ok(bytes) =>
@@ -135,7 +170,12 @@ decoded = |got|
 ## **A HOST'S STATUS AND WHAT CAME WITH IT, AS ONE TRY**: `Found` is
 ## `Ok(got)`; `Missing` and `Failed` carry nothing, and each stays itself.
 ## read! and list! both answer by it.
-answer : [Found, Missing, Failed], a -> Try(a, [Missing, Failed])
+answer : [
+	Found,
+	Missing,
+	Failed,
+],
+a -> Try(a, [Missing, Failed])
 answer = |status, got|
 	match status {
 		Found => Ok(got)
@@ -143,7 +183,16 @@ answer = |status, got|
 		Failed => Err(Failed)
 	}
 
-listing : List({ kind : [Dir, File, Other], name : List(U8) }) -> Listing
+listing : List(
+	{
+		kind : [
+			Dir,
+			File,
+			Other,
+		],
+		name : List(U8),
+	},
+) -> Listing
 listing = |raw|
 	List.fold(
 		raw,
@@ -166,7 +215,14 @@ expect decoded(Err(Failed)) == Err(Failed)
 
 # listing: names decoded, multibyte included; a name that is not UTF-8 is
 # left out and kept apart.
-expect listing([{ kind: File, name: Str.to_utf8("caf\u(e9).md") }, { kind: File, name: [0x61, 0xff] }, { kind: Dir, name: Str.to_utf8("👍") }]) == { entries: [{ kind: File, name: "caf\u(e9).md" }, { kind: Dir, name: "👍" }], not_utf8: [[0x61, 0xff]] }
+expect listing([
+	{ kind: File, name: Str.to_utf8("caf\u(e9).md") },
+	{ kind: File, name: [0x61, 0xff] },
+	{ kind: Dir, name: Str.to_utf8("👍") },
+]) == {
+	entries: [{ kind: File, name: "caf\u(e9).md" }, { kind: Dir, name: "👍" }],
+	not_utf8: [[0x61, 0xff]],
+}
 
 # read!'s answers: bytes found, empty bytes found (an empty file is there),
 # nothing there, a failed read; never one for another.
@@ -179,7 +235,13 @@ expect answer(Failed, []) != Err(Missing)
 
 # list!'s: an empty folder is Ok([]), never Missing; Missing and Failed
 # stay apart.
-expect answer(Found, [{ kind: File, name: Str.to_utf8("a.md") }]) == Ok([{ kind: File, name: Str.to_utf8("a.md") }])
-expect answer(Found, List.drop_first([{ kind: Dir, name: [] }], 1)) == Ok(List.drop_first([{ kind: Dir, name: [] }], 1))
+expect answer(
+	Found,
+	[{ kind: File, name: Str.to_utf8("a.md") }],
+) == Ok([{ kind: File, name: Str.to_utf8("a.md") }])
+expect answer(
+	Found,
+	List.drop_first([{ kind: Dir, name: [] }], 1),
+) == Ok(List.drop_first([{ kind: Dir, name: [] }], 1))
 expect answer(Missing, [{ kind: Dir, name: Str.to_utf8("x") }]) == Err(Missing)
 expect answer(Failed, [{ kind: Dir, name: Str.to_utf8("x") }]) == Err(Failed)

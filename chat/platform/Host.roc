@@ -28,12 +28,31 @@ Host := [].{
 	## ROOT ITSELF**: the host reads only the folders, whether each has a
 	## password, and each name, never a password or a key. Asked at most once
 	## a request.
-	list_accounts! : {} => { accounts : List({ id : List(U8), kind : [Agent, Guest, Member, Unreadable], name : List(U8), name_read : [Found, Unreadable] }), status : [Failed, Found] }
+	list_accounts! : {} => {
+		accounts : List(
+			{
+				id : List(U8),
+				kind : [
+					Agent,
+					Guest,
+					Member,
+					Unreadable,
+				],
+				name : List(U8),
+				name_read : [Found, Unreadable],
+			},
+		),
+		status : [Failed, Found],
+	}
 
 	## The request's body, read to a form's limit (`which`: the react
 	## form's, a message's or a doc's): `Read`, its bytes beside it;
 	## `Answered` when the host answered instead (too big) or failed.
-	read_body! : [Doc, Message, Reaction] => { bytes : List(U8), status : [Answered, Read] }
+	read_body! : [
+		Doc,
+		Message,
+		Reaction,
+	] => { bytes : List(U8), status : [Answered, Read] }
 
 	## **THE BUS, AS A PRIMITIVE** (webbox's `bus.publish`): `bytes` to every
 	## subscriber on `key`, each its own copy, as the stream writes it. It
@@ -59,21 +78,45 @@ Host := [].{
 	## failed (`Failed`: the request has failed). **MISSING AND FAILED ARE
 	## NEVER ONE ANSWER**: what is read is often rewritten, so a failure read
 	## as "no file" would write over what could not be seen.
-	read! : List(U8) => { bytes : List(U8), status : [Failed, Found, Missing] }
+	read! : List(U8) => {
+		bytes : List(U8),
+		status : [
+			Failed,
+			Found,
+			Missing,
+		],
+	}
 
 	## **A FILE'S SIZE AND ITS LAST CHANGE** under the chat root, the path
 	## checked as `read!`'s is (metal-vmm QUEUE 274): its size in bytes and
 	## its mtime in whole seconds since the epoch (`Found`), nothing there
 	## (`Missing`), or a stat that failed, a folder among them (`Failed`: the
 	## request has failed). Missing and failed are two answers, as `read!`'s.
-	stat! : List(U8) => { mtime : I64, size : U64, status : [Failed, Found, Missing] }
+	stat! : List(U8) => {
+		mtime : I64,
+		size : U64,
+		status : [
+			Failed,
+			Found,
+			Missing,
+		],
+	}
 
 	## **AT MOST `max` OF A FILE'S BYTES, FROM `offset`** under the chat
 	## root, the path checked as `read!`'s is: fewer where the file ends
 	## first (none past its end), `Missing` as `read!`'s. **A CACHE'S READ**
 	## (metal-vmm QUEUE 284): `Failed` is the read's alone, logged by the
 	## host, never the request's failure (Files.read_cache!).
-	read_at! : List(U8), U64, U64 => { bytes : List(U8), status : [Failed, Found, Missing] }
+	read_at! : List(U8),
+	U64,
+	U64 => {
+		bytes : List(U8),
+		status : [
+			Failed,
+			Found,
+			Missing,
+		],
+	}
 
 	## Write the whole file as `bytes`, its folders made as needed; `Err(Failed)`
 	## when it failed.
@@ -88,7 +131,23 @@ Host := [].{
 	## (`Missing`: webbox's store.list holds it empty); or a listing that
 	## failed (`Failed`: the request has failed; a path that is a file is
 	## one, as store.list fails it).
-	list! : List(U8) => { entries : List({ kind : [Dir, File, Other], name : List(U8) }), status : [Failed, Found, Missing] }
+	list! : List(U8) => {
+		entries : List(
+			{
+				kind : [
+					Dir,
+					File,
+					Other,
+				],
+				name : List(U8),
+			},
+		),
+		status : [
+			Failed,
+			Found,
+			Missing,
+		],
+	}
 
 	## Fail the request (a 500), for a reason, about `whose`, with the error
 	## the Zig it replaced failed it with: channel `whose`'s member file the
@@ -102,7 +161,15 @@ Host := [].{
 	## An id that is no canonical uid (the member's own, from `me!`, or an
 	## account folder's) is `NotAUid` (error.NotAUid), never said as a file
 	## that is not UTF-8.
-	fail! : [KindUnreadable, MalformedChannel, NameUnreadable, NoAuthor, NotAUid, NotUtf8], List(U8) => {}
+	fail! : [
+		KindUnreadable,
+		MalformedChannel,
+		NameUnreadable,
+		NoAuthor,
+		NotAUid,
+		NotUtf8,
+	],
+	List(U8) => {}
 
 	## Count channel `name` as one a listing skipped as malformed: the
 	## operator's count, kept by the host for /admin/host.
@@ -113,7 +180,12 @@ Host := [].{
 	## DM's new-topic announcement that failed after the topic was made (the
 	## topic), a feed's entries whose bytes are not UTF-8 (the feed's path),
 	## a recent row whose text is not (its key).
-	count_dropped! : [Announcement, FeedEntry, RecentRow], List(U8) => {}
+	count_dropped! : [
+		Announcement,
+		FeedEntry,
+		RecentRow,
+	],
+	List(U8) => {}
 
 	## **AN ASIDE: WORK WHOSE FAILURE IS ITS OWN** (STORED IS DONE): from
 	## `Begin` to `End`, a primitive that fails fails the aside, never the
@@ -143,7 +215,12 @@ Host := [].{
 	## the member can see, each with how many messages hold it, the most
 	## held first, at most `most`; and how many of their transcripts the
 	## index could not read. `NotReady` when there is no index to ask.
-	search_words! : List(U8), U64 => { status : [NotReady, Ready], unreadable : U64, words : List({ count : U64, word : List(U8) }) }
+	search_words! : List(U8),
+	U64 => {
+		status : [NotReady, Ready],
+		unreadable : U64,
+		words : List({ count : U64, word : List(U8) }),
+	}
 
 	## **SEARCH'S INDEX, ASKED FOR MESSAGES** (angry-gopher search_index.zig
 	## `messagesFor`): the messages holding the word `key` the member can
@@ -151,13 +228,37 @@ Host := [].{
 	## the unreadable count. Each hit's excerpt window, not the message: its
 	## bytes from `start` through the one past the excerpt's end, of a
 	## message `length` long, the word `at` when `found`.
-	search_messages! : List(U8), U64 => { status : [NotReady, Ready], matched : U64, unreadable : U64, hits : List({ at : U64, length : U64, start : U64, base : List(U8), date : List(U8), from : List(U8), id : List(U8), sid : List(U8), window : List(U8), found : [Found, Missing], kind : [Channel, Dm] }) }
+	search_messages! : List(U8),
+	U64 => {
+		status : [NotReady, Ready],
+		matched : U64,
+		unreadable : U64,
+		hits : List(
+			{
+				at : U64,
+				length : U64,
+				start : U64,
+				base : List(U8),
+				date : List(U8),
+				from : List(U8),
+				id : List(U8),
+				sid : List(U8),
+				window : List(U8),
+				found : [Found, Missing],
+				kind : [Channel, Dm],
+			},
+		),
+	}
 
 	## **THE WELCOME, PENDING** (angry-gopher users.zig `welcomePending`,
 	## metal-vmm QUEUE 283): whether the member's welcome is pending, a fact
 	## signup wrote in the gopher's own users folder. `Failed` when the look
 	## failed (the host has failed the request).
-	welcome_pending! : {} => [Failed, None, Pending]
+	welcome_pending! : {} => [
+		Failed,
+		None,
+		Pending,
+	]
 
 	## The member's welcome given: the pending mark goes (one gone already
 	## is done). `Err(Failed)` when it failed.
@@ -231,5 +332,10 @@ Host := [].{
 	## Whether markdown is hostile: `Fine`; `Refused`, the host having refused it
 	## (webbox's edge counter and its 400, saying `refusal`, the Roc's words);
 	## or `Failed`, the check itself.
-	check_hostile! : List(U8), List(U8) => [Fine, Refused, Failed]
+	check_hostile! : List(U8),
+	List(U8) => [
+		Fine,
+		Refused,
+		Failed,
+	]
 }

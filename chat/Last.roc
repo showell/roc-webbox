@@ -18,7 +18,12 @@ import pf.Host
 Last := [].{
 
 	## The last message as a listing shows it; `uid` empty for nobody.
-	Message : { markdown : List(U8), at : List(U8), uid : List(U8), number : U64 }
+	Message : {
+		markdown : List(U8),
+		at : List(U8),
+		uid : List(U8),
+		number : U64,
+	}
 
 	## The topic's last message, `None` for a topic with none (no
 	## transcript, or no message in it). `Failed` when the transcript's read
@@ -27,11 +32,26 @@ Last := [].{
 	of! = |at, accounts| {
 		counted = sidecar!(at)
 		match counted {
-			Ok({ count, size: _, last: Known(l) }) if count > 0 =>
-				match Files.read_cache!(Paths.transcript_path(at), l.offset, tail_window) {
+			Ok(
+				{
+					count,
+					size: _,
+					last: Known(l),
+				},
+			) if count > 0 =>
+				match Files.read_cache!(
+					Paths.transcript_path(at),
+					l.offset,
+					tail_window,
+				) {
 					Ok(window) => {
 						fill = if List.len(window) == tail_window Full else Partial
-						match Count.window_last(count, window, fill, at.topic.to_utf8()) {
+						match Count.window_last(
+							count,
+							window,
+							fill,
+							at.topic.to_utf8(),
+						) {
 							Ok(w) =>
 								Ok(
 									Some({
@@ -39,19 +59,34 @@ Last := [].{
 										at: w.msg.at,
 										# A current record's answer stands, nobody included;
 										# a record behind: the newer message's author.
-										uid: if w.record == Current l.uid else author(w.msg, accounts),
+										uid: if w.record == Current l.uid else author(
+											w.msg,
+											accounts,
+										),
 										number: w.number,
 									}),
 								)
-							Err(NotBelieved) => whole!(at, counted, accounts)
+							Err(NotBelieved) => whole!(
+								at,
+								counted,
+								accounts,
+							)
 							Err(CorruptUid(bytes)) => corrupt!(bytes)
 						}
 					}
 					# The record is a cache: a window not there, or not read, is
 					# the whole read.
-					Err(Miss) => whole!(at, counted, accounts)
+					Err(Miss) => whole!(
+						at,
+						counted,
+						accounts,
+					)
 				}
-			_ => whole!(at, counted, accounts)
+			_ => whole!(
+				at,
+				counted,
+				accounts,
+			)
 		}
 	}
 
@@ -60,7 +95,11 @@ Last := [].{
 	## (a recount, never the request's failure: Files.read_cache!).
 	sidecar! : Paths.TopicAt => Try(Count.Counted, [Malformed])
 	sidecar! = |at|
-		match Files.read_cache!(Paths.count_path(at), 0, 1025) {
+		match Files.read_cache!(
+			Paths.count_path(at),
+			0,
+			1025,
+		) {
 			Ok(raw) if List.len(raw) <= 1024 => Count.parse(raw)
 			_ => Err(Malformed)
 		}
@@ -72,8 +111,17 @@ tail_window = 64 * 1024
 
 ## fallbackLast: the transcript read whole and decoded; its blocks are the
 ## last message's number.
-whole! : Paths.TopicAt, Try(Count.Counted, [Malformed]), List(Accounts.Account) => Try([Some(Last.Message), None], [Failed])
-whole! = |at, counted, accounts|
+whole! : Paths.TopicAt,
+Try(Count.Counted, [Malformed]),
+List(Accounts.Account) => Try(
+	[Some(Last.Message), None],
+	[Failed],
+)
+whole! = |
+	at,
+	counted,
+	accounts,
+|
 	match Files.read_bytes!(Paths.transcript_path(at)) {
 		Err(Missing) => Ok(None)
 		Err(Failed) => Err(Failed)
@@ -86,11 +134,22 @@ whole! = |at, counted, accounts|
 						Ok(msg) => {
 							blocks = Count.count_blocks(raw)
 							uid =
-								match Count.recorded_author(counted, blocks, List.len(raw)) {
+								match Count.recorded_author(
+									counted,
+									blocks,
+									List.len(raw),
+								) {
 									Ok(recorded) => recorded
 									Err(NotRecorded) => author(msg, accounts)
 								}
-							Ok(Some({ markdown: msg.markdown, at: msg.at, uid, number: blocks }))
+							Ok(
+								Some({
+									markdown: msg.markdown,
+									at: msg.at,
+									uid,
+									number: blocks,
+								}),
+							)
 						}
 					}
 			}

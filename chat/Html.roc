@@ -68,7 +68,14 @@ Html :: List(U8).{
 					(piece, 1)
 				} else {
 					match List.get(values, i - 1) {
-						Ok(value) => (List.join([acc, bytes(value), piece]), i + 1)
+						Ok(value) => (
+							List.join([
+								acc,
+								bytes(value),
+								piece,
+							]),
+							i + 1,
+						)
 						# Every template here is a literal, filled where it is written.
 						Err(_) => crash "Html.fill: a template has more {s} slots than values"
 					}
@@ -87,12 +94,25 @@ Html :: List(U8).{
 	## double-escaped state, where the page's own `</script>` no longer ends
 	## the element. With no `<`, no tag or comment can start. JSON only.
 	script_safe : List(U8) -> ScriptJson
-	script_safe = |s| ScriptJson.(List.join(List.intersperse(Bytes.split_seq(s, ['<']), Str.to_utf8("\\u003c"))))
+	script_safe = |s| ScriptJson.(
+		List.join(
+			List.intersperse(
+				Bytes.split_seq(s, ['<']),
+				Str.to_utf8("\\u003c"),
+			),
+		),
+	)
 
 	## The script element `open` (a trusted `<script ...>`), `json` in it,
 	## and its close.
 	json_script : Html, ScriptJson -> Html
-	json_script = |Html.(open), ScriptJson.(json)| Html.(List.join([open, json, Str.to_utf8("</script>")]))
+	json_script = |Html.(open), ScriptJson.(json)| Html.(
+		List.join([
+			open,
+			json,
+			Str.to_utf8("</script>"),
+		]),
+	)
 
 	## **BYTES THE TWINS SAY ARE SCRIPT-SAFE ALREADY**: never called by the
 	## chat (the hunt `html_trusted_nonliteral`).
@@ -111,14 +131,35 @@ expect Html.bytes(Html.escape(Str.to_utf8("'"))) == Str.to_utf8("&#39;")
 expect Html.bytes(Html.escape(Str.to_utf8("a & b"))) == Str.to_utf8("a &amp; b")
 
 # join and bytes: the parts' bytes in order, nothing added.
-expect Html.bytes(Html.join([Html.trusted("<p>"), Html.escape(Str.to_utf8("x<y")), Html.trusted("</p>")])) == Str.to_utf8("<p>x&lt;y</p>")
+expect Html.bytes(
+	Html.join([
+		Html.trusted("<p>"),
+		Html.escape(Str.to_utf8("x<y")),
+		Html.trusted("</p>"),
+	]),
+) == Str.to_utf8("<p>x&lt;y</p>")
 expect Html.bytes(Html.join([])) == []
 expect Html.bytes(Html.host_markup(Str.to_utf8("<b>&"))) == Str.to_utf8("<b>&")
 
 # fill: each slot in turn; a slot with no value left empty.
-expect Html.bytes(Html.fill(Html.trusted("a{s}b{s}c"), [Html.trusted("1"), Html.trusted("2")])) == Str.to_utf8("a1b2c")
+expect Html.bytes(
+	Html.fill(
+		Html.trusted("a{s}b{s}c"),
+		[Html.trusted("1"), Html.trusted("2")],
+	),
+) == Str.to_utf8("a1b2c")
 
 # json_script: `</` cannot close the element early.
-expect Html.bytes(Html.json_script(Html.trusted("<script>"), Html.script_safe(Str.to_utf8("\"</script>\"")))) == Str.to_utf8("<script>\"\\u003c/script>\"</script>")
+expect Html.bytes(
+	Html.json_script(
+		Html.trusted("<script>"),
+		Html.script_safe(Str.to_utf8("\"</script>\"")),
+	),
+) == Str.to_utf8("<script>\"\\u003c/script>\"</script>")
 # The double-escaped state's way in: no `<` is left, so neither starts.
-expect Html.bytes(Html.json_script(Html.trusted("<script>"), Html.script_safe(Str.to_utf8("\"<!--<script>\"")))) == Str.to_utf8("<script>\"\\u003c!--\\u003cscript>\"</script>")
+expect Html.bytes(
+	Html.json_script(
+		Html.trusted("<script>"),
+		Html.script_safe(Str.to_utf8("\"<!--<script>\"")),
+	),
+) == Str.to_utf8("<script>\"\\u003c!--\\u003cscript>\"</script>")

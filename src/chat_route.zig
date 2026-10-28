@@ -103,10 +103,25 @@ pub const Counting = enum(u8) { counted, uncounted };
 pub const Sniff = enum(u8) { allow, forbid };
 
 /// Chat.roc's `Kind`: what an answer is (Chat.roc says each).
-pub const Kind = enum(u8) { answered, found, held, malformed, not_allowed, not_found, redirect, respond, serve, to_login };
+pub const Kind = enum(u8) {
+    answered,
+    found,
+    held,
+    malformed,
+    not_allowed,
+    not_found,
+    redirect,
+    respond,
+    serve,
+    to_login,
+};
 
 /// Host.roc's `read_body!` argument: whose limit the body is read to.
-pub const Form = enum(u8) { doc, message, reaction };
+pub const Form = enum(u8) {
+    doc,
+    message,
+    reaction,
+};
 
 /// Host.roc's `read_body!` answer's `status`: the body read (its bytes beside
 /// it), or answered by the host instead (too big) or failed.
@@ -120,22 +135,39 @@ pub const CountStatus = enum(u8) { counted, failed };
 
 /// Host.roc's `check_hostile!` answer: `refused` when the host has answered the
 /// request (webbox's edge counter and its 400), `failed` when the check did.
-pub const Hostility = enum(u8) { failed, fine, refused };
+pub const Hostility = enum(u8) {
+    failed,
+    fine,
+    refused,
+};
 
 /// Host.roc's `read!` answer's `status`: the file found (its bytes beside
 /// it), missing (nothing there), or failed (the host has failed the
 /// request). **MISSING AND FAILED ARE NEVER ONE ANSWER.**
-pub const ReadStatus = enum(u8) { failed, found, missing };
+pub const ReadStatus = enum(u8) {
+    failed,
+    found,
+    missing,
+};
 
 /// Host.roc's `list!` answer: each entry's `kind`, as webbox's store.list
 /// tells them (`directory` is `dir`; a link, a device or the like `other`).
-pub const EntryKind = enum(u8) { dir, file, other };
+pub const EntryKind = enum(u8) {
+    dir,
+    file,
+    other,
+};
 
 /// Host.roc's `list_accounts!`: each account's kind (the agent, which the host
 /// alone decides; a member, who has a password; a guest, who has neither),
 /// or `unreadable` when its password's stat failed (the host keeps the
 /// error; the request fails only when a lookup needs the kind).
-pub const AccountKind = enum(u8) { agent, guest, member, unreadable };
+pub const AccountKind = enum(u8) {
+    agent,
+    guest,
+    member,
+    unreadable,
+};
 
 /// Host.roc's `list_accounts!`: whether each account's `name` file read (its
 /// bytes beside it, "" when it has none) or failed (the host keeps the
@@ -154,7 +186,14 @@ pub const AccountsStatus = enum(u8) { failed, found };
 /// not read is that read's own error, as the host kept it; a message with no
 /// author's name is error.NoAuthor, appendMessage's own; a file whose bytes
 /// are not UTF-8 is error.NotUtf8, about its path (Files.read!'s door).
-pub const FailReason = enum(u8) { kind_unreadable, malformed_channel, name_unreadable, no_author, not_a_uid, not_utf8 };
+pub const FailReason = enum(u8) {
+    kind_unreadable,
+    malformed_channel,
+    name_unreadable,
+    no_author,
+    not_a_uid,
+    not_utf8,
+};
 
 /// Host.roc's `render!` answer's `status`: the markdown rendered (the HTML
 /// beside it), or a render that failed (the host has failed the request):
@@ -202,7 +241,11 @@ pub const Done = enum(u8) { failed, ok };
 /// Host.roc's `welcome_pending!` answer (metal-vmm QUEUE 283): the member's
 /// welcome is pending, is not, or the look failed (the host has failed the
 /// request, or the aside).
-pub const Welcome = enum(u8) { failed, none, pending };
+pub const Welcome = enum(u8) {
+    failed,
+    none,
+    pending,
+};
 
 /// Host.roc's `serve_file!` and `serve_rendered!` answer: the host holds
 /// the file's bytes for a `held` answer, or it is not there (or its read
@@ -213,7 +256,11 @@ pub const Serving = enum(u8) { not_serving, serving };
 /// fail the request for (metal-vmm QUEUE 267): a DM's new-topic announcement
 /// that failed after the topic was made, a feed's entry or a recent row
 /// whose bytes are not UTF-8.
-pub const Dropped = enum(u8) { announcement, feed_entry, recent_row };
+pub const Dropped = enum(u8) {
+    announcement,
+    feed_entry,
+    recent_row,
+};
 
 /// Host.roc's `aside!` argument: the start or the end of work whose failure
 /// is its own, never the request's.
@@ -225,7 +272,41 @@ pub const AsideEnd = enum(u8) { done, failed };
 
 comptime {
     @setEvalBranchQuota(20_000);
-    for (.{ Family, Part, Tail, Method, Area, Counting, Sniff, Kind, Form, BodyStatus, CountStatus, Hostility, ReadStatus, EntryKind, AccountKind, NameRead, AccountsStatus, FailReason, RenderStatus, AppendStatus, Surface, Presence, Membership, Admission, WordsStatus, HitConv, HitWord, Done, Welcome, Serving, Dropped, Aside, AsideEnd }) |E| assertRocOrder(E);
+    for (.{
+        Family,
+        Part,
+        Tail,
+        Method,
+        Area,
+        Counting,
+        Sniff,
+        Kind,
+        Form,
+        BodyStatus,
+        CountStatus,
+        Hostility,
+        ReadStatus,
+        EntryKind,
+        AccountKind,
+        NameRead,
+        AccountsStatus,
+        FailReason,
+        RenderStatus,
+        AppendStatus,
+        Surface,
+        Presence,
+        Membership,
+        Admission,
+        WordsStatus,
+        HitConv,
+        HitWord,
+        Done,
+        Welcome,
+        Serving,
+        Dropped,
+        Aside,
+        AsideEnd,
+    }) |E| assertRocOrder(E);
 }
 
 /// That `E`'s values are Roc's for the same tags: numbered from 0 in the
@@ -235,7 +316,11 @@ pub fn assertRocOrder(comptime E: type) void {
     const info = @typeInfo(E).@"enum";
     for (info.field_names, info.field_values, 0..) |name, value, i| {
         if (value != i) @compileError(@typeName(E) ++ "." ++ name ++ " has a number written: Roc's are its place in name order");
-        if (i > 0 and !std.mem.lessThan(u8, pascal(info.field_names[i - 1]), pascal(name)))
+        if (i > 0 and !std.mem.lessThan(
+            u8,
+            pascal(info.field_names[i - 1]),
+            pascal(name),
+        ))
             @compileError(@typeName(E) ++ ": `" ++ name ++ "` must come before `" ++ info.field_names[i - 1] ++ "`, as Roc numbers its tags by name");
     }
 }
@@ -267,11 +352,30 @@ pub const Route = struct {
 
     pub fn eql(a: Route, b: Route) bool {
         return a.family == b.family and a.part == b.part and a.tail == b.tail and
-            std.mem.eql(u8, a.key, b.key) and std.mem.eql(u8, a.rest, b.rest) and std.mem.eql(u8, a.topic, b.topic);
+            std.mem.eql(
+                u8,
+                a.key,
+                b.key,
+            ) and std.mem.eql(
+            u8,
+            a.rest,
+            b.rest,
+        ) and std.mem.eql(
+            u8,
+            a.topic,
+            b.topic,
+        );
     }
 
     pub fn format(r: Route, w: *std.Io.Writer) std.Io.Writer.Error!void {
-        try w.print("{t} key=\"{s}\" rest=\"{s}\" topic=\"{s}\" {t} {t}", .{ r.family, r.key, r.rest, r.topic, r.part, r.tail });
+        try w.print("{t} key=\"{s}\" rest=\"{s}\" topic=\"{s}\" {t} {t}", .{
+            r.family,
+            r.key,
+            r.rest,
+            r.topic,
+            r.part,
+            r.tail,
+        });
     }
 };
 
@@ -284,7 +388,12 @@ pub const Decision = union(enum) {
     redirect: []const u8,
     serve: struct { route: Route, presence: bool },
     /// A status and its body, typed `content_type` when it is not empty.
-    respond: struct { status: u16, content_type: []const u8 = "", body: []const u8 = "", nosniff: bool = false },
+    respond: struct {
+        status: u16,
+        content_type: []const u8 = "",
+        body: []const u8 = "",
+        nosniff: bool = false,
+    },
     /// A 405 naming the one method the route takes.
     not_allowed: std.http.Method,
     /// Answered already by the host, inside the call (a body too big), or
@@ -298,7 +407,13 @@ pub const Decision = union(enum) {
     found: []const u8,
     /// As `respond`, its body `before`, the bytes the host holds (read or
     /// rendered by a hosted function: a transcript, a links page), `after`.
-    held: struct { status: u16, content_type: []const u8 = "", nosniff: bool = false, before: []const u8 = "", after: []const u8 = "" },
+    held: struct {
+        status: u16,
+        content_type: []const u8 = "",
+        nosniff: bool = false,
+        before: []const u8 = "",
+        after: []const u8 = "",
+    },
     /// A 303 to the login page, to come back to this path after: the
     /// request's own, which the host checks is on the site (a 400 if not).
     to_login: []const u8,
@@ -306,14 +421,46 @@ pub const Decision = union(enum) {
     pub fn eql(a: Decision, b: Decision) bool {
         if (std.meta.activeTag(a) != std.meta.activeTag(b)) return false;
         return switch (a) {
-            .redirect => |l| std.mem.eql(u8, l, b.redirect),
+            .redirect => |l| std.mem.eql(
+                u8,
+                l,
+                b.redirect,
+            ),
             .serve => |s| s.presence == b.serve.presence and s.route.eql(b.serve.route),
-            .respond => |r| r.status == b.respond.status and r.nosniff == b.respond.nosniff and std.mem.eql(u8, r.content_type, b.respond.content_type) and std.mem.eql(u8, r.body, b.respond.body),
+            .respond => |r| r.status == b.respond.status and r.nosniff == b.respond.nosniff and std.mem.eql(
+                u8,
+                r.content_type,
+                b.respond.content_type,
+            ) and std.mem.eql(
+                u8,
+                r.body,
+                b.respond.body,
+            ),
             .not_allowed => |m| m == b.not_allowed,
             .answered, .malformed_form, .not_found => true,
-            .found => |l| std.mem.eql(u8, l, b.found),
-            .to_login => |l| std.mem.eql(u8, l, b.to_login),
-            .held => |h| h.status == b.held.status and h.nosniff == b.held.nosniff and std.mem.eql(u8, h.content_type, b.held.content_type) and std.mem.eql(u8, h.before, b.held.before) and std.mem.eql(u8, h.after, b.held.after),
+            .found => |l| std.mem.eql(
+                u8,
+                l,
+                b.found,
+            ),
+            .to_login => |l| std.mem.eql(
+                u8,
+                l,
+                b.to_login,
+            ),
+            .held => |h| h.status == b.held.status and h.nosniff == b.held.nosniff and std.mem.eql(
+                u8,
+                h.content_type,
+                b.held.content_type,
+            ) and std.mem.eql(
+                u8,
+                h.before,
+                b.held.before,
+            ) and std.mem.eql(
+                u8,
+                h.after,
+                b.held.after,
+            ),
         };
     }
 
@@ -321,14 +468,25 @@ pub const Decision = union(enum) {
         switch (d) {
             .redirect => |l| try w.print("303 {s}", .{l}),
             .serve => |s| try w.print("{f}{s}", .{ s.route, if (s.presence) " +presence" else "" }),
-            .respond => |r| try w.print("{d} \"{s}\"{s} {d} bytes", .{ r.status, r.content_type, if (r.nosniff) " nosniff" else "", r.body.len }),
+            .respond => |r| try w.print("{d} \"{s}\"{s} {d} bytes", .{
+                r.status,
+                r.content_type,
+                if (r.nosniff) " nosniff" else "",
+                r.body.len,
+            }),
             .not_allowed => |m| try w.print("405 allow {t}", .{m}),
             .answered => try w.writeAll("answered by the host"),
             .malformed_form => try w.writeAll("malformed form"),
             .not_found => try w.writeAll("404"),
             .found => |l| try w.print("302 {s}", .{l}),
             .to_login => |l| try w.print("303 to login, then {s}", .{l}),
-            .held => |h| try w.print("{d} \"{s}\"{s} {d} bytes, the host's, {d} bytes", .{ h.status, h.content_type, if (h.nosniff) " nosniff" else "", h.before.len, h.after.len }),
+            .held => |h| try w.print("{d} \"{s}\"{s} {d} bytes, the host's, {d} bytes", .{
+                h.status,
+                h.content_type,
+                if (h.nosniff) " nosniff" else "",
+                h.before.len,
+                h.after.len,
+            }),
         }
     }
 };

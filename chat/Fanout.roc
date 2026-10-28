@@ -19,12 +19,20 @@ Fanout := [].{
 
 	## A message's parts, as its feeds keep them: the Recent row's excerpt,
 	## the `<img>` tags, the code blocks.
-	Parts : { excerpt : Str, images : List(Str), code : List(Feeds.Block) }
+	Parts : {
+		excerpt : Str,
+		images : List(Str),
+		code : List(Feeds.Block),
+	}
 
 	## The parts of a message's markdown `md` (Recent.excerpt, Feeds.img_tags,
 	## Feeds.code_blocks; the twins hold each to its Zig).
 	parts_of : Str -> Parts
-	parts_of = |md| { excerpt: Recent.excerpt(md), images: Feeds.img_tags(md), code: Feeds.code_blocks(md) }
+	parts_of = |md| {
+		excerpt: Recent.excerpt(md),
+		images: Feeds.img_tags(md),
+		code: Feeds.code_blocks(md),
+	}
 
 	## The surfaces that can fail for a member, as /admin/host names them
 	## (Host.report_fanout_failure!'s; a feed's append is the one that still can).
@@ -37,7 +45,16 @@ Fanout := [].{
 	##   failure, counted, and its event never sent.
 	Step : [
 		Publish(BusKey, List(U8)),
-		Feed({ surface : Surface, member : List(U8), path : Paths.ChatPath, entry : List(U8), key : BusKey, event : List(U8) }),
+		Feed(
+			{
+				surface : Surface,
+				member : List(U8),
+				path : Paths.ChatPath,
+				entry : List(U8),
+				key : BusKey,
+				event : List(U8),
+			},
+		),
 	]
 
 	## A message stored in a conversation (its key and its members), as the
@@ -45,7 +62,17 @@ Fanout := [].{
 	## spelled it), its number `index` (0 is the topic's first), its fields,
 	## its author's account `uid`, and the accounts the request holds (a
 	## DM's; a channel names none).
-	Sent : { key : Paths.ConvKey, members : List(Uid), topic : Str, index : U64, id : Str, from : Str, at : Str, uid : Uid, accounts : List(Accounts.Account) }
+	Sent : {
+		key : Paths.ConvKey,
+		members : List(Uid),
+		topic : Str,
+		index : U64,
+		id : Str,
+		from : Str,
+		at : Str,
+		uid : Uid,
+		accounts : List(Accounts.Account),
+	}
 
 	## **EVERY MEMBER IN THE CONVERSATION'S ORDER, EACH MEMBER'S SURFACES IN
 	## ONE ORDER: NOTIFY, SIDEBAR, RECENT, IMAGES, CODE** (fanoutCrossPage).
@@ -58,7 +85,12 @@ Fanout := [].{
 		url = ChatUrl.topic(at).to_str()
 		notify = notify_event(at, notify_text(m.from, at))
 		added = topic_added(at)
-		head = { from: m.from, at: m.at, source_id: m.id, conv: m.key.to_str() }
+		head = {
+			from: m.from,
+			at: m.at,
+			source_id: m.id,
+			conv: m.key.to_str(),
+		}
 		List.join(
 			List.map(
 				m.members,
@@ -72,16 +104,47 @@ Fanout := [].{
 						# **EVERY MEMBER SEES THE ROW, THE AUTHOR AS "YOU"**.
 						{
 							who = if uid == m.uid "You" else m.from
-							[Publish(BusKey.recent(uid), Recent.chat_event({ at: m.at, url, who, label: recent_where(m, uid), topic: m.topic, excerpt: parts.excerpt, dm: m.key.kind() }))]
+							[
+								Publish(
+									BusKey.recent(uid),
+									Recent.chat_event({
+										at: m.at,
+										url,
+										who,
+										label: recent_where(m, uid),
+										topic: m.topic,
+										excerpt: parts.excerpt,
+										dm: m.key.kind(),
+									}),
+								),
+							]
 						},
 						# The feeds only when the message has what they keep.
 						match parts.images {
 							[] => []
-							tags => [Feed({ surface: Images, member: uid.to_str().to_utf8(), path: Paths.feed_path(uid, Images), entry: Feeds.images_entry(head, tags), key: BusKey.images(uid), event: Feeds.images_event(head, tags) })]
+							tags => [
+								Feed({
+									surface: Images,
+									member: uid.to_str().to_utf8(),
+									path: Paths.feed_path(uid, Images),
+									entry: Feeds.images_entry(head, tags),
+									key: BusKey.images(uid),
+									event: Feeds.images_event(head, tags),
+								}),
+							]
 						},
 						match parts.code {
 							[] => []
-							blocks => [Feed({ surface: Code, member: uid.to_str().to_utf8(), path: Paths.feed_path(uid, Code), entry: Feeds.code_entry(head, blocks), key: BusKey.code(uid), event: Feeds.code_event(head, blocks) })]
+							blocks => [
+								Feed({
+									surface: Code,
+									member: uid.to_str().to_utf8(),
+									path: Paths.feed_path(uid, Code),
+									entry: Feeds.code_entry(head, blocks),
+									key: BusKey.code(uid),
+									event: Feeds.code_event(head, blocks),
+								}),
+							]
 						},
 					]),
 			),
@@ -99,11 +162,21 @@ Fanout := [].{
 
 	## The notify stream's event: conv, session, text, link_url (ChatUrl.topic).
 	notify_event : Paths.TopicAt, Str -> List(U8)
-	notify_event = |at, text| JsonText.obj([("conv", JsonText.str(at.key.to_str())), ("session", JsonText.str(at.topic)), ("text", JsonText.str(text)), ("link_url", JsonText.str(ChatUrl.topic(at).to_str()))])
+	notify_event = |at, text| JsonText.obj([
+		("conv", JsonText.str(at.key.to_str())),
+		("session", JsonText.str(at.topic)),
+		("text", JsonText.str(text)),
+		("link_url", JsonText.str(ChatUrl.topic(at).to_str())),
+	])
 
 	## The sidebar stream's topic-added: kind, conv, sid, url (ChatUrl.topic).
 	topic_added : Paths.TopicAt -> List(U8)
-	topic_added = |at| JsonText.obj([("kind", JsonText.str("topic-added")), ("conv", JsonText.str(at.key.to_str())), ("sid", JsonText.str(at.topic)), ("url", JsonText.str(ChatUrl.topic(at).to_str()))])
+	topic_added = |at| JsonText.obj([
+		("kind", JsonText.str("topic-added")),
+		("conv", JsonText.str(at.key.to_str())),
+		("sid", JsonText.str(at.topic)),
+		("url", JsonText.str(ChatUrl.topic(at).to_str())),
+	])
 
 	## chat_fanout `recentWhere`, for `viewer`: a channel names itself ("in
 	## <key>"); a DM names the other member ("to <name>"; the DM with

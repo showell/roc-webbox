@@ -8,7 +8,16 @@ Frame := [].{
 
 	## One message as its frame carries it: `index` 0-based (the SSE `id:`),
 	## the author's account `from_uid`, `cid` empty when there is none.
-	Message : { index : U64, from : Str, from_uid : Uid, at : Str, html : Str, markdown : Str, id : Str, cid : Str }
+	Message : {
+		index : U64,
+		from : Str,
+		from_uid : Uid,
+		at : Str,
+		html : Str,
+		markdown : Str,
+		id : Str,
+		cid : Str,
+	}
 
 	## messageFrame: `id: <index>`, then one `data:` line of JSON;
 	## `from_uid` after `from`, `cid` last when there is one.
@@ -28,11 +37,19 @@ Frame := [].{
 				if m.cid == "" [] else [("cid", JsonOut.string(m.cid))],
 			]),
 		)
-		List.join([Str.to_utf8("id: ${U64.to_str(m.index)}\ndata: "), data.bytes(), Str.to_utf8("\n\n")])
+		List.join([
+			Str.to_utf8("id: ${U64.to_str(m.index)}\ndata: "),
+			data.bytes(),
+			Str.to_utf8("\n\n"),
+		])
 	}
 
 	## reactionFrame: `event: reaction`, its data the sidecar's own line;
 	## no `id:`, a reaction is not a message.
 	reaction : List(U8) -> List(U8)
-	reaction = |line| List.join([Str.to_utf8("event: reaction\ndata: "), line, Str.to_utf8("\n\n")])
+	reaction = |line| List.join([
+		Str.to_utf8("event: reaction\ndata: "),
+		line,
+		Str.to_utf8("\n\n"),
+	])
 }

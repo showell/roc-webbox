@@ -21,7 +21,11 @@ ChatState := [].{
 	## (Paths.first_of); else the date of `now_secs`, so a conversation's
 	## first post makes today's topic.
 	resume_topic : List(Str), Str, I64 -> Str
-	resume_topic = |topics, last, now_secs|
+	resume_topic = |
+		topics,
+		last,
+		now_secs,
+	|
 		match List.keep_if(topics, |t| !last.is_empty() and t == last) {
 			[t, ..] => t
 			[] => {
@@ -39,7 +43,11 @@ ChatState := [].{
 	## adds is not added twice, an unpin drops every copy, and a line the
 	## file already repeats stays repeated, as the Zig keeps it.
 	pinned : Str, Str, Pin -> [Write(List(U8)), Remove]
-	pinned = |stored, topic, pin| {
+	pinned = |
+		stored,
+		topic,
+		pin,
+	| {
 		cur = parse(stored)
 		kept = if pin == Pinned cur else List.drop_if(cur, |s| s == topic)
 		next = if pin == Pinned and !List.contains(cur, topic) List.append(kept, topic) else kept
@@ -96,4 +104,8 @@ bookmark_most = 255
 
 # pins: each line trimmed, blank ones dropped, sorted by bytes; text past
 # ASCII kept whole.
-expect ChatState.pins("b \r\n\n caf\u(e9)\t\na\n") == ["a", "b", "caf\u(e9)"]
+expect ChatState.pins("b \r\n\n caf\u(e9)\t\na\n") == [
+	"a",
+	"b",
+	"caf\u(e9)",
+]

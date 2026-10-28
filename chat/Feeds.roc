@@ -13,7 +13,12 @@ import Transcript
 Feeds := [].{
 
 	## One entry's header line: `Sent by <from> at <at>, source MSG_<source_id> in <conv>:`.
-	Header : { from : Str, at : Str, source_id : Str, conv : Str }
+	Header : {
+		from : Str,
+		at : Str,
+		source_id : Str,
+		conv : Str,
+	}
 
 	## A fenced block of a message, as the Code feed keeps it.
 	Block : { lang : Str, body : Str }
@@ -23,10 +28,18 @@ Feeds := [].{
 	header : Str -> Try(Header, [NotAHeader])
 	header = |line| {
 		inner = if line.starts_with("Sent by ") and line.ends_with(":") Ok(line.drop_prefix("Sent by ").drop_suffix(":")) else Err(NotAHeader)
-		{ before: left, after: right } = inner?.split_first(", source MSG_").map_err(|_| NotAHeader)?
+		{
+			before: left,
+			after: right,
+		} = inner?.split_first(", source MSG_").map_err(|_| NotAHeader)?
 		{ before: from, after: at } = left.split_last(" at ").map_err(|_| NotAHeader)?
 		{ before: source_id, after: conv } = right.split_first(" in ").map_err(|_| NotAHeader)?
-		Ok({ from, at, source_id, conv })
+		Ok({
+			from,
+			at,
+			source_id,
+			conv,
+		})
 	}
 
 	sep : List(U8)
@@ -40,7 +53,11 @@ Feeds := [].{
 			blocks_of(text.to_utf8()),
 			[],
 			|out, block| {
-				(line, body) = match find_byte(block, '\n', 0) {
+				(line, body) = match find_byte(
+					block,
+					'\n',
+					0,
+				) {
 					Ok(nl) => (List.take_first(block, nl), List.drop_first(block, nl + 1))
 					Err(NotFound) => (block, [])
 				}
@@ -79,23 +96,44 @@ Feeds := [].{
 	## from each of many openers (`<img ` after `<img `, `![` after `![`)
 	## costs one pass of a message, not one per opener. `from` must not go
 	## back between calls that share one.
-	Seen : [Unknown, At(U64), Never]
+	Seen : [
+		Unknown,
+		At(U64),
+		Never,
+	]
 
 	find_seen : List(U8), U8, U64, Seen -> (Try(U64, [NotFound]), Seen)
-	find_seen = |s, b, from, seen|
+	find_seen = |
+		s,
+		b,
+		from,
+		seen,
+	|
 		match seen {
 			At(k) if k >= from => (Ok(k), seen)
 			Never => (Err(NotFound), Never)
 			_ =>
-				match find_byte(s, b, from) {
+				match find_byte(
+					s,
+					b,
+					from,
+				) {
 					Ok(k) => (Ok(k), At(k))
 					Err(NotFound) => (Err(NotFound), Never)
 				}
 		}
 
 	find_byte : List(U8), U8, U64 -> Try(U64, [NotFound])
-	find_byte = |s, b, i| match List.get(s, i) {
-		Ok(c) => if c == b Ok(i) else find_byte(s, b, i + 1)
+	find_byte = |
+		s,
+		b,
+		i,
+	| match List.get(s, i) {
+		Ok(c) => if c == b Ok(i) else find_byte(
+			s,
+			b,
+			i + 1,
+		)
 		Err(_) => Err(NotFound)
 	}
 
@@ -115,13 +153,23 @@ Feeds := [].{
 			blocks_of(text.to_utf8()),
 			[],
 			|out, block|
-				match find_byte(block, '\n', 0) {
+				match find_byte(
+					block,
+					'\n',
+					0,
+				) {
 					Err(NotFound) => out
 					Ok(nl) =>
 						match header(text_of(List.take_first(block, nl))) {
 							Err(NotAHeader) => out
 							Ok(h) => {
-								bs = List.map(blocks_in(List.drop_first(block, nl + 1)), |b| { ..b, body: text_of(Transcript.unescape_body(b.body.to_utf8())) })
+								bs = List.map(
+									blocks_in(List.drop_first(block, nl + 1)),
+									|b| {
+										..b,
+										body: text_of(Transcript.unescape_body(b.body.to_utf8())),
+									},
+								)
 								if bs == [] out else List.append(out, (h, bs))
 							}
 						}
@@ -135,30 +183,73 @@ Feeds := [].{
 	code_blocks = |body| blocks_in(body.to_utf8())
 
 	close_at : List(List(U8)), U8, U64, U64 -> U64
-	close_at = |ls, char, count, j| match List.get(ls, j) {
+	close_at = |
+		ls,
+		char,
+		count,
+		j,
+	| match List.get(ls, j) {
 		Err(_) => j
-		Ok(line) => if is_close(line, char, count) j else close_at(ls, char, count, j + 1)
+		Ok(line) => if is_close(
+			line,
+			char,
+			count,
+		) j else close_at(
+			ls,
+			char,
+			count,
+			j + 1,
+		)
 	}
 
 	## markdown_fence `parseOpen`: up to three spaces, 3 to 10 of '`' or '~',
 	## and an info string whose first word is the language (no '`' in a
 	## backtick fence's).
-	fence_open : List(U8) -> Try({ char : U8, count : U64, lang : List(U8) }, [NotAFence])
+	fence_open : List(U8) -> Try(
+		{
+			char : U8,
+			count : U64,
+			lang : List(U8),
+		},
+		[NotAFence],
+	)
 	fence_open = |line| {
-		indent = smaller(Bytes.leading(line, ' ', 0), 4)
+		indent = smaller(
+			Bytes.leading(
+				line,
+				' ',
+				0,
+			),
+			4,
+		)
 		match List.get(line, indent) {
 			Err(_) => Err(NotAFence)
 			Ok(f) =>
 				if indent >= 4 or (f != '`' and f != '~') {
 					Err(NotAFence)
 				} else {
-					count = Bytes.leading(List.drop_first(line, indent), f, 0)
+					count = Bytes.leading(
+						List.drop_first(line, indent),
+						f,
+						0,
+					)
 					info = trim_info(List.drop_first(line, indent + count))
 					if count < 3 or count > 10 or (f == '`' and List.contains(info, '`')) {
 						Err(NotAFence)
 					} else {
-						lang = List.take_first(info, count_while(info, |c| c != ' ' and c != '\t', 0))
-						Ok({ char: f, count, lang })
+						lang = List.take_first(
+							info,
+							count_while(
+								info,
+								|c| c != ' ' and c != '\t',
+								0,
+							),
+						)
+						Ok({
+							char: f,
+							count,
+							lang,
+						})
 					}
 				}
 		}
@@ -166,19 +257,35 @@ Feeds := [].{
 
 	## How many bytes from `i` on keep `keep`.
 	count_while : List(U8), (U8 -> Bool), U64 -> U64
-	count_while = |s, keep, i| match List.get(s, i) {
-		Ok(c) if keep(c) => count_while(s, keep, i + 1)
+	count_while = |
+		s,
+		keep,
+		i,
+	| match List.get(s, i) {
+		Ok(c) if keep(c) => count_while(
+			s,
+			keep,
+			i + 1,
+		)
 		_ => i
 	}
 
 	## How many bytes from the end keep `keep`.
 	count_back : List(U8), (U8 -> Bool), U64 -> U64
-	count_back = |s, keep, n|
+	count_back = |
+		s,
+		keep,
+		n,
+	|
 		if n >= List.len(s) {
 			n
 		} else {
 			match List.get(s, List.len(s) - 1 - n) {
-				Ok(c) if keep(c) => count_back(s, keep, n + 1)
+				Ok(c) if keep(c) => count_back(
+					s,
+					keep,
+					n + 1,
+				)
 				_ => n
 			}
 		}
@@ -207,15 +314,36 @@ Feeds := [].{
 	images_event : Header, List(Str) -> List(U8)
 	images_event = |h, tags| {
 		safe = List.keep_oks(tags, SafeImg.rebuild)
-		JsonText.obj(List.concat(head_fields(h), [("images", JsonText.arr(List.map(safe, JsonText.str))), ("source_url", JsonText.str(ChatUrl.source(h.conv, h.source_id).to_str()))]))
+		JsonText.obj(
+			List.concat(
+				head_fields(h),
+				[
+					("images", JsonText.arr(List.map(safe, JsonText.str))),
+					("source_url", JsonText.str(ChatUrl.source(h.conv, h.source_id).to_str())),
+				],
+			),
+		)
 	}
 
 	## code_store `encodeCodeEvent`: one entry as its page and its live
 	## stream (`code:<uid>`) send it.
 	code_event : Header, List(Block) -> List(U8)
 	code_event = |h, bs| {
-		blocks = JsonText.arr(List.map(bs, |b| JsonText.obj([("lang", JsonText.str(b.lang)), ("body", JsonText.str(b.body))])))
-		JsonText.obj(List.concat(head_fields(h), [("blocks", blocks), ("source_url", JsonText.str(ChatUrl.source(h.conv, h.source_id).to_str()))]))
+		blocks = JsonText.arr(
+			List.map(
+				bs,
+				|b| JsonText.obj([("lang", JsonText.str(b.lang)), ("body", JsonText.str(b.body))]),
+			),
+		)
+		JsonText.obj(
+			List.concat(
+				head_fields(h),
+				[
+					("blocks", blocks),
+					("source_url", JsonText.str(ChatUrl.source(h.conv, h.source_id).to_str())),
+				],
+			),
+		)
 	}
 
 	## images_store `formatImagesEntry`: the header, then each tag on a line
@@ -224,7 +352,11 @@ Feeds := [].{
 	## The entry's bytes are the file's (Files.append_entry!).
 	images_entry : Header, List(Str) -> List(U8)
 	images_entry = |h, tags|
-		List.fold(tags, header_line(h), |out, tag| "${out}\n${tag.replace_each("\n", " ").replace_each("\r", " ")}").to_utf8()
+		List.fold(
+			tags,
+			header_line(h),
+			|out, tag| "${out}\n${tag.replace_each("\n", " ").replace_each("\r", " ")}",
+		).to_utf8()
 
 	## code_store `formatCodeEntry`: the header, then each block as a
 	## backtick fence (whatever its opener was), one newline between them.
@@ -275,20 +407,64 @@ blocks_of = |text|
 	}
 
 tags_in : List(U8) -> List(Str)
-tags_in = |s| List.map(img_tags_from(s, 0, [], Unknown), text_of)
+tags_in = |s| List.map(
+	img_tags_from(
+		s,
+		0,
+		[],
+		Unknown,
+	),
+	text_of,
+)
 
 img_tags_from : List(U8), U64, List(List(U8)), Feeds.Seen -> List(List(U8))
-img_tags_from = |s, i, out, gt_seen|
+img_tags_from = |
+	s,
+	i,
+	out,
+	gt_seen,
+|
 	if i >= List.len(s) {
 		out
 	} else {
 		match List.sublist(s, { start: i, len: 5 }) {
-			[a, b, c, d, e] if Feeds.lower([a, b, c, d]) == Str.to_utf8("<img") and Feeds.is_space(e) =>
-				match Feeds.find_seen(s, '>', i + 4, gt_seen) {
-					(Ok(gt), seen) => img_tags_from(s, gt + 1, List.append(out, List.sublist(s, { start: i, len: gt + 1 - i })), seen)
-					(Err(NotFound), seen) => img_tags_from(s, i + 1, out, seen)
+			[
+				a,
+				b,
+				c,
+				d,
+				e,
+			] if Feeds.lower([
+				a,
+				b,
+				c,
+				d,
+			]) == Str.to_utf8("<img") and Feeds.is_space(e) =>
+				match Feeds.find_seen(
+					s,
+					'>',
+					i + 4,
+					gt_seen,
+				) {
+					(Ok(gt), seen) => img_tags_from(
+						s,
+						gt + 1,
+						List.append(out, List.sublist(s, { start: i, len: gt + 1 - i })),
+						seen,
+					)
+					(Err(NotFound), seen) => img_tags_from(
+						s,
+						i + 1,
+						out,
+						seen,
+					)
 				}
-			_ => img_tags_from(s, i + 1, out, gt_seen)
+			_ => img_tags_from(
+				s,
+				i + 1,
+				out,
+				gt_seen,
+			)
 		}
 	}
 
@@ -296,19 +472,43 @@ smaller : U64, U64 -> U64
 smaller = |a, b| if a < b a else b
 
 blocks_in : List(U8) -> List(Block)
-blocks_in = |body| blocks_from(Bytes.split_byte(body, '\n'), 0, [])
+blocks_in = |body| blocks_from(
+	Bytes.split_byte(body, '\n'),
+	0,
+	[],
+)
 
 blocks_from : List(List(U8)), U64, List(Block) -> List(Block)
-blocks_from = |ls, i, out|
+blocks_from = |
+	ls,
+	i,
+	out,
+|
 	match List.get(ls, i) {
 		Err(_) => out
 		Ok(line) =>
 			match Feeds.fence_open(line) {
-				Err(NotAFence) => blocks_from(ls, i + 1, out)
+				Err(NotAFence) => blocks_from(
+					ls,
+					i + 1,
+					out,
+				)
 				Ok(fo) => {
-					j = Feeds.close_at(ls, fo.char, fo.count, i + 1)
+					j = Feeds.close_at(
+						ls,
+						fo.char,
+						fo.count,
+						i + 1,
+					)
 					body = Bytes.join_lines(List.sublist(ls, { start: i + 1, len: j - (i + 1) }))
-					blocks_from(ls, j + 1, if fo.lang == Str.to_utf8("quote") out else List.append(out, { lang: text_of(fo.lang), body: text_of(body) }))
+					blocks_from(
+						ls,
+						j + 1,
+						if fo.lang == Str.to_utf8("quote") out else List.append(
+							out,
+							{ lang: text_of(fo.lang), body: text_of(body) },
+						),
+					)
 				}
 			}
 	}
@@ -316,12 +516,27 @@ blocks_from = |ls, i, out|
 ## markdown_fence `isClose`: up to three spaces, at least `count` of
 ## `char`, then only whitespace.
 is_close : List(U8), U8, U64 -> Bool
-is_close = |line, char, count| {
-	indent = smaller(Bytes.leading(line, ' ', 0), 4)
+is_close = |
+	line,
+	char,
+	count,
+| {
+	indent = smaller(
+		Bytes.leading(
+			line,
+			' ',
+			0,
+		),
+		4,
+	)
 	if indent >= 4 {
 		Bool.False
 	} else {
-		n = Bytes.leading(List.drop_first(line, indent), char, 0)
+		n = Bytes.leading(
+			List.drop_first(line, indent),
+			char,
+			0,
+		)
 		n >= count and trim_info(List.drop_first(line, indent + n)) == []
 	}
 }
@@ -330,45 +545,133 @@ is_close = |line, char, count| {
 trim_info : List(U8) -> List(U8)
 trim_info = |s| {
 	ws = |c| c == ' ' or c == '\t' or c == '\r'
-	front = List.drop_first(s, Feeds.count_while(s, ws, 0))
-	List.drop_last(front, Feeds.count_back(front, ws, 0))
+	front = List.drop_first(
+		s,
+		Feeds.count_while(
+			s,
+			ws,
+			0,
+		),
+	)
+	List.drop_last(
+		front,
+		Feeds.count_back(
+			front,
+			ws,
+			0,
+		),
+	)
 }
 
 ## The fields every feed entry starts with, from its header.
 head_fields : Header -> List((Str, List(U8)))
-head_fields = |h| [("source_id", JsonText.str(h.source_id)), ("from", JsonText.str(h.from)), ("conv", JsonText.str(h.conv)), ("at", JsonText.str(h.at))]
+head_fields = |h| [
+	("source_id", JsonText.str(h.source_id)),
+	("from", JsonText.str(h.from)),
+	("conv", JsonText.str(h.conv)),
+	("at", JsonText.str(h.at)),
+]
 
 ## The header line every entry starts with, as `header` reads it back.
 header_line : Header -> Str
 header_line = |h| "Sent by ${h.from} at ${h.at}, source MSG_${h.source_id} in ${h.conv}:"
 
 # header: the last " at " before the source, the first " in " after it.
-expect Feeds.header("Sent by a at b at c, source MSG_x_1 in 1_2 in 3:") == Ok({ from: "a at b", at: "c", source_id: "x_1", conv: "1_2 in 3" })
+expect Feeds.header("Sent by a at b at c, source MSG_x_1 in 1_2 in 3:") == Ok({
+	from: "a at b",
+	at: "c",
+	source_id: "x_1",
+	conv: "1_2 in 3",
+})
 expect Feeds.header("Sent by ann at t, source MSG_x_1 in 1_2") == Err(NotAHeader)
 # code_entry and code: a body holding the separator and a forged header stays one entry, from its real sender, and reads back as sent.
 expect {
 	forged = "x\n\n-------------\n\nSent by Mallory at 2026-01-01T00:00:00Z, source MSG_f_1 in 1_2:\n\\-------------\ny"
-	real = Feeds.code_entry({ from: "ann", at: "2026-10-27T00:00:00Z", source_id: "t_1", conv: "1_2" }, [{ lang: "", body: forged }])
-	other = Feeds.code_entry({ from: "bob", at: "2026-10-27T00:00:01Z", source_id: "t_2", conv: "1_2" }, [{ lang: "zig", body: "ok" }])
-	back = Feeds.code(text_of(List.join([real, Feeds.sep, other])))
-	List.map(back, |(h, bs)| (h.from, List.map(bs, |b| b.body))) == [("ann", [forged]), ("bob", ["ok"])]
+	real = Feeds.code_entry(
+		{
+			from: "ann",
+			at: "2026-10-27T00:00:00Z",
+			source_id: "t_1",
+			conv: "1_2",
+		},
+		[{ lang: "", body: forged }],
+	)
+	other = Feeds.code_entry(
+		{
+			from: "bob",
+			at: "2026-10-27T00:00:01Z",
+			source_id: "t_2",
+			conv: "1_2",
+		},
+		[{ lang: "zig", body: "ok" }],
+	)
+	back = Feeds.code(
+		text_of(
+			List.join([
+				real,
+				Feeds.sep,
+				other,
+			]),
+		),
+	)
+	List.map(
+		back,
+		|(h, bs)| (h.from, List.map(bs, |b| b.body)),
+	) == [("ann", [forged]), ("bob", ["ok"])]
 }
 # images_of and code_of: an entry torn mid-character is skipped and counted, the others read.
 expect {
 	h = |id| Str.to_utf8("Sent by ann at t, source MSG_${id} in 1_2:\n")
-	file = List.join([h("a_1"), Str.to_utf8("<img src=\"/a.png\">"), Feeds.sep, h("a_2"), [0xf0, 0x9f], Feeds.sep, h("a_3"), Str.to_utf8("<img src=\"/c.png\">")])
+	file = List.join([
+		h("a_1"),
+		Str.to_utf8("<img src=\"/a.png\">"),
+		Feeds.sep,
+		h("a_2"),
+		[0xf0, 0x9f],
+		Feeds.sep,
+		h("a_3"),
+		Str.to_utf8("<img src=\"/c.png\">"),
+	])
 	got = Feeds.images_of(file)
 	got.damaged == 1 and List.map(got.entries, |(hd, _)| hd.source_id) == ["a_1", "a_3"]
 }
 expect {
-	file = List.join([Str.to_utf8("Sent by ann at t, source MSG_c_1 in 1_2:\n```\nx\n```"), Feeds.sep, Str.to_utf8("Sent by ann at t, source MSG_c_2 in 1_2:\n```\n"), [0xff], Str.to_utf8("\n```")])
+	file = List.join([
+		Str.to_utf8("Sent by ann at t, source MSG_c_1 in 1_2:\n```\nx\n```"),
+		Feeds.sep,
+		Str.to_utf8("Sent by ann at t, source MSG_c_2 in 1_2:\n```\n"),
+		[0xff],
+		Str.to_utf8("\n```"),
+	])
 	got = Feeds.code_of(file)
 	got.damaged == 1 and List.map(got.entries, |(hd, _)| hd.source_id) == ["c_1"]
 }
 expect Feeds.images_of(Str.to_utf8("Sent by ann at t, source MSG_a_1 in 1_2:\n<img src=\"/a.png\">")).damaged == 0
 # images_event: a stored tag rebuilt by the renderer's rule, a hostile one dropped (images_store's plants).
 expect {
-	json = Str.from_utf8(Feeds.images_event({ from: "ann", at: "2026-10-27T00:00:00Z", source_id: "t_1", conv: "1_2" }, ["<img src=x onerror=\"alert(1)\">", "<img src=\"/up/a.png\" width=\"40\" onload=\"alert(2)\">", "<img src=\"https://evil.example/t.png\">"]))
+	json = Str.from_utf8(
+		Feeds.images_event(
+			{
+				from: "ann",
+				at: "2026-10-27T00:00:00Z",
+				source_id: "t_1",
+				conv: "1_2",
+			},
+			[
+				"<img src=x onerror=\"alert(1)\">",
+				"<img src=\"/up/a.png\" width=\"40\" onload=\"alert(2)\">",
+				"<img src=\"https://evil.example/t.png\">",
+			],
+		),
+	)
 	json == Ok("{\"source_id\":\"t_1\",\"from\":\"ann\",\"conv\":\"1_2\",\"at\":\"2026-10-27T00:00:00Z\",\"images\":[\"<img src=\\\"/up/a.png\\\" width=\\\"40\\\">\"],\"source_url\":\"/chat/c/1_2/t#msg-t_1\"}")
 }
-expect Feeds.images_entry({ from: "Zo\u(eb)", at: "t", source_id: "x_1", conv: "ops" }, ["<img\r\na>"]) == Str.to_utf8("Sent by Zo\u(eb) at t, source MSG_x_1 in ops:\n<img  a>")
+expect Feeds.images_entry(
+	{
+		from: "Zo\u(eb)",
+		at: "t",
+		source_id: "x_1",
+		conv: "ops",
+	},
+	["<img\r\na>"],
+) == Str.to_utf8("Sent by Zo\u(eb) at t, source MSG_x_1 in ops:\n<img  a>")

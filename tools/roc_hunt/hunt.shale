@@ -408,6 +408,25 @@ function hunt(name, tree)
   fail("no hunt named " .. name)
 end
 
+-- **THREE OR MORE ON A LINE, OR A LINE OVER 100 COLUMNS** (metal-vmm
+-- QUEUE 296): Shale's cookbook recipe, which reads lines, not the tree,
+-- over every chat/ module, twin.roc too. A line coming back long, or a
+-- group of three unstacked, is a finding here; `write=1` on the recipe
+-- stacks them. Its own plants are its `self_test=1`.
+function stack_hunt(what)
+  local r = run({"shale", "cookbook:roc/stack.shale", what}, {timeout_ms = 300000, whole = 4000000})
+  if r.code ~= 0 then
+    print(r.out)
+    fail("cookbook:roc/stack.shale failed")
+  end
+  local found = {}
+  for line in lines(r.out) do
+    if contains(line, ": stack: ") or contains(line, ": long: ") then push(found, line) end
+  end
+  print("== stack: " .. tostring(#found))
+  for f in found do print("  " .. f) end
+end
+
 -- ── the plants, or the tree ──────────────────────────────────────────────
 
 if arg("self_test", "") ~= "" then
@@ -432,6 +451,12 @@ if arg("self_test", "") ~= "" then
     end
     print(name .. ": its " .. tostring(fires) .. " plants fire, and the quiet ones stay quiet")
   end
+  local r = run({"shale", "cookbook:roc/stack.shale", "self_test=1"}, {timeout_ms = 300000, tail = 40})
+  if r.code ~= 0 then
+    print(r.out)
+    fail("stack: cookbook:roc/stack.shale's plants failed")
+  end
+  print("stack: cookbook:roc/stack.shale's plants pass")
 else
   local files = {}
   for p in glob("chat/*.roc") do if p ~= "chat/twin.roc" then push(files, p) end end
@@ -442,4 +467,5 @@ else
     print("== " .. name .. ": " .. tostring(#found))
     for f in found do print("  " .. f) end
   end
+  stack_hunt("glob=chat/**/*.roc")
 end

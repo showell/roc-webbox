@@ -23,7 +23,17 @@ Accounts := [].{
 	## `Unreadable` is a password whose stat failed; a `name_read` of
 	## `Unreadable` a name that would not read (its `name` empty, and never
 	## taken for one).
-	Account : { id : Uid, kind : [Agent, Guest, Member, Unreadable], name : Str, name_read : [Found, Unreadable] }
+	Account : {
+		id : Uid,
+		kind : [
+			Agent,
+			Guest,
+			Member,
+			Unreadable,
+		],
+		name : Str,
+		name_read : [Found, Unreadable],
+	}
 
 	## **A LOOKUP THAT NEEDED A READ THAT FAILED HAS NO ANSWER**: account
 	## `id`'s kind or name would not read, so the request fails with that
@@ -65,11 +75,31 @@ Accounts := [].{
 	## with its name `Unreadable`, as a name that would not read is, so only
 	## a lookup of that name fails, never every member's chat. (The host
 	## lists such a name as unreadable itself, with error.NotUtf8 kept.)
-	from_host : { id : List(U8), kind : [Agent, Guest, Member, Unreadable], name : List(U8), name_read : [Found, Unreadable] } -> Try(Account, [NotAUid(List(U8))])
+	from_host : {
+		id : List(U8),
+		kind : [
+			Agent,
+			Guest,
+			Member,
+			Unreadable,
+		],
+		name : List(U8),
+		name_read : [Found, Unreadable],
+	} -> Try(Account, [NotAUid(List(U8))])
 	from_host = |a|
 		match (Uid.from_utf8(a.id), Str.from_utf8(stored_name(a.name))) {
-			(Ok(id), Ok(text)) => Ok({ id, kind: a.kind, name: text, name_read: a.name_read })
-			(Ok(id), Err(_)) => Ok({ id, kind: a.kind, name: "", name_read: Unreadable })
+			(Ok(id), Ok(text)) => Ok({
+				id,
+				kind: a.kind,
+				name: text,
+				name_read: a.name_read,
+			})
+			(Ok(id), Err(_)) => Ok({
+				id,
+				kind: a.kind,
+				name: "",
+				name_read: Unreadable,
+			})
 			(Err(_), _) => Err(NotAUid(a.id))
 		}
 
@@ -87,7 +117,10 @@ Accounts := [].{
 	## not a guest, is the roster's failure; a guest's name is never read.
 	authorized : List(Account) -> Try(List({ id : Uid, name : Str }), Unreadable)
 	authorized = |accounts|
-		match List.keep_if(accounts, |a| a.kind == Unreadable or (a.kind != Guest and a.name_read == Unreadable)) {
+		match List.keep_if(
+			accounts,
+			|a| a.kind == Unreadable or (a.kind != Guest and a.name_read == Unreadable),
+		) {
 			[a, ..] => Err(if a.kind == Unreadable KindUnreadable(a.id) else NameUnreadable(a.id))
 			[] => Ok(roster(accounts))
 		}
@@ -97,20 +130,41 @@ Accounts := [].{
 	## member's name `Unreadable` where it would not read, so only what is
 	## labelled by it is left out; an account whose kind will not read still
 	## fails it, as listAuthorized did.
-	roster_named : List(Account) -> Try(List({ id : Uid, name : Try(Str, [Unreadable]) }), Unreadable)
+	roster_named : List(Account) -> Try(
+		List({ id : Uid, name : Try(Str, [Unreadable]) }),
+		Unreadable,
+	)
 	roster_named = |accounts|
 		match List.keep_if(accounts, |a| a.kind == Unreadable) {
 			[a, ..] => Err(KindUnreadable(a.id))
 			[] => {
-				unnamed = List.keep_if(accounts, |a| a.name_read == Unreadable) |> List.map(|a| a.id)
-				Ok(List.map(roster(accounts), |u| { id: u.id, name: if List.contains(unnamed, u.id) Err(Unreadable) else Ok(u.name) }))
+				unnamed = List.keep_if(
+					accounts,
+					|a| a.name_read == Unreadable,
+				)
+					|> List.map(|a| a.id)
+				Ok(
+					List.map(
+						roster(accounts),
+						|u| {
+							id: u.id,
+							name: if List.contains(unnamed, u.id) Err(Unreadable) else Ok(u.name),
+						},
+					),
+				)
 			}
 		}
 
 	roster : List(Account) -> List({ id : Uid, name : Str })
 	roster = |accounts|
 		List.keep_if(accounts, |a| a.kind != Guest)
-			|> List.map_with_index(|a, i| { a, i, n: Paths.atoi_or0(a.id.to_str().to_utf8()) })
+			|> List.map_with_index(
+				|a, i| {
+					a,
+					i,
+					n: Paths.atoi_or0(a.id.to_str().to_utf8()),
+				},
+			)
 			|> List.sort_with(
 				|x, y|
 					if x.n < y.n {
@@ -131,8 +185,30 @@ Accounts := [].{
 ## The name file's bytes as getUserName reads them: trailing CRs and
 ## LFs cut, nothing else (inner and leading whitespace kept).
 stored_name : List(U8) -> List(U8)
-stored_name = |bytes| List.drop_last(bytes, ZigText.count_back_while(bytes, |c| c == '\r' or c == '\n', 0))
+stored_name = |bytes| List.drop_last(
+	bytes,
+	ZigText.count_back_while(
+		bytes,
+		|c| c == '\r' or c == '\n',
+		0,
+	),
+)
 
-expect Accounts.from_host({ id: Str.to_utf8("7"), kind: Member, name: Str.to_utf8("caf\u(e9)\r\n"), name_read: Found }).map_ok(|a| a.name) == Ok("caf\u(e9)")
-expect Accounts.from_host({ id: Str.to_utf8("7"), kind: Member, name: [0x41, 0xff], name_read: Found }).map_ok(|a| (a.name, a.name_read)) == Ok(("", Unreadable))
-expect Accounts.from_host({ id: Str.to_utf8("07"), kind: Member, name: [0xff], name_read: Found }) == Err(NotAUid(Str.to_utf8("07")))
+expect Accounts.from_host({
+	id: Str.to_utf8("7"),
+	kind: Member,
+	name: Str.to_utf8("caf\u(e9)\r\n"),
+	name_read: Found,
+}).map_ok(|a| a.name) == Ok("caf\u(e9)")
+expect Accounts.from_host({
+	id: Str.to_utf8("7"),
+	kind: Member,
+	name: [0x41, 0xff],
+	name_read: Found,
+}).map_ok(|a| (a.name, a.name_read)) == Ok(("", Unreadable))
+expect Accounts.from_host({
+	id: Str.to_utf8("07"),
+	kind: Member,
+	name: [0xff],
+	name_read: Found,
+}) == Err(NotAUid(Str.to_utf8("07")))

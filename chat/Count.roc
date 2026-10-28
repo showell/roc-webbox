@@ -11,16 +11,31 @@ Count := [].{
 	## Where the last message begins and who sent it, `uid` empty for nobody.
 	Last : [Known({ offset : U64, uid : List(U8) }), Unknown]
 
-	Counted : { count : U64, size : U64, last : Last }
+	Counted : {
+		count : U64,
+		size : U64,
+		last : Last,
+	}
 
 	## countBlocks: every block that is not blank, refused ones included, so
 	## that no number is given twice.
 	count_blocks : List(U8) -> U64
-	count_blocks = |raw| List.count_if(Bytes.split_seq(raw, Transcript.sep), |p| ZigText.trim(p) != [])
+	count_blocks = |raw| List.count_if(
+		Bytes.split_seq(raw, Transcript.sep),
+		|p| ZigText.trim(p) != [],
+	)
 
 	## numberIn: the N of a `<topic>_<N>` id, or none when the id is not this
 	## topic's.
-	number_in : List(U8), List(U8) -> Try(U64, [NotThisTopic, NotANumber, TooBig])
+	number_in : List(U8),
+	List(U8) -> Try(
+		U64,
+		[
+			NotThisTopic,
+			NotANumber,
+			TooBig,
+		],
+	)
 	number_in = |id, topic|
 		match Bytes.strip_prefix(id, topic) {
 			Ok(['_', .. as rest]) => ZigText.parse_u64(rest)
@@ -43,11 +58,19 @@ Count := [].{
 			Err(Malformed)
 		} else {
 			match Bytes.split_byte(raw, '\n') {
-				[first, second, ..] =>
+				[
+					first,
+					second,
+					..,
+				] =>
 					match tokens(first) {
 						[c, s] =>
 							match (ZigText.parse_u64(c), ZigText.parse_u64(s)) {
-								(Ok(count), Ok(size)) => Ok({ count, size, last: parse_last(second) })
+								(Ok(count), Ok(size)) => Ok({
+									count,
+									size,
+									last: parse_last(second),
+								})
 								_ => Err(Malformed)
 							}
 						_ => Err(Malformed)
@@ -59,10 +82,20 @@ Count := [].{
 
 	## countText: what a send writes, nobody as `-`.
 	text : U64, U64, Last -> List(U8)
-	text = |count, size, last| {
+	text = |
+		count,
+		size,
+		last,
+	| {
 		head = Str.to_utf8("${U64.to_str(count)} ${U64.to_str(size)}\n")
 		match last {
-			Known(l) => List.join([head, Str.to_utf8(U64.to_str(l.offset)), [' '], if l.uid == [] no_uid else l.uid, ['\n']])
+			Known(l) => List.join([
+				head,
+				Str.to_utf8(U64.to_str(l.offset)),
+				[' '],
+				if l.uid == [] no_uid else l.uid,
+				['\n'],
+			])
 			Unknown => head
 		}
 	}
@@ -78,8 +111,18 @@ Count := [].{
 	## recordedAuthor: the record's author, nobody included, when it counted
 	## exactly this transcript, in blocks and in bytes.
 	recorded_author : Try(Counted, [Malformed]), U64, U64 -> Try(List(U8), [NotRecorded])
-	recorded_author = |counted, blocks, size| match counted {
-		Ok({ count, size: s, last: Known(l) }) if count == blocks and s == size => Ok(l.uid)
+	recorded_author = |
+		counted,
+		blocks,
+		size,
+	| match counted {
+		Ok(
+			{
+				count,
+				size: s,
+				last: Known(l),
+			},
+		) if count == blocks and s == size => Ok(l.uid)
 		_ => Err(NotRecorded)
 	}
 
@@ -94,15 +137,34 @@ Count := [].{
 	## `topic` numbered at least `count`; the record `Current` when exactly
 	## that, `Stale` when the block is past it. A window whose decode fails
 	## (`CorruptUid`) fails with it: damaged data is never passed over.
-	window_last : U64, List(U8), Fill, List(U8) -> Try({ msg : Transcript.Msg, number : U64, record : Freshness }, [NotBelieved, CorruptUid(List(U8))])
-	window_last = |count, window, fill, topic|
+	window_last : U64,
+	List(U8),
+	Fill,
+	List(U8) -> Try(
+		{
+			msg : Transcript.Msg,
+			number : U64,
+			record : Freshness,
+		},
+		[NotBelieved, CorruptUid(List(U8))],
+	)
+	window_last = |
+		count,
+		window,
+		fill,
+		topic,
+	|
 		if fill == Full {
 			Err(NotBelieved)
 		} else {
 			match List.last(Transcript.decode_file(window)?.messages) {
 				Ok(msg) =>
 					match number_in(msg.id, topic) {
-						Ok(number) if number >= count => Ok({ msg, number, record: if number == count Current else Stale })
+						Ok(number) if number >= count => Ok({
+							msg,
+							number,
+							record: if number == count Current else Stale,
+						})
 						_ => Err(NotBelieved)
 					}
 				Err(_) => Err(NotBelieved)

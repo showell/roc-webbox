@@ -32,7 +32,12 @@ ChatUrl :: Str.{
 	source = |text, source_id| {
 		ChatUrl.(base) = feed_conv(text)
 		match source_id.split_last("_") {
-			Ok({ before, after: _ }) if !before.is_empty() => ChatUrl.("${base}/${before}#msg-${source_id}")
+			Ok(
+				{
+					before,
+					after: _,
+				},
+			) if !before.is_empty() => ChatUrl.("${base}/${before}#msg-${source_id}")
 			_ => ChatUrl.(base)
 		}
 	}
@@ -51,7 +56,11 @@ ChatUrl :: Str.{
 is_internal : List(U8) -> Bool
 is_internal = |p|
 	match p {
-		['/', '/', ..] => Bool.False
+		[
+			'/',
+			'/',
+			..,
+		] => Bool.False
 		['/', ..] => List.all(p, |c| c != '\\' and c >= 0x20 and c != 0x7f)
 		_ => Bool.False
 	}

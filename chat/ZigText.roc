@@ -39,14 +39,26 @@ ZigText := [].{
 	## `/` and the rest, a character past ASCII included, as they are. The
 	## escapes are all ASCII, so they go byte by byte over the UTF-8.
 	json_string : Str -> List(U8)
-	json_string = |s| List.append(List.fold(Str.to_utf8(s), ['"'], |out, c| List.concat(out, escaped(c))), '"')
+	json_string = |s| List.append(
+		List.fold(
+			Str.to_utf8(s),
+			['"'],
+			|out, c| List.concat(out, escaped(c)),
+		),
+		'"',
+	)
 
 	## `std.mem.trim(u8, s, " \t\r\n")`, as the sidecars' readers trim.
 	## trim's, on text: the same four ASCII spaces off each end (Str.trim's
 	## are Unicode's, and the Zig's are not).
 	trim_str : Str -> Str
 	trim_str = |s| {
-		ws = [" ", "\t", "\r", "\n"]
+		ws = [
+			" ",
+			"\t",
+			"\r",
+			"\n",
+		]
 		front = List.find_first(ws, |w| s.starts_with(w))
 		back = List.find_first(ws, |w| s.ends_with(w))
 		match (front, back) {
@@ -59,25 +71,55 @@ ZigText := [].{
 	trim : List(U8) -> List(U8)
 	trim = |s| {
 		ws = |c| c == ' ' or c == '\t' or c == '\r' or c == '\n'
-		front = List.drop_first(s, count_while(s, ws, 0))
-		List.drop_last(front, count_back_while(front, ws, 0))
+		front = List.drop_first(
+			s,
+			count_while(
+				s,
+				ws,
+				0,
+			),
+		)
+		List.drop_last(
+			front,
+			count_back_while(
+				front,
+				ws,
+				0,
+			),
+		)
 	}
 
 	## How many bytes from the end of `l` keep `keep`.
 	count_back_while : List(U8), (U8 -> Bool), U64 -> U64
-	count_back_while = |l, keep, n|
+	count_back_while = |
+		l,
+		keep,
+		n,
+	|
 		if n >= List.len(l) {
 			n
 		} else {
 			match List.get(l, List.len(l) - 1 - n) {
-				Ok(c) if keep(c) => count_back_while(l, keep, n + 1)
+				Ok(c) if keep(c) => count_back_while(
+					l,
+					keep,
+					n + 1,
+				)
 				_ => n
 			}
 		}
 
 	count_while : List(U8), (U8 -> Bool), U64 -> U64
-	count_while = |l, keep, n| match List.get(l, n) {
-		Ok(c) if keep(c) => count_while(l, keep, n + 1)
+	count_while = |
+		l,
+		keep,
+		n,
+	| match List.get(l, n) {
+		Ok(c) if keep(c) => count_while(
+			l,
+			keep,
+			n + 1,
+		)
 		_ => n
 	}
 }

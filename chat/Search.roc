@@ -39,14 +39,31 @@ Search := [].{
 
 	## A message the index found, as the host hands it: its excerpt's window
 	## (Host.search_messages!).
-	Hit : { at : U64, length : U64, start : U64, base : List(U8), date : List(U8), from : List(U8), id : List(U8), sid : List(U8), window : List(U8), found : [Found, Missing], kind : [Channel, Dm] }
+	Hit : {
+		at : U64,
+		length : U64,
+		start : U64,
+		base : List(U8),
+		date : List(U8),
+		from : List(U8),
+		id : List(U8),
+		sid : List(U8),
+		window : List(U8),
+		found : [Found, Missing],
+		kind : [Channel, Dm],
+	}
 
 	## chat_search `excerptOf`: the word as written, where the index found
 	## it, and up to `excerpt_pad` bytes either side, cut on a character's
 	## edge, "…" where cut; **NEVER ACROSS THE WORD** (a word may begin or
 	## end in stray continuation bytes). A hit whose word was not found is
 	## its first bytes, unmarked.
-	excerpt : Hit, U64 -> { before : List(U8), mark : List(U8), after : List(U8) }
+	excerpt : Hit,
+	U64 -> {
+		before : List(U8),
+		mark : List(U8),
+		after : List(U8),
+	}
 	excerpt = |h, key_len| {
 		len = h.length
 		slice = |a, b| List.sublist(h.window, { start: a - h.start, len: b - a })
@@ -56,18 +73,31 @@ Search := [].{
 				at = h.at
 				start = lesser(edge_fwd(h, sub_floor(at, excerpt_pad)), at)
 				end = greater(edge_back(h, lesser(len, at + key_len + excerpt_pad)), at + key_len)
-				{ before: List.concat(if start > 0 ellipsis else [], slice(start, at)), mark: slice(at, at + key_len), after: List.concat(slice(at + key_len, end), trail(end)) }
+				{
+					before: List.concat(if start > 0 ellipsis else [], slice(start, at)),
+					mark: slice(at, at + key_len),
+					after: List.concat(slice(at + key_len, end), trail(end)),
+				}
 			}
 			Missing => {
 				end = edge_back(h, lesser(len, 2 * excerpt_pad))
-				{ before: [], mark: [], after: List.concat(slice(0, end), trail(end)) }
+				{
+					before: [],
+					mark: [],
+					after: List.concat(slice(0, end), trail(end)),
+				}
 			}
 		}
 	}
 
 	## The answer: `{"word":…,"matched":N,"unreadable":N,"messages":[{"conv":…,"kind":…,"sid":…,"id":…,"from":…,"date":…,"before":…,"mark":…,"after":…},…]}`.
 	messages_json : List(U8), U64, U64, List(Hit) -> List(U8)
-	messages_json = |word, matched, unreadable, hits|
+	messages_json = |
+		word,
+		matched,
+		unreadable,
+		hits,
+	|
 		JsonOut.object([
 			("word", JsonOut.lossy(word)),
 			("matched", JsonOut.number(matched)),
@@ -77,12 +107,27 @@ Search := [].{
 
 	## The answer: `{"prefix":…,"most":20,"unreadable":N,"words":[{"word":…,"count":N},…]}`.
 	words_json : List(U8), U64, List({ count : U64, word : List(U8) }) -> List(U8)
-	words_json = |prefix, unreadable, words|
+	words_json = |
+		prefix,
+		unreadable,
+		words,
+	|
 		JsonOut.object([
 			("prefix", JsonOut.lossy(prefix)),
 			("most", JsonOut.number(most_words)),
 			("unreadable", JsonOut.number(unreadable)),
-			("words", JsonOut.array(List.map(words, |w| JsonOut.object([("word", JsonOut.lossy(w.word)), ("count", JsonOut.number(w.count))])))),
+			(
+				"words",
+				JsonOut.array(
+					List.map(
+						words,
+						|w| JsonOut.object([
+							("word", JsonOut.lossy(w.word)),
+							("count", JsonOut.number(w.count)),
+						]),
+					),
+				),
+			),
 		]).bytes()
 }
 
@@ -145,7 +190,12 @@ trim_word = |w|
 		(_, Ok(c)) if is_ascii_punct(c) => trim_word(List.drop_last(w, 1))
 		_ =>
 			match List.find_first(trimmed, |t| has_prefix(w, t) or has_suffix(w, t)) {
-				Ok(t) => trim_word(if has_prefix(w, t) List.drop_first(w, List.len(t)) else List.drop_last(w, List.len(t)))
+				Ok(t) => trim_word(
+					if has_prefix(w, t) List.drop_first(
+						w,
+						List.len(t),
+					) else List.drop_last(w, List.len(t)),
+				)
 				Err(_) => w
 			}
 	}
@@ -163,9 +213,36 @@ has_suffix = |w, t| List.len(w) >= List.len(t) and List.take_last(w, List.len(t)
 ## inverted marks, the primes, the no-break space.
 trimmed : List(List(U8))
 trimmed = List.map(
-	["\u(2018)", "\u(2019)", "\u(201A)", "\u(201B)", "\u(201C)", "\u(201D)", "\u(201E)", "\u(201F)", "\u(00AB)", "\u(00BB)", "\u(2039)", "\u(203A)", "\u(2026)", "\u(2013)", "\u(2014)", "\u(2015)", "\u(00A1)", "\u(00BF)", "\u(2032)", "\u(2033)", "\u(00A0)"],
+	[
+		"\u(2018)",
+		"\u(2019)",
+		"\u(201A)",
+		"\u(201B)",
+		"\u(201C)",
+		"\u(201D)",
+		"\u(201E)",
+		"\u(201F)",
+		"\u(00AB)",
+		"\u(00BB)",
+		"\u(2039)",
+		"\u(203A)",
+		"\u(2026)",
+		"\u(2013)",
+		"\u(2014)",
+		"\u(2015)",
+		"\u(00A1)",
+		"\u(00BF)",
+		"\u(2032)",
+		"\u(2033)",
+		"\u(00A0)",
+	],
 	Str.to_utf8,
 )
 
 # key: spaces and edge punctuation trimmed, ASCII folded, a curly quote gone.
-expect Search.key(Str.to_utf8(" \"La\u(201D)! ")) == Str.to_utf8("la") and Search.key(Str.to_utf8("CAF\u(C9)")) == Str.to_utf8("caf\u(C9)") and Search.key(List.repeat('a', 257)) == []
+expect Search.key(Str.to_utf8(" \"La\u(201D)! ")) == Str.to_utf8("la") and Search.key(Str.to_utf8("CAF\u(C9)")) == Str.to_utf8("caf\u(C9)") and Search.key(
+	List.repeat(
+		'a',
+		257,
+	),
+) == []

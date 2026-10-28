@@ -158,7 +158,10 @@ Paths := [].{
 	is_channel_name : Str -> Bool
 	is_channel_name = |text| match text.to_utf8() {
 		[first, .. as more] =>
-			text.count_utf8_bytes() <= 40 and is_alpha(first) and List.all(more, |c| is_alnum(c) or c == '-')
+			text.count_utf8_bytes() <= 40 and is_alpha(first) and List.all(
+				more,
+				|c| is_alnum(c) or c == '-',
+			)
 		[] => Bool.False
 	}
 
@@ -189,7 +192,10 @@ Paths := [].{
 		match cut_last(id, '_') {
 			Err(NoSeparator) => Bool.False
 			Ok((left, right)) =>
-				left != [] and right != [] and List.all(left, |c| is_alnum(c) or c == '-') and List.all(right, |c| c >= '0' and c <= '9')
+				left != [] and right != [] and List.all(
+					left,
+					|c| is_alnum(c) or c == '-',
+				) and List.all(right, |c| c >= '0' and c <= '9')
 		}
 
 	## firstOf: "ChitChat" when there, else the first (the list is sorted),
@@ -205,14 +211,26 @@ Paths := [].{
 	## listUserChannels's decision: the names of the channels `uid` is in,
 	## sorted by bytes, from every roster (`rosters`'s).
 	member_channels : List(Roster), Uid -> List(Str)
-	member_channels = |all, uid| sort_by_bytes(List.map(List.keep_if(all, |r| List.contains(r.members, uid)), |r| r.name))
+	member_channels = |all, uid| sort_by_bytes(
+		List.map(
+			List.keep_if(all, |r| List.contains(r.members, uid)),
+			|r| r.name,
+		),
+	)
 
 	## Texts sorted by their bytes, as the Zig's sorts compare.
 	sort_by_bytes : List(Str) -> List(Str)
 	sort_by_bytes = |texts| List.sort_with(texts, |a, b| Bytes.compare(a.to_utf8(), b.to_utf8()))
 
 	## A folder's entry, as Files.list! answers it: its name is text.
-	Entry : { kind : [Dir, File, Other], name : Str }
+	Entry : {
+		kind : [
+			Dir,
+			File,
+			Other,
+		],
+		name : Str,
+	}
 
 	## A channel and its members, as its member file lists them.
 	Roster : { name : Str, members : List(Uid) }
@@ -223,7 +241,12 @@ Paths := [].{
 	## by bytes. A folder named `x.md` is no topic; a file named `.md` is
 	## topic "".
 	topics : List(Entry) -> List(Str)
-	topics = |entries| sort_by_bytes(List.keep_oks(entries, |e| if e.kind == Dir Err(NoSuffix) else str_suffix(e.name, ".md")))
+	topics = |entries| sort_by_bytes(
+		List.keep_oks(
+			entries,
+			|e| if e.kind == Dir Err(NoSuffix) else str_suffix(e.name, ".md"),
+		),
+	)
 
 	## **A FILE UNDER THE CHAT ROOT, NAMED HERE**: opaque (`::`), so only
 	## this module makes one, and Files.roc, the one module that reaches the
@@ -321,14 +344,23 @@ Paths := [].{
 	## those channel_names would have chosen: each is a channel the listing
 	## skipped, and counted as malformed.
 	channel_names_not_utf8 : List(List(U8)) -> List(List(U8))
-	channel_names_not_utf8 = |names| List.keep_oks(names, |n| cut_suffix(n, Str.to_utf8(".channel")))
+	channel_names_not_utf8 = |names| List.keep_oks(
+		names,
+		|n| cut_suffix(n, Str.to_utf8(".channel")),
+	)
 
 	## **ONE CHANNEL'S PART IN EVERY ROSTER** (channelRosters), from its
 	## member file as read: its roster (`Listed`); `Malformed`, skipped, and
 	## counted by the host (the operator's count), so one bad file is not
 	## every member's chat down; `Gone` since the listing, skipped; or
 	## `Failed`, and nothing past it (the request has failed).
-	roster : Str, Try(Str, [Missing, Failed]) -> [Listed(Roster), Malformed, Gone, Failed]
+	roster : Str,
+	Try(Str, [Missing, Failed]) -> [
+		Listed(Roster),
+		Malformed,
+		Gone,
+		Failed,
+	]
 	roster = |name, file|
 		match file {
 			Ok(stored) =>
@@ -343,8 +375,17 @@ Paths := [].{
 	## Every roster, from the channels `channel_names` chose and their member
 	## files as read, in that order, by `roster`: the rosters, and the
 	## malformed channels' names, up to a read that failed.
-	rosters : List(Str), List(Try(Str, [Missing, Failed])) -> { rosters : List(Roster), malformed : List(Str) }
-	rosters = |names, files| rosters_from(names, files, 0, { rosters: [], malformed: [] })
+	rosters : List(Str),
+	List(Try(Str, [Missing, Failed])) -> {
+		rosters : List(Roster),
+		malformed : List(Str),
+	}
+	rosters = |names, files| rosters_from(
+		names,
+		files,
+		0,
+		{ rosters: [], malformed: [] },
+	)
 
 	## A topic's transcript: {conv_dir}/sessions/<topic>.md.
 	transcript_path : TopicAt -> ChatPath
@@ -364,14 +405,22 @@ Paths := [].{
 	## slug (is_doc_slug) and `.md`, sorted by slug, beside its file.
 	docs : Uid, List(Entry) -> List({ slug : Str, path : ChatPath })
 	docs = |uid, entries|
-		sort_by_bytes(List.keep_oks(entries, |e| if e.kind == Dir Err(NoSuffix) else str_suffix(e.name, ".md")))
+		sort_by_bytes(
+			List.keep_oks(
+				entries,
+				|e| if e.kind == Dir Err(NoSuffix) else str_suffix(e.name, ".md"),
+			),
+		)
 			|> List.keep_if(is_doc_slug)
 			|> List.map(|slug| { slug, path: ChatPath.("users/${uid.to_str()}/docs/${slug}.md") })
 
 	## The member's doc `slug` (docs_store `docPath`), or `NotASlug` for a
 	## slug no slugifyTitle made (validDocSlug, its path-traversal check).
 	doc_path : Uid, Str -> Try(ChatPath, [NotASlug])
-	doc_path = |uid, slug| if is_doc_slug(slug) Ok(ChatPath.("users/${uid.to_str()}/docs/${slug}.md")) else Err(NotASlug)
+	doc_path = |
+		uid,
+		slug,
+	| if is_doc_slug(slug) Ok(ChatPath.("users/${uid.to_str()}/docs/${slug}.md")) else Err(NotASlug)
 
 	## A topic's message count sidecar (countPath, chat_count.zig):
 	## {conv_dir}/sessions/<topic>.count.
@@ -385,21 +434,37 @@ Paths := [].{
 	## The bytes before and after the first `sep`.
 	cut_first : List(U8), U8 -> Try((List(U8), List(U8)), [NoSeparator])
 	cut_first = |s, sep| {
-		i = index_of(s, sep, 0)?
+		i = index_of(
+			s,
+			sep,
+			0,
+		)?
 		Ok((List.take_first(s, i), List.drop_first(s, i + 1)))
 	}
 
 	## The bytes before and after the last `sep`.
 	cut_last : List(U8), U8 -> Try((List(U8), List(U8)), [NoSeparator])
 	cut_last = |s, sep| {
-		(last, _) = List.fold(s, (Err(NoSeparator), 0), |(found, i), c| (if c == sep Ok(i) else found, i + 1))
+		(last, _) = List.fold(
+			s,
+			(Err(NoSeparator), 0),
+			|(found, i), c| (if c == sep Ok(i) else found, i + 1),
+		)
 		i = last?
 		Ok((List.take_first(s, i), List.drop_first(s, i + 1)))
 	}
 
 	index_of : List(U8), U8, U64 -> Try(U64, [NoSeparator])
-	index_of = |s, sep, i| match List.get(s, i) {
-		Ok(c) => if c == sep Ok(i) else index_of(s, sep, i + 1)
+	index_of = |
+		s,
+		sep,
+		i,
+	| match List.get(s, i) {
+		Ok(c) => if c == sep Ok(i) else index_of(
+			s,
+			sep,
+			i + 1,
+		)
 		Err(_) => Err(NoSeparator)
 	}
 }
@@ -415,7 +480,10 @@ conv_dir = |key|
 
 ## `name` without `suffix`, when it ends in it.
 str_suffix : Str, Str -> Try(Str, [NoSuffix])
-str_suffix = |name, suffix| if name.ends_with(suffix) Ok(name.drop_suffix(suffix)) else Err(NoSuffix)
+str_suffix = |
+	name,
+	suffix,
+| if name.ends_with(suffix) Ok(name.drop_suffix(suffix)) else Err(NoSuffix)
 
 ## validDocSlug: 1 to 80 lowercase letters and digits, joined by single
 ## hyphens, none first or last; anything else no slugifyTitle made.
@@ -424,7 +492,11 @@ is_doc_slug = |slug| {
 	b = slug.to_utf8()
 	n = List.len(b)
 	in_set = List.all(b, |c| c == '-' or (c >= 'a' and c <= 'z') or (c >= '0' and c <= '9'))
-	doubled = List.fold(b, { found: Bool.False, prev: 0 }, |s, c| { found: s.found or (c == '-' and s.prev == '-'), prev: c }).found
+	doubled = List.fold(
+		b,
+		{ found: Bool.False, prev: 0 },
+		|s, c| { found: s.found or (c == '-' and s.prev == '-'), prev: c },
+	).found
 	n > 0 and n <= 80 and in_set and !doubled and List.first(b) != Ok('-') and List.last(b) != Ok('-')
 }
 
@@ -433,18 +505,58 @@ is_doc_slug = |slug| {
 trim_line : List(U8) -> List(U8)
 trim_line = |s| {
 	ws = |c| c == ' ' or c == '\t' or c == '\r'
-	front = List.drop_first(s, ZigText.count_while(s, ws, 0))
-	List.drop_last(front, ZigText.count_back_while(front, ws, 0))
+	front = List.drop_first(
+		s,
+		ZigText.count_while(
+			s,
+			ws,
+			0,
+		),
+	)
+	List.drop_last(
+		front,
+		ZigText.count_back_while(
+			front,
+			ws,
+			0,
+		),
+	)
 }
 
-rosters_from : List(Str), List(Try(Str, [Missing, Failed])), U64, { rosters : List(Roster), malformed : List(Str) } -> { rosters : List(Roster), malformed : List(Str) }
-rosters_from = |names, files, i, got|
+rosters_from : List(Str),
+List(Try(Str, [Missing, Failed])),
+U64,
+{
+	rosters : List(Roster),
+	malformed : List(Str),
+} -> { rosters : List(Roster), malformed : List(Str) }
+rosters_from = |
+	names,
+	files,
+	i,
+	got,
+|
 	match (List.get(names, i), List.get(files, i)) {
 		(Ok(name), Ok(file)) =>
 			match Paths.roster(name, file) {
-				Listed(r) => rosters_from(names, files, i + 1, { rosters: List.append(got.rosters, r), malformed: got.malformed })
-				Malformed => rosters_from(names, files, i + 1, { rosters: got.rosters, malformed: List.append(got.malformed, name) })
-				Gone => rosters_from(names, files, i + 1, got)
+				Listed(r) => rosters_from(
+					names,
+					files,
+					i + 1,
+					{ rosters: List.append(got.rosters, r), malformed: got.malformed },
+				)
+				Malformed => rosters_from(
+					names,
+					files,
+					i + 1,
+					{ rosters: got.rosters, malformed: List.append(got.malformed, name) },
+				)
+				Gone => rosters_from(
+					names,
+					files,
+					i + 1,
+					got,
+				)
 				Failed => got
 			}
 		_ => got
@@ -455,7 +567,10 @@ cut_suffix : List(U8), List(U8) -> Try(List(U8), [NoSuffix])
 cut_suffix = |name, suffix| {
 	n = List.len(name)
 	k = List.len(suffix)
-	if n >= k and List.drop_first(name, n - k) == suffix Ok(List.take_first(name, n - k)) else Err(NoSuffix)
+	if n >= k and List.drop_first(
+		name,
+		n - k,
+	) == suffix Ok(List.take_first(name, n - k)) else Err(NoSuffix)
 }
 
 is_alpha : U8 -> Bool
@@ -471,10 +586,30 @@ expect match (Paths.pair_key_from_str("3_7"), Paths.channel_name_from_str("gener
 		channel = Channel(name)
 		(Paths.topics_folder(dm).bytes() == Str.to_utf8("3_7/sessions"))
 			and (Paths.topics_folder(channel).bytes() == Str.to_utf8("channels/general/sessions"))
-				and (Paths.reactions_path({ key: dm, topic: "ChitChat" }).bytes() == Str.to_utf8("3_7/sessions/ChitChat.reactions.jsonl"))
-					and (Paths.reactions_path({ key: channel, topic: "road-trip" }).bytes() == Str.to_utf8("channels/general/sessions/road-trip.reactions.jsonl"))
-						and (Paths.transcript_path({ key: dm, topic: "ChitChat" }).bytes() == Str.to_utf8("3_7/sessions/ChitChat.md"))
-							and (Paths.transcript_path({ key: channel, topic: "road-trip" }).bytes() == Str.to_utf8("channels/general/sessions/road-trip.md"))
+				and (
+					Paths.reactions_path({
+						key: dm,
+						topic: "ChitChat",
+					}).bytes() == Str.to_utf8("3_7/sessions/ChitChat.reactions.jsonl")
+				)
+					and (
+						Paths.reactions_path({
+							key: channel,
+							topic: "road-trip",
+						}).bytes() == Str.to_utf8("channels/general/sessions/road-trip.reactions.jsonl")
+					)
+						and (
+							Paths.transcript_path({
+								key: dm,
+								topic: "ChitChat",
+							}).bytes() == Str.to_utf8("3_7/sessions/ChitChat.md")
+						)
+							and (
+								Paths.transcript_path({
+									key: channel,
+									topic: "road-trip",
+								}).bytes() == Str.to_utf8("channels/general/sessions/road-trip.md")
+							)
 								and (conv_dir(dm) == "3_7")
 									and (conv_dir(channel) == "channels/general")
 	}
@@ -489,8 +624,18 @@ expect match (Uid.from_str("3"), Uid.from_str("7")) {
 	(Ok(three), Ok(seven)) => {
 		pair = Paths.pair_key(seven, three)
 		(Paths.last_conv_path(three).bytes() == Str.to_utf8("users/3/last-conv"))
-			and (Paths.last_session_path(three, Dm(pair)).bytes() == Str.to_utf8("users/3/last-sessions/3_7"))
-				and (Paths.pinned_path(three, Dm(pair)).bytes() == Str.to_utf8("users/3/pinned-sessions/3_7"))
+			and (
+				Paths.last_session_path(
+					three,
+					Dm(pair),
+				).bytes() == Str.to_utf8("users/3/last-sessions/3_7")
+			)
+				and (
+					Paths.pinned_path(
+						three,
+						Dm(pair),
+					).bytes() == Str.to_utf8("users/3/pinned-sessions/3_7")
+				)
 					and (Paths.feed_path(three, Images).bytes() == Str.to_utf8("users/3/images.md"))
 						and (Paths.feed_path(three, Code).bytes() == Str.to_utf8("users/3/code.md"))
 							and (Paths.links_path(three).bytes() == Str.to_utf8("users/3/links.md"))
@@ -498,13 +643,25 @@ expect match (Uid.from_str("3"), Uid.from_str("7")) {
 	_ => Bool.False
 }
 expect match (Paths.channel_name_from_str("general"), Uid.from_str("3")) {
-	(Ok(name), Ok(three)) => Paths.pinned_path(three, Channel(name)).bytes() == Str.to_utf8("users/3/pinned-sessions/general")
+	(Ok(name), Ok(three)) => Paths.pinned_path(
+		three,
+		Channel(name),
+	).bytes() == Str.to_utf8("users/3/pinned-sessions/general")
 	_ => Bool.False
 }
 
 # pair_key: the smaller uid first, by number, not by bytes.
 expect match (Uid.from_str("7"), Uid.from_str("3")) {
-	(Ok(seven), Ok(three)) => Paths.pair_key(seven, three).to_str() == "3_7" and Paths.pair_key(three, seven).to_str() == "3_7" and Paths.pair_key(three, three).to_str() == "3_3"
+	(
+		Ok(seven),
+		Ok(three),
+	) => Paths.pair_key(
+		seven,
+		three,
+	).to_str() == "3_7" and Paths.pair_key(
+		three,
+		seven,
+	).to_str() == "3_7" and Paths.pair_key(three, three).to_str() == "3_3"
 	_ => Bool.False
 }
 expect match (Uid.from_str("10"), Uid.from_str("9")) {
@@ -590,7 +747,10 @@ expect Paths.channel_name_from_str("").is_err()
 
 # ConvKey.base: the host's Conv.base (Conversation.dm_base, channel_base).
 expect match (Paths.pair_key_from_str("3_7"), Paths.channel_name_from_str("general")) {
-	(Ok(pair), Ok(name)) => (Paths.ConvKey.Dm(pair).base() == "/chat/c/3_7") and (Paths.ConvKey.Channel(name).base() == "/channel/general")
+	(
+		Ok(pair),
+		Ok(name),
+	) => (Paths.ConvKey.Dm(pair).base() == "/chat/c/3_7") and (Paths.ConvKey.Channel(name).base() == "/channel/general")
 	_ => Bool.False
 }
 
@@ -598,8 +758,23 @@ expect match (Paths.pair_key_from_str("3_7"), Paths.channel_name_from_str("gener
 expect match Uid.from_str("3") {
 	Ok(three) => {
 		e = |kind, name| { kind, name }
-		got = Paths.docs(three, [e(File, "zeta.md"), e(Dir, "folder.md"), e(File, "Bad_Slug.md"), e(File, "plain.txt"), e(Other, "a-b.md"), e(File, "-x.md"), e(File, "a--b.md"), e(File, ".md")])
-		List.map(got, |d| d.slug) == ["a-b", "zeta"] and List.map(got, |d| d.path.bytes()) == [Str.to_utf8("users/3/docs/a-b.md"), Str.to_utf8("users/3/docs/zeta.md")]
+		got = Paths.docs(
+			three,
+			[
+				e(File, "zeta.md"),
+				e(Dir, "folder.md"),
+				e(File, "Bad_Slug.md"),
+				e(File, "plain.txt"),
+				e(Other, "a-b.md"),
+				e(File, "-x.md"),
+				e(File, "a--b.md"),
+				e(File, ".md"),
+			],
+		)
+		List.map(got, |d| d.slug) == ["a-b", "zeta"] and List.map(got, |d| d.path.bytes()) == [
+			Str.to_utf8("users/3/docs/a-b.md"),
+			Str.to_utf8("users/3/docs/zeta.md"),
+		]
 	}
 	Err(_) => Bool.False
 }

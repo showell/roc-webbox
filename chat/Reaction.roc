@@ -26,7 +26,16 @@ Reaction := [].{
 	## retraction: the client folds by last event wins per (msg, uid, emoji),
 	## so the file stays append-only.
 	line : Event -> List(U8)
-	line = |{ msg, uid, from, emoji, change, at }|
+	line = |
+		{
+			msg,
+			uid,
+			from,
+			emoji,
+			change,
+			at,
+		},
+	|
 		JsonText.obj([
 			("msg", Str.to_utf8(U64.to_str(msg))),
 			("uid", JsonText.str(uid.to_str())),
@@ -46,15 +55,47 @@ Reaction := [].{
 		Removed => Bool.False
 	}
 
-	Answer : [Reacted({ msg : U64, emoji : Str, change : Change }), Bad(List(U8)), Malformed]
+	Answer : [
+		Reacted(
+			{
+				msg : U64,
+				emoji : Str,
+				change : Change,
+			},
+		),
+		Bad(List(U8)),
+		Malformed,
+	]
 
 	## Every field read before any is judged, as the Zig: a malformed one is
 	## malformed whichever it is.
 	form : List(U8) -> Answer
 	form = |body|
-		match (Form.field(body, "msg"), Form.field(body, "emoji"), Form.field(body, "on")) {
-			(Malformed, _, _) | (_, Malformed, _) | (_, _, Malformed) => Malformed
-			(m, e, o) => {
+		match (
+			Form.field(body, "msg"),
+			Form.field(body, "emoji"),
+			Form.field(body, "on"),
+		) {
+			(
+				Malformed,
+				_,
+				_,
+			)
+			| (
+				_,
+				Malformed,
+				_,
+			)
+			| (
+				_,
+				_,
+				Malformed,
+			) => Malformed
+			(
+				m,
+				e,
+				o,
+			) => {
 				msg_s = found_or(m, "")
 				emoji = found_or(e, "")
 				on_s = found_or(o, "1")
@@ -62,7 +103,11 @@ Reaction := [].{
 					Err(NotANumber) | Err(TooBig) => Bad(Str.to_utf8("react: msg must be a message number\n"))
 					Ok(msg) =>
 						if is_valid_emoji(emoji) {
-							Reacted({ msg, emoji, change: if on_s == "1" Added else Removed })
+							Reacted({
+								msg,
+								emoji,
+								change: if on_s == "1" Added else Removed,
+							})
 						} else {
 							Bad(Str.to_utf8("react: emoji must be one glyph\n"))
 						}
