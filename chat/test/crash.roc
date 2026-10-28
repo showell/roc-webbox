@@ -95,20 +95,84 @@ handle! = |req|
 			List.concat(Str.to_utf8(said), got.html),
 		)
 	} else if starts(req.sub, "/store/") {
-		# Message 9 of DM 1_2's topic `<topic>`: every field of the message a
-		# different string, so a record laid out wrong shows.
+		# A block appended to DM 1_2's topic `<topic>`, and the transcript's
+		# size after; then message 9 told to the index, every field of the
+		# message a different string, so a record laid out wrong shows.
+		topic = List.drop_first(req.sub, 7)
+		got = Host.append_message!(
+			dm12,
+			topic,
+			Str.to_utf8("the block"),
+		)
+		match got.status {
+			Appended => {
+				Host.index_message!(
+					dm12,
+					topic,
+					probe_message,
+				)
+				Chat.respond(
+					200,
+					[],
+					Str.to_utf8("appended ${U64.to_str(got.size)}"),
+				)
+			}
+			Failed => Chat.respond(
+				200,
+				[],
+				Str.to_utf8("failed"),
+			)
+		}
+	} else if starts(req.sub, "/upload/") {
+		# An upload served as part `<part>`, every field of the record a
+		# different value, so one laid out wrong shows (metal-vmm QUEUE 291).
+		part = match List.drop_first(req.sub, 8) {
+			['r', ..] => Range
+			['u', ..] => Unsatisfiable
+			_ => Whole
+		}
+		got = Host.serve_upload!({
+			first: 11,
+			last: 22,
+			size: 33,
+			content_type: Str.to_utf8("image/png"),
+			path: Str.to_utf8("1_2/sessions/Plans.uploads/a.png"),
+			part,
+		})
 		Chat.respond(
 			200,
 			[],
-			done(
-				Host.store_message!(
-					dm12,
-					List.drop_first(req.sub, 7),
-					Str.to_utf8("the block"),
-					8,
-					probe_message,
-				),
-			),
+			Str.to_utf8(if got == Served "served" else "gone"),
+		)
+	} else if starts(req.sub, "/bundle/") {
+		# Two files added to a bundle, then the bundle served as `<name>`.
+		name = List.drop_first(req.sub, 8)
+		added = Host.bundle_add!(
+			Str.to_utf8("Plans/Plans.md"),
+			Str.to_utf8("1_2/sessions/Plans.md"),
+		)
+		match added {
+			Ok({}) => {
+				Host.serve_bundle!(name)
+				Chat.respond(
+					200,
+					[],
+					Str.to_utf8("bundled"),
+				)
+			}
+			Err(Failed) => Chat.respond(
+				200,
+				[],
+				Str.to_utf8("failed"),
+			)
+		}
+	} else if starts(req.sub, "/cache/") {
+		# A cache written at `<path>`: never the request's failure.
+		Host.write_cache!(List.drop_first(req.sub, 7), Str.to_utf8("7 99\n"))
+		Chat.respond(
+			200,
+			[],
+			Str.to_utf8("written"),
 		)
 	} else if starts(req.sub, "/entry/") {
 		# An entry appended to `<path>`; one that failed is said for member 2
@@ -273,10 +337,11 @@ handle! = |req|
 	} else if req.sub == Str.to_utf8("/crash") {
 		crash "a planted crash"
 	} else if req.sub == Str.to_utf8("/crash-after-asking") {
-		if Host.check_member!({}) == Member crash "a planted crash, after asking" else Chat.zig(
-			Chat.family(NotFound),
-			Uncounted,
-		)
+		if Host.check_member!({}) == Member {
+			crash "a planted crash, after asking"
+		} else {
+			Chat.zig(Chat.family(NotFound))
+		}
 	} else if req.sub == Str.to_utf8("/crash-after-asking-big") {
 		# A list grown a byte at a time, through many allocations, then a
 		# crash: each allocation is one a test can make fail. Bytes, said:
@@ -290,12 +355,13 @@ handle! = |req|
 			[],
 			|acc, b| List.append(acc, b),
 		)
-		if Host.check_member!({}) == Member and List.len(big) == 20000 crash "a planted crash, after a big list" else Chat.zig(
-			Chat.family(NotFound),
-			Uncounted,
-		)
+		if Host.check_member!({}) == Member and List.len(big) == 20000 {
+			crash "a planted crash, after a big list"
+		} else {
+			Chat.zig(Chat.family(NotFound))
+		}
 	} else {
-		Chat.zig(Chat.family(Default), Counted)
+		Chat.zig(Chat.family(Default))
 	}
 
 starts : List(U8), Str -> Bool

@@ -66,6 +66,12 @@ Chrome := [].{
 		Err(_) => crash "Chrome: no script named <name>"
 	}
 
+	## **THE SERVER'S OWN MARKDOWN, RENDERED** (Host.render!, markdown.zig
+	## `render`): the HTML the host made of it, as a doc's preview paints it
+	## first. Hostile markdown is the host's placeholder, never passed on.
+	rendered : List(U8) -> Html
+	rendered = |html| Html.host_markup(html)
+
 	## chat_page.zig's `chat_css`, the conversation page's layout.
 	chat_css : Html
 	chat_css = Html.trusted(

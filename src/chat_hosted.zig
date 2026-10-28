@@ -24,6 +24,7 @@ pub const Rendered = abi.Rendered;
 pub const RenderStatus = route.RenderStatus;
 pub const Message = abi.Message;
 pub const Appended = abi.Appended;
+pub const AppendedAt = abi.AppendedAt;
 pub const AppendStatus = route.AppendStatus;
 pub const Surface = route.Surface;
 pub const Hostility = route.Hostility;
@@ -40,6 +41,7 @@ pub const Accounts = abi.Accounts;
 pub const AccountKind = route.AccountKind;
 pub const AccountRead = abi.AccountRead;
 pub const Presence = route.Presence;
+pub const PresenceEdge = route.PresenceEdge;
 pub const Admission = route.Admission;
 pub const Word = abi.Word;
 pub const Words = abi.Words;
@@ -47,6 +49,8 @@ pub const Hit = abi.Hit;
 pub const Messages = abi.Messages;
 pub const Membership = route.Membership;
 pub const Done = route.Done;
+pub const Upload = abi.Upload;
+pub const UploadServed = route.UploadServed;
 pub const Welcome = route.Welcome;
 pub const Serving = route.Serving;
 pub const Dropped = route.Dropped;
@@ -100,13 +104,21 @@ fn expectRoute(
         .GET,
         routing.host(),
     );
-    if (got == .serve and routing.marked) got.serve.presence = true;
-    const expected: Decision = .{ .serve = .{ .route = want, .presence = presence } };
-    if (!got.eql(expected)) {
-        std.debug.print("{s}: got {f}, want {f}\n", .{
+    // A path that names nothing is the Roc's own 404 (metal-vmm QUEUE 286),
+    // its presence counted as the Zig's was.
+    if (want.family == .not_found) {
+        if (got == .not_found and routing.marked == presence) return;
+        std.debug.print("{s}: got {f}, want the Roc's 404\n", .{ sub, got });
+        return error.TestUnexpectedResult;
+    }
+    const expected: Decision = .{ .serve = .{ .route = want } };
+    if (!got.eql(expected) or routing.marked != presence) {
+        std.debug.print("{s}: got {f} (presence {}), want {f} (presence {})\n", .{
             sub,
             got,
+            routing.marked,
             expected,
+            presence,
         });
         return error.TestUnexpectedResult;
     }
@@ -198,12 +210,6 @@ test "the router: a topic's tails, a channel, an asset before the gate, the gate
         true,
     );
     try expectRoute(
-        "/docs/new",
-        false,
-        .{ .family = .docs, .rest = "/new" },
-        true,
-    );
-    try expectRoute(
         "/docsX",
         false,
         .{ .family = .not_found },
@@ -215,10 +221,12 @@ test "the router: a topic's tails, a channel, an asset before the gate, the gate
         .{ .family = .asset, .rest = "chat.js" },
         false,
     );
+    // A docs path of two segments is the Roc's 404 (metal-vmm QUEUE 289),
+    // its text whole.
     try expectRoute(
         "/docs/caf\xc3\xa9/\xf0\x9f\x91\x8d",
         false,
-        .{ .family = .docs, .rest = "/caf\xc3\xa9/\xf0\x9f\x91\x8d" },
+        .{ .family = .not_found },
         true,
     );
 
@@ -280,6 +288,8 @@ const Scripted = struct {
     files: []const File = &.{},
     /// Whether a write or a remove succeeds.
     write_ok: bool = true,
+    /// What counting the member online says: the edge (they came online) or not.
+    edge: route.PresenceEdge = .steady,
     /// The members seen within the presence window; any other is offline.
     online_ids: []const []const u8 = &.{},
     is_async: bool = false,
@@ -292,6 +302,8 @@ const Scripted = struct {
     store_ok: bool = true,
     /// A topic whose message will not store, alone (an announcement's).
     store_fails_for: ?[]const u8 = null,
+    /// The transcript's size before an append (Host.append_message!).
+    transcript_before: u64 = 100,
     /// What Host.aside!(End) answers.
     aside_end: route.AsideEnd = .done,
     /// What Host.welcome_pending! answers (metal-vmm QUEUE 283); `welcome_done!`
@@ -312,6 +324,7 @@ const Scripted = struct {
             .ctx = self,
             .check_member = member,
             .count_presence = presence,
+            .presence_unspent = presenceUnspent,
             .list_accounts = accountsOf,
             .me = meId,
             .now = nowOf,
@@ -334,7 +347,10 @@ const Scripted = struct {
             .read_header = header,
             .check_hostile = hostile,
             .render = render,
-            .store_message = storeMessage,
+            .render_preview = renderPreview,
+            .append_message = appendMessage,
+            .index_message = indexMessage,
+            .write_cache = writeCache,
             .append_entry = appendEntry,
             .report_fanout_failure = fanoutFailed,
             .serve_file = raw,
@@ -409,10 +425,18 @@ const Scripted = struct {
         );
         return .member;
     }
-    fn presence(ctx: *anyopaque) void {
+    fn presence(ctx: *anyopaque) route.PresenceEdge {
         say(
             ctx,
             "presence",
+            .{},
+        );
+        return me(ctx).edge;
+    }
+    fn presenceUnspent(ctx: *anyopaque) void {
+        say(
+            ctx,
+            "presence unspent",
             .{},
         );
     }
@@ -693,6 +717,20 @@ const Scripted = struct {
         );
         return &abi.test_srcs;
     }
+    fn renderPreview(ctx: *anyopaque, markdown: []const u8) abi.Rendered {
+        say(
+            ctx,
+            "preview {s}",
+            .{markdown},
+        );
+        const s = me(ctx);
+        if (!s.render_ok) return .failed;
+        return .{ .rendered = std.fmt.allocPrint(
+            s.alloc,
+            "<p>{s}</p>",
+            .{markdown},
+        ) catch @panic("oom") };
+    }
     fn render(ctx: *anyopaque, markdown: []const u8) abi.Rendered {
         say(
             ctx,
@@ -707,33 +745,25 @@ const Scripted = struct {
             .{markdown},
         ) catch @panic("oom") };
     }
-    /// The block escaped and every field of the message in Chat.Message's
-    /// order, so a record laid out wrong across the seam shows.
-    fn storeMessage(
+    /// The block escaped, so its every byte shows; the transcript was
+    /// `transcript_before` bytes, so its size after is that and the block.
+    fn appendMessage(
         ctx: *anyopaque,
         conv: Conv,
         sid: []const u8,
         block: []const u8,
-        index: u64,
-        m: abi.Message,
-    ) route.Done {
+    ) abi.AppendedAt {
         sayConv(
             ctx,
-            "store",
+            "append",
             conv,
         );
         say(
             ctx,
-            " {s} {f} {d} {s}|{s}|{s}|{s}|{s}",
+            " {s} {f}",
             .{
                 sid,
                 std.zig.fmtString(block),
-                index,
-                m.id,
-                m.from,
-                m.at,
-                m.uid,
-                m.markdown,
             },
         );
         const s = me(ctx);
@@ -742,7 +772,40 @@ const Scripted = struct {
             t,
             sid,
         )) return .failed;
-        return if (s.store_ok) .ok else .failed;
+        if (!s.store_ok) return .failed;
+        return .{ .appended = s.transcript_before + block.len };
+    }
+    /// Every field of the message in Chat.Message's order, so a record laid
+    /// out wrong across the seam shows.
+    fn indexMessage(
+        ctx: *anyopaque,
+        conv: Conv,
+        sid: []const u8,
+        m: abi.Message,
+    ) void {
+        say(
+            ctx,
+            "index {s} {s} {s}|{s}|{s}|{s}|{s}",
+            .{
+                conv.key,
+                sid,
+                m.id,
+                m.from,
+                m.at,
+                m.uid,
+                m.markdown,
+            },
+        );
+    }
+    fn writeCache(ctx: *anyopaque, path: []const u8, bytes: []const u8) void {
+        say(
+            ctx,
+            "cache {s} {f}",
+            .{
+                path,
+                std.zig.fmtString(bytes),
+            },
+        );
     }
     /// The separator and the entry escaped, so their every byte shows.
     fn appendEntry(
@@ -1174,21 +1237,30 @@ test "a topic's reactions, react, pin and unpin are the Roc's: presence, the con
         s.accounts = &.{steve};
         break :blk s;
     }, .not_found, "member;presence;accounts;");
-    // A tail the Zig serves, handed back once the Roc found the
-    // conversation and the topic the member's; a stream counts no presence.
+    // A tail the Zig serves (an upload's POST), handed back once the Roc
+    // found the conversation and the topic the member's; a name no upload
+    // has is the Roc's own 404 (metal-vmm QUEUE 291); a stream counts no
+    // presence.
     try expectAct(
-        "/c/1_2/Plans/uploads/a.png",
+        "/c/1_2/Plans/upload",
         false,
-        .GET,
+        .POST,
         a,
         .{ .serve = .{ .route = .{
             .family = .dm,
             .key = "1_2",
             .topic = "Plans",
             .part = .topic,
-            .tail = .uploads,
-            .rest = "a.png",
-        }, .presence = false } },
+            .tail = .upload,
+        } } },
+        dm_topic,
+    );
+    try expectAct(
+        "/c/1_2/Plans/uploads/a.png",
+        false,
+        .GET,
+        a,
+        .not_found,
         dm_topic,
     );
     try expectAct(
@@ -1196,27 +1268,25 @@ test "a topic's reactions, react, pin and unpin are the Roc's: presence, the con
         false,
         .GET,
         a,
-        .{ .serve = .{ .route = .{
-            .family = .dm,
-            .key = "1_2",
+        .{ .stream = .{
+            .key = "1_2/Plans",
+            .transcript = "1_2/sessions/Plans.md",
             .topic = "Plans",
-            .part = .topic,
-            .tail = .stream,
-        }, .presence = false } },
+        } },
         "member;accounts;list 1_2/sessions;",
     );
     try expectAct(
-        "/ops/Plans/download",
+        "/ops/Plans/upload",
         true,
-        .GET,
+        .POST,
         a,
         .{ .serve = .{ .route = .{
             .family = .channel,
             .key = "ops",
             .topic = "Plans",
             .part = .topic,
-            .tail = .download,
-        }, .presence = false } },
+            .tail = .upload,
+        } } },
         ops_topic,
     );
     try expectAct(
@@ -1500,6 +1570,9 @@ test "a page's sidebar is the Roc's (sidebarOf): the roster but the viewer, each
 const Sent = struct {
     count: []const u8,
     render: []const u8,
+    /// The append alone: what a send whose append fails asks.
+    append: []const u8,
+    /// The append, the count and the index (metal-vmm QUEUE 287).
     store: []const u8,
     publish: []const u8,
     fan_out: []const u8,
@@ -1518,7 +1591,13 @@ fn sent(
     const block = "\n\n-------------\nMSG_" ++ id ++ "\nfrom: " ++ name ++ "\ndate: " ++ at ++ "\nuid: 1\n\n" ++ md;
     const frame = "id: 3\ndata: {\"index\":3,\"from\":\"" ++ name ++ "\",\"from_uid\":\"1\",\"at\":\"" ++ at ++ "\",\"html\":\"<p>" ++ md ++ "</p>\",\"markdown\":\"" ++ md ++ "\",\"id\":\"" ++ id ++ "\"" ++ (if (cid.len == 0) "" else ",\"cid\":\"" ++ cid ++ "\"") ++ "}\n\n";
     const message = id ++ "|" ++ name ++ "|" ++ at ++ "|1|" ++ md;
+    const appended = std.fmt.comptimePrint("append {s} {s} {f};", .{
+        conv,
+        sid,
+        std.zig.fmtString(block),
+    });
     return comptime .{
+        .append = appended,
         .count = blk: {
             const dir = if (std.mem.startsWith(
                 u8,
@@ -1528,12 +1607,25 @@ fn sent(
             break :blk "stat " ++ dir ++ "/sessions/" ++ sid ++ ".md;read_at " ++ dir ++ "/sessions/" ++ sid ++ ".count;";
         },
         .render = "render " ++ md ++ ";",
-        .store = std.fmt.comptimePrint("store {s} {s} {f} 3 {s};", .{
-            conv,
-            sid,
-            std.zig.fmtString(block),
-            message,
-        }),
+        // The append, then the count the Roc writes (metal-vmm QUEUE 287:
+        // 4 messages, the transcript's 100 bytes and the block, the block
+        // at 100 by member 1), then the index.
+        .store = blk: {
+            const dir = if (std.mem.startsWith(
+                u8,
+                conv,
+                "dm ",
+            )) key else "channels/" ++ key;
+            break :blk std.fmt.comptimePrint("{s}cache {s}/sessions/{s}.count 4 {d}\\n100 1\\n;index {s} {s} {s};", .{
+                appended,
+                dir,
+                sid,
+                100 + block.len,
+                key,
+                sid,
+                message,
+            });
+        },
         .publish = std.fmt.comptimePrint("publish {s}/{s} {f};", .{
             key,
             sid,
@@ -1762,7 +1854,7 @@ test "a message is the Roc's: no author, no message; the count, the id, the stam
         var s = a;
         s.store_ok = false;
         break :blk s;
-    }, .answered, before ++ plans.count ++ plans.render ++ plans.store);
+    }, .answered, before ++ plans.count ++ plans.render ++ plans.append);
     // A topic's first message is index 0: its id `_1`, its block with no
     // separator before it, its frame `id: 0`.
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
@@ -1780,7 +1872,8 @@ test "a message is the Roc's: no author, no message; the count, the id, the stam
     );
     const at = "2025-10-25T13:46:40Z";
     for ([_][]const u8{
-        "store " ++ dm_said ++ " Plans MSG_Plans_1\\nfrom: Steve\\ndate: " ++ at ++ "\\nuid: 1\\n\\none 0 Plans_1|Steve|" ++ at ++ "|1|one;",
+        "append " ++ dm_said ++ " Plans MSG_Plans_1\\nfrom: Steve\\ndate: " ++ at ++ "\\nuid: 1\\n\\none;",
+        "index 1_2 Plans Plans_1|Steve|" ++ at ++ "|1|one;",
         "publish 1_2/Plans id: 0\\ndata: {\\\"index\\\":0,",
     }) |want| if (std.mem.indexOf(
         u8,
@@ -1993,7 +2086,7 @@ test "a send is the Roc's: the conversation, the method, the header, the body, t
             "hi",
             "c-1",
         );
-        break :blk s.count ++ s.render ++ s.store;
+        break :blk s.count ++ s.render ++ s.append;
     });
     // Judged by the Roc before the host is asked to: empty; not UTF-8, which
     // the form's door refuses as malformed.
@@ -2077,7 +2170,7 @@ test "a send is the Roc's: the conversation, the method, the header, the body, t
             "New topic: [Ideas](/chat/c/1_2/Ideas)",
             "",
         );
-        break :blk g.count ++ g.render ++ g.store;
+        break :blk g.count ++ g.render ++ g.append;
     } ++ "aside end;dropped announcement Ideas;");
 }
 

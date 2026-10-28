@@ -137,8 +137,8 @@ Chat := [].{
 	}
 
 	## What the answer is:
-	## - `Serve`: Zig serves `route` (marking presence first when `presence`
-	##   is `Counted`);
+	## - `Serve`: Zig serves `route` (its presence the Roc's, counted
+	##   first, metal-vmm QUEUE 288);
 	## - `Redirect`: a 303 to `location`;
 	## - `Respond`: `status` with `body`, and a content-type when
 	##   `content_type` (`sniff` `Forbid`: the browser told not to guess another);
@@ -153,6 +153,10 @@ Chat := [].{
 	##   out), then `location`.
 	## - `ToLogin`: a 303 to the login page, to come back to `location` after
 	##   (the request's own path, so the host checks that it is on the site).
+	## - `Stream`: the live stream on the bus key `location`, held by the
+	##   host (metal-vmm QUEUE 286); a topic's, with its backlog replayed
+	##   first from the transcript at `body` (a path under the chat root),
+	##   its messages numbered in topic `route.topic`. `body` empty: live only.
 	Kind : [
 		Serve,
 		Redirect,
@@ -164,10 +168,8 @@ Chat := [].{
 		Found,
 		Held,
 		ToLogin,
+		Stream,
 	]
-
-	## Whether a request Zig serves counts as the member's presence.
-	Counting : [Counted, Uncounted]
 
 	## Whether the browser may guess a type other than `content_type`
 	## (`Forbid`: the answer says `nosniff`).
@@ -176,7 +178,6 @@ Chat := [].{
 	Answer : {
 		kind : Kind,
 		location : List(U8),
-		presence : Counting,
 		route : Route,
 		status : U16,
 		content_type : List(U8),
@@ -200,7 +201,6 @@ Chat := [].{
 	none = {
 		kind: Serve,
 		location: [],
-		presence: Uncounted,
 		route: family(NotFound),
 		status: 0,
 		content_type: [],
@@ -210,11 +210,10 @@ Chat := [].{
 	}
 
 	## Zig serves it.
-	zig : Route, Counting -> Answer
-	zig = |route, presence| {
+	zig : Route -> Answer
+	zig = |route| {
 		..none,
 		route,
-		presence,
 	}
 
 	## A 303 to `location`.
@@ -291,6 +290,30 @@ Chat := [].{
 		..none,
 		kind: Found,
 		location,
+	}
+
+	## The live stream on the bus key `key`, nothing replayed: a member's
+	## feed, notifications or sidebar.
+	stream : List(U8) -> Answer
+	stream = |key| {
+		..none,
+		kind: Stream,
+		location: key,
+	}
+
+	## A topic's stream on the bus key `key`: its backlog first, from the
+	## transcript at `transcript`, numbered in `topic`.
+	topic_stream : List(U8), List(U8), List(U8) -> Answer
+	topic_stream = |
+		key,
+		transcript,
+		topic,
+	| {
+		..none,
+		kind: Stream,
+		location: key,
+		body: transcript,
+		route: { ..family(NotFound), topic },
 	}
 
 	## To the login page, to come back to `next` after.

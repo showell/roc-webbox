@@ -59,7 +59,12 @@ const Files = struct {
         h.append_line = appendLine;
         h.publish = publish;
         h.render = render;
-        h.store_message = storeMessage;
+        h.append_message = appendMessage;
+        h.serve_upload = serveUpload;
+        h.bundle_add = bundleAdd;
+        h.serve_bundle = serveBundle;
+        h.index_message = indexMessage;
+        h.write_cache = writeCache;
         h.append_entry = appendEntry;
         h.report_fanout_failure = fanoutFailed;
         h.check_online = online;
@@ -143,18 +148,36 @@ const Files = struct {
         }
         return .{ .rendered = "<p>html</p>" };
     }
-    /// Topic `Broken` will not store.
-    fn storeMessage(
+    /// Topic `Broken` will not take a block; any other's transcript is 42
+    /// bytes after it.
+    fn serveUpload(ctx: *anyopaque, u: abi.Upload) @import("chat_route.zig").UploadServed {
+        of(ctx).asked.print(
+            testing.allocator,
+            "upload {d} {d} {d} {s} {s} {t};",
+            .{ u.first, u.last, u.size, u.content_type, u.path, u.part },
+        ) catch @panic("oom");
+        return .served;
+    }
+    fn bundleAdd(ctx: *anyopaque, name: []const u8, path: []const u8) @import("chat_route.zig").Done {
+        of(ctx).asked.print(
+            testing.allocator,
+            "add {s} {s};",
+            .{ name, path },
+        ) catch @panic("oom");
+        return .ok;
+    }
+    fn serveBundle(ctx: *anyopaque, name: []const u8) void {
+        say(ctx, "bundle", name);
+    }
+    fn appendMessage(
         ctx: *anyopaque,
         conv: abi.Conv,
         sid: []const u8,
         block: []const u8,
-        index: u64,
-        m: abi.Message,
-    ) route.Done {
+    ) abi.AppendedAt {
         of(ctx).asked.print(
             testing.allocator,
-            "store {t} {s} {s} {s},{s} {s} {s} {d} id={s} from={s} at={s} uid={s} md={s};",
+            "append {t} {s} {s} {s},{s} {s} {s};",
             .{
                 conv.family,
                 conv.key,
@@ -163,12 +186,6 @@ const Files = struct {
                 conv.members[1],
                 sid,
                 block,
-                index,
-                m.id,
-                m.from,
-                m.at,
-                m.uid,
-                m.markdown,
             },
         ) catch @panic("oom");
         if (std.mem.eql(
@@ -179,7 +196,35 @@ const Files = struct {
             fail(ctx, error.IsDir);
             return .failed;
         }
-        return .ok;
+        return .{ .appended = 42 };
+    }
+    /// Every field of the message in Chat.Message's order.
+    fn indexMessage(
+        ctx: *anyopaque,
+        conv: abi.Conv,
+        sid: []const u8,
+        m: abi.Message,
+    ) void {
+        of(ctx).asked.print(
+            testing.allocator,
+            "index {s} {s} id={s} from={s} at={s} uid={s} md={s};",
+            .{
+                conv.key,
+                sid,
+                m.id,
+                m.from,
+                m.at,
+                m.uid,
+                m.markdown,
+            },
+        ) catch @panic("oom");
+    }
+    fn writeCache(ctx: *anyopaque, path: []const u8, bytes: []const u8) void {
+        of(ctx).asked.print(
+            testing.allocator,
+            "cache {s} {f};",
+            .{ path, std.zig.fmtString(bytes) },
+        ) catch @panic("oom");
     }
     /// `users/1/broken` will not take a line; any other path does.
     fn appendLine(
@@ -651,15 +696,37 @@ test "a message's render and store cross the seam: the HTML or a render that fai
     const fields = "id=Plans_9 from=Steve at=2026-10-26T00:00:00Z uid=1 md=**hi**";
     try probe(
         "/store/Plans",
-        "done",
-        "store dm 1_2 /chat/c/1_2 1,2 Plans the block 8 " ++ fields ++ ";",
+        "appended 42",
+        "append dm 1_2 /chat/c/1_2 1,2 Plans the block;index 1_2 Plans " ++ fields ++ ";",
         null,
     );
     try probe(
         "/store/Broken",
         "failed",
-        "store dm 1_2 /chat/c/1_2 1,2 Broken the block 8 " ++ fields ++ ";",
+        "append dm 1_2 /chat/c/1_2 1,2 Broken the block;",
         error.IsDir,
+    );
+    // A cache under the root is written; one off it fails the request (the
+    // seam's path check), never written.
+    // An upload's record crosses whole, each field in its place, for
+    // each part; a bundle's two effects in turn (metal-vmm QUEUE 291).
+    inline for (.{ .{ "r", "range" }, .{ "u", "unsatisfiable" }, .{ "w", "whole" } }) |p| try probe(
+        "/upload/" ++ p[0],
+        "served",
+        "upload 11 22 33 image/png 1_2/sessions/Plans.uploads/a.png " ++ p[1] ++ ";",
+        null,
+    );
+    try probe(
+        "/bundle/Plans",
+        "bundled",
+        "add Plans/Plans.md 1_2/sessions/Plans.md;bundle Plans;",
+        null,
+    );
+    try probe(
+        "/cache/1_2/sessions/Plans.count",
+        "written",
+        "cache 1_2/sessions/Plans.count 7 99\\n;",
+        null,
     );
 }
 

@@ -15,10 +15,11 @@
 ## stamp, its line and its frame), stored and sent through the primitives
 ## (`append_line!`, `message_count!`, `publish!`); a message is the Roc's
 ## too (`append_message!`: its author, number, stamp, block and frame), stored
-## through `store_message!` (the append, the count cache, the search index),
+## through `store_block!` (the append, the count cache, the search index),
 ## and its fan-out (Fanout.roc: every member's surfaces, their keys, events
 ## and feed entries) through `publish!`, `append_entry!` and
-## `report_fanout_failure!`, the message's parts its own (Fanout.parts_of). The files and folders it reads by name (the member's own, a
+## `report_fanout_failure!`, the message's parts its own (Fanout.parts_of).
+## The files and folders it reads by name (the member's own, a
 ## conversation's topics, a channel's members, the rosters, a topic's
 ## reactions) it reads through the file primitives, the names and formats
 ## its own.
@@ -52,6 +53,9 @@ import Saved
 import JsonOut
 import Limits
 import BusKey
+import ChatUrl
+import Docs
+import Upload
 import Search
 
 handle! : Chat.Request => Chat.Answer
@@ -67,7 +71,7 @@ handle! = |req|
 dispatch! : Chat.Request, Str => Chat.Answer
 dispatch! = |req, sub|
 	match (if req.area == Channel Err(NotAnAsset) else Route.asset(sub)) {
-		Ok(route) => zig(route, Uncounted)
+		Ok(route) => zig(route)
 		Err(NotAnAsset) =>
 			if Host.check_member!({}) == Outsider {
 				area = if req.area == Channel "/channel" else "/chat"
@@ -76,7 +80,11 @@ dispatch! = |req, sub|
 				route = if req.area == Channel Route.under_channel(sub) else Route.under_chat(sub)
 				match served_by(route) {
 					Roc => act!(req, route)
-					Zig => zig(route, if Route.is_stream(route) Uncounted else Counted)
+					# A stream is no presence (the Zig's streams were served uncounted).
+					Zig => {
+						if Route.is_stream(route) {} else presence!(Unasked)
+						zig(route)
+					}
 				}
 			}
 	}
@@ -121,11 +129,11 @@ not_found_page! = |
 	}
 
 ## The route handed back to the Zig, as the seam's bytes.
-zig : Route.R, Chat.Counting -> Chat.Answer
-zig = |route, counting| Chat.zig(Route.to_wire(route), counting)
+zig : Route.R -> Chat.Answer
+zig = |route| Chat.zig(Route.to_wire(route))
 
 ## Which side serves a route. The Roc serves: /chat and /chat/default, the recent,
-## images and code pages (not their streams), /chat/links,
+## images and code pages and every stream (metal-vmm QUEUE 286), /chat/links,
 ## /chat/conversations, /chat/msg/<id>; and every route of a DM or a
 ## channel, handing back to the Zig only a topic's uploads, upload,
 ## stream, download and saved, once it has found them the viewer's.
@@ -134,13 +142,17 @@ served_by : Route.R -> [Roc, Zig]
 served_by = |r|
 	match r.family {
 		Default | Links | Conversations | Msg => Roc
-		Recent | Images | Code => if r.rest == "/stream" Zig else Roc
+		# The pages and their streams (metal-vmm QUEUE 286): the Roc picks
+		# the member's bus key, the host holds the stream.
+		Recent | Images | Code | Notifications | SidebarStream => Roc
+		NotFound => Roc
 		# **THE ROC DECIDES EVERY CONVERSATION'S ROUTE** (metal-vmm QUEUE
 		# 271): whose it is, whether its topic is there, every 404. The Zig
 		# serves the tails handed back to it, authorized here.
 		Dm | Channel => Roc
-		# A doc posted to chat (metal-vmm QUEUE 278); the rest of docs is Zig's.
-		Docs => if r.rest == "/post" Roc else Zig
+		# The docs: posted to chat (metal-vmm QUEUE 278), the read pages
+		# (289), the writes and the live preview (290).
+		Docs => Roc
 		# Search's words and messages (metal-vmm QUEUE 281, 282), and the
 		# 404 for anything else under /chat/search.
 		Search => Roc
@@ -154,20 +166,636 @@ act! = |req, route| {
 	# the member is counted online: login seeded it before they ever were.
 	who = if route.family == Default welcome!({}) else Unasked
 	# A stream is no presence (the Zig's streams were served uncounted).
-	if Route.is_stream(route) {} else Host.count_presence!({})
+	if Route.is_stream(route) {} else presence!(who)
 	match route.family {
 		Default => resume!(who)
 		Conversations => if req.method != Get Chat.not_allowed(Get) else serve_conversations!({})
 		Msg => redirect_to_msg!(route.rest.to_utf8())
 		Links => serve_links!(route.rest.to_utf8())
-		Recent => serve_recent!(route.rest.to_utf8())
-		Docs => post_doc!(req)
+		Recent =>
+			if route.rest == "/stream" {
+				member_stream!(req, BusKey.recent)
+			} else {
+				serve_recent!(route.rest.to_utf8())
+			}
+		Docs => docs!(req, route.rest)
 		Search => search!(req, route.rest)
-		Images => serve_feed!(Images, route.rest.to_utf8())
-		Code => serve_feed!(Code, route.rest.to_utf8())
+		Images =>
+			if route.rest == "/stream" {
+				member_stream!(req, BusKey.images)
+			} else {
+				serve_feed!(Images, route.rest.to_utf8())
+			}
+		Code =>
+			if route.rest == "/stream" {
+				member_stream!(req, BusKey.code)
+			} else {
+				serve_feed!(Code, route.rest.to_utf8())
+			}
+		Notifications => member_stream!(req, BusKey.notify)
+		SidebarStream => member_stream!(req, BusKey.sidebar)
+		NotFound => Chat.not_found
 		_ => serve_conversation!(req, route)
 	}
 }
+
+## **THE MEMBER COUNTED ONLINE** (metal-vmm QUEUE 288): the host marks
+## them (the online map lasts the process, so it is the host's); on the
+## edge, offline until now, the Roc tells every other member and the
+## agent, on their sidebar (the row's dot) and their status strip.
+## **BEST-EFFORT, IN AN ASIDE**: a read that fails tells no one and never
+## fails the request, and the edge is given back (`presence_unspent!`),
+## so a request 30 s on is the edge again.
+presence! : Who => {}
+presence! = |who|
+	match Host.count_presence!({}) {
+		Steady => {}
+		CameOnline => {
+			_ = Host.aside!(Begin)
+			told = came_online!(who)
+			match (Host.aside!(End), told) {
+				(Done, Ok({})) => {}
+				_ => Host.presence_unspent!({})
+			}
+		}
+	}
+
+## The came-online fan-out (the Zig's, gone): the member's name, then
+## every authorized account but theirs (listAuthorized: one that will not
+## read fails it), each told on its sidebar, then its status strip, with
+## a link to its DM with the member.
+came_online! : Who => Try({}, [Failed])
+came_online! = |who| {
+	me = load_uid!({})?
+	all = load_accounts!(who)?
+	name = fail_if_unreadable!(Accounts.name(all, me))?
+	roster = fail_if_unreadable!(Accounts.authorized(all))?
+	online = JsonOut.object([
+		("kind", JsonOut.string("user-online")),
+		("user_id", JsonOut.string(me.to_str())),
+		("user_name", JsonOut.string(name)),
+	]).bytes()
+	List.for_each!(
+		List.drop_if(roster, |u| u.id == me),
+		|u| {
+			Host.publish!(BusKey.sidebar(u.id).bytes(), online)
+			link = ChatUrl.conv(Dm(Paths.pair_key(u.id, me))).to_str()
+			strip = JsonOut.object([
+				("text", JsonOut.string("${name} has come online.")),
+				("link_url", JsonOut.string(link)),
+			])
+			Host.publish!(BusKey.notify(u.id).bytes(), strip.bytes())
+		},
+	)
+	Ok({})
+}
+
+## **THE MEMBER'S DOCS** (docs.zig `handle`, metal-vmm QUEUE 289, 290):
+## posting one to chat, the writes (a new doc, a save, a message saved to
+## the reading list), the live preview, then the read pages.
+docs! : Chat.Request, Str => Chat.Answer
+docs! = |req, rest|
+	if rest == "/post" {
+		post_doc!(req)
+	} else if rest == "/new" {
+		new_doc!(req)
+	} else if rest == "/save" {
+		save_doc!(req)
+	} else if rest == "/render" {
+		preview_doc!(req)
+	} else if rest == "/save_to_reading_list" {
+		save_to_reading_list!(req)
+	} else {
+		docs_read!(req, rest)
+	}
+
+## docsNew: a doc of the posted title, made empty, then its editor (303);
+## a GET, or no title, back to the docs.
+new_doc! : Chat.Request => Chat.Answer
+new_doc! = |req|
+	if req.method != Post {
+		Chat.redirect("/chat/docs".to_utf8())
+	} else {
+		body = Host.read_body!(Doc)
+		if body.status == Answered {
+			Chat.answered
+		} else {
+			match Form.field(body.bytes, "title") {
+				Malformed => Chat.malformed
+				Found(title) => create_doc!(ZigText.trim_str(title))
+				Missing => create_doc!("")
+			}
+		}
+	}
+
+## createUserDoc: the title's slug, one no doc has yet, made empty.
+create_doc! : Str => Chat.Answer
+create_doc! = |title|
+	if title == "" {
+		Chat.redirect("/chat/docs".to_utf8())
+	} else {
+		match load_uid!({}) {
+			Err(Failed) => Chat.answered
+			Ok(me) =>
+				match unused_slug!(me, Docs.slug_of_title(title)) {
+					Err(Failed) => Chat.answered
+					Ok(slug) =>
+						match Paths.doc_path(me, slug) {
+							# A slug of 80 suffixed past 80 (docPath's InvalidDocSlug).
+							Err(NotASlug) => Chat.respond(
+								500,
+								[],
+								"The doc cannot be made: InvalidDocSlug.\n".to_utf8(),
+							)
+							Ok(path) =>
+								match Files.write!(path, []) {
+									Err(Failed) => Chat.answered
+									Ok({}) => {
+										doc_touched!(me, slug)
+										Chat.redirect("/chat/docs/${slug}".to_utf8())
+									}
+								}
+						}
+				}
+		}
+	}
+
+## uniqueDocSlug: `base` unless a doc has it or a docs route does, else
+## the first of `base-2` to `base-999` no doc has; past those, `base`.
+unused_slug! : Uid, Str => Try(Str, [Failed])
+unused_slug! = |me, base|
+	if [
+		"list",
+		"new",
+		"save",
+		"render",
+		"post",
+	].contains(base) {
+		suffixed_slug!(
+			me,
+			base,
+			2,
+		)
+	} else {
+		match doc_there!(me, base) {
+			Err(Failed) => Err(Failed)
+			Ok(Free) => Ok(base)
+			Ok(Taken) => suffixed_slug!(
+				me,
+				base,
+				2,
+			)
+		}
+	}
+
+## `base-n`, or the next, up to 999.
+suffixed_slug! : Uid, Str, U64 => Try(Str, [Failed])
+suffixed_slug! = |
+	me,
+	base,
+	n,
+|
+	if n >= 1000 {
+		Ok(base)
+	} else {
+		candidate = "${base}-${n.to_str()}"
+		match doc_there!(me, candidate) {
+			Err(Failed) => Err(Failed)
+			Ok(Free) => Ok(candidate)
+			Ok(Taken) => suffixed_slug!(
+				me,
+				base,
+				n + 1,
+			)
+		}
+	}
+
+## docFileExists: whether the member has a doc `slug` (a name no slug
+## names none).
+doc_there! : Uid, Str => Try([Taken, Free], [Failed])
+doc_there! = |me, slug|
+	match Paths.doc_path(me, slug) {
+		Err(NotASlug) => Ok(Free)
+		Ok(path) =>
+			match Files.stat!(path) {
+				Ok(_) => Ok(Taken)
+				Err(Missing) => Ok(Free)
+				Err(Failed) => Err(Failed)
+			}
+	}
+
+## docsSave: a doc's body replaced (the editor's autosave), then 204.
+## **A SAVE SAYS WHAT IT SAVES** (metal-vmm QUEUE 172): no body field is
+## refused, never an emptied doc; a doc not there is a 404, never made.
+save_doc! : Chat.Request => Chat.Answer
+save_doc! = |req|
+	if req.method != Post {
+		Chat.not_allowed(Post)
+	} else {
+		body = Host.read_body!(Doc)
+		if body.status == Answered {
+			Chat.answered
+		} else {
+			match Form.field(body.bytes, "slug") {
+				Malformed => Chat.malformed
+				Found(slug) => save_slug!(body.bytes, ZigText.trim_str(slug))
+				Missing => save_slug!(body.bytes, "")
+			}
+		}
+	}
+
+## The save of doc `slug`, its text the form's `body`.
+save_slug! : List(U8), Str => Chat.Answer
+save_slug! = |form, slug|
+	match load_uid!({}) {
+		Err(Failed) => Chat.answered
+		Ok(me) =>
+			match Paths.doc_path(me, slug) {
+				Err(NotASlug) => refuse("bad slug\n")
+				Ok(path) =>
+					match Form.field(form, "body") {
+						Malformed => Chat.malformed
+						Missing => refuse("not saved: no body\n")
+						Found(text) =>
+							match Files.stat!(path) {
+								Err(Missing) => Chat.respond(
+									404,
+									[],
+									"no such doc\n".to_utf8(),
+								)
+								Err(Failed) => Chat.answered
+								Ok(_) =>
+									match Files.write!(path, text.to_utf8()) {
+										Err(Failed) => Chat.answered
+										Ok({}) => {
+											doc_touched!(me, slug)
+											Chat.respond(
+												204,
+												[],
+												[],
+											)
+										}
+									}
+							}
+					}
+			}
+	}
+
+## docsRender: posted markdown as the live preview renders it, the same
+## processor a message's; hostile markdown is its placeholder, counted.
+preview_doc! : Chat.Request => Chat.Answer
+preview_doc! = |req|
+	if req.method != Post {
+		Chat.not_allowed(Post)
+	} else {
+		body = Host.read_body!(Doc)
+		if body.status == Answered {
+			Chat.answered
+		} else {
+			match Form.field(body.bytes, "body") {
+				Malformed => Chat.malformed
+				Found(md) => preview!(md)
+				Missing => preview!("")
+			}
+		}
+	}
+
+## `md` rendered for the preview.
+preview! : Str => Chat.Answer
+preview! = |md| {
+	rendered = Host.render_preview!(md.to_utf8())
+	match rendered.status {
+		Failed => Chat.answered
+		Rendered => Chat.respond(
+			200,
+			html,
+			rendered.html,
+		)
+	}
+}
+
+## docsSaveToReadingList: a chat message, as its saver saw it, appended to
+## their reading list with the way back to it, then 204; a list at its
+## cap is the client's 413.
+save_to_reading_list! : Chat.Request => Chat.Answer
+save_to_reading_list! = |req|
+	if req.method != Post {
+		Chat.not_allowed(Post)
+	} else {
+		body = Host.read_body!(Doc)
+		if body.status == Answered {
+			Chat.answered
+		} else {
+			fields = List.map(
+				[
+					"conv",
+					"sid",
+					"id",
+					"from",
+					"at",
+					"body",
+					"note",
+				],
+				|name| Form.field(body.bytes, name),
+			)
+			if fields.contains(Malformed) {
+				Chat.malformed
+			} else {
+				texts = List.map(
+					fields,
+					|f|
+						match f {
+							Found(t) => t
+							_ => ""
+						},
+				)
+				match texts {
+					[
+						conv,
+						sid,
+						id,
+						from,
+						at,
+						md,
+						note,
+					] => saved_message!({
+						conv: ZigText.trim_str(conv),
+						sid: ZigText.trim_str(sid),
+						id: ZigText.trim_str(id),
+						from,
+						at,
+						md,
+						note,
+					})
+					_ => crash "save_to_reading_list!: seven fields asked, not seven answered"
+				}
+			}
+		}
+	}
+
+## The saved message appended; one missing a place or a body refused.
+saved_message! : {
+	conv : Str,
+	sid : Str,
+	id : Str,
+	from : Str,
+	at : Str,
+	md : Str,
+	note : Str,
+} => Chat.Answer
+saved_message! = |m|
+	if m.conv == "" or m.sid == "" or m.id == "" or m.md == "" {
+		refuse("missing field\n")
+	} else {
+		match load_uid!({}) {
+			Err(Failed) => Chat.answered
+			Ok(me) => {
+				url = "${ChatUrl.feed_conv(m.conv).to_str()}/${m.sid}#msg-${m.id}"
+				entry = Docs.reading_entry({
+					note: m.note,
+					from: m.from,
+					at: m.at,
+					url,
+					body: m.md,
+				}).to_utf8()
+				path = Paths.reading_list_path(me)
+				# **A DOCUMENT THAT WILL NOT READ IS NOT AN EMPTY DOCUMENT**:
+				# the write replaces it with what was read and the entry.
+				stored = match Files.read_bytes!(path) {
+					Ok(bytes) => Ok(bytes)
+					Err(Missing) => Ok([])
+					Err(Failed) => Err(Failed)
+				}
+				match stored {
+					Err(Failed) => Chat.answered
+					Ok(before) =>
+						if List.len(before) + List.len(entry) > Limits.reading_list_bytes {
+							Chat.respond(
+								413,
+								[],
+								"not saved: the reading list is full\n".to_utf8(),
+							)
+						} else {
+							match Files.write!(path, List.concat(before, entry)) {
+								Err(Failed) => Chat.answered
+								Ok({}) => {
+									doc_touched!(me, "reading-list")
+									Chat.respond(
+										204,
+										[],
+										[],
+									)
+								}
+							}
+						}
+				}
+			}
+		}
+	}
+
+## publishDocRecent: the member's own recent feed told of doc `slug`,
+## made or saved now.
+doc_touched! : Uid, Str => {}
+doc_touched! = |me, slug|
+	Host.publish!(
+		BusKey.recent(me).bytes(),
+		Docs.recent_frame(Time.rfc3339(Host.now!({})), slug),
+	)
+
+## **THE DOCS' READ PAGES** (docs.zig `handle`, metal-vmm QUEUE 289), each
+## the member's own, never another's: the landing, the list's JSON, a doc's
+## raw markdown, its editor. One segment after /docs: a nested one is a 404.
+docs_read! : Chat.Request, Str => Chat.Answer
+docs_read! = |req, rest|
+	match load_uid!({}) {
+		Err(Failed) => Chat.answered
+		Ok(me) =>
+			if rest == "" or rest == "/" {
+				docs_landing!(me)
+			} else {
+				seg = rest.drop_prefix("/")
+				if seg == "list" {
+					if req.method != Get Chat.not_allowed(Get) else docs_list!(me)
+				} else if seg.contains("/") {
+					Chat.not_found
+				} else if seg.ends_with(".md") {
+					raw_doc!(me, seg.drop_suffix(".md"))
+				} else {
+					docs_editor!(me, ZigText.trim_str(seg))
+				}
+			}
+	}
+
+## The member's docs, sorted by slug, and in the folder's order (a folder
+## not there holds none). `Failed` when it would not list.
+load_docs! : Uid => Try(List({ slug : Str, path : Paths.ChatPath }), [Failed])
+load_docs! = |me|
+	match Files.list!(Paths.docs_folder(me)) {
+		Ok(listed) => Ok(Paths.docs_in_order(me, listed.entries))
+		Err(Missing) => Ok([])
+		Err(Failed) => Err(Failed)
+	}
+
+## **THE DOC TOUCHED LAST** (mostRecentDocSlug), the landing's 303, a
+## reading list just saved among them; with none, the editor with nothing
+## open.
+docs_landing! : Uid => Chat.Answer
+docs_landing! = |me|
+	match load_docs!(me) {
+		Err(Failed) => Chat.answered
+		Ok(docs) =>
+			match last_touched!(docs, Err(None)) {
+				Err(Failed) => Chat.answered
+				Ok(Ok(last)) => Chat.redirect("/chat/docs/${last.slug}".to_utf8())
+				Ok(Err(None)) => docs_page!(sorted_slugs(docs), Nothing)
+			}
+	}
+
+## Of `docs`, in the folder's order, the one changed last, the first of a
+## tie, against `best` so far; one gone since the listing is passed over.
+last_touched! : List({ slug : Str, path : Paths.ChatPath }),
+Try({ slug : Str, mtime : I64 }, [None]) => Try(
+	Try({ slug : Str, mtime : I64 }, [None]),
+	[Failed],
+)
+last_touched! = |docs, best|
+	match docs {
+		[] => Ok(best)
+		[doc, .. as more] =>
+			match Files.stat!(doc.path) {
+				Err(Failed) => Err(Failed)
+				Err(Missing) => last_touched!(more, best)
+				Ok(st) =>
+					match best {
+						Ok(b) if b.mtime >= st.mtime => last_touched!(more, best)
+						_ => last_touched!(more, Ok({ slug: doc.slug, mtime: st.mtime }))
+					}
+			}
+	}
+
+## The slugs of `docs`, sorted (listUserDocs' order).
+sorted_slugs : List({ slug : Str, path : Paths.ChatPath }) -> List(Str)
+sorted_slugs = |docs| Paths.sort_by_bytes(List.map(docs, |d| d.slug))
+
+## docsList: the member's docs as JSON, for an API client.
+docs_list! : Uid => Chat.Answer
+docs_list! = |me|
+	match load_docs!(me) {
+		Err(Failed) => Chat.answered
+		Ok(docs) => Chat.respond(
+			200,
+			json,
+			Docs.list_json(me.to_str(), sorted_slugs(docs)),
+		)
+	}
+
+## serveRawDoc: a doc's markdown as stored. **AN ERROR IS NOT "NO SUCH
+## DOC"** (metal-vmm QUEUE 114): a name no slug is the Zig's 500, saying so.
+raw_doc! : Uid, Str => Chat.Answer
+raw_doc! = |me, slug|
+	match Paths.doc_path(me, slug) {
+		Err(NotASlug) => Chat.respond(
+			500,
+			[],
+			"The doc cannot be read: InvalidDocSlug.\n".to_utf8(),
+		)
+		Ok(path) =>
+			match Files.read_bytes!(path) {
+				Ok(bytes) => Chat.respond(
+					200,
+					"text/markdown; charset=utf-8".to_utf8(),
+					bytes,
+				)
+				Err(Missing) => Chat.not_found
+				Err(Failed) => Chat.answered
+			}
+	}
+
+## renderDocsEditor: the editor with `slug` open; one no slug, or not
+## among the member's docs, is back to the bare editor (303).
+docs_editor! : Uid, Str => Chat.Answer
+docs_editor! = |me, slug|
+	match load_docs!(me) {
+		Err(Failed) => Chat.answered
+		Ok(docs) => {
+			slugs = sorted_slugs(docs)
+			if slug == "" {
+				docs_page!(slugs, Nothing)
+			} else {
+				match (Paths.doc_path(me, slug), slugs.contains(slug)) {
+					(Ok(path), Bool.True) => open_doc!(
+						slugs,
+						slug,
+						path,
+					)
+					_ => Chat.redirect("/chat/docs".to_utf8())
+				}
+			}
+		}
+	}
+
+## The editor with the doc at `path` open: its markdown (a doc gone since
+## the listing is empty) and that rendered, the preview's first paint.
+open_doc! : List(Str), Str, Paths.ChatPath => Chat.Answer
+open_doc! = |
+	slugs,
+	slug,
+	path,
+| {
+	stored = match Files.read_bytes!(path) {
+		Ok(bytes) => Ok(bytes)
+		Err(Missing) => Ok([])
+		Err(Failed) => Err(Failed)
+	}
+	match stored {
+		Err(Failed) => Chat.answered
+		Ok(markdown) => {
+			rendered = Host.render!(markdown)
+			match rendered.status {
+				Failed => Chat.answered
+				Rendered => docs_page!(
+					slugs,
+					Doc({
+						slug,
+						markdown,
+						rendered: Chrome.rendered(rendered.html),
+					}),
+				)
+			}
+		}
+	}
+}
+
+## The docs page for the member, `open` among their `slugs`.
+docs_page! : List(Str), Docs.Open => Chat.Answer
+docs_page! = |slugs, open|
+	match load_viewer!(Unasked) {
+		Err(Failed) => Chat.answered
+		Ok(viewer) => Chat.respond(
+			200,
+			html,
+			Docs.editor({
+				src: Chrome.src_in(Host.srcs!({})),
+				viewer,
+				slugs,
+				open,
+			}).bytes(),
+		)
+	}
+
+## **A MEMBER'S OWN STREAM** (metal-vmm QUEUE 286): their feed, their
+## notifications or their sidebar, on the bus key `key` makes of their uid,
+## live only (the page is the backlog). A GET's, as every stream is.
+member_stream! : Chat.Request, (Uid -> BusKey) => Chat.Answer
+member_stream! = |req, key|
+	if req.method != Get {
+		Chat.not_allowed(Get)
+	} else {
+		match load_uid!({}) {
+			Ok(me) => Chat.stream(key(me).bytes())
+			Err(Failed) => Chat.answered
+		}
+	}
 
 ## A DM's or a channel's, in the Zig's order: a new topic and a send look
 ## their conversation up themselves (a send makes its topic); the landing
@@ -350,6 +978,148 @@ serve_page_or_raw! = |
 		}
 	}
 
+## **AN UPLOAD SERVED** (chat_upload `serveUpload`, metal-vmm QUEUE 291):
+## a GET's or a HEAD's, of a name an upload has, typed by it; whole, or the
+## range asked for, or the 416 for one that cannot be. The host serves the
+## bytes (Host.serve_upload!).
+serve_upload! : Chat.Request, Route.R, AtTopic => Chat.Answer
+serve_upload! = |
+	req,
+	route,
+	found,
+|
+	if req.method != Get and req.method != Head {
+		Chat.not_allowed(Get)
+	} else {
+		match Upload.content_type(route.rest) {
+			Err(NotAnUpload) => Chat.not_found
+			Ok(content_type) => {
+				path = Paths.upload_path({ key: found.key, topic: route.topic }, route.rest)
+				match Files.stat!(path) {
+					Err(Missing) => Chat.not_found
+					Err(Failed) => Chat.answered
+					Ok(st) => {
+						part = match Host.read_header!("range".to_utf8()) {
+							[] => Whole({ first: 0, last: 0 })
+							[asked, ..] =>
+								match Upload.range(asked, st.size) {
+									Ok(r) => Range(r)
+									Err(Unsatisfiable) => Unsatisfiable({ first: 0, last: 0 })
+								}
+						}
+						(kind, r) = match part {
+							Whole(at) => (Whole, at)
+							Range(at) => (Range, at)
+							Unsatisfiable(at) => (Unsatisfiable, at)
+						}
+						served = Host.serve_upload!({
+							first: r.first,
+							last: r.last,
+							size: st.size,
+							content_type: content_type.to_utf8(),
+							path: path.bytes(),
+							part: kind,
+						})
+						match served {
+							Served => Chat.answered
+							# Gone since its stat: nothing was answered.
+							Gone => Chat.not_found
+						}
+					}
+				}
+			}
+		}
+	}
+
+## **A TOPIC'S BUNDLE** (chat_download `serveBundle`, metal-vmm QUEUE 291):
+## its transcript, its reactions when anyone reacted, and every upload (a
+## folder in the uploads passed over), named under the topic, then served
+## as `<topic>.tar.gz`. A topic with no transcript is a 404; anything else
+## that will not read fails the download: the whole topic or nothing.
+serve_download! : Chat.Request, Route.R, AtTopic => Chat.Answer
+serve_download! = |
+	req,
+	route,
+	found,
+|
+	if req.method != Get and req.method != Head {
+		Chat.not_allowed(Get)
+	} else {
+		at = { key: found.key, topic: route.topic }
+		sid = route.topic
+		md = Paths.transcript_path(at)
+		match Files.stat!(md) {
+			Err(Missing) => Chat.not_found
+			Err(Failed) => Chat.answered
+			Ok(_) =>
+				match bundle_files!(at, md) {
+					Err(Failed) => Chat.answered
+					Ok(files) =>
+						match add_all!(files) {
+							Err(Failed) => Chat.answered
+							Ok({}) => {
+								Host.serve_bundle!(sid.to_utf8())
+								Chat.answered
+							}
+						}
+				}
+		}
+	}
+
+## The bundle's files, each with its name in the tar: the transcript,
+## the reactions when there, then the uploads in the folder's order.
+bundle_files! : Paths.TopicAt,
+Paths.ChatPath => Try(
+	List({ name : Str, path : Paths.ChatPath }),
+	[Failed],
+)
+bundle_files! = |at, md| {
+	sid = at.topic
+	reactions = Paths.reactions_path(at)
+	with_reactions = match Files.stat!(reactions) {
+		Ok(_) => Ok([{ name: "${sid}/${sid}.reactions.jsonl", path: reactions }])
+		Err(Missing) => Ok([])
+		Err(Failed) => Err(Failed)
+	}
+	uploads = match Files.list!(Paths.uploads_folder(at)) {
+		Ok(listed) =>
+			Ok(
+				List.keep_if(listed.entries, |e| e.kind != Dir)
+					|> List.map(
+						|e| {
+							name: "${sid}/uploads/${e.name}",
+							path: Paths.upload_path(at, e.name),
+						},
+					),
+			)
+		Err(Missing) => Ok([])
+		Err(Failed) => Err(Failed)
+	}
+	match (with_reactions, uploads) {
+		(Ok(rx), Ok(ups)) => Ok(
+			List.join([
+				[{ name: "${sid}/${sid}.md", path: md }],
+				rx,
+				ups,
+			]),
+		)
+		_ => Err(Failed)
+	}
+}
+
+## Each file added to the host's bundle, in turn; the first that will not
+## read fails it.
+add_all! : List({ name : Str, path : Paths.ChatPath }) => Try({}, [Failed])
+add_all! = |files|
+	match files {
+		[] => Ok({})
+		[f, .. as more] =>
+			match Files.bundle_add!(f.name.to_utf8(), f.path) {
+				Ok({}) => add_all!(more)
+				Err(Failed) => Err(Failed)
+			}
+	}
+
 ## A topic that is there: the method, then the work.
 serve_topic! : Chat.Request, Route.R, AtTopic => Chat.Answer
 serve_topic! = |
@@ -359,10 +1129,40 @@ serve_topic! = |
 | {
 	who = found.who
 	match route.tail {
-		# The tails the Zig serves, the conversation and the topic found
-		# the viewer's here.
-		Uploads | Upload | Stream | Download => zig(route, Uncounted)
-		Saved => if req.method != Get and req.method != Head Chat.not_allowed(Get) else serve_saved!(route)
+		# An upload and the bundle (metal-vmm QUEUE 291): the Roc decides,
+		# the host serves the bytes.
+		Uploads => serve_upload!(
+			req,
+			route,
+			found,
+		)
+		Download => serve_download!(
+			req,
+			route,
+			found,
+		)
+		# The tail the Zig serves, the conversation and the topic found the
+		# viewer's here.
+		Upload => zig(route)
+		# The topic's stream (metal-vmm QUEUE 286): its key and transcript
+		# the Roc's, the backlog's replay and the live stream the host's.
+		Stream =>
+			if req.method != Get {
+				Chat.not_allowed(Get)
+			} else {
+				at = { key: found.key, topic: route.topic }
+				Chat.topic_stream(
+					BusKey.topic(at).bytes(),
+					Paths.transcript_path(at).bytes(),
+					route.topic.to_utf8(),
+				)
+			}
+		Saved =>
+			if req.method != Get and req.method != Head {
+				Chat.not_allowed(Get)
+			} else {
+				serve_saved!(route)
+			}
 		Invalid => Chat.not_found
 		Page | Raw => serve_page_or_raw!(
 			req,
@@ -1743,7 +2543,7 @@ find_channel! = |
 					}
 				# Every name here passed channel_name_from_str already
 				# (load_rosters_from! keeps no other).
-				Err(Invalid) => crash "find_channel!: a roster's name that load_rosters_from! kept is no channel name"
+				Err(Invalid) => crash "find_channel!: a kept roster's name is no channel name"
 			}
 		Err(_) => Err(NoSuchTopic)
 	}
@@ -2264,8 +3064,8 @@ Draft : {
 ## `topic` of `conv` (as the request spelled it), with the
 ## sender's client id `cid` ("" for none). Its number is the topic's count
 ## (`message_count!`), its id `<topic>_<n>`, its stamp the request's time; its
-## block and its frame are made, then the block stored (`store_message!`:
-## the append, the count cache, the search index), then the frame published
+## block and its frame are made, then the block stored (`store_block!`: the
+## append, the count cache, the search index), then the frame published
 ## on the topic's key, then the fan-out (`fan_out!`, its steps Fanout.roc's,
 ## made before the store too). `who` holds a DM's accounts (the fan-out
 ## names the other member). Its id once stored; `Err(Failed)` when a step
@@ -2380,9 +3180,8 @@ append_message_by! = |
 									},
 									Fanout.parts_of(md),
 								)
-								Host.store_message!(
-									conv,
-									topic.to_utf8(),
+								store_block!(
+									{ conv, at: topic_at },
 									block,
 									index,
 									stored,
@@ -2404,6 +3203,55 @@ append_message_by! = |
 			Err(Failed) => Err(Failed)
 		}
 	}
+
+## **A MESSAGE STORED, IN ITS ORDER** (chat_store `storeMessage` as it was,
+## metal-vmm QUEUE 287): `block`, message `index`, appended to the topic's
+## transcript (the one primitive that can fail the send); then the `.count`
+## (`index` + 1, the transcript's new size, where the block begins and who
+## wrote it), the text the backfill writes for the same transcript; then the
+## search index told of `message`. **A CRASH BETWEEN THE APPEND AND THE
+## COUNT** leaves a count whose size is not the transcript's, which the next
+## count refuses and recounts (Count.believed): the size is the protection,
+## not the order. **STORED IS DONE**: the count and the index never fail it.
+## Where a block goes: its conversation, as the host takes it, and its topic.
+BlockAt : { conv : Chat.Conv, at : Paths.TopicAt }
+
+store_block! : BlockAt, List(U8), U64, Chat.Message => Try({}, [Failed])
+store_block! = |
+	{ conv, at },
+	block,
+	index,
+	message,
+| {
+	appended = Host.append_message!(
+		conv,
+		at.topic.to_utf8(),
+		block,
+	)
+	match appended.status {
+		Failed => Err(Failed)
+		Appended => {
+			last = Known({
+				offset: appended.size - List.len(block),
+				uid: message.uid,
+			})
+			Files.write_cache!(
+				Paths.count_path(at),
+				Count.text(
+					index + 1,
+					appended.size,
+					last,
+				),
+			)
+			Host.index_message!(
+				conv,
+				at.topic.to_utf8(),
+				message,
+			)
+			Ok({})
+		}
+	}
+}
 
 ## **THE FAN-OUT, CARRIED OUT IN ITS ORDER** (Fanout.steps): each publish
 ## sent; each feed's entry appended and only then its event sent; each

@@ -10,9 +10,16 @@ Host := [].{
 	## may fetch, so a request for one does no identity reads.
 	check_member! : {} => [Member, Outsider]
 
-	## Count this request as the member's presence, now (the prelude's, for
-	## a request the Roc serves itself).
-	count_presence! : {} => {}
+	## **COUNT THIS REQUEST AS THE MEMBER'S PRESENCE**, now, in the online
+	## map (process-lifetime state, so the host's), and say whether it was
+	## the edge: offline until now (`CameOnline`, the Roc's to broadcast,
+	## metal-vmm QUEUE 288), or an edge whose broadcast was lost and is due
+	## again; else `Steady`.
+	count_presence! : {} => [CameOnline, Steady]
+
+	## **THE EDGE NOT SPENT**: its broadcast was lost (a read it needed
+	## failed), so a request 30 s on is the edge again, not every request.
+	presence_unspent! : {} => {}
 
 	## **EVERY ACCOUNT, THE ONE IDENTITY PRIMITIVE**: each account folder
 	## named as a counter names one (a canonical id), in the disk's order,
@@ -285,14 +292,28 @@ Host := [].{
 	## could not be rendered (the request has failed): never an empty page.
 	render! : List(U8) => { html : List(U8), status : [Failed, Rendered] }
 
-	## **A MESSAGE STORED**: `block` (Transcript.stored_form of message
-	## `index` of topic `sid` in `conv`) appended to the topic's transcript,
-	## then the store's infrastructure told: the count cache (`index` + 1,
-	## the transcript's new size, the block's offset and its author) and the
-	## search index (`message`, as it lands). `Err(Failed)` when the append failed
-	## (the request has failed, and nothing was stored). **STORED IS DONE**:
-	## the count and the search are best-effort and never fail it.
-	store_message! : Chat.Conv, List(U8), List(U8), U64, Chat.Message => Try({}, [Failed])
+	## **A DOC'S LIVE PREVIEW** (metal-vmm QUEUE 290): `render!`'s, and
+	## markdown too hostile to render is counted too (webbox's edge counter,
+	## `malformed_markdown`), shown as the processor's placeholder.
+	render_preview! : List(U8) => { html : List(U8), status : [Failed, Rendered] }
+
+	## **A MESSAGE'S BLOCK APPENDED** (metal-vmm QUEUE 287): `block`
+	## (Transcript.stored_form) appended to topic `sid`'s transcript in `conv`,
+	## and the transcript's size after it. `Failed` when the append failed
+	## (the request has failed, and nothing was stored). The count and the
+	## search index are the Roc's to tell after (`write_cache!`,
+	## `index_message!`).
+	append_message! : Chat.Conv, List(U8), List(U8) => { size : U64, status : [Appended, Failed] }
+
+	## **THE SEARCH INDEX TOLD OF A MESSAGE AS IT LANDS** (search_index
+	## `noteAppend`): process-lifetime state, so a primitive. It never fails:
+	## an index that cannot take the message drops itself, to be rebuilt.
+	index_message! : Chat.Conv, List(U8), Chat.Message => {}
+
+	## **A CACHE WRITTEN** (a topic's `.count`): the whole file as `bytes`,
+	## under the chat root. **NEVER THE REQUEST'S FAILURE**: a cache not
+	## written is a miss, recounted (QUEUE 284); the host logs it.
+	write_cache! : List(U8), List(U8) => {}
 
 	## **THE FAN-OUT'S PRIMITIVES NEVER FAIL THE REQUEST** (metal-vmm QUEUE
 	## 172, 156(c)): the fan-out runs after the store, and **STORED IS DONE**.
@@ -328,6 +349,35 @@ Host := [].{
 	## host renders it as the server's own markdown and holds it
 	## (Chat.served_html) (`NotServing` when the read failed, too).
 	serve_rendered! : List(U8) => [Serving, NotServing]
+
+	## **AN UPLOAD SERVED** (metal-vmm QUEUE 291): the file at `path` under
+	## the chat root (checked as `read!`'s is), `size` bytes when the Roc
+	## looked, typed `content_type`; `Whole`, the bytes `first` to `last`
+	## (`Range`, a 206), or a range it cannot serve (`Unsatisfiable`, a 416).
+	## The host answers it, a file too big to read whole streamed. `Gone`
+	## when the file went since the Roc's look: nothing is answered.
+	serve_upload! : {
+		first : U64,
+		last : U64,
+		size : U64,
+		content_type : List(U8),
+		path : List(U8),
+		part : [
+			Range,
+			Unsatisfiable,
+			Whole,
+		],
+	} => [Gone, Served]
+
+	## **A TOPIC'S BUNDLE, A FILE AT A TIME** (metal-vmm QUEUE 291): the file
+	## at `path` under the chat root (checked as `read!`'s is) added to the
+	## bundle the host holds as the entry `name`. `Failed` when it would not
+	## read (the request has failed).
+	bundle_add! : List(U8), List(U8) => Try({}, [Failed])
+
+	## **THE BUNDLE SERVED**: the files added, a gzipped tar, answered as the
+	## attachment `<name>.tar.gz`.
+	serve_bundle! : List(U8) => {}
 
 	## Whether markdown is hostile: `Fine`; `Refused`, the host having refused it
 	## (webbox's edge counter and its 400, saying `refusal`, the Roc's words);

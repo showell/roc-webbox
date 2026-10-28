@@ -95,10 +95,6 @@ pub const Method = enum(u8) {
 /// Chat.roc's `Request`'s `area`: the path is under /channel or /chat.
 pub const Area = enum(u8) { channel, chat };
 
-/// Chat.roc's `Counting`: whether a request Zig serves counts as the
-/// member's presence (a stream does not).
-pub const Counting = enum(u8) { counted, uncounted };
-
 /// Chat.roc's `Sniff`: `forbid` when the answer says `nosniff`.
 pub const Sniff = enum(u8) { allow, forbid };
 
@@ -113,6 +109,7 @@ pub const Kind = enum(u8) {
     redirect,
     respond,
     serve,
+    stream,
     to_login,
 };
 
@@ -228,6 +225,10 @@ pub const HitWord = enum(u8) { found, missing };
 /// the request's time, or not (never seen is `offline`).
 pub const Presence = enum(u8) { offline, online };
 
+/// Host.roc's `count_presence!` answer (metal-vmm QUEUE 288): the member
+/// came online with this request (the Roc broadcasts), or was online.
+pub const PresenceEdge = enum(u8) { came_online, steady };
+
 /// Host.roc's `check_member!` answer: whether the one asking may use the
 /// chat (a member, or the agent).
 pub const Membership = enum(u8) { member, outsider };
@@ -251,6 +252,14 @@ pub const Welcome = enum(u8) {
 /// the file's bytes for a `held` answer, or it is not there (or its read
 /// failed).
 pub const Serving = enum(u8) { not_serving, serving };
+
+/// Host.roc's `serve_upload!` record's `part` (metal-vmm QUEUE 291): the
+/// whole file, the bytes `first` to `last`, or a range it cannot serve.
+pub const UploadPart = enum(u8) { range, unsatisfiable, whole };
+
+/// Host.roc's `serve_upload!` answer: the file gone since the Roc's look
+/// (nothing answered), or served.
+pub const UploadServed = enum(u8) { gone, served };
 
 /// Host.roc's `count_dropped!`: what the chat dropped, counted, rather than
 /// fail the request for (metal-vmm QUEUE 267): a DM's new-topic announcement
@@ -278,7 +287,6 @@ comptime {
         Tail,
         Method,
         Area,
-        Counting,
         Sniff,
         Kind,
         Form,
@@ -295,6 +303,7 @@ comptime {
         AppendStatus,
         Surface,
         Presence,
+        PresenceEdge,
         Membership,
         Admission,
         WordsStatus,
@@ -303,6 +312,8 @@ comptime {
         Done,
         Welcome,
         Serving,
+        UploadPart,
+        UploadServed,
         Dropped,
         Aside,
         AsideEnd,
@@ -380,13 +391,13 @@ pub const Route = struct {
 };
 
 /// What the router decided: the gate's 303 to the login page, or a route for
-/// Zig, with whether the request counts as presence (it is not a stream);
-/// or, for a route the Roc served itself, what to send.
+/// Zig (the Roc counted its presence first, metal-vmm QUEUE 288); or,
+/// for a route the Roc served itself, what to send.
 pub const Decision = union(enum) {
     /// A 303 to a path the Roc built from a conversation's base and a
     /// topic, which the store's names keep on the site.
     redirect: []const u8,
-    serve: struct { route: Route, presence: bool },
+    serve: struct { route: Route },
     /// A status and its body, typed `content_type` when it is not empty.
     respond: struct {
         status: u16,
@@ -417,6 +428,15 @@ pub const Decision = union(enum) {
     /// A 303 to the login page, to come back to this path after: the
     /// request's own, which the host checks is on the site (a 400 if not).
     to_login: []const u8,
+    /// The live stream on bus key `key`, held by the host (metal-vmm QUEUE
+    /// 286); a topic's replays its backlog first, from `transcript` (a path
+    /// under the chat root, its messages numbered in `topic`). `transcript`
+    /// empty: live only.
+    stream: struct {
+        key: []const u8,
+        transcript: []const u8 = "",
+        topic: []const u8 = "",
+    },
 
     pub fn eql(a: Decision, b: Decision) bool {
         if (std.meta.activeTag(a) != std.meta.activeTag(b)) return false;
@@ -426,7 +446,7 @@ pub const Decision = union(enum) {
                 l,
                 b.redirect,
             ),
-            .serve => |s| s.presence == b.serve.presence and s.route.eql(b.serve.route),
+            .serve => |s| s.route.eql(b.serve.route),
             .respond => |r| r.status == b.respond.status and r.nosniff == b.respond.nosniff and std.mem.eql(
                 u8,
                 r.content_type,
@@ -448,6 +468,19 @@ pub const Decision = union(enum) {
                 l,
                 b.to_login,
             ),
+            .stream => |s| std.mem.eql(
+                u8,
+                s.key,
+                b.stream.key,
+            ) and std.mem.eql(
+                u8,
+                s.transcript,
+                b.stream.transcript,
+            ) and std.mem.eql(
+                u8,
+                s.topic,
+                b.stream.topic,
+            ),
             .held => |h| h.status == b.held.status and h.nosniff == b.held.nosniff and std.mem.eql(
                 u8,
                 h.content_type,
@@ -467,7 +500,7 @@ pub const Decision = union(enum) {
     pub fn format(d: Decision, w: *std.Io.Writer) std.Io.Writer.Error!void {
         switch (d) {
             .redirect => |l| try w.print("303 {s}", .{l}),
-            .serve => |s| try w.print("{f}{s}", .{ s.route, if (s.presence) " +presence" else "" }),
+            .serve => |s| try w.print("{f}", .{s.route}),
             .respond => |r| try w.print("{d} \"{s}\"{s} {d} bytes", .{
                 r.status,
                 r.content_type,
@@ -480,6 +513,14 @@ pub const Decision = union(enum) {
             .not_found => try w.writeAll("404"),
             .found => |l| try w.print("302 {s}", .{l}),
             .to_login => |l| try w.print("303 to login, then {s}", .{l}),
+            .stream => |s| if (s.transcript.len == 0) try w.print(
+                "stream {s}",
+                .{s.key},
+            ) else try w.print("stream {s}, its backlog from {s} in {s}", .{
+                s.key,
+                s.transcript,
+                s.topic,
+            }),
             .held => |h| try w.print("{d} \"{s}\"{s} {d} bytes, the host's, {d} bytes", .{
                 h.status,
                 h.content_type,
