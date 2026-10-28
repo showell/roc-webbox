@@ -123,6 +123,49 @@ handle! = |req|
 				Str.to_utf8("failed"),
 			)
 		}
+	} else if starts(req.sub, "/upload/") {
+		# An upload served as part `<part>`, every field of the record a
+		# different value, so one laid out wrong shows (metal-vmm QUEUE 291).
+		part = match List.drop_first(req.sub, 8) {
+			['r', ..] => Range
+			['u', ..] => Unsatisfiable
+			_ => Whole
+		}
+		got = Host.serve_upload!({
+			first: 11,
+			last: 22,
+			size: 33,
+			content_type: Str.to_utf8("image/png"),
+			path: Str.to_utf8("1_2/sessions/Plans.uploads/a.png"),
+			part,
+		})
+		Chat.respond(
+			200,
+			[],
+			Str.to_utf8(if got == Served "served" else "gone"),
+		)
+	} else if starts(req.sub, "/bundle/") {
+		# Two files added to a bundle, then the bundle served as `<name>`.
+		name = List.drop_first(req.sub, 8)
+		added = Host.bundle_add!(
+			Str.to_utf8("Plans/Plans.md"),
+			Str.to_utf8("1_2/sessions/Plans.md"),
+		)
+		match added {
+			Ok({}) => {
+				Host.serve_bundle!(name)
+				Chat.respond(
+					200,
+					[],
+					Str.to_utf8("bundled"),
+				)
+			}
+			Err(Failed) => Chat.respond(
+				200,
+				[],
+				Str.to_utf8("failed"),
+			)
+		}
 	} else if starts(req.sub, "/cache/") {
 		# A cache written at `<path>`: never the request's failure.
 		Host.write_cache!(List.drop_first(req.sub, 7), Str.to_utf8("7 99\n"))

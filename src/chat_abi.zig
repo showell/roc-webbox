@@ -141,6 +141,17 @@ pub const AppendRec = extern struct { fault: u16, status: route_mod.AppendStatus
 /// Host.roc's `append_message!` answer (metal-vmm QUEUE 287): `{ size : U64,
 /// status : [Appended, Failed] }`, the transcript's size after the append.
 pub const AppendedAtRec = extern struct { size: u64, status: route_mod.AppendStatus };
+/// Host.roc's `serve_upload!` record (metal-vmm QUEUE 291): `{ first, last,
+/// size : U64, content_type, path : List(U8), part : [Range, Unsatisfiable,
+/// Whole] }`, the numbers first, the bytes by name, the tag last.
+pub const UploadRec = extern struct {
+    first: u64,
+    last: u64,
+    size: u64,
+    content_type: RocBytes,
+    path: RocBytes,
+    part: route_mod.UploadPart,
+};
 /// Host.roc's `check_online!` answer, `List([Offline, Online])`: its elements one
 /// byte each, so laid out as a `List(U8)` is.
 pub const PresenceList = RocBytes;
@@ -249,6 +260,14 @@ comptime {
     std.debug.assert(@sizeOf(RocBytes) == 3 * w and @sizeOf(Request) == 4 * w and @sizeOf(RouteRec) == 10 * w and @sizeOf(Answer) == 20 * w and @sizeOf(Got) == 4 * w and @sizeOf(ConvRec) == 10 * w and @sizeOf(ReadRec) == 4 * w and @sizeOf(EntryRec) == 4 * w and @sizeOf(SrcRec) == 6 * w and @sizeOf(ListRec) == 4 * w and @sizeOf(AccountRec) == 7 * w and @sizeOf(AccountsRec) == 4 * w and @sizeOf(RenderRec) == 4 * w and @sizeOf(MessageRec) == 15 * w);
     std.debug.assert(@sizeOf(AppendRec) == 4);
     std.debug.assert(@sizeOf(AppendedAtRec) == 16 and @offsetOf(AppendedAtRec, "size") == 0 and @offsetOf(AppendedAtRec, "status") == 8);
+    // serve_upload!'s (metal-vmm QUEUE 291): three numbers, two lists, a tag.
+    std.debug.assert(@offsetOf(UploadRec, "first") == 0 and
+        @offsetOf(UploadRec, "last") == 8 and
+        @offsetOf(UploadRec, "size") == 16 and
+        @offsetOf(UploadRec, "content_type") == 24 and
+        @offsetOf(UploadRec, "path") == 24 + 3 * w and
+        @offsetOf(UploadRec, "part") == 24 + 6 * w and
+        @sizeOf(UploadRec) == std.mem.alignForward(usize, 24 + 6 * w + 1, 8));
     // search_words!'s (metal-vmm QUEUE 281): the 8-byte numbers at 0, the
     // bytes and the list after, the tag last.
     std.debug.assert(@offsetOf(
@@ -394,6 +413,16 @@ pub const Count = union(route_mod.CountStatus) { counted: u64, failed };
 /// **A MESSAGE'S MARKDOWN AS THE HOST RENDERED IT**, or a render that
 /// failed (the host has failed the request): never "" for one that failed.
 pub const Rendered = union(route_mod.RenderStatus) { failed, rendered: []const u8 };
+
+/// An upload as Host.serve_upload! names it (UploadRec, its bytes as slices).
+pub const Upload = struct {
+    first: u64,
+    last: u64,
+    size: u64,
+    content_type: []const u8,
+    path: []const u8,
+    part: route_mod.UploadPart,
+};
 
 /// A message as the Roc made it (Chat.Message): what the store's count and
 /// search, and the fan-out, take. Its bytes are the call's.
@@ -656,6 +685,12 @@ pub const Host = struct {
         ctx: *anyopaque,
         path: []const u8,
     ) route_mod.Serving = noServeRendered,
+    /// Host.serve_upload!: the upload answered, or gone since the Roc's look.
+    serve_upload: *const fn (ctx: *anyopaque, upload: Upload) route_mod.UploadServed = noServeUpload,
+    /// Host.bundle_add!: the file at `path` added to the bundle as `name`.
+    bundle_add: *const fn (ctx: *anyopaque, name: []const u8, path: []const u8) route_mod.Done = noBundleAdd,
+    /// Host.serve_bundle!: the bundle answered as `<name>.tar.gz`.
+    serve_bundle: *const fn (ctx: *anyopaque, name: []const u8) void = noServeBundle,
 };
 
 fn noPublish(
@@ -671,6 +706,15 @@ fn noAppendLine(
     _: []const u8,
 ) route_mod.Done {
     @panic("append_line asked of a host that does not answer it");
+}
+fn noServeUpload(_: *anyopaque, _: Upload) route_mod.UploadServed {
+    @panic("serve_upload asked of a host that does not answer it");
+}
+fn noBundleAdd(_: *anyopaque, _: []const u8, _: []const u8) route_mod.Done {
+    @panic("bundle_add asked of a host that does not answer it");
+}
+fn noServeBundle(_: *anyopaque, _: []const u8) void {
+    @panic("serve_bundle asked of a host that does not answer it");
 }
 fn noServeRendered(_: *anyopaque, _: []const u8) route_mod.Serving {
     @panic("serve_rendered asked of a host that does not answer it");
@@ -1425,6 +1469,30 @@ export fn roc_chat_serve_file(path: RocBytes) callconv(.c) route_mod.Serving {
     const h = current("serve_file");
     if (!underRoot(h, path.slice())) return .not_serving;
     return h.serve_file(h.ctx, path.slice());
+}
+
+export fn roc_chat_serve_upload(rec: UploadRec) callconv(.c) route_mod.UploadServed {
+    const h = current("serve_upload");
+    if (!underRoot(h, rec.path.slice())) return .gone;
+    return h.serve_upload(h.ctx, .{
+        .first = rec.first,
+        .last = rec.last,
+        .size = rec.size,
+        .content_type = rec.content_type.slice(),
+        .path = rec.path.slice(),
+        .part = rec.part,
+    });
+}
+
+export fn roc_chat_bundle_add(name: RocBytes, path: RocBytes) callconv(.c) route_mod.Done {
+    const h = current("bundle_add");
+    if (!underRoot(h, path.slice())) return .failed;
+    return h.bundle_add(h.ctx, name.slice(), path.slice());
+}
+
+export fn roc_chat_serve_bundle(name: RocBytes) callconv(.c) void {
+    const h = current("serve_bundle");
+    h.serve_bundle(h.ctx, name.slice());
 }
 
 export fn roc_chat_serve_rendered(path: RocBytes) callconv(.c) route_mod.Serving {

@@ -60,6 +60,9 @@ const Files = struct {
         h.publish = publish;
         h.render = render;
         h.append_message = appendMessage;
+        h.serve_upload = serveUpload;
+        h.bundle_add = bundleAdd;
+        h.serve_bundle = serveBundle;
         h.index_message = indexMessage;
         h.write_cache = writeCache;
         h.append_entry = appendEntry;
@@ -147,6 +150,25 @@ const Files = struct {
     }
     /// Topic `Broken` will not take a block; any other's transcript is 42
     /// bytes after it.
+    fn serveUpload(ctx: *anyopaque, u: abi.Upload) @import("chat_route.zig").UploadServed {
+        of(ctx).asked.print(
+            testing.allocator,
+            "upload {d} {d} {d} {s} {s} {t};",
+            .{ u.first, u.last, u.size, u.content_type, u.path, u.part },
+        ) catch @panic("oom");
+        return .served;
+    }
+    fn bundleAdd(ctx: *anyopaque, name: []const u8, path: []const u8) @import("chat_route.zig").Done {
+        of(ctx).asked.print(
+            testing.allocator,
+            "add {s} {s};",
+            .{ name, path },
+        ) catch @panic("oom");
+        return .ok;
+    }
+    fn serveBundle(ctx: *anyopaque, name: []const u8) void {
+        say(ctx, "bundle", name);
+    }
     fn appendMessage(
         ctx: *anyopaque,
         conv: abi.Conv,
@@ -686,6 +708,20 @@ test "a message's render and store cross the seam: the HTML or a render that fai
     );
     // A cache under the root is written; one off it fails the request (the
     // seam's path check), never written.
+    // An upload's record crosses whole, each field in its place, for
+    // each part; a bundle's two effects in turn (metal-vmm QUEUE 291).
+    inline for (.{ .{ "r", "range" }, .{ "u", "unsatisfiable" }, .{ "w", "whole" } }) |p| try probe(
+        "/upload/" ++ p[0],
+        "served",
+        "upload 11 22 33 image/png 1_2/sessions/Plans.uploads/a.png " ++ p[1] ++ ";",
+        null,
+    );
+    try probe(
+        "/bundle/Plans",
+        "bundled",
+        "add Plans/Plans.md 1_2/sessions/Plans.md;bundle Plans;",
+        null,
+    );
     try probe(
         "/cache/1_2/sessions/Plans.count",
         "written",

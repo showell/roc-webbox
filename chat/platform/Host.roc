@@ -350,6 +350,35 @@ Host := [].{
 	## (Chat.served_html) (`NotServing` when the read failed, too).
 	serve_rendered! : List(U8) => [Serving, NotServing]
 
+	## **AN UPLOAD SERVED** (metal-vmm QUEUE 291): the file at `path` under
+	## the chat root (checked as `read!`'s is), `size` bytes when the Roc
+	## looked, typed `content_type`; `Whole`, the bytes `first` to `last`
+	## (`Range`, a 206), or a range it cannot serve (`Unsatisfiable`, a 416).
+	## The host answers it, a file too big to read whole streamed. `Gone`
+	## when the file went since the Roc's look: nothing is answered.
+	serve_upload! : {
+		first : U64,
+		last : U64,
+		size : U64,
+		content_type : List(U8),
+		path : List(U8),
+		part : [
+			Range,
+			Unsatisfiable,
+			Whole,
+		],
+	} => [Gone, Served]
+
+	## **A TOPIC'S BUNDLE, A FILE AT A TIME** (metal-vmm QUEUE 291): the file
+	## at `path` under the chat root (checked as `read!`'s is) added to the
+	## bundle the host holds as the entry `name`. `Failed` when it would not
+	## read (the request has failed).
+	bundle_add! : List(U8), List(U8) => Try({}, [Failed])
+
+	## **THE BUNDLE SERVED**: the files added, a gzipped tar, answered as the
+	## attachment `<name>.tar.gz`.
+	serve_bundle! : List(U8) => {}
+
 	## Whether markdown is hostile: `Fine`; `Refused`, the host having refused it
 	## (webbox's edge counter and its 400, saying `refusal`, the Roc's words);
 	## or `Failed`, the check itself.

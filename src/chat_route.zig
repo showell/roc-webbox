@@ -253,6 +253,14 @@ pub const Welcome = enum(u8) {
 /// failed).
 pub const Serving = enum(u8) { not_serving, serving };
 
+/// Host.roc's `serve_upload!` record's `part` (metal-vmm QUEUE 291): the
+/// whole file, the bytes `first` to `last`, or a range it cannot serve.
+pub const UploadPart = enum(u8) { range, unsatisfiable, whole };
+
+/// Host.roc's `serve_upload!` answer: the file gone since the Roc's look
+/// (nothing answered), or served.
+pub const UploadServed = enum(u8) { gone, served };
+
 /// Host.roc's `count_dropped!`: what the chat dropped, counted, rather than
 /// fail the request for (metal-vmm QUEUE 267): a DM's new-topic announcement
 /// that failed after the topic was made, a feed's entry or a recent row
@@ -304,6 +312,8 @@ comptime {
         Done,
         Welcome,
         Serving,
+        UploadPart,
+        UploadServed,
         Dropped,
         Aside,
         AsideEnd,
