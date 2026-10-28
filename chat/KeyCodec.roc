@@ -33,7 +33,13 @@ KeyCodec := [].{
 
 	## The entry's line.
 	encode : KeyCodec.Entry -> List(U8)
-	encode = |{ key, hash, created }| {
+	encode = |
+		{
+			key,
+			hash,
+			created,
+		},
+	| {
 		k = key.record()
 		Stored.line(
 			"key",
@@ -66,13 +72,27 @@ KeyCodec := [].{
 		expires_field = created_field.rest.field("expires")?
 		expires = expiry_from(expires_field.value)?
 		state_field = expires_field.rest.field("state")?
-		revocation = Stored.word(state_field.value, { name: "state", all: all_revocations, spell: spell_revocation })?
+		revocation = Stored.word(
+			state_field.value,
+			{
+				name: "state",
+				all: all_revocations,
+				spell: spell_revocation,
+			},
+		)?
 		read_field = state_field.rest.field("read")?
 		read = reach_from(read_field.value, "read")?
 		post_field = read_field.rest.field("post")?
 		post = reach_from(post_field.value, "post")?
 		admin_field = post_field.rest.field("admin")?
-		admin = Stored.word(admin_field.value, { name: "admin", all: all_switches, spell: spell_switch })?
+		admin = Stored.word(
+			admin_field.value,
+			{
+				name: "admin",
+				all: all_switches,
+				spell: spell_switch,
+			},
+		)?
 		admin_field.rest.close()?
 		match (acts_as, admin) {
 			(Bot(_), On) => Err(AdminForBot)
@@ -81,7 +101,11 @@ KeyCodec := [].{
 					key: ApiKey.Key.load({
 						id,
 						acts_as,
-						scope: { read, post, admin },
+						scope: {
+							read,
+							post,
+							admin,
+						},
 						expires,
 						revocation,
 					}),
@@ -149,7 +173,10 @@ reach_text = |part|
 	match part {
 		Off => spell_switch(Off)
 		On(Everywhere) => everywhere_word
-		On(Only(convs)) => "${only_prefix}${Str.join_with(List.map(convs, |c| c.to_u64().to_str()), ",")}"
+		On(Only(convs)) => {
+			listed = List.map(convs, |c| c.to_u64().to_str())
+			"${only_prefix}${Str.join_with(listed, ",")}"
+		}
 	}
 
 reach_from : List(U8), Str -> Try(ReachPart, Stored.Problem)
@@ -254,10 +281,18 @@ broad = {
 }
 
 ## What a test compares of an entry: Key has no `==`, its record does.
-Seen : { record : ApiKey.Record(ConvAccess.ConvId), hash : Stored.SecretHash, created : I64 }
+Seen : {
+	record : ApiKey.Record(ConvAccess.ConvId),
+	hash : Stored.SecretHash,
+	created : I64,
+}
 
 seen : KeyCodec.Entry -> Seen
-seen = |e| { record: e.key.record(), hash: e.hash, created: e.created }
+seen = |e| {
+	record: e.key.record(),
+	hash: e.hash,
+	created: e.created,
+}
 
 ## The entry survives a round trip whole.
 is_kept : KeyCodec.Entry -> Bool
@@ -283,8 +318,22 @@ expect
 			{ ..narrow, acts_as: Principal.Id.Bot(aid(2)) },
 			{ ..narrow, expires: At(-1) },
 			{ ..narrow, expires: At(0) },
-			{ ..narrow, scope: { read: Off, post: On(Everywhere), admin: Off } },
-			{ ..narrow, scope: { read: On(Only([conv(5)])), post: On(Only([conv(5), conv(5)])), admin: Off } },
+			{
+				..narrow,
+				scope: {
+					read: Off,
+					post: On(Everywhere),
+					admin: Off,
+				},
+			},
+			{
+				..narrow,
+				scope: {
+					read: On(Only([conv(5)])),
+					post: On(Only([conv(5), conv(5)])),
+					admin: Off,
+				},
+			},
 			{ ..broad, revocation: Active },
 		],
 		|r| is_kept(entry(r)),
@@ -320,18 +369,53 @@ expect decoded(narrow_but({ from: "acts=agent:7", to: "acts=admin:7" })) == Err(
 expect decoded(narrow_but({ from: "hash=", to: "hash=0" })) == Err(BadValue("hash"))
 expect decoded(narrow_but({ from: hex5a, to: Str.repeat("5A", 32) })) == Err(BadValue("hash"))
 expect decoded(narrow_but({ from: "hash=${hex5a} ", to: "" })) == Err(MissingField("hash"))
-expect decoded(narrow_but({ from: "created=1761600000", to: "created=now" })) == Err(BadNumber("created"))
-expect decoded(narrow_but({ from: "expires=never", to: "expires=Never" })) == Err(UnknownWord("expires"))
+expect decoded(
+	narrow_but({
+		from: "created=1761600000",
+		to: "created=now",
+	}),
+) == Err(BadNumber("created"))
+expect decoded(
+	narrow_but({
+		from: "expires=never",
+		to: "expires=Never",
+	}),
+) == Err(UnknownWord("expires"))
 expect decoded(narrow_but({ from: "expires=never", to: "expires=" })) == Err(UnknownWord("expires"))
-expect decoded(narrow_but({ from: "expires=never", to: "expires=at:" })) == Err(BadNumber("expires"))
-expect decoded(narrow_but({ from: "expires=never", to: "expires=at:017" })) == Err(BadNumber("expires"))
-expect decoded(narrow_but({ from: "expires=never", to: "expires=1761609999" })) == Err(UnknownWord("expires"))
+expect decoded(
+	narrow_but({
+		from: "expires=never",
+		to: "expires=at:",
+	}),
+) == Err(BadNumber("expires"))
+expect decoded(
+	narrow_but({
+		from: "expires=never",
+		to: "expires=at:017",
+	}),
+) == Err(BadNumber("expires"))
+expect decoded(
+	narrow_but({
+		from: "expires=never",
+		to: "expires=1761609999",
+	}),
+) == Err(UnknownWord("expires"))
 expect decoded(narrow_but({ from: "state=active", to: "state=live" })) == Err(UnknownWord("state"))
 expect decoded(narrow_but({ from: "state=active ", to: "" })) == Err(MissingField("state"))
 expect decoded(narrow_but({ from: "read=only:3,9", to: "read=all" })) == Err(UnknownWord("read"))
 expect decoded(narrow_but({ from: "read=only:3,9", to: "read=" })) == Err(UnknownWord("read"))
-expect decoded(narrow_but({ from: "read=only:3,9", to: "read=only:3,,9" })) == Err(BadNumber("read"))
-expect decoded(narrow_but({ from: "read=only:3,9", to: "read=only:3,9," })) == Err(BadNumber("read"))
+expect decoded(
+	narrow_but({
+		from: "read=only:3,9",
+		to: "read=only:3,,9",
+	}),
+) == Err(BadNumber("read"))
+expect decoded(
+	narrow_but({
+		from: "read=only:3,9",
+		to: "read=only:3,9,",
+	}),
+) == Err(BadNumber("read"))
 expect decoded(narrow_but({ from: "read=only:3,9", to: "read=only:3,0" })) == Err(BadValue("read"))
 expect decoded(narrow_but({ from: "read=only:3,9", to: "read=only:3;9" })) == Err(BadNumber("read"))
 expect decoded(narrow_but({ from: "post=off", to: "post=on" })) == Err(UnknownWord("post"))
@@ -340,11 +424,21 @@ expect decoded(narrow_but({ from: "admin=off", to: "admin=yes" })) == Err(Unknow
 expect decoded(narrow_but({ from: " admin=off", to: "" })) == Err(MissingField("admin"))
 expect decoded(narrow_but({ from: "admin=off\n", to: "admin=off \n" })) == Err(Trailing)
 expect decoded(narrow_but({ from: "admin=off\n", to: "admin=off last_used=1\n" })) == Err(Trailing)
-expect decoded(narrow_but({ from: "read=only:3,9 post=off", to: "post=off read=only:3,9" })) == Err(MissingField("read"))
+expect decoded(
+	narrow_but({
+		from: "read=only:3,9 post=off",
+		to: "post=off read=only:3,9",
+	}),
+) == Err(MissingField("read"))
 
 # A bot with admin on: no grant makes one.
 expect decoded(narrow_but({ from: "acts=agent:7", to: "acts=bot:7" })) == Ok({})
 expect
-	decoded(narrow_but({ from: "acts=agent:7", to: "acts=bot:7" }).replace_first("admin=off", "admin=on"))
+	decoded(
+		narrow_but({
+			from: "acts=agent:7",
+			to: "acts=bot:7",
+		}).replace_first("admin=off", "admin=on"),
+	)
 		== Err(AdminForBot)
 expect decoded(narrow_but({ from: "admin=off", to: "admin=on" })) == Ok({})

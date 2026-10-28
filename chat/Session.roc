@@ -62,7 +62,14 @@ Session :: {
 		token_hash : Stored.SecretHash,
 		now : I64,
 	} -> Session
-	start = |{ id, human, token_hash, now }|
+	start = |
+		{
+			id,
+			human,
+			token_hash,
+			now,
+		},
+	|
 		Session.(
 			{
 				id,
@@ -76,7 +83,12 @@ Session :: {
 	## **A SESSION AS ITS STORED RECORD HOLDS IT**, when the record could
 	## be one: seen no earlier than it was created.
 	load : Session.Fields -> Try(Session, [SeenBeforeCreated])
-	load = |fields| if fields.last_seen < fields.created Err(SeenBeforeCreated) else Ok(Session.(fields))
+	load = |fields|
+		if fields.last_seen < fields.created {
+			Err(SeenBeforeCreated)
+		} else {
+			Ok(Session.(fields))
+		}
 
 	## The session's fields, to store.
 	fields : Session -> Session.Fields
@@ -119,7 +131,13 @@ Session :: {
 		now : I64,
 	} -> [
 		Admitted({ principal : Principal, write : [Unchanged, Touched(Session)] }),
-		Refused([IdleExpired, AbsoluteExpired, NoSuchAccount]),
+		Refused(
+			[
+				IdleExpired,
+				AbsoluteExpired,
+				NoSuchAccount,
+			],
+		),
 	]
 	admit = |session, { accounts, now }| {
 		Session.(s) = session
@@ -130,7 +148,14 @@ Session :: {
 				match Principal.find(accounts, Principal.Id.Human(s.human)) {
 					Err(NoSuchPrincipal) => Refused(NoSuchAccount)
 					Ok(principal) => {
-						write = if now - s.last_seen >= Session.touch_secs Touched(Session.({ ..s, last_seen: now })) else Unchanged
+						write = if now - s.last_seen >= Session.touch_secs Touched(
+							Session.(
+								{
+									..s,
+									last_seen: now,
+								},
+							),
+						) else Unchanged
 						Admitted({ principal, write })
 					}
 				}
@@ -177,8 +202,18 @@ token = |b|
 	}
 
 ## Session `n` of human `who`, created at `at`.
-opened : { n : U64, who : U64, at : I64 } -> Session
-opened = |{ n, who, at }|
+opened : {
+	n : U64,
+	who : U64,
+	at : I64,
+} -> Session
+opened = |
+	{
+		n,
+		who,
+		at,
+	},
+|
 	Session.start({
 		id: sid(n),
 		human: gid(who),
@@ -188,7 +223,11 @@ opened = |{ n, who, at }|
 
 # Created at 1000.
 s1 : Session
-s1 = opened({ n: 1, who: 1, at: 1000 })
+s1 = opened({
+	n: 1,
+	who: 1,
+	at: 1000,
+})
 
 day : I64
 day = Session.idle_secs
@@ -229,12 +268,31 @@ expect Session.load(s1.fields()) == Ok(s1)
 
 # ── ADMITTING A REQUEST
 ann : Principal
-ann = Principal.Human({ id: gid(1), login: "ann", name: "Ann", role: Member })
+ann = Principal.Human({
+	id: gid(1),
+	login: "ann",
+	name: "Ann",
+	role: Member,
+})
 
 bea : Principal
-bea = Principal.Human({ id: gid(2), login: "bea", name: "Bea", role: Member })
+bea = Principal.Human({
+	id: gid(2),
+	login: "bea",
+	name: "Bea",
+	role: Member,
+})
 
-Admission : [Admitted({ principal : Principal.Id, write : [Unchanged, Touched(I64)] }), Refused([IdleExpired, AbsoluteExpired, NoSuchAccount])]
+Admission : [
+	Admitted({ principal : Principal.Id, write : [Unchanged, Touched(I64)] }),
+	Refused(
+		[
+			IdleExpired,
+			AbsoluteExpired,
+			NoSuchAccount,
+		],
+	),
+]
 
 ## The admission of `session` at `now` among `among`, the principal by id
 ## and a write by the last sight it writes.
@@ -252,11 +310,23 @@ admitted = |session, { among, now }|
 			})
 	}
 
-expect admitted(s1, { among: [ann, bea], now: 1000 }) == Admitted({ principal: Principal.id(ann), write: Unchanged })
-expect admitted(s1, { among: [ann, bea], now: 1299 }) == Admitted({ principal: Principal.id(ann), write: Unchanged })
-expect admitted(s1, { among: [ann, bea], now: 1300 }) == Admitted({ principal: Principal.id(ann), write: Touched(1300) })
+expect admitted(s1, { among: [ann, bea], now: 1000 }) == Admitted({
+	principal: Principal.id(ann),
+	write: Unchanged,
+})
+expect admitted(s1, { among: [ann, bea], now: 1299 }) == Admitted({
+	principal: Principal.id(ann),
+	write: Unchanged,
+})
+expect admitted(s1, { among: [ann, bea], now: 1300 }) == Admitted({
+	principal: Principal.id(ann),
+	write: Touched(1300),
+})
 expect admitted(s1, { among: [ann, bea], now: 1000 + day }) == Refused(IdleExpired)
-expect admitted(seen_at(1000 + week - 1), { among: [ann], now: 1000 + week }) == Refused(AbsoluteExpired)
+expect admitted(
+	seen_at(1000 + week - 1),
+	{ among: [ann], now: 1000 + week },
+) == Refused(AbsoluteExpired)
 expect admitted(s1, { among: [ann], now: 999 }) == Refused(AbsoluteExpired)
 
 # Ann retired: her live session admits nobody.
@@ -264,7 +334,17 @@ expect admitted(s1, { among: [bea], now: 1000 }) == Refused(NoSuchAccount)
 
 # The role is the accounts' now, not the one at sign-in.
 expect
-	match s1.admit({ accounts: [Principal.Human({ id: gid(1), login: "ann", name: "Ann", role: Admin })], now: 1000 }) {
+	match s1.admit({
+		accounts: [
+			Principal.Human({
+				id: gid(1),
+				login: "ann",
+				name: "Ann",
+				role: Admin,
+			}),
+		],
+		now: 1000,
+	}) {
 		Admitted({ principal: Human(h), write: _ }) => h.role == Admin
 		_ => Bool.False
 	}
@@ -274,8 +354,16 @@ expect
 sessions : List(Session)
 sessions = [
 	s1,
-	opened({ n: 2, who: 1, at: 1000 - day }),
-	opened({ n: 3, who: 2, at: 1000 }),
+	opened({
+		n: 2,
+		who: 1,
+		at: 1000 - day,
+	}),
+	opened({
+		n: 3,
+		who: 2,
+		at: 1000,
+	}),
 ]
 
 expect Session.log_out_everywhere(sessions, gid(1)) == [sid(1), sid(2)]
@@ -284,6 +372,10 @@ expect Session.log_out_everywhere(sessions, gid(9)) == []
 expect Session.log_out_everywhere([], gid(1)) == []
 expect Session.sweep(sessions, 1000) == [sid(2)]
 expect Session.sweep(sessions, 1000 + day - 1) == [sid(2)]
-expect Session.sweep(sessions, 1000 + day) == [sid(1), sid(2), sid(3)]
+expect Session.sweep(sessions, 1000 + day) == [
+	sid(1),
+	sid(2),
+	sid(3),
+]
 expect Session.sweep(sessions, 999) == [sid(1), sid(3)]
 expect Session.sweep([], 1000) == []

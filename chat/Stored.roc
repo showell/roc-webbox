@@ -85,7 +85,12 @@ Stored := [].{
 	## by `from_bytes`, which refuses any other length.
 	SecretHash :: List(U8).{
 		from_bytes : List(U8) -> Try(Stored.SecretHash, [NotAHash])
-		from_bytes = |bytes| if List.len(bytes) == hash_bytes Ok(Stored.SecretHash.(bytes)) else Err(NotAHash)
+		from_bytes = |bytes|
+			if List.len(bytes) == hash_bytes {
+				Ok(Stored.SecretHash.(bytes))
+			} else {
+				Err(NotAHash)
+			}
 
 		bytes : Stored.SecretHash -> List(U8)
 		bytes = |Stored.SecretHash.(b)| b
@@ -139,7 +144,10 @@ Stored := [].{
 							Err(NoMatch) => Err(WrongRecord)
 							Ok(rest) => {
 								version_end = Bytes.count_while(rest, { keep: |c| c != ' ', at: 0 })
-								if List.take_first(rest, version_end) == Str.to_utf8(Stored.version) {
+								if List.take_first(
+									rest,
+									version_end,
+								) == Str.to_utf8(Stored.version) {
 									Ok(Stored.Reader.(List.drop_first(rest, version_end)))
 								} else {
 									Err(UnknownVersion)
@@ -151,7 +159,11 @@ Stored := [].{
 
 		## The value of the field `name`, which must come next, and the
 		## fields after it.
-		field : Stored.Reader, Str -> Try({ value : List(U8), rest : Stored.Reader }, Stored.Problem)
+		field : Stored.Reader,
+		Str -> Try(
+			{ value : List(U8), rest : Stored.Reader },
+			Stored.Problem,
+		)
 		field = |Stored.Reader.(rest), name|
 			match Bytes.strip_prefix(rest, Str.to_utf8(" ${name}=")) {
 				Err(NoMatch) => Err(MissingField(name))
@@ -230,8 +242,20 @@ Stored := [].{
 	## **A WORD FROM A CLOSED SET**: the member of `all` whose `spell` it is.
 	## `spell` is the one home of each member's word (an exhaustive match);
 	## `all` lists the members, and each codec's round trips hold it whole.
-	word : List(U8), { name : Str, all : List(a), spell : (a -> Str) } -> Try(a, Stored.Problem)
-	word = |value, { name, all, spell }|
+	word : List(U8),
+	{
+		name : Str,
+		all : List(a),
+		spell : (a -> Str),
+	} -> Try(a, Stored.Problem)
+	word = |
+		value,
+		{
+			name,
+			all,
+			spell,
+		},
+	|
 		match List.find_first(all, |member| Str.to_utf8(spell(member)) == value) {
 			Ok(member) => Ok(member)
 			Err(NotFound) => Err(UnknownWord(name))
@@ -240,7 +264,7 @@ Stored := [].{
 	## **A HASH**: 64 lowercase hex digits, its 32 bytes.
 	hash : List(U8), Str -> Try(Stored.SecretHash, Stored.Problem)
 	hash = |value, name|
-		if List.len(value) != hash_bytes * 2 {
+		if List.len(value) != hash_bytes * digits_per_byte {
 			Err(BadValue(name))
 		} else {
 			nibbles = List.map_try(value, |c| List.find_first_index(hex_digits, |d| d == c))
@@ -248,7 +272,7 @@ Stored := [].{
 				Err(NotFound) => Err(BadValue(name))
 				Ok(ns) => {
 					bytes = List.map(
-						List.chunks_of(ns, 2),
+						List.chunks_of(ns, digits_per_byte),
 						|pair| match pair {
 							[high, low] => high.to_u8_wrap() * nibble_base + low.to_u8_wrap()
 							_ => crash "Stored.hash: an even count of nibbles chunks into pairs"
@@ -286,6 +310,10 @@ hash_bytes = 32
 ## A byte's two hex digits are its high and low halves, each below this.
 nibble_base : U8
 nibble_base = 16
+
+## A byte is two hex digits.
+digits_per_byte : U64
+digits_per_byte = 2
 
 ## The hex digits, each at its own value: the one home of the spelling.
 hex_digits : List(U8)
@@ -346,7 +374,17 @@ expect opened("tt v1\n") == Err(WrongRecord)
 expect opened("t v2\n") == Err(UnknownVersion)
 expect opened("t v10\n") == Err(UnknownVersion)
 expect opened("t\n") == Err(WrongRecord)
-expect Stored.Reader.open([0x74, 0x20, 0x76, 0x31, 0xff, '\n'], "t").map_ok(|_| {}) == Err(NotUtf8)
+expect Stored.Reader.open(
+	[
+		0x74,
+		0x20,
+		0x76,
+		0x31,
+		0xff,
+		'\n',
+	],
+	"t",
+).map_ok(|_| {}) == Err(NotUtf8)
 
 # Fields: the one expected, in its place, or its name.
 field_a : Str -> Try(List(U8), Stored.Problem)
@@ -397,7 +435,14 @@ expect
 	)
 expect
 	List.all(
-		[0, 1, -1, 1761600000, -9223372036854775808, 9223372036854775807],
+		[
+			0,
+			1,
+			-1,
+			1761600000,
+			-9223372036854775808,
+			9223372036854775807,
+		],
 		|t| Stored.time(Str.to_utf8(Stored.time_text(t)), "t") == Ok(t),
 	)
 
@@ -412,7 +457,14 @@ spell_colour = |c|
 	}
 
 colour : Str -> Try(Colour, Stored.Problem)
-colour = |text| Stored.word(Str.to_utf8(text), { name: "c", all: [Red, Green], spell: spell_colour })
+colour = |text| Stored.word(
+	Str.to_utf8(text),
+	{
+		name: "c",
+		all: [Red, Green],
+		spell: spell_colour,
+	},
+)
 
 expect colour("red") == Ok(Red)
 expect colour("green") == Ok(Green)
@@ -424,7 +476,13 @@ expect colour("reds") == Err(UnknownWord("c"))
 ## A test's hash: byte `i` is `i` times `step`.
 hash_stepping : U8 -> Stored.SecretHash
 hash_stepping = |step|
-	match Stored.SecretHash.from_bytes(Iter.fold(U8.to(0, 31), [], |acc, b| acc.append(b * step))) {
+	match Stored.SecretHash.from_bytes(
+		Iter.fold(
+			U8.to(0, 31),
+			[],
+			|acc, b| acc.append(b * step),
+		),
+	) {
 		Ok(h) => h
 		Err(NotAHash) => crash "hash_stepping: 32 bytes are a hash"
 	}
@@ -434,7 +492,17 @@ some_hash = hash_stepping(7)
 
 expect Stored.hash_text(some_hash) == "00070e151c232a31383f464d545b626970777e858c939aa1a8afb6bdc4cbd2d9"
 expect Stored.hash(Str.to_utf8(Stored.hash_text(some_hash)), "h") == Ok(some_hash)
-expect Stored.hash(Str.to_utf8("00070E151C232A31383F464D545B626970777E858C939AA1A8AFB6BDC4CBD2D9"), "h") == Err(BadValue("h"))
+expect Stored.hash(
+	Str.to_utf8("00070E151C232A31383F464D545B626970777E858C939AA1A8AFB6BDC4CBD2D9"),
+	"h",
+) == Err(BadValue("h"))
 expect Stored.hash(Str.to_utf8("00070e"), "h") == Err(BadValue("h"))
-expect Stored.hash(Str.to_utf8("g0070e151c232a31383f464d545b626970777e858c939aa1a8afb6bdc4cbd2d9"), "h") == Err(BadValue("h"))
-expect Stored.SecretHash.from_bytes([1, 2, 3]) == Err(NotAHash)
+expect Stored.hash(
+	Str.to_utf8("g0070e151c232a31383f464d545b626970777e858c939aa1a8afb6bdc4cbd2d9"),
+	"h",
+) == Err(BadValue("h"))
+expect Stored.SecretHash.from_bytes([
+	1,
+	2,
+	3,
+]) == Err(NotAHash)

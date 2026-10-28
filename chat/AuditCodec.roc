@@ -47,7 +47,13 @@ AuditCodec := [].{
 		verdict_field = action_field.rest.field("verdict")?
 		verdict = verdict_from(verdict_field.value)?
 		verdict_field.rest.close()?
-		Ok({ who, via, action, at, verdict })
+		Ok({
+			who,
+			via,
+			action,
+			at,
+			verdict,
+		})
 	}
 }
 
@@ -76,17 +82,39 @@ via_text = |via|
 via_from : List(U8) -> Try(Via, Stored.Problem)
 via_from = |value| {
 	{ head, tail } = split_colon(value, "via")?
-	match Stored.word(head, { name: "via", all: all_via_kinds, spell: spell_via })? {
-		Session => Stored.id(tail, { name: "via", make: Principal.SessionId.from_u64 }).map_ok(|s| Session(s))
+	match Stored.word(
+		head,
+		{
+			name: "via",
+			all: all_via_kinds,
+			spell: spell_via,
+		},
+	)? {
+		Session => Stored.id(
+			tail,
+			{ name: "via", make: Principal.SessionId.from_u64 },
+		).map_ok(|s| Session(s))
 		Key => Stored.id(tail, { name: "via", make: Principal.KeyId.from_u64 }).map_ok(|k| Key(k))
 	}
 }
 
 ## An action's word, without its target.
-ActionKind : [ListAccounts, Retire, RevokeKeys, RevokeSessions, ReadCounters]
+ActionKind : [
+	ListAccounts,
+	Retire,
+	RevokeKeys,
+	RevokeSessions,
+	ReadCounters,
+]
 
 all_action_kinds : List(ActionKind)
-all_action_kinds = [ListAccounts, Retire, RevokeKeys, RevokeSessions, ReadCounters]
+all_action_kinds = [
+	ListAccounts,
+	Retire,
+	RevokeKeys,
+	RevokeSessions,
+	ReadCounters,
+]
 
 spell_action : ActionKind -> Str
 spell_action = |kind|
@@ -114,29 +142,56 @@ action_from : List(U8) -> Try(Admin.Action, Stored.Problem)
 action_from = |value|
 	match List.split_first(value, ':') {
 		Err(NotFound) =>
-			match Stored.word(value, { name: "action", all: all_action_kinds, spell: spell_action })? {
+			match Stored.word(
+				value,
+				{
+					name: "action",
+					all: all_action_kinds,
+					spell: spell_action,
+				},
+			)? {
 				ListAccounts => Ok(ListAccounts)
 				ReadCounters => Ok(ReadCounters)
 				Retire | RevokeKeys | RevokeSessions => Err(BadValue("action"))
 			}
 
 		Ok({ before, after }) =>
-			match Stored.word(before, { name: "action", all: all_action_kinds, spell: spell_action })? {
+			match Stored.word(
+				before,
+				{
+					name: "action",
+					all: all_action_kinds,
+					spell: spell_action,
+				},
+			)? {
 				ListAccounts | ReadCounters => Err(BadValue("action"))
 				Retire => AccountCodec.id_from(after, "action").map_ok(|id| Retire(id))
 				RevokeKeys => AccountCodec.id_from(after, "action").map_ok(|id| RevokeKeys(id))
 				RevokeSessions =>
-					Stored.id(after, { name: "action", make: Principal.GitHubId.from_u64 }).map_ok(|g| RevokeSessions(g))
+					Stored.id(
+						after,
+						{ name: "action", make: Principal.GitHubId.from_u64 },
+					).map_ok(|g| RevokeSessions(g))
 			}
 	}
 
 Verdict : [Permitted, Refused(Admin.Refusal)]
 
 ## The refusals Admin says itself; a key's are ApiKey's, after `key:`.
-AdminRefusal : [NoSuchPrincipal, SessionNotHuman, NotAdmin, RetiresOwnAuthority]
+AdminRefusal : [
+	NoSuchPrincipal,
+	SessionNotHuman,
+	NotAdmin,
+	RetiresOwnAuthority,
+]
 
 all_admin_refusals : List(AdminRefusal)
-all_admin_refusals = [NoSuchPrincipal, SessionNotHuman, NotAdmin, RetiresOwnAuthority]
+all_admin_refusals = [
+	NoSuchPrincipal,
+	SessionNotHuman,
+	NotAdmin,
+	RetiresOwnAuthority,
+]
 
 spell_admin_refusal : AdminRefusal -> Str
 spell_admin_refusal = |why|
@@ -148,7 +203,13 @@ spell_admin_refusal = |why|
 	}
 
 all_key_refusals : List(ApiKey.Refusal)
-all_key_refusals = [Revoked, Expired, NoSuchPrincipal, OutOfScope, BeyondPrincipal]
+all_key_refusals = [
+	Revoked,
+	Expired,
+	NoSuchPrincipal,
+	OutOfScope,
+	BeyondPrincipal,
+]
 
 spell_key_refusal : ApiKey.Refusal -> Str
 spell_key_refusal = |why|
@@ -165,11 +226,18 @@ verdict_text : Verdict -> Str
 verdict_text = |verdict|
 	match verdict {
 		Permitted => permitted_word
-		Refused(KeyRefused(why)) => "${refused_prefix}${key_prefix}${spell_key_refusal(why)}"
-		Refused(NoSuchPrincipal) => "${refused_prefix}${spell_admin_refusal(NoSuchPrincipal)}"
-		Refused(SessionNotHuman) => "${refused_prefix}${spell_admin_refusal(SessionNotHuman)}"
-		Refused(NotAdmin) => "${refused_prefix}${spell_admin_refusal(NotAdmin)}"
-		Refused(RetiresOwnAuthority) => "${refused_prefix}${spell_admin_refusal(RetiresOwnAuthority)}"
+		Refused(why) => "${refused_prefix}${refusal_text(why)}"
+	}
+
+## A refusal's word, a key's after `key:`.
+refusal_text : Admin.Refusal -> Str
+refusal_text = |why|
+	match why {
+		KeyRefused(key_why) => "${key_prefix}${spell_key_refusal(key_why)}"
+		NoSuchPrincipal => spell_admin_refusal(NoSuchPrincipal)
+		SessionNotHuman => spell_admin_refusal(SessionNotHuman)
+		NotAdmin => spell_admin_refusal(NotAdmin)
+		RetiresOwnAuthority => spell_admin_refusal(RetiresOwnAuthority)
 	}
 
 verdict_from : List(U8) -> Try(Verdict, Stored.Problem)
@@ -182,11 +250,25 @@ verdict_from = |value|
 			Ok(why) =>
 				match Bytes.strip_prefix(why, Str.to_utf8(key_prefix)) {
 					Ok(key_why) =>
-						Stored.word(key_why, { name: "verdict", all: all_key_refusals, spell: spell_key_refusal })
+						Stored.word(
+							key_why,
+							{
+								name: "verdict",
+								all: all_key_refusals,
+								spell: spell_key_refusal,
+							},
+						)
 							.map_ok(|w| Refused(KeyRefused(w)))
 
 					Err(NoMatch) =>
-						match Stored.word(why, { name: "verdict", all: all_admin_refusals, spell: spell_admin_refusal })? {
+						match Stored.word(
+							why,
+							{
+								name: "verdict",
+								all: all_admin_refusals,
+								spell: spell_admin_refusal,
+							},
+						)? {
 							NoSuchPrincipal => Ok(Refused(NoSuchPrincipal))
 							SessionNotHuman => Ok(Refused(SessionNotHuman))
 							NotAdmin => Ok(Refused(NotAdmin))
@@ -255,13 +337,31 @@ text_of = |audit|
 	}
 
 expect
-	text_of({ who: Principal.Id.Agent(aid(1)), via: Key(kid(4)), action: RevokeKeys(Principal.Id.Human(gid(2))), at: 1761600000, verdict: Permitted })
+	text_of({
+		who: Principal.Id.Agent(aid(1)),
+		via: Key(kid(4)),
+		action: RevokeKeys(Principal.Id.Human(gid(2))),
+		at: 1761600000,
+		verdict: Permitted,
+	})
 		== "audit v1 at=1761600000 who=agent:1 via=key:4 action=revoke-keys:human:2 verdict=permitted\n"
 expect
-	text_of({ who: Principal.Id.Human(gid(2)), via: Session(sid(12)), action: Retire(Principal.Id.Human(gid(1))), at: 1761600077, verdict: Refused(NotAdmin) })
+	text_of({
+		who: Principal.Id.Human(gid(2)),
+		via: Session(sid(12)),
+		action: Retire(Principal.Id.Human(gid(1))),
+		at: 1761600077,
+		verdict: Refused(NotAdmin),
+	})
 		== "audit v1 at=1761600077 who=human:2 via=session:12 action=retire:human:1 verdict=refused:not-admin\n"
 expect
-	text_of({ who: Principal.Id.Bot(aid(3)), via: Key(kid(5)), action: ReadCounters, at: -1, verdict: Refused(KeyRefused(OutOfScope)) })
+	text_of({
+		who: Principal.Id.Bot(aid(3)),
+		via: Key(kid(5)),
+		action: ReadCounters,
+		at: -1,
+		verdict: Refused(KeyRefused(OutOfScope)),
+	})
 		== "audit v1 at=-1 who=bot:3 via=key:5 action=read-counters verdict=refused:key:out-of-scope\n"
 
 # ── EVERY ENTRY ROUND-TRIPS: every action against every verdict, by a
@@ -302,8 +402,20 @@ entries =
 			List.join_map(
 				verdicts,
 				|verdict| [
-					{ who: Principal.Id.Human(gid(1)), via: Session(sid(9)), action, at: 1761600000, verdict },
-					{ who: Principal.Id.Agent(aid(1)), via: Key(kid(4)), action, at: 0, verdict },
+					{
+						who: Principal.Id.Human(gid(1)),
+						via: Session(sid(9)),
+						action,
+						at: 1761600000,
+						verdict,
+					},
+					{
+						who: Principal.Id.Agent(aid(1)),
+						via: Key(kid(4)),
+						action,
+						at: 0,
+						verdict,
+					},
 				],
 			),
 	)
@@ -317,7 +429,12 @@ usual_line : Str
 usual_line = "audit v1 at=1761600000 who=agent:1 via=key:4 action=revoke-keys:human:2 verdict=permitted\n"
 
 decoded : { from : Str, to : Str } -> Try({}, Stored.Problem)
-decoded = |{ from, to }| AuditCodec.decode(Str.to_utf8(usual_line.replace_first(from, to))).map_ok(|_| {})
+decoded = |
+	{
+		from,
+		to,
+	},
+| AuditCodec.decode(Str.to_utf8(usual_line.replace_first(from, to))).map_ok(|_| {})
 
 expect decoded({ from: "", to: "" }) == Ok({})
 expect decoded({ from: "\n", to: "" }) == Err(Torn)
@@ -332,11 +449,23 @@ expect decoded({ from: "via=key:4", to: "via=key" }) == Err(BadValue("via"))
 expect decoded({ from: "via=key:4", to: "via=key:0" }) == Err(BadValue("via"))
 expect decoded({ from: "via=key:4", to: "via=session:x" }) == Err(BadNumber("via"))
 expect decoded({ from: "via=key:4 ", to: "" }) == Err(MissingField("via"))
-expect decoded({ from: "revoke-keys:human:2", to: "read-mail:human:2" }) == Err(UnknownWord("action"))
+expect decoded({
+	from: "revoke-keys:human:2",
+	to: "read-mail:human:2",
+}) == Err(UnknownWord("action"))
 expect decoded({ from: "revoke-keys:human:2", to: "revoke-keys" }) == Err(BadValue("action"))
-expect decoded({ from: "revoke-keys:human:2", to: "list-accounts:human:2" }) == Err(BadValue("action"))
-expect decoded({ from: "revoke-keys:human:2", to: "revoke-keys:human:0" }) == Err(BadValue("action"))
-expect decoded({ from: "revoke-keys:human:2", to: "revoke-sessions:human:2" }) == Err(BadNumber("action"))
+expect decoded({
+	from: "revoke-keys:human:2",
+	to: "list-accounts:human:2",
+}) == Err(BadValue("action"))
+expect decoded({
+	from: "revoke-keys:human:2",
+	to: "revoke-keys:human:0",
+}) == Err(BadValue("action"))
+expect decoded({
+	from: "revoke-keys:human:2",
+	to: "revoke-sessions:human:2",
+}) == Err(BadNumber("action"))
 expect decoded({ from: "revoke-keys:human:2", to: "revoke-sessions:2" }) == Ok({})
 expect decoded({ from: "revoke-keys:human:2", to: "list-accounts" }) == Ok({})
 expect decoded({ from: "permitted", to: "allowed" }) == Err(UnknownWord("verdict"))
@@ -347,4 +476,7 @@ expect decoded({ from: "permitted", to: "refused:key:not-admin" }) == Err(Unknow
 expect decoded({ from: "permitted", to: "refused:key:" }) == Err(UnknownWord("verdict"))
 expect decoded({ from: " verdict=permitted", to: "" }) == Err(MissingField("verdict"))
 expect decoded({ from: "permitted\n", to: "permitted by=steve\n" }) == Err(Trailing)
-expect decoded({ from: "who=agent:1 via=key:4", to: "via=key:4 who=agent:1" }) == Err(MissingField("who"))
+expect decoded({
+	from: "who=agent:1 via=key:4",
+	to: "via=key:4 who=agent:1",
+}) == Err(MissingField("who"))

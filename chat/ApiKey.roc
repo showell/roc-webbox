@@ -637,7 +637,12 @@ boss_until_100 = issued({ acts_as: boss, scope: with_admin }, At(100))
 # ── LOADING A STORED KEY
 # A key's record loads back to the same record, revoked or not.
 expect List.all(
-	[ann_forever, boss_until_100, ann_agent_reads_c, boss_agent_admin.revoke()],
+	[
+		ann_forever,
+		boss_until_100,
+		ann_agent_reads_c,
+		boss_agent_admin.revoke(),
+	],
 	|key| ApiKey.Key.load(key.record()).record() == key.record(),
 )
 

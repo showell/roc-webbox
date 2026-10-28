@@ -724,6 +724,8 @@ const kept_alone = {
   Last = "a topic's count and last message from its sidecar, effectful; main reads both through it, and Count (pure, the twin's) holds the rules",
   -- A rule to audit alone.
   SafeImg = "a security rule (which <img> a page may hold), auditable alone; its one caller is Feeds",
+  OAuthState = "a security rule (the login state's check, what stops login CSRF), auditable alone; its one caller is GitHubSignIn",
+  ConvAccess = "a security rule (who sees a conversation, and who elects), auditable alone with its table; its one caller is KeyCodec until a host routes requests",
   -- The plants' own (tools/roc_hunt/plants/single_caller/).
   QuietKept = "a plant: allowlisted, so quiet",
 }

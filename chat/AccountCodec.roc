@@ -47,8 +47,22 @@ AccountCodec := [].{
 				)
 			}
 
-			Agent(a) => owned_line(Agent, { id: a.id, owner: a.owner, name: a.name })
-			Bot(b) => owned_line(Bot, { id: b.id, owner: b.owner, name: b.name })
+			Agent(a) => owned_line(
+				Agent,
+				{
+					id: a.id,
+					owner: a.owner,
+					name: a.name,
+				},
+			)
+			Bot(b) => owned_line(
+				Bot,
+				{
+					id: b.id,
+					owner: b.owner,
+					name: b.name,
+				},
+			)
 		}
 
 	## The account a line holds.
@@ -56,7 +70,14 @@ AccountCodec := [].{
 	decode = |raw| {
 		fields = Stored.Reader.open(raw, "account")?
 		kind = fields.field("kind")?
-		match Stored.word(kind.value, { name: "kind", all: all_kinds, spell: spell_kind })? {
+		match Stored.word(
+			kind.value,
+			{
+				name: "kind",
+				all: all_kinds,
+				spell: spell_kind,
+			},
+		)? {
 			Human => decode_human(kind.rest)
 			Agent => decode_owned(kind.rest).map_ok(|a| Principal.Agent(a))
 			Bot => decode_owned(kind.rest).map_ok(|b| Principal.Bot(b))
@@ -80,18 +101,42 @@ AccountCodec := [].{
 		match List.split_first(value, ':') {
 			Err(NotFound) => Err(BadValue(name))
 			Ok({ before, after }) =>
-				match Stored.word(before, { name, all: all_kinds, spell: spell_kind })? {
-					Human => Stored.id(after, { name, make: Principal.GitHubId.from_u64 }).map_ok(|g| Principal.Id.Human(g))
-					Agent => Stored.id(after, { name, make: Principal.AgentId.from_u64 }).map_ok(|a| Principal.Id.Agent(a))
-					Bot => Stored.id(after, { name, make: Principal.AgentId.from_u64 }).map_ok(|b| Principal.Id.Bot(b))
+				match Stored.word(
+					before,
+					{
+						name,
+						all: all_kinds,
+						spell: spell_kind,
+					},
+				)? {
+					Human => Stored.id(
+						after,
+						{ name, make: Principal.GitHubId.from_u64 },
+					).map_ok(|g| Principal.Id.Human(g))
+					Agent => Stored.id(
+						after,
+						{ name, make: Principal.AgentId.from_u64 },
+					).map_ok(|a| Principal.Id.Agent(a))
+					Bot => Stored.id(
+						after,
+						{ name, make: Principal.AgentId.from_u64 },
+					).map_ok(|b| Principal.Id.Bot(b))
 				}
 		}
 }
 
-Kind : [Human, Agent, Bot]
+Kind : [
+	Human,
+	Agent,
+	Bot,
+]
 
 all_kinds : List(Kind)
-all_kinds = [Human, Agent, Bot]
+all_kinds = [
+	Human,
+	Agent,
+	Bot,
+]
 
 spell_kind : Kind -> Str
 spell_kind = |kind|
@@ -126,7 +171,14 @@ owned_line : [Agent, Bot],
 	owner : Principal.GitHubId,
 	name : Str,
 } -> Try(List(U8), AccountCodec.EncodeProblem)
-owned_line = |kind, { id, owner, name }| {
+owned_line = |
+	kind,
+	{
+		id,
+		owner,
+		name,
+	},
+| {
 	text = name_text(name)?
 	Ok(
 		Stored.line(
@@ -155,7 +207,14 @@ decode_human = |after_kind| {
 	login = github.rest.field("login")?
 	login_text = GitHubLogin.from_utf8(login.value).map_err(|_| BadValue("login"))?
 	role = login.rest.field("role")?
-	role_word = Stored.word(role.value, { name: "role", all: all_roles, spell: spell_role })?
+	role_word = Stored.word(
+		role.value,
+		{
+			name: "role",
+			all: all_roles,
+			spell: spell_role,
+		},
+	)?
 	name = stored_name(role.rest)?
 	Ok(
 		Principal.Human({
@@ -182,7 +241,11 @@ decode_owned = |after_kind| {
 	owner_field = id_field.rest.field("owner")?
 	owner = Stored.id(owner_field.value, { name: "owner", make: Principal.GitHubId.from_u64 })?
 	name = stored_name(owner_field.rest)?
-	Ok({ id, name, owner })
+	Ok({
+		id,
+		name,
+		owner,
+	})
 }
 
 ## The last field, the name: as the rule takes it, already trimmed.
@@ -225,18 +288,45 @@ steve : Principal
 steve = human({ name: "Steve H.", role: Admin })
 
 cc : Principal
-cc = Principal.Agent({ id: aid(7), owner: gid(583231), name: "CC" })
+cc = Principal.Agent({
+	id: aid(7),
+	owner: gid(583231),
+	name: "CC",
+})
 
 commits : Principal
-commits = Principal.Bot({ id: aid(9), owner: gid(583231), name: "commits" })
+commits = Principal.Bot({
+	id: aid(9),
+	owner: gid(583231),
+	name: "commits",
+})
 
 ## **A PRINCIPAL, EVERY FIELD OF IT, FOR A TEST TO COMPARE**: Principal has
 ## no `==` on purpose (two principals are the same one when their ids are),
 ## and a round trip must keep every field, not only the id.
 Every : [
-	Human({ id : Principal.GitHubId, login : Str, name : Str, role : Principal.Role }),
-	Agent({ id : Principal.AgentId, name : Str, owner : Principal.GitHubId }),
-	Bot({ id : Principal.AgentId, name : Str, owner : Principal.GitHubId }),
+	Human(
+		{
+			id : Principal.GitHubId,
+			login : Str,
+			name : Str,
+			role : Principal.Role,
+		},
+	),
+	Agent(
+		{
+			id : Principal.AgentId,
+			name : Str,
+			owner : Principal.GitHubId,
+		},
+	),
+	Bot(
+		{
+			id : Principal.AgentId,
+			name : Str,
+			owner : Principal.GitHubId,
+		},
+	),
 ]
 
 every : Principal -> Every
@@ -293,7 +383,11 @@ expect
 		|name| is_kept(human({ name, role: Member })),
 	)
 biggest : Principal
-biggest = Principal.Bot({ id: aid(18446744073709551615), owner: gid(18446744073709551615), name: "max" })
+biggest = Principal.Bot({
+	id: aid(18446744073709551615),
+	owner: gid(18446744073709551615),
+	name: "max",
+})
 
 expect is_kept(biggest)
 expect round_trip(steve) != round_trip(human({ name: "Steve H.", role: Member }))
@@ -319,47 +413,71 @@ expect
 decoded : Str -> Try({}, Stored.Problem)
 decoded = |text| AccountCodec.decode(Str.to_utf8(text)).map_ok(|_| {})
 
+human_line : Str
+human_line = "account v1 kind=human github=1 login=a role=member name=b\n"
+
+agent_line : Str
+agent_line = "account v1 kind=agent id=7 owner=5 name=CC\n"
+
+## The human's line with `from` replaced by `to`, decoded.
+human_but : { from : Str, to : Str } -> Try({}, Stored.Problem)
+human_but = |{ from, to }| decoded(human_line.replace_first(from, to))
+
+## The agent's line with `from` replaced by `to`, decoded.
+agent_but : { from : Str, to : Str } -> Try({}, Stored.Problem)
+agent_but = |{ from, to }| decoded(agent_line.replace_first(from, to))
+
+expect human_but({ from: "", to: "" }) == Ok({})
+expect agent_but({ from: "", to: "" }) == Ok({})
 expect decoded("") == Err(Torn)
-expect decoded("account v1 kind=agent id=7 owner=5 name=CC") == Err(Torn)
-expect decoded("account v1 kind=agent id=7 owner=5 name=CC\naccount v1 kind=agent id=8 owner=5 name=CD\n") == Err(ExtraLine)
+expect agent_but({ from: "\n", to: "" }) == Err(Torn)
+expect decoded(Str.concat(agent_line, agent_line)) == Err(ExtraLine)
 expect decoded("session v1 id=1\n") == Err(WrongRecord)
-expect decoded("account v2 kind=agent id=7 owner=5 name=CC\n") == Err(UnknownVersion)
-expect decoded("account v1 kind=robot id=7 owner=5 name=CC\n") == Err(UnknownWord("kind"))
-expect decoded("account v1 kind=Human github=1 login=a role=member name=b\n") == Err(UnknownWord("kind"))
-expect decoded("account v1 github=1 login=a role=member name=b\n") == Err(MissingField("kind"))
-expect decoded("account v1 kind=human login=a github=1 role=member name=b\n") == Err(MissingField("github"))
-expect decoded("account v1 kind=human github=1 role=member name=b\n") == Err(MissingField("login"))
-expect decoded("account v1 kind=human github=1 github=1 login=a role=member name=b\n") == Err(MissingField("login"))
-expect decoded("account v1 kind=human github=1 login=a name=b\n") == Err(MissingField("role"))
-expect decoded("account v1 kind=human github=1 login=a role=member\n") == Err(MissingField("name"))
-expect decoded("account v1 kind=human github=1 login=a  role=member name=b\n") == Err(MissingField("role"))
-expect decoded("account v1 kind=human github=1 login=a extra=1 role=member name=b\n") == Err(MissingField("role"))
-expect decoded("account v1 kind=human github=0 login=a role=member name=b\n") == Err(BadValue("github"))
-expect decoded("account v1 kind=human github=01 login=a role=member name=b\n") == Err(BadNumber("github"))
-expect decoded("account v1 kind=human github=-1 login=a role=member name=b\n") == Err(BadNumber("github"))
-expect decoded("account v1 kind=human github= login=a role=member name=b\n") == Err(BadNumber("github"))
-expect decoded("account v1 kind=human github=1 login=a_b role=member name=b\n") == Err(BadValue("login"))
-expect decoded("account v1 kind=human github=1 login= role=member name=b\n") == Err(BadValue("login"))
-expect decoded("account v1 kind=human github=1 login=a role=owner name=b\n") == Err(UnknownWord("role"))
-expect decoded("account v1 kind=human github=1 login=a role=Admin name=b\n") == Err(UnknownWord("role"))
-expect decoded("account v1 kind=human github=1 login=a role=member name=\n") == Err(BadValue("name"))
-expect decoded("account v1 kind=human github=1 login=a role=member name= b\n") == Err(BadValue("name"))
-expect decoded("account v1 kind=human github=1 login=a role=member name=b \n") == Err(BadValue("name"))
-expect decoded("account v1 kind=human github=1 login=a role=member name=b\r\n") == Err(BadValue("name"))
-expect decoded("account v1 kind=human github=1 login=a role=member name=a\tb\n") == Err(BadValue("name"))
-expect decoded("account v1 kind=human github=1 login=a role=member name=${Str.repeat("n", 65)}\n") == Err(BadValue("name"))
-expect decoded("account v1 kind=agent id=0 owner=5 name=CC\n") == Err(BadValue("id"))
-expect decoded("account v1 kind=agent id=7 owner=0 name=CC\n") == Err(BadValue("owner"))
-expect decoded("account v1 kind=agent id=7 name=CC\n") == Err(MissingField("owner"))
-expect decoded("account v1 kind=agent github=1 login=a role=member name=b\n") == Err(MissingField("id"))
-expect decoded("account v1 kind=bot id=18446744073709551616 owner=5 name=b\n") == Err(BadNumber("id"))
-expect AccountCodec.decode([0x61, 0xff, '\n']).map_ok(|_| {}) == Err(NotUtf8)
+expect agent_but({ from: "v1", to: "v2" }) == Err(UnknownVersion)
+expect agent_but({ from: "kind=agent", to: "kind=robot" }) == Err(UnknownWord("kind"))
+expect human_but({ from: "kind=human", to: "kind=Human" }) == Err(UnknownWord("kind"))
+expect human_but({ from: " kind=human", to: "" }) == Err(MissingField("kind"))
+expect human_but({ from: "github=1 login=a", to: "login=a github=1" }) == Err(MissingField("github"))
+expect human_but({ from: " login=a", to: "" }) == Err(MissingField("login"))
+expect human_but({ from: "github=1", to: "github=1 github=1" }) == Err(MissingField("login"))
+expect human_but({ from: " role=member", to: "" }) == Err(MissingField("role"))
+expect human_but({ from: " name=b", to: "" }) == Err(MissingField("name"))
+expect human_but({ from: "login=a ", to: "login=a  " }) == Err(MissingField("role"))
+expect human_but({ from: "login=a ", to: "login=a extra=1 " }) == Err(MissingField("role"))
+expect human_but({ from: "github=1", to: "github=0" }) == Err(BadValue("github"))
+expect human_but({ from: "github=1", to: "github=01" }) == Err(BadNumber("github"))
+expect human_but({ from: "github=1", to: "github=-1" }) == Err(BadNumber("github"))
+expect human_but({ from: "github=1", to: "github=" }) == Err(BadNumber("github"))
+expect human_but({ from: "login=a", to: "login=a_b" }) == Err(BadValue("login"))
+expect human_but({ from: "login=a", to: "login=" }) == Err(BadValue("login"))
+expect human_but({ from: "role=member", to: "role=owner" }) == Err(UnknownWord("role"))
+expect human_but({ from: "role=member", to: "role=Admin" }) == Err(UnknownWord("role"))
+expect human_but({ from: "name=b", to: "name=" }) == Err(BadValue("name"))
+expect human_but({ from: "name=b", to: "name= b" }) == Err(BadValue("name"))
+expect human_but({ from: "name=b", to: "name=b " }) == Err(BadValue("name"))
+expect human_but({ from: "name=b", to: "name=b\r" }) == Err(BadValue("name"))
+expect human_but({ from: "name=b", to: "name=a\tb" }) == Err(BadValue("name"))
+expect human_but({ from: "name=b", to: "name=${Str.repeat("n", 65)}" }) == Err(BadValue("name"))
+expect agent_but({ from: "id=7", to: "id=0" }) == Err(BadValue("id"))
+expect agent_but({ from: "owner=5", to: "owner=0" }) == Err(BadValue("owner"))
+expect agent_but({ from: " owner=5", to: "" }) == Err(MissingField("owner"))
+expect agent_but({ from: "id=7 owner=5", to: "github=1 login=a role=member" }) == Err(MissingField("id"))
+expect agent_but({ from: "kind=agent id=7", to: "kind=bot id=18446744073709551616" }) == Err(BadNumber("id"))
+expect AccountCodec.decode([
+	0x61,
+	0xff,
+	'\n',
+]).map_ok(|_| {}) == Err(NotUtf8)
 
 # A principal's id: each kind round-trips; each malformed spelling, its
 # problem.
 expect
 	List.all(
-		[Principal.Id.Human(gid(583231)), Principal.Id.Agent(aid(7)), Principal.Id.Bot(aid(7))],
+		[
+			Principal.Id.Human(gid(583231)),
+			Principal.Id.Agent(aid(7)),
+			Principal.Id.Bot(aid(7)),
+		],
 		|id| AccountCodec.id_from(Str.to_utf8(AccountCodec.id_text(id)), "who") == Ok(id),
 	)
 expect AccountCodec.id_text(Principal.Id.Bot(aid(9))) == "bot:9"
@@ -378,9 +496,27 @@ expect id_read("agent:7:8") == Err(BadNumber("who"))
 # What will not encode: a name the rule refuses, one untrimmed, a login
 # GitHub would not give.
 expect AccountCodec.encode(human({ name: "", role: Member })) == Err(NameRefused(Empty))
-expect AccountCodec.encode(human({ name: "a\nrole=admin", role: Member })) == Err(NameRefused(ControlCharacter))
+expect AccountCodec.encode(
+	human({
+		name: "a\nrole=admin",
+		role: Member,
+	}),
+) == Err(NameRefused(ControlCharacter))
 expect AccountCodec.encode(human({ name: " Ann", role: Member })) == Err(NameUntrimmed)
-expect AccountCodec.encode(Principal.Agent({ id: aid(1), owner: gid(1), name: "" })) == Err(NameRefused(Empty))
+expect AccountCodec.encode(
+	Principal.Agent({
+		id: aid(1),
+		owner: gid(1),
+		name: "",
+	}),
+) == Err(NameRefused(Empty))
 expect
-	AccountCodec.encode(Principal.Human({ id: gid(1), login: "bad login", name: "b", role: Member }))
+	AccountCodec.encode(
+		Principal.Human({
+			id: gid(1),
+			login: "bad login",
+			name: "b",
+			role: Member,
+		}),
+	)
 		== Err(LoginRefused)

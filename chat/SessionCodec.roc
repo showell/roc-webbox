@@ -130,31 +130,49 @@ decoded : Str -> Try({}, Stored.Problem)
 decoded = |text| SessionCodec.decode(Str.to_utf8(text)).map_ok(|_| {})
 
 ## The usual line with `from` replaced by `to`.
-usual_but : Str, Str -> Str
-usual_but = |from, to|
-	"session v1 id=12 human=583231 token=${ab64} created=1761600000 seen=1761603600\n".replace_first(from, to)
+usual_but : { from : Str, to : Str } -> Str
+usual_but = |{ from, to }|
+	"session v1 id=12 human=583231 token=${ab64} created=1761600000 seen=1761603600\n".replace_first(
+		from,
+		to,
+	)
 
-expect decoded(usual_but("", "")) == Ok({})
-expect decoded(usual_but("\n", "")) == Err(Torn)
-expect decoded(usual_but("\n", "\n\n")) == Err(ExtraLine)
-expect decoded(usual_but("session", "account")) == Err(WrongRecord)
-expect decoded(usual_but("v1", "v0")) == Err(UnknownVersion)
-expect decoded(usual_but("id=12 ", "")) == Err(MissingField("id"))
-expect decoded(usual_but("id=12", "id=0")) == Err(BadValue("id"))
-expect decoded(usual_but("id=12", "id=012")) == Err(BadNumber("id"))
-expect decoded(usual_but("human=583231 ", "")) == Err(MissingField("human"))
-expect decoded(usual_but("human=583231", "human=0")) == Err(BadValue("human"))
-expect decoded(usual_but("token=${ab64} ", "")) == Err(MissingField("token"))
-expect decoded(usual_but(ab64, Str.repeat("AB", 32))) == Err(BadValue("token"))
-expect decoded(usual_but(ab64, Str.repeat("ab", 31))) == Err(BadValue("token"))
-expect decoded(usual_but(ab64, Str.repeat("ab", 33))) == Err(BadValue("token"))
-expect decoded(usual_but(ab64, "")) == Err(BadValue("token"))
-expect decoded(usual_but("created=1761600000 ", "")) == Err(MissingField("created"))
-expect decoded(usual_but("created=1761600000", "created=1761600000.5")) == Err(BadNumber("created"))
-expect decoded(usual_but(" seen=1761603600", "")) == Err(MissingField("seen"))
-expect decoded(usual_but("seen=1761603600", "seen=")) == Err(BadNumber("seen"))
-expect decoded(usual_but("seen=1761603600", "seen=1761599999")) == Err(SeenBeforeCreated)
-expect decoded(usual_but("1761603600\n", "1761603600 \n")) == Err(Trailing)
-expect decoded(usual_but("1761603600\n", "1761603600 device=x\n")) == Err(Trailing)
-expect decoded(usual_but("created=1761600000 seen=1761603600", "seen=1761603600 created=1761600000")) == Err(MissingField("created"))
+expect decoded(usual_but({ from: "", to: "" })) == Ok({})
+expect decoded(usual_but({ from: "\n", to: "" })) == Err(Torn)
+expect decoded(usual_but({ from: "\n", to: "\n\n" })) == Err(ExtraLine)
+expect decoded(usual_but({ from: "session", to: "account" })) == Err(WrongRecord)
+expect decoded(usual_but({ from: "v1", to: "v0" })) == Err(UnknownVersion)
+expect decoded(usual_but({ from: "id=12 ", to: "" })) == Err(MissingField("id"))
+expect decoded(usual_but({ from: "id=12", to: "id=0" })) == Err(BadValue("id"))
+expect decoded(usual_but({ from: "id=12", to: "id=012" })) == Err(BadNumber("id"))
+expect decoded(usual_but({ from: "human=583231 ", to: "" })) == Err(MissingField("human"))
+expect decoded(usual_but({ from: "human=583231", to: "human=0" })) == Err(BadValue("human"))
+expect decoded(usual_but({ from: "token=${ab64} ", to: "" })) == Err(MissingField("token"))
+expect decoded(usual_but({ from: ab64, to: Str.repeat("AB", 32) })) == Err(BadValue("token"))
+expect decoded(usual_but({ from: ab64, to: Str.repeat("ab", 31) })) == Err(BadValue("token"))
+expect decoded(usual_but({ from: ab64, to: Str.repeat("ab", 33) })) == Err(BadValue("token"))
+expect decoded(usual_but({ from: ab64, to: "" })) == Err(BadValue("token"))
+expect decoded(usual_but({ from: "created=1761600000 ", to: "" })) == Err(MissingField("created"))
+expect decoded(
+	usual_but({
+		from: "created=1761600000",
+		to: "created=1761600000.5",
+	}),
+) == Err(BadNumber("created"))
+expect decoded(usual_but({ from: " seen=1761603600", to: "" })) == Err(MissingField("seen"))
+expect decoded(usual_but({ from: "seen=1761603600", to: "seen=" })) == Err(BadNumber("seen"))
+expect decoded(
+	usual_but({
+		from: "seen=1761603600",
+		to: "seen=1761599999",
+	}),
+) == Err(SeenBeforeCreated)
+expect decoded(usual_but({ from: "1761603600\n", to: "1761603600 \n" })) == Err(Trailing)
+expect decoded(usual_but({ from: "1761603600\n", to: "1761603600 device=x\n" })) == Err(Trailing)
+expect decoded(
+	usual_but({
+		from: "created=1761600000 seen=1761603600",
+		to: "seen=1761603600 created=1761600000",
+	}),
+) == Err(MissingField("created"))
 expect SessionCodec.decode([0xff, '\n']) == Err(NotUtf8)

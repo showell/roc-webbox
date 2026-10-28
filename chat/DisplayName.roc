@@ -45,7 +45,10 @@ DisplayName :: Str.{
 			Err(TooLong)
 		} else if List.any(bytes, Ascii.is_control) or has_c1_control(bytes) {
 			Err(ControlCharacter)
-		} else if List.any(bidi_controls, |c| has_sequence(bytes, Str.to_utf8(c))) {
+		} else if List.any(
+			bidi_controls,
+			|c| Bytes.find(bytes, { needle: Str.to_utf8(c), at: 0 }).is_ok(),
+		) {
 			Err(BidiControl)
 		} else {
 			match Str.from_utf8(bytes) {
@@ -116,10 +119,6 @@ has_c1_control = |bytes|
 			}
 		_ => Bool.False
 	}
-
-## `needle` is somewhere in `bytes`.
-has_sequence : List(U8), List(U8) -> Bool
-has_sequence = |bytes, needle| Bytes.find(bytes, { needle, at: 0 }).is_ok()
 
 # ── tests
 
