@@ -437,6 +437,8 @@ pub const Routing = struct {
         h.list = noFolder;
         h.srcs = everyScript;
         h.serve_rendered = holdsNone;
+        // An aside (the welcome on /chat) that meets no host account does nothing.
+        h.aside = asideDone;
         return h;
     }
     fn of(ctx: *anyopaque) *Routing {
@@ -460,6 +462,9 @@ pub const Routing = struct {
     }
     fn noAccount(_: *anyopaque) Accounts {
         return .{ .found = &.{} };
+    }
+    fn asideDone(_: *anyopaque, _: route_mod.Aside) route_mod.AsideEnd {
+        return .done;
     }
     fn noFolder(_: *anyopaque, _: []const u8) Listing {
         return .missing;

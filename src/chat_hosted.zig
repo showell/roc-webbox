@@ -376,6 +376,11 @@ fn expectAct(sub: []const u8, channel: bool, method: std.http.Method, script: Sc
     }
 }
 
+/// What /chat asks first, for member 1, the host: the welcome's aside
+/// (metal-vmm QUEUE 279), which reads the accounts and finds the member is
+/// the host, so seeds nothing.
+const welcome_checked = "member;aside begin;accounts;aside end;";
+
 /// What finding DM 1_2's topic Plans asks: the accounts (whether 2 is one,
 /// and its name, the title, before the topics, as findTopic read them),
 /// the topics (the DM's sessions folder, listed).
@@ -1001,7 +1006,7 @@ test "the member's bookmarks are the Roc's files: the topic last viewed first, t
         s.topics = &.{ "Other", "Plans" };
         s.files = &.{ .{ .path = ls, .read = .{ .found = "\tPlans \r\n" } }, .{ .path = lc, .read = .{ .found = " 1_2\r\n" } } };
         break :blk s;
-    }, .{ .redirect = "/chat/c/1_2/Plans" }, "member;presence;read " ++ lc ++ ";list 1_2/sessions;read " ++ ls ++ ";");
+    }, .{ .redirect = "/chat/c/1_2/Plans" }, welcome_checked ++ "presence;read " ++ lc ++ ";list 1_2/sessions;read " ++ ls ++ ";");
     // The feeds are the member's files too, named by the Roc.
     for ([_][2][]const u8{ .{ "/images", "users/1/images.md" }, .{ "/code", "users/1/code.md" } }) |feed| {
         var arena = std.heap.ArenaAllocator.init(testing.allocator);
@@ -1173,7 +1178,9 @@ test "accounts that will not read fail the request: never \"no such account\" ha
     // A viewer: no message stored under "".
     try expectAct("/ops/Plans/send", true, .POST, a, .answered, "member;presence;read channels/ops.channel;header x-chat-async;body;hostile hi;accounts;");
     try expectAct("/links", false, .GET, a, .answered, "member;presence;accounts;");
-    try expectAct("", false, .GET, a, .answered, "member;presence;read users/1/last-conv;accounts;");
+    // The welcome's aside reads them first, and its failure is its own;
+    // the viewer's name, read again, fails the request.
+    try expectAct("", false, .GET, a, .answered, welcome_checked ++ "presence;read users/1/last-conv;accounts;");
     // The roster: no conversations, no message searched for.
     try expectAct("/conversations", false, .GET, a, .answered, "member;presence;accounts;");
     try expectAct("/msg/Plans_1", false, .GET, a, .answered, "member;presence;accounts;");

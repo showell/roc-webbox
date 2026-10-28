@@ -127,10 +127,13 @@ served_by = |r|
 ## The Roc's own routes: presence, then the route's own work.
 act! : Chat.Request, Route.R => Chat.Answer
 act! = |req, route| {
+	# **THE WELCOME DM ON THE FIRST /chat** (metal-vmm QUEUE 279), before
+	# the member is counted online: login seeded it before they ever were.
+	who = if route.family == Default welcome!({}) else Unasked
 	# A stream is no presence (the Zig's streams were served uncounted).
 	if Route.is_stream(route) {} else Host.count_presence!({})
 	match route.family {
-		Default => resume!({})
+		Default => resume!(who)
 		Conversations => if req.method != Get Chat.not_allowed(Get) else serve_conversations!({})
 		Msg => redirect_to_msg!(route.rest.to_utf8())
 		Links => serve_links!(route.rest.to_utf8())
@@ -936,10 +939,52 @@ sidebar_of = |me, topic, at, others, channels, pins|
 json : List(U8)
 json = Str.to_utf8("application/json; charset=utf-8")
 
+## **THE HOST'S WELCOME** (login.zig `sendHostWelcome` as it was, metal-vmm
+## QUEUE 279): a member's DM with the host (member 1), while it has no
+## topic, gets the host's automated hello, in `general`, by the host's name,
+## and the member's bookmark at it, so /chat opens on it. Not the host's
+## own, and none when there is no host. **BEST-EFFORT, IN AN ASIDE**: a read
+## or a store that fails means no welcome this time, never a failed /chat;
+## the next visit tries again. The accounts it read, for the rest of the
+## request (`Unasked` when the aside failed).
+welcome! : {} => Who
+welcome! = |{}| {
+	_ = Host.aside!(Begin)
+	got = seed_welcome!({})
+	match (Host.aside!(End), got) {
+		(Done, Ok(accounts)) => Known(accounts)
+		_ => Unasked
+	}
+}
+
+seed_welcome! : {} => Try(List(Accounts.Account), [Failed])
+seed_welcome! = |{}| {
+	me = load_uid!({})?
+	accounts = load_accounts!(Unasked)?
+	match List.keep_if(accounts, |a| a.id.to_str() == "1") {
+		[host, ..] if host.id != me => {
+			name = fail_if_unreadable!(Accounts.name(accounts, host.id))?
+			pair = Paths.pair_key(host.id, me)
+			key = Dm(pair)
+			if !Paths.first_of(load_topics!(key)).is_empty() {
+				Ok(accounts)
+			} else {
+				bytes = key.bytes()
+				conv = { family: Dm, key: bytes, base: Conversation.dm_base(bytes), members: Conversation.dm_members(bytes) }
+				text = "Hi, this is an automated message from ${name}. Please say hello and ${name} will get back to you soon."
+				_ = append_message_by!(conv, Known(accounts), host.id, { at: { key, topic: "general" }, name, markdown: text, cid: "" })?
+				bookmark!(key, "general")?
+				Ok(accounts)
+			}
+		}
+		_ => Ok(accounts)
+	}
+}
+
 ## /chat: the member's last DM, at the topic they resume, or its own page
 ## when it has no topic yet; with none, the empty /chat.
-resume! : {} => Chat.Answer
-resume! = |{}|
+resume! : Who => Chat.Answer
+resume! = |who|
 	match load_uid!({}) {
 		Err(Failed) => Chat.answered
 		Ok(me) => {
@@ -954,7 +999,7 @@ resume! = |{}|
 					}
 				}
 				_ =>
-					match load_viewer!(Unasked) {
+					match load_viewer!(who) {
 						Ok(viewer) => Chat.respond(200, html, Pages.no_conversations(Chrome.src_in(Host.srcs!({})), viewer).bytes())
 						Err(Failed) => Chat.answered
 					}
@@ -1340,7 +1385,12 @@ Draft : { at : Paths.TopicAt, name : Str, markdown : Str, cid : Str }
 ## before the store failed (the request has, with its error), and nothing
 ## was stored.
 append_message! : Chat.Conv, Who, Draft => Try(Str, [Failed])
-append_message! = |conv, who, { at: topic_at, name, markdown: md, cid }|
+append_message! = |conv, who, draft| append_message_by!(conv, who, load_uid!({})?, draft)
+
+## append_message!, by the member `me` (the request's, or the host's for
+## the welcome DM).
+append_message_by! : Chat.Conv, Who, Uid, Draft => Try(Str, [Failed])
+append_message_by! = |conv, who, me, { at: topic_at, name, markdown: md, cid }|
 	# **NO MESSAGE WITHOUT AN AUTHOR** (the review of 156): the decoder
 	# refuses such a block on every read, so it would go out live and be
 	# gone on reload. A nameless member (a release cut short) cannot post.
@@ -1349,8 +1399,8 @@ append_message! = |conv, who, { at: topic_at, name, markdown: md, cid }|
 		Err(Failed)
 	} else {
 		topic = topic_at.topic
-		match (count_messages!(topic_at), load_uid!({})) {
-			(Ok(count), Ok(me)) => {
+		match count_messages!(topic_at) {
+			Ok(count) => {
 				index = count
 				# A count of the largest U64 has no next number: the call
 				# crashes into a 500, storing nothing.
@@ -1405,7 +1455,7 @@ append_message! = |conv, who, { at: topic_at, name, markdown: md, cid }|
 					}
 				}
 			}
-			_ => Err(Failed)
+			Err(Failed) => Err(Failed)
 		}
 	}
 
