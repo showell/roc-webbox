@@ -154,7 +154,7 @@ pub const AccountsStatus = enum(u8) { failed, found };
 /// not read is that read's own error, as the host kept it; a message with no
 /// author's name is error.NoAuthor, appendMessage's own; a file whose bytes
 /// are not UTF-8 is error.NotUtf8, about its path (Files.read!'s door).
-pub const FailReason = enum(u8) { kind_unreadable, malformed_channel, name_unreadable, no_author, not_utf8 };
+pub const FailReason = enum(u8) { kind_unreadable, malformed_channel, name_unreadable, no_author, not_a_uid, not_utf8 };
 
 /// Host.roc's `render!` answer's `status`: the markdown rendered (the HTML
 /// beside it), or a render that failed (the host has failed the request):

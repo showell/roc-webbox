@@ -271,13 +271,13 @@ load_accounts! = |who|
 			match got.status {
 				# **EACH ID AND NAME DECODED HERE, AT THE DOOR**
 				# (Accounts.from_host): one that is no uid fails the request
-				# (NotUtf8, about the account); a name that is not UTF-8 is
+				# (NotAUid, about the account); a name that is not UTF-8 is
 				# that account's alone, listed as unreadable.
 				Found =>
 					match List.map_try(got.accounts, Accounts.from_host) {
 						Ok(all) => Ok(all)
 						Err(NotAUid(bad)) => {
-							Host.fail!(NotUtf8, bad)
+							Host.fail!(NotAUid, bad)
 							Err(Failed)
 						}
 					}
@@ -299,14 +299,14 @@ load_viewer! = |who| {
 
 ## **THE MEMBER'S ID, DECODED WHERE THE HOST HANDS IT** (Host.me!): a
 ## session is signed only for an id a counter made, so one that is no
-## canonical uid fails the request (NotUtf8, about the id), and `Failed`.
+## canonical uid fails the request (NotAUid, about the id), and `Failed`.
 load_uid! : {} => Try(Uid, [Failed])
 load_uid! = |{}| {
 	bytes = Host.me!({})
 	match Uid.from_utf8(bytes) {
 		Ok(uid) => Ok(uid)
 		Err(NotAUid) => {
-			Host.fail!(NotUtf8, bytes)
+			Host.fail!(NotAUid, bytes)
 			Err(Failed)
 		}
 	}

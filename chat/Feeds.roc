@@ -72,6 +72,26 @@ Feeds := [].{
 	img_tags : Str -> List(Str)
 	img_tags = |s| tags_in(s.to_utf8())
 
+	## **A BYTE'S NEXT PLACE, REMEMBERED** (metal-vmm QUEUE 268): what one
+	## search found (`At`), or that there is none (`Never`), answers every
+	## later search from a place at or before it, so a scan that searches
+	## from each of many openers (`<img ` after `<img `, `![` after `![`)
+	## costs one pass of a message, not one per opener. `from` must not go
+	## back between calls that share one.
+	Seen : [Unknown, At(U64), Never]
+
+	find_seen : List(U8), U8, U64, Seen -> (Try(U64, [NotFound]), Seen)
+	find_seen = |s, b, from, seen|
+		match seen {
+			At(k) if k >= from => (Ok(k), seen)
+			Never => (Err(NotFound), Never)
+			_ =>
+				match find_byte(s, b, from) {
+					Ok(k) => (Ok(k), At(k))
+					Err(NotFound) => (Err(NotFound), Never)
+				}
+		}
+
 	find_byte : List(U8), U8, U64 -> Try(U64, [NotFound])
 	find_byte = |s, b, i| match List.get(s, i) {
 		Ok(c) => if c == b Ok(i) else find_byte(s, b, i + 1)
@@ -271,20 +291,20 @@ blocks_of = |text|
 	}
 
 tags_in : List(U8) -> List(Str)
-tags_in = |s| List.map(img_tags_from(s, 0, []), text_of)
+tags_in = |s| List.map(img_tags_from(s, 0, [], Unknown), text_of)
 
-img_tags_from : List(U8), U64, List(List(U8)) -> List(List(U8))
-img_tags_from = |s, i, out|
+img_tags_from : List(U8), U64, List(List(U8)), Feeds.Seen -> List(List(U8))
+img_tags_from = |s, i, out, gt_seen|
 	if i >= List.len(s) {
 		out
 	} else {
 		match List.sublist(s, { start: i, len: 5 }) {
 			[a, b, c, d, e] if Feeds.lower([a, b, c, d]) == Str.to_utf8("<img") and Feeds.is_space(e) =>
-				match Feeds.find_byte(s, '>', i + 4) {
-					Ok(gt) => img_tags_from(s, gt + 1, List.append(out, List.sublist(s, { start: i, len: gt + 1 - i })))
-					Err(NotFound) => img_tags_from(s, i + 1, out)
+				match Feeds.find_seen(s, '>', i + 4, gt_seen) {
+					(Ok(gt), seen) => img_tags_from(s, gt + 1, List.append(out, List.sublist(s, { start: i, len: gt + 1 - i })), seen)
+					(Err(NotFound), seen) => img_tags_from(s, i + 1, out, seen)
 				}
-			_ => img_tags_from(s, i + 1, out)
+			_ => img_tags_from(s, i + 1, out, gt_seen)
 		}
 	}
 

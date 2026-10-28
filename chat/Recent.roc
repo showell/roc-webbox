@@ -155,17 +155,20 @@ quotes_from = |ls, i, out|
 ## `replaceImgHtml`: `<img` (any case) not followed by a word byte, to
 ## the next `>`.
 html_images : List(U8) -> List(U8)
-html_images = |s| html_from(s, 0, [])
+html_images = |s| html_from(s, 0, [], Unknown)
 
-html_from : List(U8), U64, List(U8) -> List(U8)
-html_from = |s, i, out|
+## Linear (metal-vmm QUEUE 268): where the next `>` is, or that there is
+## none, is remembered across openers (Feeds.find_seen).
+html_from : List(U8), U64, List(U8), Feeds.Seen -> List(U8)
+html_from = |s, i, out, gt_seen|
 	match List.get(s, i) {
 		Err(_) => out
 		Ok(c) => {
 			opens = i + 4 <= List.len(s) and Feeds.lower(List.sublist(s, { start: i, len: 4 })) == Str.to_utf8("<img") and !is_word_byte(List.get(s, i + 4) ?? ' ')
-			match (if opens Feeds.find_byte(s, '>', i + 4) else Err(NotFound)) {
-				Ok(gt) => html_from(s, gt + 1, List.concat(out, Str.to_utf8("[image]")))
-				Err(NotFound) => html_from(s, i + 1, List.append(out, c))
+			(found, seen) = if opens Feeds.find_seen(s, '>', i + 4, gt_seen) else (Err(NotFound), gt_seen)
+			match found {
+				Ok(gt) => html_from(s, gt + 1, List.concat(out, Str.to_utf8("[image]")), seen)
+				Err(NotFound) => html_from(s, i + 1, List.append(out, c), seen)
 			}
 		}
 	}
@@ -175,32 +178,35 @@ is_word_byte = |c| (c >= 'A' and c <= 'Z') or (c >= 'a' and c <= 'z') or (c >= '
 
 ## `replaceImgMarkdown`: `![…](…)`.
 md_images : List(U8) -> List(U8)
-md_images = |s| md_from(s, 0, [])
+md_images = |s| md_from(s, 0, [], { br: Unknown, pa: Unknown })
 
-md_from : List(U8), U64, List(U8) -> List(U8)
-md_from = |s, i, out|
+## Linear (metal-vmm QUEUE 268): where the next `]` and `)` are, or that
+## there are none, is remembered across `![`s (Feeds.find_seen); every
+## search from a later `![` starts at or after the one before it.
+md_from : List(U8), U64, List(U8), { br : Feeds.Seen, pa : Feeds.Seen } -> List(U8)
+md_from = |s, i, out, seen|
 	match List.get(s, i) {
 		Err(_) => out
 		Ok(c) => {
-			end = if c == '!' and List.get(s, i + 1) == Ok('[') md_image(s, i) else Err(NotAnImage)
+			(end, after) = if c == '!' and List.get(s, i + 1) == Ok('[') md_image(s, i, seen) else (Err(NotAnImage), seen)
 			match end {
-				Ok(e) => md_from(s, e, List.concat(out, Str.to_utf8("[image]")))
-				Err(NotAnImage) => md_from(s, i + 1, List.append(out, c))
+				Ok(e) => md_from(s, e, List.concat(out, Str.to_utf8("[image]")), after)
+				Err(NotAnImage) => md_from(s, i + 1, List.append(out, c), after)
 			}
 		}
 	}
 
-md_image : List(U8), U64 -> Try(U64, [NotAnImage])
-md_image = |s, start|
-	match Feeds.find_byte(s, ']', start + 2) {
-		Err(NotFound) => Err(NotAnImage)
-		Ok(alt_end) =>
+md_image : List(U8), U64, { br : Feeds.Seen, pa : Feeds.Seen } -> (Try(U64, [NotAnImage]), { br : Feeds.Seen, pa : Feeds.Seen })
+md_image = |s, start, seen|
+	match Feeds.find_seen(s, ']', start + 2, seen.br) {
+		(Err(NotFound), br) => (Err(NotAnImage), { ..seen, br })
+		(Ok(alt_end), br) =>
 			if List.get(s, alt_end + 1) != Ok('(') {
-				Err(NotAnImage)
+				(Err(NotAnImage), { ..seen, br })
 			} else {
-				match Feeds.find_byte(s, ')', alt_end + 2) {
-					Ok(url_end) => Ok(url_end + 1)
-					Err(NotFound) => Err(NotAnImage)
+				match Feeds.find_seen(s, ')', alt_end + 2, seen.pa) {
+					(Ok(url_end), pa) => (Ok(url_end + 1), { br, pa })
+					(Err(NotFound), pa) => (Err(NotAnImage), { br, pa })
 				}
 			}
 	}

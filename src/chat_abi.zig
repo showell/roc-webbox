@@ -548,6 +548,10 @@ export fn roc_chat_publish(key: RocBytes, bytes: RocBytes) callconv(.c) void {
 
 export fn roc_chat_message_count(conv: ConvRec, sid: RocBytes) callconv(.c) CountRec {
     const h = current("message_count");
+    if (!onePart(conv.key.slice()) or !onePart(sid.slice())) {
+        h.fail(h.ctx, error.PathOutsideChatRoot);
+        return .{ .count = 0, .status = .failed };
+    }
     return switch (h.message_count(h.ctx, .of(conv), sid.slice())) {
         .counted => |n| .{ .count = n, .status = .counted },
         .failed => .{ .count = 0, .status = .failed },
@@ -624,6 +628,7 @@ export fn roc_chat_fail(reason: route_mod.FailReason, whose: RocBytes) callconv(
         .kind_unreadable => h.fail_account(h.ctx, .kind, whose.slice()),
         .name_unreadable => h.fail_account(h.ctx, .name, whose.slice()),
         .no_author => h.fail(h.ctx, error.NoAuthor),
+        .not_a_uid => h.fail(h.ctx, error.NotAUid),
         .not_utf8 => h.fail_text(h.ctx, whose.slice()),
     }
 }
@@ -680,12 +685,36 @@ export fn roc_chat_render(markdown: RocBytes) callconv(.c) RenderRec {
 
 export fn roc_chat_store_message(conv: ConvRec, sid: RocBytes, block: RocBytes, index: u64, message: MessageRec) callconv(.c) route_mod.Done {
     const h = current("store_message");
+    if (!onePart(conv.key.slice()) or !onePart(sid.slice())) {
+        h.fail(h.ctx, error.PathOutsideChatRoot);
+        return .failed;
+    }
     return h.store_message(h.ctx, .of(conv), sid.slice(), block.slice(), index, .of(message));
 }
 
-/// An error as the Roc carries it: a number only the host reads.
+/// An error as the Roc carries it: a number only the host reads. **EVERY
+/// NUMBER HANDED OUT IS KEPT** (`issued`), so the one the Roc hands back is
+/// checked before it is made an error again (`errorOf`): any other number
+/// is no error at all, and `@errorFromInt` of it would be illegal behaviour.
 fn faultOf(e: anyerror) u16 {
-    return @intFromError(e);
+    const n = @intFromError(e);
+    issued.set(n);
+    return n;
+}
+var issued: std.StaticBitSet(1 << 16) = .empty;
+
+/// The error a fault from `faultOf` names, or null for a number it never
+/// handed out (0, or the Roc's garbage).
+fn errorOf(fault: u16) ?anyerror {
+    if (fault == 0 or !issued.isSet(fault)) return null;
+    return @errorFromInt(fault);
+}
+
+/// **A NAME THE HOST JOINS INTO A PATH IS ONE PART OF IT** (metal-vmm QUEUE
+/// 268, defense in depth): a conversation's key or a topic as the store
+/// takes them is checked as `underRoot` checks a path, and holds no `/`.
+fn onePart(name: []const u8) bool {
+    return roc.inRoot(name) and std.mem.indexOfScalar(u8, name, '/') == null;
 }
 
 /// **A FEED'S PATH THAT WOULD LEAVE THE CHAT ROOT IS A ROC BUG, SAID, NEVER
@@ -706,7 +735,10 @@ export fn roc_chat_report_fanout_failure(surface: route_mod.Surface, member: Roc
     comptime if (@typeInfo(route_mod.Surface).@"enum".field_names.len < 2)
         @compileError("Host.report_fanout_failure!'s surface of one tag crosses as nothing: roc_chat_report_fanout_failure must not take it");
     const h = current("report_fanout_failure");
-    h.report_fanout_failure(h.ctx, surface, member.slice(), key.slice(), sid.slice(), @errorFromInt(fault));
+    // A fault the seam never handed out is the Roc's bug: the request's
+    // failure, never illegal behaviour here (metal-vmm QUEUE 268).
+    const e = errorOf(fault) orelse return h.fail(h.ctx, error.FaultNotIssued);
+    h.report_fanout_failure(h.ctx, surface, member.slice(), key.slice(), sid.slice(), e);
 }
 
 export fn roc_chat_read_header(name: RocBytes) callconv(.c) roc.RocBytesList {
@@ -801,12 +833,15 @@ pub fn decide(alloc: std.mem.Allocator, sub: []const u8, channel: bool, method: 
         } } },
         .redirect => .{ .redirect = try alloc.dupe(u8, a.location.slice()) },
         .respond => .{ .respond = .{ .status = a.status, .content_type = try alloc.dupe(u8, a.content_type.slice()), .body = try alloc.dupe(u8, a.body.slice()), .nosniff = a.sniff == .forbid } },
-        .not_allowed => .{ .not_allowed = switch (a.allow) {
-            .get => .GET,
-            .head => .HEAD,
-            .post => .POST,
-            .other => std.debug.panic("roc_chat_handle: a 405 allowing no method", .{}),
-        } },
+        .not_allowed => .{
+            .not_allowed = switch (a.allow) {
+                .get => .GET,
+                .head => .HEAD,
+                .post => .POST,
+                // The Roc's bug, the request's 500, never a panic (QUEUE 268).
+                .other => return error.NotAllowedNoMethod,
+            },
+        },
         .answered => .answered,
         .malformed => .malformed_form,
         .not_found => .not_found,
@@ -814,4 +849,17 @@ pub fn decide(alloc: std.mem.Allocator, sub: []const u8, channel: bool, method: 
         .to_login => .{ .to_login = try alloc.dupe(u8, a.location.slice()) },
         .held => .{ .held = .{ .status = a.status, .content_type = try alloc.dupe(u8, a.content_type.slice()), .nosniff = a.sniff == .forbid, .before = try alloc.dupe(u8, a.body.slice()), .after = try alloc.dupe(u8, a.location.slice()) } },
     };
+}
+
+test "a fault is an error again only if the seam handed it out: 0 and any other number are none (metal-vmm QUEUE 268)" {
+    const n = faultOf(error.IsDir);
+    try std.testing.expectEqual(@as(?anyerror, error.IsDir), errorOf(n));
+    try std.testing.expectEqual(@as(?anyerror, null), errorOf(0));
+    // A number past every error this binary has: never handed out.
+    try std.testing.expectEqual(@as(?anyerror, null), errorOf(std.math.maxInt(u16)));
+}
+
+test "a key or a topic the host joins into a path is one part of it: never empty, absolute, `..` or holding a `/` (metal-vmm QUEUE 268)" {
+    try std.testing.expect(onePart("1_2") and onePart("Plans") and onePart("ops"));
+    for ([_][]const u8{ "", "..", "/etc", "a/b", "1_2/../x" }) |bad| try std.testing.expect(!onePart(bad));
 }

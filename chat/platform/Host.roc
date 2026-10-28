@@ -91,7 +91,10 @@ Host := [].{
 	## message with no author's name (appendMessage's error.NoAuthor, `whose`
 	## unused); a file at path `whose` whose bytes are not UTF-8 (Files.read!'s
 	## door, error.NotUtf8).
-	fail! : [KindUnreadable, MalformedChannel, NameUnreadable, NoAuthor, NotUtf8], List(U8) => {}
+	## An id that is no canonical uid (the member's own, from `me!`, or an
+	## account folder's) is `NotAUid` (error.NotAUid), never said as a file
+	## that is not UTF-8.
+	fail! : [KindUnreadable, MalformedChannel, NameUnreadable, NoAuthor, NotAUid, NotUtf8], List(U8) => {}
 
 	## Count channel `name` as one a listing skipped as malformed: the
 	## operator's count, kept by the host for /admin/host.
