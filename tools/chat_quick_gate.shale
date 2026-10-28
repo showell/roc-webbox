@@ -1,8 +1,9 @@
 -- **THE ROC CHAT'S QUICK GATE**: what a behaviour-preserving refactor of
 -- the chat's Roc (chat/*.roc), its platform (chat/platform/) or its Zig seam
 -- (src/chat_*.zig, src/twin_abi.zig) can break, and nothing else. Run from
--- roc-webbox, with angry-gopher checked out beside it (../angry-gopher, the
--- worktree whose zig-server builds against this one):
+-- roc-webbox, with angry-gopher checked out beside it (../angry-gopher). The
+-- angry-gopher it judges is that repo's one worktree holding the chat's host
+-- (see `chat_host`), wherever it lives:
 --   shale tools/chat_quick_gate.shale
 -- No arguments. Cheapest first; it stops at the first part that fails, with
 -- that part's last lines, and ends with one PASS or FAIL line.
@@ -102,12 +103,35 @@ if not exists("chat/main.roc") or not exists("build.zig") then
   fail("quick gate: run it from roc-webbox's root (no chat/main.roc or build.zig here)")
 end
 const here = real(".")
-const gopher = folder_of(here) .. "/angry-gopher"
+
+-- **THE ANGRY-GOPHER THAT HOSTS THE ROC CHAT, ASKED OF GIT**: of the
+-- worktrees of the angry-gopher beside roc-webbox, the one holding the chat's
+-- host (zig-server/src/chat_router.zig). Never just "the checkout beside
+-- me": that may be production's master, which has no chat host, and a gate
+-- run against it passes having judged nothing.
+function chat_host()
+  local beside = folder_of(here) .. "/angry-gopher"
+  local listed = run({"git", "-C", beside, "worktree", "list", "--porcelain"}, {whole = 100000, timeout_ms = 10000})
+  if listed.ended ~= "exit" or listed.code ~= 0 then
+    fail("quick gate: no angry-gopher checkout beside roc-webbox, at " .. beside .. ": " .. trim(listed.out))
+  end
+  local hosts = {}
+  local seen = {}
+  for l in lines(listed.out) do
+    if starts_with(l, "worktree ") then
+      local wt = sub(l, 10)
+      push(seen, wt)
+      local has = run({"git", "-C", wt, "ls-files", "--error-unmatch", "zig-server/src/chat_router.zig"}, {tail = 2, timeout_ms = 10000})
+      if has.ended == "exit" and has.code == 0 then push(hosts, wt) end
+    end
+  end
+  if #hosts == 0 then fail("quick gate: no worktree of " .. beside .. " holds the Roc chat's host (zig-server/src/chat_router.zig); its worktrees: " .. join(seen, ", ")) end
+  if #hosts > 1 then fail("quick gate: more than one worktree of " .. beside .. " holds the Roc chat's host, so which one to judge is a guess: " .. join(hosts, ", ")) end
+  return hosts[1]
+end
+const gopher = chat_host()
 const gopher_build = gopher .. "/zig-server/build.zig"
 local found = run({"git", "-C", gopher, "rev-parse", "--abbrev-ref", "HEAD"}, {tail = 5, timeout_ms = 10000})
-if found.ended ~= "exit" or found.code ~= 0 then
-  fail("quick gate: no angry-gopher checkout beside roc-webbox, at " .. gopher .. ": " .. trim(found.out))
-end
 local branch = run({"git", "rev-parse", "--abbrev-ref", "HEAD"}, {tail = 5, timeout_ms = 10000})
 print("roc-webbox " .. trim(branch.out) .. " " .. git_head("") .. " (" .. here .. ")")
 print("angry-gopher " .. trim(found.out) .. " (" .. gopher .. ")")
