@@ -11,10 +11,10 @@ import Uid
 Conversation := [].{
 
 	## dmOther: the other of DM pair `key` when `me` is one of the pair, by
-	## chatKeyParticipant's rule (Paths.is_participant; the pair is canonical
+	## chatKeyParticipant's rule (PairKey.is_participant; the pair is canonical
 	## by its type); `NotAParticipant` otherwise.
 	dm_other : Paths.PairKey, Uid -> Try(Uid, [NotAParticipant])
-	dm_other = |key, me| if Paths.is_participant(key, me) Ok(Paths.partner(key, me)) else Err(NotAParticipant)
+	dm_other = |key, me| if key.is_participant(me) Ok(key.partner(me)) else Err(NotAParticipant)
 
 	## ConvMeta.dm's members: the pair's two uids, or one in the DM with
 	## yourself, so no one is sent a notice twice.
@@ -40,7 +40,7 @@ Conversation := [].{
 
 	## A channel's title: "#" and its name.
 	channel_title : Paths.ChannelName -> Str
-	channel_title = |name| "#${Paths.channel_name_to_str(name)}"
+	channel_title = |name| "#${name.to_str()}"
 
 	## A topic's title: its conversation's, ": ", its id.
 	topic_title : Str, Str -> Str

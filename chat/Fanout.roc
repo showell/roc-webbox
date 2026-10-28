@@ -56,7 +56,7 @@ Fanout := [].{
 		url = topic_url(at)
 		notify = notify_event(at, notify_text(m.from, at))
 		added = topic_added(at)
-		head = { from: m.from, at: m.at, source_id: m.id, conv: Paths.conv_key_to_str(m.key) }
+		head = { from: m.from, at: m.at, source_id: m.id, conv: m.key.to_str() }
 		List.join(
 			List.map(
 				m.members,
@@ -70,7 +70,7 @@ Fanout := [].{
 						# **EVERY MEMBER SEES THE ROW, THE AUTHOR AS "YOU"**.
 						{
 							who = if uid == m.uid "You" else m.from
-							[Publish(recent_key(uid), Recent.chat_event({ at: m.at, url, who, label: recent_where(m, uid), topic: m.topic, excerpt: parts.excerpt, dm: Paths.conv_kind(m.key) }))]
+							[Publish(recent_key(uid), Recent.chat_event({ at: m.at, url, who, label: recent_where(m, uid), topic: m.topic, excerpt: parts.excerpt, dm: m.key.kind() }))]
 						},
 						# The feeds only when the message has what they keep.
 						match parts.images {
@@ -108,12 +108,12 @@ Fanout := [].{
 	## The topic's live bus key, where its messages and reactions are
 	## published: `<key>/<topic>`.
 	topic_key : Paths.TopicAt -> List(U8)
-	topic_key = |{ key, topic }| "${Paths.conv_key_to_str(key)}/${topic}".to_utf8()
+	topic_key = |{ key, topic }| "${key.to_str()}/${topic}".to_utf8()
 
 	## The topic's page: the conversation's URL root (Feeds.base_url,
 	## convKeyBaseURL), then the topic.
 	topic_url : Paths.TopicAt -> Str
-	topic_url = |at| "${Paths.conv_base(at.key)}/${at.topic}"
+	topic_url = |at| "${at.key.base()}/${at.topic}"
 
 	## The status strip's line: a DM's "X sent you a message on <topic>.", a
 	## channel's "X posted to <key> > <topic>.".
@@ -121,16 +121,16 @@ Fanout := [].{
 	notify_text = |from, at|
 		match at.key {
 			Dm(_) => "${from} sent you a message on ${at.topic}."
-			Channel(name) => "${from} posted to ${Paths.channel_name_to_str(name)} > ${at.topic}."
+			Channel(name) => "${from} posted to ${name.to_str()} > ${at.topic}."
 		}
 
 	## The notify stream's event: conv, session, text, link_url (topic_url).
 	notify_event : Paths.TopicAt, Str -> List(U8)
-	notify_event = |at, text| JsonText.obj([("conv", JsonText.str(Paths.conv_key_to_str(at.key))), ("session", JsonText.str(at.topic)), ("text", JsonText.str(text)), ("link_url", JsonText.str(topic_url(at)))])
+	notify_event = |at, text| JsonText.obj([("conv", JsonText.str(at.key.to_str())), ("session", JsonText.str(at.topic)), ("text", JsonText.str(text)), ("link_url", JsonText.str(topic_url(at)))])
 
 	## The sidebar stream's topic-added: kind, conv, sid, url (topic_url).
 	topic_added : Paths.TopicAt -> List(U8)
-	topic_added = |at| JsonText.obj([("kind", JsonText.str("topic-added")), ("conv", JsonText.str(Paths.conv_key_to_str(at.key))), ("sid", JsonText.str(at.topic)), ("url", JsonText.str(topic_url(at)))])
+	topic_added = |at| JsonText.obj([("kind", JsonText.str("topic-added")), ("conv", JsonText.str(at.key.to_str())), ("sid", JsonText.str(at.topic)), ("url", JsonText.str(topic_url(at)))])
 
 	## chat_fanout `recentWhere`, for `viewer`: a channel names itself ("in
 	## <key>"); a DM names the other member ("to <name>"; the DM with
@@ -140,7 +140,7 @@ Fanout := [].{
 	recent_where : Sent, Uid -> Str
 	recent_where = |m, viewer|
 		match m.key {
-			Channel(name) => "in ${Paths.channel_name_to_str(name)}"
+			Channel(name) => "in ${name.to_str()}"
 			Dm(_) => {
 				# The DM with yourself has no other member, so no name.
 				match List.keep_if(m.members, |member| member != viewer).last() {

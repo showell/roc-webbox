@@ -8,20 +8,29 @@ import ZigText
 
 Paths := [].{
 
-	## chatKeyParticipant: `user` is one of the pair's two uids (the key is
-	## canonical: only pair_key and pair_key_from_str make one).
-	is_participant : PairKey, Uid -> Bool
-	is_participant = |PairKey.(pair), user| pair.small == user or pair.large == user
-
-	## partnerName's half: the pair's first uid, unless it is `me` (then the
-	## second, so `1_1`'s partner is `1`).
-	partner : PairKey, Uid -> Uid
-	partner = |PairKey.(pair), me| if pair.small == me pair.large else pair.small
-
 	## **A DM'S KEY**: its two uids, the smaller first. Opaque (`::`), so
 	## only `pair_key` (from two uids) and `pair_key_from_str` (from text,
 	## validated) make one.
-	PairKey :: { small : Uid, large : Uid }
+	PairKey :: { small : Uid, large : Uid }.{
+
+		## chatKeyParticipant: `user` is one of the pair's two uids (the key
+		## is canonical: only pair_key and pair_key_from_str make one).
+		is_participant : PairKey, Uid -> Bool
+		is_participant = |PairKey.(pair), user| pair.small == user or pair.large == user
+
+		## partnerName's half: the pair's first uid, unless it is `me` (then
+		## the second, so `1_1`'s partner is `1`).
+		partner : PairKey, Uid -> Uid
+		partner = |PairKey.(pair), me| if pair.small == me pair.large else pair.small
+
+		## The key's text: `<small>_<large>`.
+		to_str : PairKey -> Str
+		to_str = |PairKey.(pair)| "${pair.small.to_str()}_${pair.large.to_str()}"
+
+		## The key's bytes, where they go back out.
+		bytes : PairKey -> List(U8)
+		bytes = |pair| pair.to_str().to_utf8()
+	}
 
 	## chatPairKey: the smaller numeric id first, joined by `_` (a number
 	## past i64's counts as 0, as Zig's `atoiOr0`). A Uid is canonical by
@@ -43,60 +52,55 @@ Paths := [].{
 				match (Uid.from_str(before), Uid.from_str(after)) {
 					(Ok(a), Ok(b)) => {
 						made = pair_key(a, b)
-						if pair_key_to_str(made) == key Ok(made) else Err(Invalid)
+						if made.to_str() == key Ok(made) else Err(Invalid)
 					}
 					_ => Err(Invalid)
 				}
 			Err(_) => Err(Invalid)
 		}
 
-	## The key's text: `<small>_<large>`.
-	pair_key_to_str : PairKey -> Str
-	pair_key_to_str = |PairKey.(pair)| "${pair.small.to_str()}_${pair.large.to_str()}"
-
-	## The key's bytes, where they go back out.
-	pair_key_bytes : PairKey -> List(U8)
-	pair_key_bytes = |pair| pair_key_to_str(pair).to_utf8()
-
 	## **WHICH CONVERSATION**: a DM, by its canonical pair key, two uids
 	## joined by `_`, the smaller first (`3_7`; pair_key); or a channel, by
 	## its name, a letter then letters, digits and hyphens (`general`;
 	## channel_name).
-	ConvKey : [Dm(PairKey), Channel(ChannelName)]
+	ConvKey := [Dm(PairKey), Channel(ChannelName)].{
 
-	## The key's bytes, where it goes back out (a URL, a bus key, a JSON
-	## field, a host call): the pair key or the channel's name.
-	conv_key_bytes : ConvKey -> List(U8)
-	conv_key_bytes = |key|
-		match key {
-			Dm(pair) => pair_key_bytes(pair)
-			Channel(name) => channel_name_bytes(name)
-		}
+		## The key's bytes, where it goes back out (a URL, a bus key, a JSON
+		## field, a host call): the pair key or the channel's name.
+		bytes : ConvKey -> List(U8)
+		bytes = |key|
+			match key {
+				Dm(pair) => pair.bytes()
+				Channel(name) => name.bytes()
+			}
 
-	## The key's text: the pair key or the channel's name.
-	conv_key_to_str : ConvKey -> Str
-	conv_key_to_str = |key|
-		match key {
-			Dm(pair) => pair_key_to_str(pair)
-			Channel(name) => channel_name_to_str(name)
-		}
+		## The key's text: the pair key or the channel's name.
+		to_str : ConvKey -> Str
+		to_str = |key|
+			match key {
+				Dm(pair) => pair.to_str()
+				Channel(name) => name.to_str()
+			}
 
-	## The conversation's URL base: `/chat/c/` and a DM's pair key, or
-	## `/channel/` and a channel's name (the host's Conv.base).
-	conv_base : ConvKey -> Str
-	conv_base = |key|
-		match key {
-			Dm(pair) => "/chat/c/${pair_key_to_str(pair)}"
-			Channel(name) => "/channel/${channel_name_to_str(name)}"
-		}
+		## The conversation's URL base: `/chat/c/` and a DM's pair key, or
+		## `/channel/` and a channel's name (the host's Conv.base).
+		base : ConvKey -> Str
+		base = |key|
+			match key {
+				Dm(pair) => "/chat/c/${pair.to_str()}"
+				Channel(name) => "/channel/${name.to_str()}"
+			}
 
-	## The key's family: a DM's or a channel's.
-	conv_kind : ConvKey -> [Dm, Channel]
-	conv_kind = |key|
-		match key {
-			Dm(_) => Dm
-			Channel(_) => Channel
-		}
+		## The key's family: a DM's or a channel's.
+		kind : ConvKey -> [Dm, Channel]
+		kind = |key|
+			match key {
+				Dm(_) => Dm
+				Channel(_) => Channel
+			}
+
+		is_eq : _
+	}
 
 	## decimal.parseInt at i64, or 0.
 	atoi_or0 : List(U8) -> U64
@@ -112,7 +116,7 @@ Paths := [].{
 	TopicAt : {
 		## The conversation (ConvKey): a DM's pair key or a channel's name,
 		## each validated where the request came in. Its bytes (`3_7`,
-		## `general`; conv_key_bytes) are the bus key's and URL's; on disk,
+		## `general`; ConvKey.bytes) are the bus key's and URL's; on disk,
 		## the conversation's folder is `<key>` or `channels/<key>`
 		## (conv_dir).
 		key : ConvKey,
@@ -161,19 +165,22 @@ Paths := [].{
 	## **A CHANNEL'S NAME, VALIDATED**: opaque (`::`), so only
 	## `channel_name_from_str` makes one, and a channel's path is built from
 	## nothing else.
-	ChannelName :: Str
+	ChannelName :: Str.{
+
+		## The name's text.
+		to_str : ChannelName -> Str
+		to_str = |ChannelName.(n)| n
+
+		## The name's bytes, where they go back out.
+		bytes : ChannelName -> List(U8)
+		bytes = |ChannelName.(n)| n.to_utf8()
+
+		is_eq : _
+	}
 
 	## The name, when is_channel_name passes it.
 	channel_name_from_str : Str -> Try(ChannelName, [Invalid])
 	channel_name_from_str = |name| if is_channel_name(name) Ok(ChannelName.(name)) else Err(Invalid)
-
-	## The name's text.
-	channel_name_to_str : ChannelName -> Str
-	channel_name_to_str = |ChannelName.(s)| s
-
-	## The name's bytes, where they go back out.
-	channel_name_bytes : ChannelName -> List(U8)
-	channel_name_bytes = |ChannelName.(s)| s.to_utf8()
 
 	## validMsgRefID: a topic slug (letters, digits, hyphens), `_`, and a
 	## message's decimal number, cut at the last `_`.
@@ -223,11 +230,12 @@ Paths := [].{
 	## disk, takes nothing else. **ITS PARTS ARE A ConvKey, A Uid, A TOPIC
 	## AND LITERALS**: none empty, none with a `/`, so joined by one `/` they
 	## are std.fs.path.join's path.
-	ChatPath :: Str
+	ChatPath :: Str.{
 
-	## The path's bytes, as the host takes them.
-	bytes : ChatPath -> List(U8)
-	bytes = |ChatPath.(s)| s.to_utf8()
+		## The path's bytes, as the host takes them.
+		bytes : ChatPath -> List(U8)
+		bytes = |ChatPath.(p)| p.to_utf8()
+	}
 
 	## A topic's reaction sidecar (reactionsPath):
 	## {conv_dir}/sessions/<topic>.reactions.jsonl.
@@ -255,12 +263,12 @@ Paths := [].{
 	## The topic the member last viewed in DM `key` (lastViewedTopic's
 	## file): users/<uid>/last-sessions/<conv>.
 	last_session_path : Uid, ConvKey -> ChatPath
-	last_session_path = |uid, key| ChatPath.("users/${uid.to_str()}/last-sessions/${conv_key_to_str(key)}")
+	last_session_path = |uid, key| ChatPath.("users/${uid.to_str()}/last-sessions/${key.to_str()}")
 
 	## The member's pins in `key` (pinnedTopics's file):
 	## users/<uid>/pinned-sessions/<conv>.
 	pinned_path : Uid, ConvKey -> ChatPath
-	pinned_path = |uid, key| ChatPath.("users/${uid.to_str()}/pinned-sessions/${conv_key_to_str(key)}")
+	pinned_path = |uid, key| ChatPath.("users/${uid.to_str()}/pinned-sessions/${key.to_str()}")
 
 	## The member's feed file: users/<uid>/images.md or code.md, where
 	## images_store and code_store keep them.
@@ -373,7 +381,7 @@ Paths := [].{
 conv_dir : ConvKey -> Str
 conv_dir = |key|
 	match key {
-		Dm(pair) => Paths.pair_key_to_str(pair)
+		Dm(pair) => pair.to_str()
 		Channel(ChannelName.(name)) => "channels/${name}"
 	}
 
@@ -422,57 +430,57 @@ expect match (Paths.pair_key_from_str("3_7"), Paths.channel_name_from_str("gener
 	(Ok(pair), Ok(name)) => {
 		dm = Dm(pair)
 		channel = Channel(name)
-		(Paths.bytes(Paths.topics_folder(dm)) == Str.to_utf8("3_7/sessions"))
-			and (Paths.bytes(Paths.topics_folder(channel)) == Str.to_utf8("channels/general/sessions"))
-				and (Paths.bytes(Paths.reactions_path({ key: dm, topic: "ChitChat" })) == Str.to_utf8("3_7/sessions/ChitChat.reactions.jsonl"))
-					and (Paths.bytes(Paths.reactions_path({ key: channel, topic: "road-trip" })) == Str.to_utf8("channels/general/sessions/road-trip.reactions.jsonl"))
-						and (Paths.bytes(Paths.transcript_path({ key: dm, topic: "ChitChat" })) == Str.to_utf8("3_7/sessions/ChitChat.md"))
-							and (Paths.bytes(Paths.transcript_path({ key: channel, topic: "road-trip" })) == Str.to_utf8("channels/general/sessions/road-trip.md"))
+		(Paths.topics_folder(dm).bytes() == Str.to_utf8("3_7/sessions"))
+			and (Paths.topics_folder(channel).bytes() == Str.to_utf8("channels/general/sessions"))
+				and (Paths.reactions_path({ key: dm, topic: "ChitChat" }).bytes() == Str.to_utf8("3_7/sessions/ChitChat.reactions.jsonl"))
+					and (Paths.reactions_path({ key: channel, topic: "road-trip" }).bytes() == Str.to_utf8("channels/general/sessions/road-trip.reactions.jsonl"))
+						and (Paths.transcript_path({ key: dm, topic: "ChitChat" }).bytes() == Str.to_utf8("3_7/sessions/ChitChat.md"))
+							and (Paths.transcript_path({ key: channel, topic: "road-trip" }).bytes() == Str.to_utf8("channels/general/sessions/road-trip.md"))
 								and (conv_dir(dm) == "3_7")
 									and (conv_dir(channel) == "channels/general")
 	}
 	_ => Bool.False
 }
-expect Paths.bytes(Paths.channels_folder) == Str.to_utf8("channels")
+expect Paths.channels_folder.bytes() == Str.to_utf8("channels")
 expect match Paths.channel_name_from_str("general") {
-	Ok(name) => Paths.bytes(Paths.channel_path(name)) == Str.to_utf8("channels/general.channel")
+	Ok(name) => Paths.channel_path(name).bytes() == Str.to_utf8("channels/general.channel")
 	Err(Invalid) => Bool.False
 }
 expect match (Uid.from_str("3"), Uid.from_str("7")) {
 	(Ok(three), Ok(seven)) => {
 		pair = Paths.pair_key(seven, three)
-		(Paths.bytes(Paths.last_conv_path(three)) == Str.to_utf8("users/3/last-conv"))
-			and (Paths.bytes(Paths.last_session_path(three, Dm(pair))) == Str.to_utf8("users/3/last-sessions/3_7"))
-				and (Paths.bytes(Paths.pinned_path(three, Dm(pair))) == Str.to_utf8("users/3/pinned-sessions/3_7"))
-					and (Paths.bytes(Paths.feed_path(three, Images)) == Str.to_utf8("users/3/images.md"))
-						and (Paths.bytes(Paths.feed_path(three, Code)) == Str.to_utf8("users/3/code.md"))
-							and (Paths.bytes(Paths.links_path(three)) == Str.to_utf8("users/3/links.md"))
+		(Paths.last_conv_path(three).bytes() == Str.to_utf8("users/3/last-conv"))
+			and (Paths.last_session_path(three, Dm(pair)).bytes() == Str.to_utf8("users/3/last-sessions/3_7"))
+				and (Paths.pinned_path(three, Dm(pair)).bytes() == Str.to_utf8("users/3/pinned-sessions/3_7"))
+					and (Paths.feed_path(three, Images).bytes() == Str.to_utf8("users/3/images.md"))
+						and (Paths.feed_path(three, Code).bytes() == Str.to_utf8("users/3/code.md"))
+							and (Paths.links_path(three).bytes() == Str.to_utf8("users/3/links.md"))
 	}
 	_ => Bool.False
 }
 expect match (Paths.channel_name_from_str("general"), Uid.from_str("3")) {
-	(Ok(name), Ok(three)) => Paths.bytes(Paths.pinned_path(three, Channel(name))) == Str.to_utf8("users/3/pinned-sessions/general")
+	(Ok(name), Ok(three)) => Paths.pinned_path(three, Channel(name)).bytes() == Str.to_utf8("users/3/pinned-sessions/general")
 	_ => Bool.False
 }
 
 # pair_key: the smaller uid first, by number, not by bytes.
 expect match (Uid.from_str("7"), Uid.from_str("3")) {
-	(Ok(seven), Ok(three)) => Paths.pair_key(seven, three).pair_key_to_str() == "3_7" and Paths.pair_key(three, seven).pair_key_to_str() == "3_7" and Paths.pair_key(three, three).pair_key_to_str() == "3_3"
+	(Ok(seven), Ok(three)) => Paths.pair_key(seven, three).to_str() == "3_7" and Paths.pair_key(three, seven).to_str() == "3_7" and Paths.pair_key(three, three).to_str() == "3_3"
 	_ => Bool.False
 }
 expect match (Uid.from_str("10"), Uid.from_str("9")) {
-	(Ok(ten), Ok(nine)) => Paths.pair_key(ten, nine).pair_key_to_str() == "9_10"
+	(Ok(ten), Ok(nine)) => Paths.pair_key(ten, nine).to_str() == "9_10"
 	_ => Bool.False
 }
 expect match (Uid.from_str("9223372036854775808"), Uid.from_str("5")) {
-	(Ok(big), Ok(five)) => Paths.pair_key(big, five).pair_key_to_str() == "9223372036854775808_5"
+	(Ok(big), Ok(five)) => Paths.pair_key(big, five).to_str() == "9223372036854775808_5"
 	_ => Bool.False
 }
 
 # pair_key_from_str: only the canonical `<small>_<large>` of two uids, or a
 # uid twice (the DM with yourself).
-expect Paths.pair_key_from_str("3_7").map_ok(Paths.pair_key_to_str) == Ok("3_7")
-expect Paths.pair_key_from_str("3_3").map_ok(Paths.pair_key_to_str) == Ok("3_3")
+expect Paths.pair_key_from_str("3_7").map_ok(|k| k.to_str()) == Ok("3_7")
+expect Paths.pair_key_from_str("3_3").map_ok(|k| k.to_str()) == Ok("3_3")
 expect Paths.pair_key_from_str("7_3").is_err()
 expect Paths.pair_key_from_str("3_").is_err()
 expect Paths.pair_key_from_str("_7").is_err()
@@ -486,7 +494,7 @@ expect Paths.pair_key_from_str("").is_err()
 # is_participant: only the pair's two members.
 expect match Paths.pair_key_from_str("3_7") {
 	Ok(pair) => {
-		is_in = |text| Uid.from_str(text).map_ok(|uid| Paths.is_participant(pair, uid)) == Ok(Bool.True)
+		is_in = |text| Uid.from_str(text).map_ok(|uid| pair.is_participant(uid)) == Ok(Bool.True)
 		is_in("3") and is_in("7") and !is_in("9") and !is_in("37")
 	}
 	Err(Invalid) => Bool.False
@@ -531,7 +539,7 @@ expect !Paths.is_channel_name("caf\u(e9)")
 
 # channel_name_from_str: a valid name round-trips; nothing else is a
 # ChannelName, so no channel path is built from it.
-expect Paths.channel_name_from_str("a-1-").map_ok(Paths.channel_name_to_str) == Ok("a-1-")
+expect Paths.channel_name_from_str("a-1-").map_ok(|k| k.to_str()) == Ok("a-1-")
 expect Paths.channel_name_from_str("../x").is_err()
 expect Paths.channel_name_from_str("").is_err()
 
@@ -541,8 +549,8 @@ expect Paths.channel_name_from_str("").is_err()
 # upstream's: Route.conversation passes one only through is_topic_id, and
 # make_topic! checks a new topic's id.
 
-# conv_base: the host's Conv.base (Conversation.dm_base, channel_base).
+# ConvKey.base: the host's Conv.base (Conversation.dm_base, channel_base).
 expect match (Paths.pair_key_from_str("3_7"), Paths.channel_name_from_str("general")) {
-	(Ok(pair), Ok(name)) => (Paths.conv_base(Dm(pair)) == "/chat/c/3_7") and (Paths.conv_base(Channel(name)) == "/channel/general")
+	(Ok(pair), Ok(name)) => (Paths.ConvKey.Dm(pair).base() == "/chat/c/3_7") and (Paths.ConvKey.Channel(name).base() == "/channel/general")
 	_ => Bool.False
 }

@@ -14,13 +14,13 @@ Files := [].{
 	## damaged file, never passed on.
 	read! : Paths.ChatPath => Try(Str, [Missing, Failed])
 	read! = |path| {
-		got = Host.read!(Paths.bytes(path))
+		got = Host.read!(path.bytes())
 		match decoded(answer(got.status, got.bytes)) {
 			Ok(text) => Ok(text)
 			Err(Missing) => Err(Missing)
 			Err(Failed) => Err(Failed)
 			Err(NotUtf8) => {
-				Host.fail!(NotUtf8, Paths.bytes(path))
+				Host.fail!(NotUtf8, path.bytes())
 				Err(Failed)
 			}
 		}
@@ -33,7 +33,7 @@ Files := [].{
 	## page's (metal-vmm QUEUE 267). `Missing` and `Failed` as `read!`'s.
 	read_bytes! : Paths.ChatPath => Try(List(U8), [Missing, Failed])
 	read_bytes! = |path| {
-		got = Host.read!(Paths.bytes(path))
+		got = Host.read!(path.bytes())
 		answer(got.status, got.bytes)
 	}
 
@@ -42,39 +42,39 @@ Files := [].{
 	## a listing skips as damaged and counts (a channel's member file).
 	read_text! : Paths.ChatPath => Try(Str, [Missing, Failed, NotUtf8])
 	read_text! = |path| {
-		got = Host.read!(Paths.bytes(path))
+		got = Host.read!(path.bytes())
 		decoded(answer(got.status, got.bytes))
 	}
 
 	## Host.write!: the whole file as `bytes`.
 	write! : Paths.ChatPath, List(U8) => Try({}, [Failed])
-	write! = |path, bytes| Host.write!(Paths.bytes(path), bytes)
+	write! = |path, bytes| Host.write!(path.bytes(), bytes)
 
 	## Host.remove!: the file gone.
 	remove! : Paths.ChatPath => Try({}, [Failed])
-	remove! = |path| Host.remove!(Paths.bytes(path))
+	remove! = |path| Host.remove!(path.bytes())
 
 	## Host.append_line!: `line` and a newline appended.
 	append_line! : Paths.ChatPath, List(U8) => Try({}, [Failed])
-	append_line! = |path, line| Host.append_line!(Paths.bytes(path), line)
+	append_line! = |path, line| Host.append_line!(path.bytes(), line)
 
 	## Host.append_entry!: a feed's entry appended, or failed with its fault.
 	append_entry! : Paths.ChatPath, List(U8), List(U8) => { fault : U16, status : [Appended, Failed] }
-	append_entry! = |path, separator, entry| Host.append_entry!(Paths.bytes(path), separator, entry)
+	append_entry! = |path, separator, entry| Host.append_entry!(path.bytes(), separator, entry)
 
 	## Host.serve_file!: the host loads the file and serves its bytes as the answer
 	## (Chat.served_plain), so Roc never copies a large transcript. `Serving`
 	## when it loaded; `NotServing` when the file is not there or the read
 	## failed: the host answers both as one.
 	serve_file! : Paths.ChatPath => [Serving, NotServing]
-	serve_file! = |path| Host.serve_file!(Paths.bytes(path))
+	serve_file! = |path| Host.serve_file!(path.bytes())
 
 	## Host.serve_rendered!: the host loads the file, renders it as the server's own
 	## markdown, and serves that inside the page (Chat.served_html). `Serving`
 	## when it did; `NotServing` when the file is not there, or the read or
 	## the render failed: the host answers them as one.
 	serve_rendered! : Paths.ChatPath => [Serving, NotServing]
-	serve_rendered! = |path| Host.serve_rendered!(Paths.bytes(path))
+	serve_rendered! = |path| Host.serve_rendered!(path.bytes())
 
 	## Host.list!'s answer as one tag: the folder's entries, nothing there,
 	## or a listing that failed (the request has failed). **MISSING AND
@@ -84,7 +84,7 @@ Files := [].{
 	## bytes kept in `not_utf8`, for the caller to count where a counter fits.
 	list! : Paths.ChatPath => Try(Listing, [Missing, Failed])
 	list! = |path| {
-		got = Host.list!(Paths.bytes(path))
+		got = Host.list!(path.bytes())
 		answer(got.status, got.entries).map_ok(listing)
 	}
 

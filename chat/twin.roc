@@ -50,14 +50,14 @@ call = |req| {
 		# A key that is no canonical pair is no PairKey, so no participant.
 		7 =>
 			match pair_of(arg(0)) {
-				Ok(pair) => [bool(Uid.from_utf8(arg(1)).map_ok(|u| Paths.is_participant(pair, u)) == Ok(Bool.True))]
+				Ok(pair) => [bool(Uid.from_utf8(arg(1)).map_ok(|u| pair.is_participant(u)) == Ok(Bool.True))]
 				Err(_) => [bool(Bool.False)]
 			}
 		# Two uids that are canonical numbers make a key; any other half
 		# is no Uid (the Zig's atoiOr0 read it as 0), and no answer.
 		8 =>
 			match (Uid.from_utf8(arg(0)), Uid.from_utf8(arg(1))) {
-				(Ok(a), Ok(b)) => [Paths.pair_key_bytes(Paths.pair_key(a, b))]
+				(Ok(a), Ok(b)) => [Paths.pair_key(a, b).bytes()]
 				_ => []
 			}
 		# Bytes that are not UTF-8 are no text, so neither a topic nor a name.
@@ -70,7 +70,7 @@ call = |req| {
 		# A conversation's key and a topic id; the door refuses any other.
 		14 =>
 			match topic_at(arg(0), arg(1)) {
-				Ok(at) => [Paths.bytes(Paths.transcript_path(at))]
+				Ok(at) => [Paths.transcript_path(at).bytes()]
 				Err(Invalid) => []
 			}
 		15 => {
@@ -244,7 +244,7 @@ call = |req| {
 		# A uid that is no Uid has no paths: the door refuses it.
 		54 =>
 			match (Uid.from_utf8(arg(0)), conv_of(arg(1))) {
-				(Ok(u), Ok(key)) => List.map([Paths.last_conv_path(u), Paths.last_session_path(u, key), Paths.pinned_path(u, key), Paths.feed_path(u, Images), Paths.feed_path(u, Code)], Paths.bytes)
+				(Ok(u), Ok(key)) => List.map([Paths.last_conv_path(u), Paths.last_session_path(u, key), Paths.pinned_path(u, key), Paths.feed_path(u, Images), Paths.feed_path(u, Code)], |p| p.bytes())
 				_ => []
 			}
 		55 => List.map(Paths.topics(entries(req.args, 0, [])), Str.to_utf8)
@@ -267,7 +267,7 @@ call = |req| {
 			dm = Dm(valid_pair(arg(0)))
 			channel = valid_channel(arg(1))
 			match topic_at(arg(0), arg(2)) {
-				Ok(at) => List.map([Paths.topics_folder(dm), Paths.topics_folder(Channel(channel)), Paths.channel_path(channel), Paths.reactions_path(at)], Paths.bytes)
+				Ok(at) => List.map([Paths.topics_folder(dm), Paths.topics_folder(Channel(channel)), Paths.channel_path(channel), Paths.reactions_path(at)], |p| p.bytes())
 				Err(Invalid) => []
 			}
 		}

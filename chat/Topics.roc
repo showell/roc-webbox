@@ -43,7 +43,7 @@ Topics := [].{
 	conversations_json = |me, entries| {
 		one = |e|
 			JsonText.obj([
-				("conv", JsonText.str(Paths.pair_key_to_str(e.conv))),
+				("conv", JsonText.str(e.conv.to_str())),
 				("partner", JsonText.obj([("id", JsonText.str(e.id.to_str())), ("name", JsonText.str(e.name))])),
 				("default", JsonText.str(e.default)),
 				("sessions", JsonText.arr(List.map(e.sessions, JsonText.str))),
@@ -53,7 +53,7 @@ Topics := [].{
 
 	## newTopic's answer: the conversation and the topic made.
 	made_json : { key : Paths.ConvKey, topic : Str } -> List(U8)
-	made_json = |{ key, topic }| JsonText.obj([("conv", JsonText.str(Paths.conv_key_to_str(key))), ("sid", JsonText.str(topic))])
+	made_json = |{ key, topic }| JsonText.obj([("conv", JsonText.str(key.to_str())), ("sid", JsonText.str(topic))])
 }
 
 # is_same_name: ASCII case folds, nothing past ASCII does.

@@ -224,7 +224,7 @@ serve_topic! = |req, route, found| {
 ## channel's are not asked.
 find! : Paths.ConvKey => Try((Chat.Conv, Who), [NotYours, Failed])
 find! = |key| {
-	bytes = Paths.conv_key_bytes(key)
+	bytes = key.bytes()
 	me = load_uid!({})?
 	match key {
 		Dm(pair) =>
@@ -347,7 +347,7 @@ load_channel_members! = |name|
 			match Paths.channel_members(text) {
 				Ok(members) => members
 				Err(Malformed) => {
-					Host.fail!(MalformedChannel, Paths.channel_name_bytes(name))
+					Host.fail!(MalformedChannel, name.bytes())
 					[]
 				}
 			}
@@ -432,7 +432,7 @@ load_title! = |key, who|
 		Dm(pair) =>
 			match load_accounts!(who) {
 				Ok(all) => {
-					other = Paths.partner(pair, load_uid!({})?)
+					other = pair.partner(load_uid!({})?)
 					match fail_if_unreadable!(Accounts.name(all, other)) {
 						Ok(name) => Ok(Conversation.dm_title(name, other))
 						Err(Failed) => Err(Failed)
@@ -477,7 +477,7 @@ bookmark! = |key, topic| {
 		Ok({})
 	} else {
 		write_if_changed!(Paths.last_session_path(me, key), topic)?
-		write_if_changed!(Paths.last_conv_path(me), Paths.conv_key_to_str(key))
+		write_if_changed!(Paths.last_conv_path(me), key.to_str())
 	}
 }
 
@@ -566,7 +566,7 @@ serve_links! = |rest|
 						(before, after) = Pages.links_around(src, viewer)
 						Chat.served_html(before, after)
 					}
-					NotServing => Chat.respond(200, html, Html.bytes(Pages.links(src, viewer, NoLinks)))
+					NotServing => Chat.respond(200, html, Pages.links(src, viewer, NoLinks).bytes())
 				}
 			}
 		}
@@ -586,7 +586,7 @@ serve_recent! = |rest|
 				# counted, and the page served with the rest.
 				got = Recent.rows_of(Host.gather_recent!({}))
 				List.for_each!(got.damaged, |key| Host.count_dropped!(RecentRow, key))
-				Chat.respond(200, html, Html.bytes(Pages.recent(Chrome.src_in(Host.srcs!({})), { viewer, json: Recent.json(me, got.rows) })))
+				Chat.respond(200, html, Pages.recent(Chrome.src_in(Host.srcs!({})), { viewer, json: Recent.json(me, got.rows) }).bytes())
 			}
 			_ => Chat.answered
 		}
@@ -622,8 +622,8 @@ serve_feed! = |which, rest|
 						(Pages.code(src, { viewer, json: Feeds.code_json(got.entries) }), got.damaged)
 					}
 				}
-				if damaged > 0 Host.count_dropped!(FeedEntry, Paths.bytes(path)) else {}
-				Chat.respond(200, html, Html.bytes(page))
+				if damaged > 0 Host.count_dropped!(FeedEntry, path.bytes()) else {}
+				Chat.respond(200, html, page.bytes())
 			}
 		}
 	}
@@ -644,7 +644,7 @@ serve_landing! = |route, key|
 					Err(Failed) => Chat.answered
 					Ok(title) =>
 						match load_viewer!(who) {
-							Ok(viewer) => Chat.respond(200, html, Html.bytes(Pages.no_topics(Chrome.src_in(Host.srcs!({})), { viewer, base: Paths.conv_base(key), title })))
+							Ok(viewer) => Chat.respond(200, html, Pages.no_topics(Chrome.src_in(Host.srcs!({})), { viewer, base: key.base(), title }).bytes())
 							Err(Failed) => Chat.answered
 						}
 				}
@@ -664,8 +664,8 @@ serve_topic_page! = |route, at|
 		match load_sidebar!(route.topic, at) {
 			Err(Failed) => Chat.answered
 			Ok((viewer, sb)) => {
-				view = { key: route.key, base: Paths.conv_base(at.key), topic: route.topic, title: at.title, uid: sb.uid, viewer, sidebar_json: Pages.sidebar_json(sb) }
-				Chat.respond(200, html, Html.bytes(Pages.conversation(Chrome.src_in(Host.srcs!({})), Host.limits!({}), view)))
+				view = { key: route.key, base: at.key.base(), topic: route.topic, title: at.title, uid: sb.uid, viewer, sidebar_json: Pages.sidebar_json(sb) }
+				Chat.respond(200, html, Pages.conversation(Chrome.src_in(Host.srcs!({})), Host.limits!({}), view).bytes())
 			}
 		}
 	}
@@ -717,7 +717,7 @@ with_online = |others, flags|
 
 sidebar_of : Uid, Str, AtTopic, List({ id : Uid, name : Str, presence : [Online, Offline] }), List(Str), List(Str) -> Pages.Sidebar
 sidebar_of = |me, topic, at, others, channels, pins|
-	{ uid: me, kind: if at.conv.family == Dm Dm else Channel, key: Paths.conv_key_to_str(at.key), base: Paths.conv_base(at.key), topic, others, channels, pins, topics: at.topics }
+	{ uid: me, kind: if at.conv.family == Dm Dm else Channel, key: at.key.to_str(), base: at.key.base(), topic, others, channels, pins, topics: at.topics }
 
 json : List(U8)
 json = Str.to_utf8("application/json; charset=utf-8")
@@ -731,7 +731,7 @@ resume! = |{}|
 		Ok(me) => {
 			conv = ChatState.bookmark(Files.read!(Paths.last_conv_path(me)))
 			match Paths.pair_key_from_str(conv) {
-				Ok(pair) if Paths.is_participant(pair, me) => {
+				Ok(pair) if pair.is_participant(me) => {
 					topics = load_topics!(Dm(pair))
 					if Paths.first_of(topics).is_empty() {
 						Chat.redirect("/chat/c/${conv}".to_utf8())
@@ -741,7 +741,7 @@ resume! = |{}|
 				}
 				_ =>
 					match load_viewer!(Unasked) {
-						Ok(viewer) => Chat.respond(200, html, Html.bytes(Pages.no_conversations(Chrome.src_in(Host.srcs!({})), viewer)))
+						Ok(viewer) => Chat.respond(200, html, Pages.no_conversations(Chrome.src_in(Host.srcs!({})), viewer).bytes())
 						Err(Failed) => Chat.answered
 					}
 			}
@@ -841,7 +841,7 @@ find_dm! = |me, members, topic, i|
 				find_dm!(me, members, topic, i + 1)
 			} else {
 				pair = Paths.pair_key(me, id)
-				if List.contains(List.map(load_topics!(Dm(pair)), Str.to_utf8), topic) Ok(Paths.pair_key_bytes(pair)) else find_dm!(me, members, topic, i + 1)
+				if List.contains(List.map(load_topics!(Dm(pair)), Str.to_utf8), topic) Ok(pair.bytes()) else find_dm!(me, members, topic, i + 1)
 			}
 		Err(_) => Err(NoSuchTopic)
 	}
@@ -929,7 +929,7 @@ announce! : Paths.ConvKey, Chat.Conv, Who, Str, Str => Try({}, [Failed])
 announce! = |key, conv, who, topic, name|
 	match Topics.highest_general(load_topics!(key)) {
 		Ok(gen) if gen != topic =>
-			append_message!(conv, who, { at: { key, topic: gen }, name, markdown: "New topic: [${topic}](${Paths.conv_base(key)}/${topic})", cid: "" })
+			append_message!(conv, who, { at: { key, topic: gen }, name, markdown: "New topic: [${topic}](${key.base()}/${topic})", cid: "" })
 		_ => Ok({})
 	}
 
@@ -1076,7 +1076,7 @@ append_message! = |conv, who, { at: topic_at, name, markdown: md, cid }|
 						# the store only sends and appends. A DM's accounts are
 						# the request's already (`find!`); asked here only were
 						# they not, before anything is stored.
-						named = if Paths.conv_kind(topic_at.key) == Dm load_accounts!(who) else Ok([])
+						named = if topic_at.key.kind() == Dm load_accounts!(who) else Ok([])
 						match (named, decode_members!(conv.members)) {
 							(Ok(all), Ok(members)) => {
 								frame = Frame.message({ index, from: name, from_uid: me, at: stamp, html: page_html, markdown: md, id, cid })
@@ -1116,7 +1116,7 @@ fan_out! = |at, steps|
 					got = Files.append_entry!(f.path, Feeds.sep, f.entry)
 					match got.status {
 						Appended => Host.publish!(f.key, f.event)
-						Failed => Host.report_fanout_failure!(f.surface, f.member, Paths.conv_key_bytes(at.key), at.topic.to_utf8(), got.fault)
+						Failed => Host.report_fanout_failure!(f.surface, f.member, at.key.bytes(), at.topic.to_utf8(), got.fault)
 					}
 				}
 			}

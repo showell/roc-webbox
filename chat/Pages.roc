@@ -89,7 +89,7 @@ Pages := [].{
 	## (a curated page can be long), and answers before, them, after.
 	links_around : (List(U8) -> Html), Str -> (List(U8), List(U8))
 	links_around = |src, viewer|
-		match Bytes.cut_seq(Html.bytes(links(src, viewer, Held)), [0]) {
+		match Bytes.cut_seq(links(src, viewer, Held).bytes(), [0]) {
 			Ok(parts) => parts
 			Err(NotFound) => crash "Pages.links_around: the page lost its mark"
 		}
@@ -160,7 +160,7 @@ Pages := [].{
 	sidebar_json : Sidebar -> Html.ScriptJson
 	sidebar_json = |sb| {
 		person = |u| {
-			pk = Paths.pair_key_to_str(Paths.pair_key(sb.uid, u.id))
+			pk = Paths.pair_key(sb.uid, u.id).to_str()
 			online = if u.presence == Online [("online", JsonText.bool(Bool.True))] else []
 			JsonText.obj(List.concat([("id", JsonText.str("uid:${u.id.to_str()}")), ("label", JsonText.str(u.name)), ("url", JsonText.str("/chat/c/${pk}")), ("active", JsonText.bool(sb.kind == Dm and pk == sb.key))], online))
 		}
