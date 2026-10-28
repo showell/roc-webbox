@@ -49,6 +49,12 @@ pub const ListRec = extern struct { entries: EntryList, status: route_mod.ReadSt
 pub const StatRec = extern struct { mtime: i64, size: u64, status: route_mod.ReadStatus };
 /// One of Host.roc's `srcs!` scripts: `{ name : List(U8), src : List(U8) }`.
 pub const SrcRec = extern struct { name: RocBytes, src: RocBytes };
+/// One of Host.roc's `search_words!` words: `{ count : U64, word : List(U8)
+/// }`. **THE 8-BYTE COUNT FIRST, THEN THE BYTES** (src/roc_abi.zig's rule).
+pub const WordRec = extern struct { count: u64, word: RocBytes };
+/// Host.roc's `search_words!` answer: `{ status : [NotReady, Ready],
+/// unreadable : U64, words : List(...) }`: the count, the list, then the tag.
+pub const WordsRec = extern struct { unreadable: u64, words: WordList, status: route_mod.WordsStatus };
 /// One of Host.roc's `list_accounts!` accounts: `{ id : List(U8), kind : [Agent, Guest, Member, Unreadable], name : List(U8), name_read : [Found, Unreadable] }`.
 pub const AccountRec = extern struct { id: RocBytes, name: RocBytes, kind: route_mod.AccountKind, name_read: route_mod.NameRead };
 /// Host.roc's `list_accounts!` answer: `{ accounts : List(...), status : [Failed, Found] }`.
@@ -92,6 +98,12 @@ pub const EntryList = RecList(EntryRec, Entry, struct {
     }
 }.rec);
 
+pub const WordList = RecList(WordRec, Word, struct {
+    fn rec(it: Word) WordRec {
+        return .{ .count = it.count, .word = .from(it.word) };
+    }
+}.rec);
+
 pub const SrcList = RecList(SrcRec, Src, struct {
     fn rec(it: Src) SrcRec {
         return .{ .name = .from(it.name), .src = .from(it.src) };
@@ -111,6 +123,10 @@ comptime {
     const w = @sizeOf(usize);
     std.debug.assert(@sizeOf(RocBytes) == 3 * w and @sizeOf(Request) == 4 * w and @sizeOf(RouteRec) == 10 * w and @sizeOf(Answer) == 20 * w and @sizeOf(Got) == 4 * w and @sizeOf(ConvRec) == 10 * w and @sizeOf(ReadRec) == 4 * w and @sizeOf(EntryRec) == 4 * w and @sizeOf(SrcRec) == 6 * w and @sizeOf(ListRec) == 4 * w and @sizeOf(AccountRec) == 7 * w and @sizeOf(AccountsRec) == 4 * w and @sizeOf(RenderRec) == 4 * w and @sizeOf(MessageRec) == 15 * w);
     std.debug.assert(@sizeOf(AppendRec) == 4);
+    // search_words!'s (metal-vmm QUEUE 281): the 8-byte numbers at 0, the
+    // bytes and the list after, the tag last.
+    std.debug.assert(@offsetOf(WordRec, "count") == 0 and @offsetOf(WordRec, "word") == 8 and @sizeOf(WordRec) == std.mem.alignForward(usize, 8 + 3 * w, 8));
+    std.debug.assert(@offsetOf(WordsRec, "unreadable") == 0 and @offsetOf(WordsRec, "words") == 8 and @offsetOf(WordsRec, "status") == 8 + 3 * w and @sizeOf(WordsRec) == std.mem.alignForward(usize, 8 + 3 * w + 1, 8));
     std.debug.assert(@sizeOf(StatRec) == 24 and @offsetOf(StatRec, "size") == 8 and @offsetOf(StatRec, "status") == 16);
     std.debug.assert(@sizeOf(route_mod.Presence) == 1);
     // **A FAULT IS THE HOST'S ERROR, CARRIED BY THE ROC AS A NUMBER** it
@@ -131,6 +147,8 @@ pub const Entry = struct { name: []const u8, kind: route_mod.EntryKind };
 /// gives them; nothing there; or a listing that failed (the host has failed
 /// the request). Missing and failed are never one answer.
 pub const Listing = union(route_mod.ReadStatus) { failed, found: []const Entry, missing };
+/// One word search_words! answers: the word, and how many messages hold it.
+pub const Word = struct { word: []const u8, count: u64 };
 /// A file's size in bytes and its last change in whole seconds since the
 /// epoch, as stat! answers them.
 pub const Stat = union(route_mod.ReadStatus) { failed, found: struct { size: u64, mtime: i64 }, missing };

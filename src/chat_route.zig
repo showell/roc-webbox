@@ -170,6 +170,14 @@ pub const AppendStatus = enum(u8) { appended, failed };
 /// them). Notify and sidebar are made of the Roc's bytes alone, so never.
 pub const Surface = enum(u8) { code, images };
 
+/// Host.roc's `admit!` answer: the member may search now, or has searched
+/// too often this second (chat_search.zig `admit`).
+pub const Admission = enum(u8) { admitted, refused };
+
+/// Host.roc's `search_words!` answer's `status`: the index there to ask, or
+/// not ready (it could not be built).
+pub const WordsStatus = enum(u8) { not_ready, ready };
+
 /// Host.roc's `check_online!` answer: each id seen within the presence window of
 /// the request's time, or not (never seen is `offline`).
 pub const Presence = enum(u8) { offline, online };
@@ -205,7 +213,7 @@ pub const AsideEnd = enum(u8) { done, failed };
 
 comptime {
     @setEvalBranchQuota(20_000);
-    for (.{ Family, Part, Tail, Method, Area, Counting, Sniff, Kind, Form, BodyStatus, CountStatus, Hostility, ReadStatus, EntryKind, AccountKind, NameRead, AccountsStatus, FailReason, RenderStatus, AppendStatus, Surface, Presence, Membership, Done, Serving, Dropped, Aside, AsideEnd }) |E| assertRocOrder(E);
+    for (.{ Family, Part, Tail, Method, Area, Counting, Sniff, Kind, Form, BodyStatus, CountStatus, Hostility, ReadStatus, EntryKind, AccountKind, NameRead, AccountsStatus, FailReason, RenderStatus, AppendStatus, Surface, Presence, Membership, Admission, WordsStatus, Done, Serving, Dropped, Aside, AsideEnd }) |E| assertRocOrder(E);
 }
 
 /// That `E`'s values are Roc's for the same tags: numbered from 0 in the
