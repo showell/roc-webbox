@@ -58,6 +58,7 @@ import Upload
 import Search
 import Retire
 import Members
+import Bytes
 
 handle! : Chat.Request => Chat.Answer
 handle! = |req|
@@ -524,7 +525,10 @@ serve_topic! = |
 	match route.tail {
 		# An upload and the bundle (metal-vmm QUEUE 291): the Roc decides,
 		# the host serves the bytes.
-		Uploads => Upload.serve!(req, { at: { key: found.key, topic: route.topic }, file: route.rest })
+		Uploads => Upload.serve!(
+			req,
+			{ at: { key: found.key, topic: route.topic }, file: route.rest },
+		)
 		Download => serve_download!(
 			req,
 			route,
@@ -2084,7 +2088,7 @@ store! = |
 	send,
 	{ markdown: md, cid },
 |
-	if ZigText.trim(md.to_utf8()) == [] {
+	if Bytes.trim(md.to_utf8(), Bytes.zig_spaces) == [] {
 		Chat.refuse("not sent: the message is empty\n")
 	} else if Host.check_hostile!(
 		md.to_utf8(),
@@ -2268,7 +2272,7 @@ post_slug! = |slug|
 ## The doc's text judged, its partner found, then stored as a message.
 post_text! : Uid, Str => Chat.Answer
 post_text! = |me, md|
-	if ZigText.trim(md.to_utf8()) == [] {
+	if Bytes.trim(md.to_utf8(), Bytes.zig_spaces) == [] {
 		Chat.refuse("doc is empty\n")
 	} else if Host.check_hostile!(
 		md.to_utf8(),

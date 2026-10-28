@@ -18,6 +18,7 @@ import Paths
 import Time
 import Uid
 import ZigText
+import Ascii
 
 Docs := [].{
 
@@ -125,7 +126,7 @@ Docs := [].{
 			ZigText.trim_str(title).with_ascii_lowercased().to_utf8(),
 			{ out: [], hyphen: Bool.False },
 			|acc, c| {
-				if (c >= 'a' and c <= 'z') or (c >= '0' and c <= '9') {
+				if Ascii.is_alphanumeric(c) {
 					{ out: List.append(acc.out, c), hyphen: Bool.False }
 				} else if acc.hyphen or acc.out.is_empty() {
 					acc
@@ -134,8 +135,8 @@ Docs := [].{
 				}
 			},
 		)
-		slug = trim_hyphens(kept.out)
-		short = if List.len(slug) > 80 trim_hyphens(List.take_first(slug, 80)) else slug
+		slug = Bytes.trim_end(kept.out, ['-'])
+		short = if List.len(slug) > 80 Bytes.trim_end(List.take_first(slug, 80), ['-']) else slug
 		match Str.from_utf8(short) {
 			Ok("") => "untitled"
 			Ok(s) => s
@@ -791,22 +792,6 @@ doc_list = |slugs, selected|
 		Html.trusted("</aside>"),
 	])
 
-## How many `~` start `line`.
-leading_tildes : List(U8) -> U64
-leading_tildes = |line|
-	match line {
-		['~', .. as rest] => 1 + leading_tildes(rest)
-		_ => 0
-	}
-
-## Hyphens off the end (a slug never ends in one).
-trim_hyphens : List(U8) -> List(U8)
-trim_hyphens = |bytes|
-	match List.last(bytes) {
-		Ok('-') => trim_hyphens(List.drop_last(bytes, 1))
-		_ => bytes
-	}
-
 ## oneLine: every line break a space, so a field cannot break the block.
 one_line : Str -> Str
 one_line = |s| s.replace_each("\n", " ").replace_each("\r", " ")
@@ -819,7 +804,11 @@ quote_fence = |body| {
 		List.split_on(body.to_utf8(), '\n'),
 		0,
 		|most, line| {
-			run = leading_tildes(line)
+			run = Bytes.count_while(
+				line,
+				|c| c == '~',
+				0,
+			)
 			if run >= 3 and run > most run else most
 		},
 	)

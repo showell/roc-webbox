@@ -12,7 +12,7 @@
 ## host hands it (main's load_accounts! and load_uid!).
 import Paths
 import Uid
-import ZigText
+import Bytes
 
 Accounts := [].{
 
@@ -185,14 +185,7 @@ Accounts := [].{
 ## The name file's bytes as getUserName reads them: trailing CRs and
 ## LFs cut, nothing else (inner and leading whitespace kept).
 stored_name : List(U8) -> List(U8)
-stored_name = |bytes| List.drop_last(
-	bytes,
-	ZigText.count_back_while(
-		bytes,
-		|c| c == '\r' or c == '\n',
-		0,
-	),
-)
+stored_name = |bytes| Bytes.trim_end(bytes, ['\r', '\n'])
 
 expect Accounts.from_host({
 	id: Str.to_utf8("7"),

@@ -30,6 +30,7 @@ import Saved
 import Search
 import BusKey
 import ChatUrl
+import Bytes
 
 call : { which : U8, args : List(List(U8)) } -> List(List(U8))
 call = |req| {
@@ -53,7 +54,7 @@ call = |req| {
 				Ok(t) => [Json.to_str(t).to_utf8()]
 				Err(_) => []
 			}
-		6 => [ZigText.trim(arg(0))]
+		6 => [Bytes.trim(arg(0), Bytes.zig_spaces)]
 		# A key that is no canonical pair is no PairKey, so no participant.
 		7 =>
 			match pair_of(arg(0)) {
@@ -960,7 +961,12 @@ accounts = |args, i|
 		List.chunks_of(List.drop_first(args, i), 4),
 		|record|
 			match record {
-				[id, k, r, name] => {
+				[
+					id,
+					k,
+					r,
+					name,
+				] => {
 					kind = match k {
 						[97] => Agent
 						[109] => Member
@@ -968,7 +974,12 @@ accounts = |args, i|
 						_ => Guest
 					}
 					name_read = if r == [117] Unreadable else Found
-					Ok({ id, kind, name, name_read })
+					Ok({
+						id,
+						kind,
+						name,
+						name_read,
+					})
 				}
 				_ => Err(Short)
 			},
@@ -1089,7 +1100,17 @@ written = |args, i|
 		List.chunks_of(List.drop_first(args, i), 9),
 		|record|
 			match record {
-				[doc, secs, uid, name, key, label, topic, markdown, dm] => Ok({
+				[
+					doc,
+					secs,
+					uid,
+					name,
+					key,
+					label,
+					topic,
+					markdown,
+					dm,
+				] => Ok({
 					kind: if doc == ['1'] Doc else Message,
 					secs,
 					uid,

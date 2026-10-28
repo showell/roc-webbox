@@ -3,8 +3,9 @@
 ## typed made a key as the index holds words, and the answer's JSON. The
 ## index and the rate limit are the host's (Host.search_words!,
 ## Host.admit!). Pure.
-import ZigText
 import JsonOut
+import Ascii
+import Bytes
 
 Search := [].{
 
@@ -20,7 +21,7 @@ Search := [].{
 	## edge punctuation, then ASCII-lowercased; empty past `max_word`.
 	key : List(U8) -> List(U8)
 	key = |typed| {
-		t = trim_word(ZigText.trim(typed))
+		t = trim_word(Bytes.trim(typed, Bytes.zig_spaces))
 		if List.len(t) > max_word [] else List.map(t, |c| if c >= 'A' and c <= 'Z' c + 32 else c)
 	}
 
@@ -176,8 +177,8 @@ edge_back = |h, i| if i > 0 and i < h.length and is_continuation(h, i) edge_back
 trim_word : List(U8) -> List(U8)
 trim_word = |w|
 	match (List.first(w), List.last(w)) {
-		(Ok(c), _) if is_ascii_punct(c) => trim_word(List.drop_first(w, 1))
-		(_, Ok(c)) if is_ascii_punct(c) => trim_word(List.drop_last(w, 1))
+		(Ok(c), _) if Ascii.is_punctuation(c) => trim_word(List.drop_first(w, 1))
+		(_, Ok(c)) if Ascii.is_punctuation(c) => trim_word(List.drop_last(w, 1))
 		_ =>
 			match List.find_first(trimmed, |t| List.starts_with(w, t) or List.ends_with(w, t)) {
 				Ok(t) => trim_word(
@@ -189,9 +190,6 @@ trim_word = |w|
 				Err(_) => w
 			}
 	}
-
-is_ascii_punct : U8 -> Bool
-is_ascii_punct = |c| (c >= '!' and c <= '/') or (c >= ':' and c <= '@') or (c >= '[' and c <= '`') or (c >= '{' and c <= '~')
 
 ## search_tokens `trimmed`: quotes, guillemets, the ellipsis and dashes, the
 ## inverted marks, the primes, the no-break space.

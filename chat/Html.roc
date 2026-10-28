@@ -10,7 +10,6 @@
 ## out is `bytes`, where a page becomes a response body. The host's markdown
 ## (`render!`) never reaches a page here: it rides a JSON frame (Frame.roc),
 ## and the curated links the host splices in itself (Pages.links_around).
-import Bytes
 
 Html :: List(U8).{
 

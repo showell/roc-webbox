@@ -4,7 +4,6 @@
 ## with a body line that would read as the separator escaped by one
 ## backslash. Pure, on bytes.
 import Bytes
-import ZigText
 import Uid
 
 Transcript := [].{
@@ -43,7 +42,7 @@ Transcript := [].{
 			List.split_on_list(data, sep),
 			{ messages: [], refused: 0 },
 			|acc, piece|
-				if ZigText.trim(piece) == [] {
+				if Bytes.trim(piece, Bytes.zig_spaces) == [] {
 					Ok(acc)
 				} else {
 					b = decode_block(piece)
@@ -133,27 +132,13 @@ line_at = |piece, at| List.sublist(
 	piece,
 	{
 		start: at,
-		len: line_len(
+		len: Bytes.count_while(
 			piece,
-			at,
-			0,
-		),
+			|c| c != '\n',
+			at + 0,
+		) - at,
 	},
 )
-
-line_len : List(U8), U64, U64 -> U64
-line_len = |
-	piece,
-	at,
-	n,
-| match List.get(piece, at + n) {
-	Ok(c) if c != '\n' => line_len(
-		piece,
-		at,
-		n + 1,
-	)
-	_ => n
-}
 
 ## The header lines from offset `at` to the blank one, then the body:
 ## everything after the blank line (none when there is no blank line).
@@ -251,9 +236,9 @@ dashes = Str.to_utf8("-------------")
 ## A line of one or more backslashes then exactly the dashes loses one.
 unescape_line : List(U8) -> List(U8)
 unescape_line = |line| {
-	k = Bytes.leading(
+	k = Bytes.count_while(
 		line,
-		'\\',
+		|x| x == '\\',
 		0,
 	)
 	if k >= 1 and List.drop_first(line, k) == dashes List.drop_first(line, 1) else line
@@ -262,9 +247,9 @@ unescape_line = |line| {
 ## A line of any backslashes then exactly the dashes gains one.
 escape_line : List(U8) -> List(U8)
 escape_line = |line| {
-	k = Bytes.leading(
+	k = Bytes.count_while(
 		line,
-		'\\',
+		|x| x == '\\',
 		0,
 	)
 	if List.drop_first(line, k) == dashes List.prepend(line, '\\') else line

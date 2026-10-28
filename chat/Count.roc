@@ -23,7 +23,7 @@ Count := [].{
 	count_blocks : List(U8) -> U64
 	count_blocks = |raw| List.count_if(
 		List.split_on_list(raw, Transcript.sep),
-		|p| ZigText.trim(p) != [],
+		|p| Bytes.trim(p, Bytes.zig_spaces) != [],
 	)
 
 	## numberIn: the N of a `<topic>_<N>` id, or none when the id is not this

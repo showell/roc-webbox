@@ -19,7 +19,6 @@ import Paths
 import Time
 import Transcript
 import Uid
-import ZigText
 
 Retire := [].{
 
@@ -149,13 +148,21 @@ Retire := [].{
 						Members.fail_unreadable!(why)
 						Chat.answered
 					}
-					Err(Refused(why)) => Chat.respond(400, [], why.to_utf8())
+					Err(Refused(why)) => Chat.respond(
+						400,
+						[],
+						why.to_utf8(),
+					)
 					Ok({}) =>
 						match plan!(accounts, got) {
 							Err(Failed) => Chat.answered
 							Ok(steps) =>
 								match carry_out!(steps) {
-									Ok({}) => Chat.respond(200, [], [])
+									Ok({}) => Chat.respond(
+										200,
+										[],
+										[],
+									)
 									Err(Failed) => Chat.answered
 								}
 						}
@@ -468,7 +475,7 @@ without = |body, ids|
 		List.split_on(body, '\n'),
 		{ kept: [], dropped: 0 },
 		|got, raw| {
-			line = ZigText.trim(raw)
+			line = Bytes.trim(raw, Bytes.zig_spaces)
 			member = line != [] and List.first(line) != Ok('#') and List.any(
 				ids,
 				|id| id.to_utf8() == line,
@@ -538,7 +545,7 @@ swept! = |
 				"last-conv",
 			])
 			conv = match Files.read_bytes!(last) {
-				Ok(raw) => Ok(ZigText.trim(raw))
+				Ok(raw) => Ok(Bytes.trim(raw, Bytes.zig_spaces))
 				Err(Missing) => Ok([])
 				Err(Failed) => Err(Failed)
 			}

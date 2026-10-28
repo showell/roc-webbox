@@ -2,6 +2,8 @@
 ## `date:` (RFC 3339, UTC, to the second), a dated topic's name, and the
 ## reading back of a date another writer may have made. Howard Hinnant's
 ## civil-date algorithm, as the Zig has it. Pure.
+import Ascii
+import Bytes
 Time := [].{
 
 	## `2026-06-19T14:34:07Z` for `unix_secs`.
@@ -117,7 +119,11 @@ offset_of : List(U8) -> Try(I64, [NotADate])
 offset_of = |rest0| {
 	rest = match rest0 {
 		['.', .. as frac] => {
-			n = count_digits(frac, 0)
+			n = Bytes.count_while(
+				frac,
+				Ascii.is_digit,
+				0,
+			)
 			if n == 0 Err(NotADate) else Ok(List.drop_first(frac, n))
 		}
 		_ => Ok(rest0)
@@ -160,12 +166,6 @@ offset_of = |rest0| {
 	}
 }
 
-count_digits : List(U8), U64 -> U64
-count_digits = |l, n| match List.get(l, n) {
-	Ok(c) if c >= '0' and c <= '9' => count_digits(l, n + 1)
-	_ => n
-}
-
 ## `len` decimal digits at `start`, as a number, or none.
 digits : List(U8), U64, U64 -> Try(I64, [NotDigits])
 digits = |
@@ -174,7 +174,7 @@ digits = |
 	len,
 | {
 	piece = List.sublist(t, { start, len })
-	if List.len(piece) != len or !List.all(piece, |c| c >= '0' and c <= '9') {
+	if List.len(piece) != len or !List.all(piece, Ascii.is_digit) {
 		Err(NotDigits)
 	} else {
 		Ok(
@@ -193,7 +193,10 @@ civil_from_days = |days| {
 	era = I64.div_floor_by(z, 146097)
 	doe = z - era * 146097
 	yoe = I64.div_floor_by(
-		doe - I64.div_floor_by(doe, 1460) + I64.div_floor_by(doe, 36524) - I64.div_floor_by(doe, 146096),
+		doe - I64.div_floor_by(doe, 1460) + I64.div_floor_by(doe, 36524) - I64.div_floor_by(
+			doe,
+			146096,
+		),
 		365,
 	)
 	y = yoe + era * 400

@@ -3,6 +3,7 @@
 ## **A UID IS CANONICAL ASCII DIGITS, THE FIRST NOT ZERO** (allocateUser's):
 ## opaque (`::`), so only `from_str` makes one, and every uid in the chat
 ## is one an account could have.
+import Ascii
 Uid :: Str.{
 
 	## The uid `text` spells, when it is digits, the first not zero.
@@ -12,7 +13,7 @@ Uid :: Str.{
 			[
 				first,
 				..,
-			] if first != '0' and text.to_utf8().all(|c| c >= '0' and c <= '9') => Ok(Uid.(text))
+			] if first != '0' and text.to_utf8().all(Ascii.is_digit) => Ok(Uid.(text))
 			_ => Err(NotAUid)
 		}
 

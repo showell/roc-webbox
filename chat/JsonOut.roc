@@ -14,7 +14,8 @@ JsonOut :: List(U8).{
 
 	## Bytes as a string, as chat_search.zig's `str` writes them: each byte
 	## that does not begin a whole UTF-8 sequence is U+FFFD (a word the
-	## index read from a transcript, a key typed as `%FF`).
+	## index read from a transcript, a key typed as `%FF`). **Kept on purpose:**
+	## `Str.from_utf8_lossy` gives one U+FFFD per bad sequence, not per byte.
 	lossy : List(U8) -> JsonOut
 	lossy = |b| string(
 		whole_or_replaced(

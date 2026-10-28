@@ -6,6 +6,7 @@
 ## **A FORM IS TEXT AT THE DOOR**: a value that is not UTF-8 once decoded
 ## is malformed too, so no field past here is bytes.
 import Bytes
+import Ascii
 
 Form := [].{
 	Field : [
@@ -87,7 +88,7 @@ decode_from = |
 hex : U8 -> Try(U8, [NotHex])
 hex = |c|
 	match c {
-		_ if c >= '0' and c <= '9' => Ok(c - '0')
+		_ if Ascii.is_digit(c) => Ok(c - '0')
 		_ if c >= 'a' and c <= 'f' => Ok(c - 'a' + 10)
 		_ if c >= 'A' and c <= 'F' => Ok(c - 'A' + 10)
 		_ => Err(NotHex)

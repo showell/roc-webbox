@@ -10,6 +10,7 @@ import Paths
 import JsonOut
 import Limits
 import ZigText
+import Ascii
 
 Upload := [].{
 
@@ -49,8 +50,8 @@ Upload := [].{
 				}
 				match Bytes.cut_seq(spec, ['-']) {
 					Ok((left, right)) => from_to(
-						trim_spaces(left),
-						trim_spaces(right),
+						Bytes.trim(left, [' ']),
+						Bytes.trim(right, [' ']),
 						size,
 					)
 					Err(NotFound) => Err(Unsatisfiable)
@@ -288,20 +289,8 @@ from_to = |
 	}
 }
 
-## Spaces off both ends (the Zig's trim of " ").
-trim_spaces : List(U8) -> List(U8)
-trim_spaces = |b|
-	match b {
-		[' ', .. as rest] => trim_spaces(rest)
-		_ =>
-			match List.last(b) {
-				Ok(' ') => trim_spaces(List.drop_last(b, 1))
-				_ => b
-			}
-	}
-
 is_hex : U8 -> Bool
-is_hex = |c| (c >= '0' and c <= '9') or (c >= 'a' and c <= 'f')
+is_hex = |c| Ascii.is_digit(c) or (c >= 'a' and c <= 'f')
 
 ## The types the chat takes (chat_upload `accepted`): each stored name's
 ## extension and the type it is served as.

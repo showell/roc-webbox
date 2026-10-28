@@ -5,7 +5,6 @@
 ## and chat_page.zig, and angry-gopher's chat_twin_test.zig holds every page
 ## built here to the one the Zig builds, byte for byte, until the Zig's go.
 ## The scripts' srcs are the host's (`src`): their hash is of bytes it holds.
-import Bytes
 import Html
 
 Chrome := [].{

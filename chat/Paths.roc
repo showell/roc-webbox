@@ -5,6 +5,7 @@
 import Bytes
 import Uid
 import ZigText
+import Ascii
 
 Paths := [].{
 
@@ -146,7 +147,7 @@ Paths := [].{
 					} else if c == '-' {
 						(!prev_hyphen, Bool.True)
 					} else {
-						(is_alnum(c), Bool.False)
+						(Ascii.is_alphanumeric(c), Bool.False)
 					},
 			)
 			ok
@@ -158,9 +159,9 @@ Paths := [].{
 	is_channel_name : Str -> Bool
 	is_channel_name = |text| match text.to_utf8() {
 		[first, .. as more] =>
-			text.count_utf8_bytes() <= 40 and is_alpha(first) and List.all(
+			text.count_utf8_bytes() <= 40 and Ascii.is_alphabetic(first) and List.all(
 				more,
-				|c| is_alnum(c) or c == '-',
+				|c| Ascii.is_alphanumeric(c) or c == '-',
 			)
 		[] => Bool.False
 	}
@@ -194,8 +195,8 @@ Paths := [].{
 			Ok({ before: left, after: right }) =>
 				left != [] and right != [] and List.all(
 					left,
-					|c| is_alnum(c) or c == '-',
-				) and List.all(right, |c| c >= '0' and c <= '9')
+					|c| Ascii.is_alphanumeric(c) or c == '-',
+				) and List.all(right, Ascii.is_digit)
 		}
 
 	## firstOf: "ChitChat" when there, else the first (the list is sorted),
@@ -326,7 +327,14 @@ Paths := [].{
 				match acc {
 					Err(Malformed) => acc
 					Ok(out) => {
-						line = trim_line(raw)
+						line = Bytes.trim(
+							raw,
+							[
+								' ',
+								'\t',
+								'\r',
+							],
+						)
 						if line == [] or List.first(line) == Ok('#') {
 							acc
 						} else {
@@ -473,36 +481,13 @@ is_doc_slug : Str -> Bool
 is_doc_slug = |slug| {
 	b = slug.to_utf8()
 	n = List.len(b)
-	in_set = List.all(b, |c| c == '-' or (c >= 'a' and c <= 'z') or (c >= '0' and c <= '9'))
+	in_set = List.all(b, |c| c == '-' or (c >= 'a' and c <= 'z') or Ascii.is_digit(c))
 	doubled = List.fold(
 		b,
 		{ found: Bool.False, prev: 0 },
 		|s, c| { found: s.found or (c == '-' and s.prev == '-'), prev: c },
 	).found
 	n > 0 and n <= 80 and in_set and !doubled and List.first(b) != Ok('-') and List.last(b) != Ok('-')
-}
-
-## channelMembers's trim: spaces, tabs and CRs (a line split on newlines
-## has none of those).
-trim_line : List(U8) -> List(U8)
-trim_line = |s| {
-	ws = |c| c == ' ' or c == '\t' or c == '\r'
-	front = List.drop_first(
-		s,
-		ZigText.count_while(
-			s,
-			ws,
-			0,
-		),
-	)
-	List.drop_last(
-		front,
-		ZigText.count_back_while(
-			front,
-			ws,
-			0,
-		),
-	)
 }
 
 rosters_from : List(Str),
@@ -554,12 +539,6 @@ cut_suffix = |name, suffix| {
 		n - k,
 	) == suffix Ok(List.take_first(name, n - k)) else Err(NoSuffix)
 }
-
-is_alpha : U8 -> Bool
-is_alpha = |c| (c >= 'A' and c <= 'Z') or (c >= 'a' and c <= 'z')
-
-is_alnum : U8 -> Bool
-is_alnum = |c| is_alpha(c) or (c >= '0' and c <= '9')
 
 # The builders' exact bytes, for a DM (`3_7`) and a channel (`general`).
 expect match (Paths.pair_key_from_str("3_7"), Paths.channel_name_from_str("general")) {

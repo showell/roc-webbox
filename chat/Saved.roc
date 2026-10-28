@@ -6,6 +6,8 @@
 ## other shape is passed over, never an error, and bytes that are not
 ## UTF-8 are only bytes. Pure.
 import Paths
+import Bytes
+import Ascii
 
 Saved := [].{
 
@@ -53,19 +55,19 @@ Saved := [].{
 ## parseRefAt: `<conv>/<topic>#msg-<id>` from `start`, or nothing.
 ref_at : List(U8), U64 -> Try(Saved.Ref, [NotARef])
 ref_at = |text, start| {
-	conv_end = run(
+	conv_end = Bytes.count_while(
 		text,
-		start,
 		is_path_seg,
+		start,
 	)
 	if conv_end == start or List.get(text, conv_end) != Ok('/') {
 		Err(NotARef)
 	} else {
 		topic_start = conv_end + 1
-		topic_end = run(
+		topic_end = Bytes.count_while(
 			text,
-			topic_start,
 			is_path_seg,
+			topic_start,
 		)
 		anchor = "#msg-".to_utf8()
 		if topic_end == topic_start or !List.starts_with(List.drop_first(text, topic_end), anchor) {
@@ -76,10 +78,10 @@ ref_at = |text, start| {
 				text,
 				{
 					start: id_start,
-					len: run(
+					len: Bytes.count_while(
 						text,
-						id_start,
 						is_id_char,
+						id_start,
 					) - id_start,
 				},
 			)
@@ -96,29 +98,13 @@ ref_at = |text, start| {
 	}
 }
 
-## How many bytes from `i` on `keep` takes.
-run : List(U8), U64, (U8 -> Bool) -> U64
-run = |
-	s,
-	i,
-	keep,
-|
-	match List.get(s, i) {
-		Ok(c) if keep(c) => run(
-			s,
-			i + 1,
-			keep,
-		)
-		_ => i
-	}
-
 ## A byte a conversation's key or a topic may hold in a URL (isPathSeg).
 is_path_seg : U8 -> Bool
 is_path_seg = |c| is_id_char(c) or c == '.'
 
 ## A byte a message's id may hold (isIdChar).
 is_id_char : U8 -> Bool
-is_id_char = |c| (c >= 'A' and c <= 'Z') or (c >= 'a' and c <= 'z') or (c >= '0' and c <= '9') or c == '-' or c == '_'
+is_id_char = |c| Ascii.is_alphanumeric(c) or c == '-' or c == '_'
 
 expect Saved.ids(
 	Str.to_utf8("[o](/chat/c/1_2/Plans#msg-Plans_3) /channel/1_2/Plans#msg-Plans_9 /chat/c/1_2/Plans#msg-bad /chat/c/1_2/Other#msg-Other_1"),

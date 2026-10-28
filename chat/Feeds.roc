@@ -6,10 +6,10 @@
 import JsonOut
 import Bytes
 import Fence
-import ZigText
 import ChatUrl
 import SafeImg
 import Transcript
+import Ascii
 
 Feeds := [].{
 
@@ -241,10 +241,13 @@ text_blocks = |bytes| {
 ## The file's blocks between separators, trimmed, the empty ones gone.
 blocks_of : List(U8) -> List(List(U8))
 blocks_of = |text|
-	if ZigText.trim(text) == [] {
+	if Bytes.trim(text, Bytes.zig_spaces) == [] {
 		[]
 	} else {
-		List.keep_if(List.map(List.split_on_list(text, Feeds.sep), ZigText.trim), |b| b != [])
+		List.keep_if(
+			List.map(List.split_on_list(text, Feeds.sep), |b| Bytes.trim(b, Bytes.zig_spaces)),
+			|b| b != [],
+		)
 	}
 
 tags_in : List(U8) -> List(Str)
@@ -275,12 +278,15 @@ img_tags_from = |
 				c,
 				d,
 				e,
-			] if Bytes.lower([
-				a,
-				b,
-				c,
-				d,
-			]) == Str.to_utf8("<img") and Bytes.is_space(e) =>
+			] if List.map(
+				[
+					a,
+					b,
+					c,
+					d,
+				],
+				Ascii.to_lower,
+			) == Str.to_utf8("<img") and Ascii.is_whitespace(e) =>
 				match Bytes.find_seen(
 					s,
 					'>',

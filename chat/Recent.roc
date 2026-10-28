@@ -7,7 +7,7 @@ import Bytes
 import Fence
 import Time
 import Uid
-import ZigText
+import Ascii
 
 Recent := [].{
 
@@ -270,11 +270,12 @@ html_from = |
 	match List.get(s, i) {
 		Err(_) => out
 		Ok(c) => {
-			opens = i + 4 <= List.len(s) and Bytes.lower(
+			opens = i + 4 <= List.len(s) and List.map(
 				List.sublist(
 					s,
 					{ start: i, len: 4 },
 				),
+				Ascii.to_lower,
 			) == Str.to_utf8("<img") and !is_word_byte(List.get(s, i + 4) ?? ' ')
 			(found, seen) = if opens Bytes.find_seen(
 				s,
@@ -300,7 +301,7 @@ html_from = |
 	}
 
 is_word_byte : U8 -> Bool
-is_word_byte = |c| (c >= 'A' and c <= 'Z') or (c >= 'a' and c <= 'z') or (c >= '0' and c <= '9') or c == '_'
+is_word_byte = |c| Ascii.is_alphanumeric(c) or c == '_'
 
 ## `replaceImgMarkdown`: `![…](…)`.
 md_images : List(U8) -> List(U8)
@@ -388,7 +389,7 @@ collapse_ws = |s| {
 		s,
 		([], Bool.False),
 		|(acc, in_ws), c|
-			if Bytes.is_space(c) {
+			if Ascii.is_whitespace(c) {
 				(acc, Bool.True)
 			} else {
 				(List.append(if in_ws and acc != [] List.append(acc, ' ') else acc, c), Bool.False)
