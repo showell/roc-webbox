@@ -18,7 +18,8 @@
 ## through `store_block!` (the append, the count cache, the search index),
 ## and its fan-out (Fanout.roc: every member's surfaces, their keys, events
 ## and feed entries) through `publish!`, `append_entry!` and
-## `report_fanout_failure!`, the message's parts its own (Fanout.parts_of). The files and folders it reads by name (the member's own, a
+## `report_fanout_failure!`, the message's parts its own (Fanout.parts_of).
+## The files and folders it reads by name (the member's own, a
 ## conversation's topics, a channel's members, the rosters, a topic's
 ## reactions) it reads through the file primitives, the names and formats
 ## its own.
@@ -53,6 +54,7 @@ import JsonOut
 import Limits
 import BusKey
 import ChatUrl
+import Docs
 import Search
 
 handle! : Chat.Request => Chat.Answer
@@ -147,8 +149,20 @@ served_by = |r|
 		# 271): whose it is, whether its topic is there, every 404. The Zig
 		# serves the tails handed back to it, authorized here.
 		Dm | Channel => Roc
-		# A doc posted to chat (metal-vmm QUEUE 278); the rest of docs is Zig's.
-		Docs => if r.rest == "/post" Roc else Zig
+		# A doc posted to chat (metal-vmm QUEUE 278) and the read pages (289);
+		# the writes and the live preview are still Zig's.
+		Docs =>
+			if r.rest == "/new" {
+				Zig
+			} else if r.rest == "/save" {
+				Zig
+			} else if r.rest == "/render" {
+				Zig
+			} else if r.rest == "/save_to_reading_list" {
+				Zig
+			} else {
+				Roc
+			}
 		# Search's words and messages (metal-vmm QUEUE 281, 282), and the
 		# 404 for anything else under /chat/search.
 		Search => Roc
@@ -174,7 +188,7 @@ act! = |req, route| {
 			} else {
 				serve_recent!(route.rest.to_utf8())
 			}
-		Docs => post_doc!(req)
+		Docs => if route.rest == "/post" post_doc!(req) else docs_read!(req, route.rest)
 		Search => search!(req, route.rest)
 		Images =>
 			if route.rest == "/stream" {
@@ -245,6 +259,187 @@ came_online! = |who| {
 	)
 	Ok({})
 }
+
+## **THE DOCS' READ PAGES** (docs.zig `handle`, metal-vmm QUEUE 289), each
+## the member's own, never another's: the landing, the list's JSON, a doc's
+## raw markdown, its editor. One segment after /docs: a nested one is a 404.
+docs_read! : Chat.Request, Str => Chat.Answer
+docs_read! = |req, rest|
+	match load_uid!({}) {
+		Err(Failed) => Chat.answered
+		Ok(me) =>
+			if rest == "" or rest == "/" {
+				docs_landing!(me)
+			} else {
+				seg = rest.drop_prefix("/")
+				if seg == "list" {
+					if req.method != Get Chat.not_allowed(Get) else docs_list!(me)
+				} else if seg.contains("/") {
+					Chat.not_found
+				} else if seg.ends_with(".md") {
+					raw_doc!(me, seg.drop_suffix(".md"))
+				} else {
+					docs_editor!(me, ZigText.trim_str(seg))
+				}
+			}
+	}
+
+## The member's docs, sorted by slug, and in the folder's order (a folder
+## not there holds none). `Failed` when it would not list.
+load_docs! : Uid => Try(List({ slug : Str, path : Paths.ChatPath }), [Failed])
+load_docs! = |me|
+	match Files.list!(Paths.docs_folder(me)) {
+		Ok(listed) => Ok(Paths.docs_in_order(me, listed.entries))
+		Err(Missing) => Ok([])
+		Err(Failed) => Err(Failed)
+	}
+
+## **THE DOC TOUCHED LAST** (mostRecentDocSlug), the landing's 303, a
+## reading list just saved among them; with none, the editor with nothing
+## open.
+docs_landing! : Uid => Chat.Answer
+docs_landing! = |me|
+	match load_docs!(me) {
+		Err(Failed) => Chat.answered
+		Ok(docs) =>
+			match last_touched!(docs, Err(None)) {
+				Err(Failed) => Chat.answered
+				Ok(Ok(last)) => Chat.redirect("/chat/docs/${last.slug}".to_utf8())
+				Ok(Err(None)) => docs_page!(sorted_slugs(docs), Nothing)
+			}
+	}
+
+## Of `docs`, in the folder's order, the one changed last, the first of a
+## tie, against `best` so far; one gone since the listing is passed over.
+last_touched! : List({ slug : Str, path : Paths.ChatPath }),
+Try({ slug : Str, mtime : I64 }, [None]) => Try(
+	Try({ slug : Str, mtime : I64 }, [None]),
+	[Failed],
+)
+last_touched! = |docs, best|
+	match docs {
+		[] => Ok(best)
+		[doc, .. as more] =>
+			match Files.stat!(doc.path) {
+				Err(Failed) => Err(Failed)
+				Err(Missing) => last_touched!(more, best)
+				Ok(st) =>
+					match best {
+						Ok(b) if b.mtime >= st.mtime => last_touched!(more, best)
+						_ => last_touched!(more, Ok({ slug: doc.slug, mtime: st.mtime }))
+					}
+			}
+	}
+
+## The slugs of `docs`, sorted (listUserDocs' order).
+sorted_slugs : List({ slug : Str, path : Paths.ChatPath }) -> List(Str)
+sorted_slugs = |docs| Paths.sort_by_bytes(List.map(docs, |d| d.slug))
+
+## docsList: the member's docs as JSON, for an API client.
+docs_list! : Uid => Chat.Answer
+docs_list! = |me|
+	match load_docs!(me) {
+		Err(Failed) => Chat.answered
+		Ok(docs) => Chat.respond(
+			200,
+			json,
+			Docs.list_json(me.to_str(), sorted_slugs(docs)),
+		)
+	}
+
+## serveRawDoc: a doc's markdown as stored. **AN ERROR IS NOT "NO SUCH
+## DOC"** (metal-vmm QUEUE 114): a name no slug is the Zig's 500, saying so.
+raw_doc! : Uid, Str => Chat.Answer
+raw_doc! = |me, slug|
+	match Paths.doc_path(me, slug) {
+		Err(NotASlug) => Chat.respond(
+			500,
+			[],
+			"The doc cannot be read: InvalidDocSlug.\n".to_utf8(),
+		)
+		Ok(path) =>
+			match Files.read_bytes!(path) {
+				Ok(bytes) => Chat.respond(
+					200,
+					"text/markdown; charset=utf-8".to_utf8(),
+					bytes,
+				)
+				Err(Missing) => Chat.not_found
+				Err(Failed) => Chat.answered
+			}
+	}
+
+## renderDocsEditor: the editor with `slug` open; one no slug, or not
+## among the member's docs, is back to the bare editor (303).
+docs_editor! : Uid, Str => Chat.Answer
+docs_editor! = |me, slug|
+	match load_docs!(me) {
+		Err(Failed) => Chat.answered
+		Ok(docs) => {
+			slugs = sorted_slugs(docs)
+			if slug == "" {
+				docs_page!(slugs, Nothing)
+			} else {
+				match (Paths.doc_path(me, slug), slugs.contains(slug)) {
+					(Ok(path), Bool.True) => open_doc!(
+						slugs,
+						slug,
+						path,
+					)
+					_ => Chat.redirect("/chat/docs".to_utf8())
+				}
+			}
+		}
+	}
+
+## The editor with the doc at `path` open: its markdown (a doc gone since
+## the listing is empty) and that rendered, the preview's first paint.
+open_doc! : List(Str), Str, Paths.ChatPath => Chat.Answer
+open_doc! = |
+	slugs,
+	slug,
+	path,
+| {
+	stored = match Files.read_bytes!(path) {
+		Ok(bytes) => Ok(bytes)
+		Err(Missing) => Ok([])
+		Err(Failed) => Err(Failed)
+	}
+	match stored {
+		Err(Failed) => Chat.answered
+		Ok(markdown) => {
+			rendered = Host.render!(markdown)
+			match rendered.status {
+				Failed => Chat.answered
+				Rendered => docs_page!(
+					slugs,
+					Doc({
+						slug,
+						markdown,
+						rendered: Chrome.rendered(rendered.html),
+					}),
+				)
+			}
+		}
+	}
+}
+
+## The docs page for the member, `open` among their `slugs`.
+docs_page! : List(Str), Docs.Open => Chat.Answer
+docs_page! = |slugs, open|
+	match load_viewer!(Unasked) {
+		Err(Failed) => Chat.answered
+		Ok(viewer) => Chat.respond(
+			200,
+			html,
+			Docs.editor({
+				src: Chrome.src_in(Host.srcs!({})),
+				viewer,
+				slugs,
+				open,
+			}).bytes(),
+		)
+	}
 
 ## **A MEMBER'S OWN STREAM** (metal-vmm QUEUE 286): their feed, their
 ## notifications or their sidebar, on the bus key `key` makes of their uid,
@@ -466,7 +661,12 @@ serve_topic! = |
 					route.topic.to_utf8(),
 				)
 			}
-		Saved => if req.method != Get and req.method != Head Chat.not_allowed(Get) else serve_saved!(route)
+		Saved =>
+			if req.method != Get and req.method != Head {
+				Chat.not_allowed(Get)
+			} else {
+				serve_saved!(route)
+			}
 		Invalid => Chat.not_found
 		Page | Raw => serve_page_or_raw!(
 			req,
@@ -1847,7 +2047,7 @@ find_channel! = |
 					}
 				# Every name here passed channel_name_from_str already
 				# (load_rosters_from! keeps no other).
-				Err(Invalid) => crash "find_channel!: a roster's name that load_rosters_from! kept is no channel name"
+				Err(Invalid) => crash "find_channel!: a kept roster's name is no channel name"
 			}
 		Err(_) => Err(NoSuchTopic)
 	}

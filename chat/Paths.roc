@@ -405,13 +405,14 @@ Paths := [].{
 	## slug (is_doc_slug) and `.md`, sorted by slug, beside its file.
 	docs : Uid, List(Entry) -> List({ slug : Str, path : ChatPath })
 	docs = |uid, entries|
-		sort_by_bytes(
-			List.keep_oks(
-				entries,
-				|e| if e.kind == Dir Err(NoSuffix) else str_suffix(e.name, ".md"),
-			),
-		)
-			|> List.keep_if(is_doc_slug)
+		sort_by_bytes(doc_slugs(entries))
+			|> List.map(|slug| { slug, path: ChatPath.("users/${uid.to_str()}/docs/${slug}.md") })
+
+	## The same docs in the folder's order (mostRecentDocSlug's walk, whose
+	## first of a tie wins).
+	docs_in_order : Uid, List(Entry) -> List({ slug : Str, path : ChatPath })
+	docs_in_order = |uid, entries|
+		doc_slugs(entries)
 			|> List.map(|slug| { slug, path: ChatPath.("users/${uid.to_str()}/docs/${slug}.md") })
 
 	## The member's doc `slug` (docs_store `docPath`), or `NotASlug` for a
@@ -484,6 +485,15 @@ str_suffix = |
 	name,
 	suffix,
 | if name.ends_with(suffix) Ok(name.drop_suffix(suffix)) else Err(NoSuffix)
+
+## The slugs of a docs folder's entries: not a folder, `.md`, a slug.
+doc_slugs : List(Paths.Entry) -> List(Str)
+doc_slugs = |entries|
+	List.keep_oks(
+		entries,
+		|e| if e.kind == Dir Err(NoSuffix) else str_suffix(e.name, ".md"),
+	)
+		|> List.keep_if(is_doc_slug)
 
 ## validDocSlug: 1 to 80 lowercase letters and digits, joined by single
 ## hyphens, none first or last; anything else no slugifyTitle made.
@@ -750,7 +760,9 @@ expect match (Paths.pair_key_from_str("3_7"), Paths.channel_name_from_str("gener
 	(
 		Ok(pair),
 		Ok(name),
-	) => (Paths.ConvKey.Dm(pair).base() == "/chat/c/3_7") and (Paths.ConvKey.Channel(name).base() == "/channel/general")
+	) =>
+		(Paths.ConvKey.Dm(pair).base() == "/chat/c/3_7")
+			and (Paths.ConvKey.Channel(name).base() == "/channel/general")
 	_ => Bool.False
 }
 

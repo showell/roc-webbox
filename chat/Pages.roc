@@ -416,7 +416,14 @@ shell = |
 }
 
 links_css : Html
-links_css = Html.trusted("<style>\n.links-page { max-width: 46rem; margin: 0 auto; line-height: 1.55; }\n.links-page h2 { margin-top: 1.6rem; }\n.links-page li { margin: 3px 0; }\n</style>")
+links_css = Html.trusted(
+	\\<style>
+	\\.links-page { max-width: 46rem; margin: 0 auto; line-height: 1.55; }
+	\\.links-page h2 { margin-top: 1.6rem; }
+	\\.links-page li { margin: 3px 0; }
+	\\</style>
+	,
+)
 
 ## images.zig's and code.zig's pages: the attention strip, the feed's
 ## mount, its JSON (`json`, script-safe) and its scripts.

@@ -245,14 +245,18 @@ end
 
 -- `served_by`'s answer for route `r` ({family, part, tail, rest}),
 -- evaluated over its tree from the node at `at`: a `match` on a field, its
--- branches' tags, `_`, the tags `Roc`/`Zig`, and `if r.rest == "<lit>"`
--- (or `!=`) choosing between two of them. Anything else stops the census:
+-- branches' tags, `_`, the tags `Roc`/`Zig`, a block holding one of them,
+-- and `if r.rest == "<lit>"` (or `!=`) choosing between two of them. Anything else stops the census:
 -- the rule grew a shape it cannot read.
 function evaluate(tree, at, r)
   local t = hd(tree, at)
   if starts_with(t, "(e-tag ") then
     local raw = between(t, "(raw \"", "\")")
     if raw == "Roc" or raw == "Zig" then return raw end
+  end
+  if starts_with(t, "(e-block") or starts_with(t, "(statements") or starts_with(t, "(s-expr") then
+    local k = kids(tree, at)
+    return evaluate(tree, k[#k], r)
   end
   if starts_with(t, "(e-if-then-else") then
     local k = kids(tree, at)

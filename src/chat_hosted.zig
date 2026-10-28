@@ -225,10 +225,12 @@ test "the router: a topic's tails, a channel, an asset before the gate, the gate
         .{ .family = .asset, .rest = "chat.js" },
         false,
     );
+    // A docs path of two segments is the Roc's 404 (metal-vmm QUEUE 289),
+    // its text whole.
     try expectRoute(
         "/docs/caf\xc3\xa9/\xf0\x9f\x91\x8d",
         false,
-        .{ .family = .docs, .rest = "/caf\xc3\xa9/\xf0\x9f\x91\x8d" },
+        .{ .family = .not_found },
         true,
     );
 
