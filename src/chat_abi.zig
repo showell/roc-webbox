@@ -55,6 +55,17 @@ pub const WordRec = extern struct { count: u64, word: RocBytes };
 /// Host.roc's `search_words!` answer: `{ status : [NotReady, Ready],
 /// unreadable : U64, words : List(...) }`: the count, the list, then the tag.
 pub const WordsRec = extern struct { unreadable: u64, words: WordList, status: route_mod.WordsStatus };
+/// One of Host.roc's `search_messages!` hits: `{ at, length, start : U64,
+/// base, date, from, id, sid, window : List(U8), found, kind }`. **THE
+/// 8-BYTE NUMBERS FIRST, BY NAME, THEN THE BYTES, BY NAME, THEN THE TAGS.**
+/// `window` is the message's bytes from `start`, through the one past the
+/// excerpt's end (its cut looks there), of a message `length` long; `at`
+/// where the word is in the message, when `found`.
+pub const HitRec = extern struct { at: u64, length: u64, start: u64, base: RocBytes, date: RocBytes, from: RocBytes, id: RocBytes, sid: RocBytes, window: RocBytes, found: route_mod.HitWord, kind: route_mod.HitConv };
+/// Host.roc's `search_messages!` answer: `{ hits : List(...), matched,
+/// unreadable : U64, status : [NotReady, Ready] }`: the numbers, the list,
+/// the tag.
+pub const MessagesRec = extern struct { matched: u64, unreadable: u64, hits: HitList, status: route_mod.WordsStatus };
 /// One of Host.roc's `list_accounts!` accounts: `{ id : List(U8), kind : [Agent, Guest, Member, Unreadable], name : List(U8), name_read : [Found, Unreadable] }`.
 pub const AccountRec = extern struct { id: RocBytes, name: RocBytes, kind: route_mod.AccountKind, name_read: route_mod.NameRead };
 /// Host.roc's `list_accounts!` answer: `{ accounts : List(...), status : [Failed, Found] }`.
@@ -104,6 +115,12 @@ pub const WordList = RecList(WordRec, Word, struct {
     }
 }.rec);
 
+pub const HitList = RecList(HitRec, Hit, struct {
+    fn rec(it: Hit) HitRec {
+        return .{ .at = it.at, .length = it.length, .start = it.start, .base = .from(it.base), .date = .from(it.date), .from = .from(it.from), .id = .from(it.id), .sid = .from(it.sid), .window = .from(it.window), .found = it.found, .kind = it.kind };
+    }
+}.rec);
+
 pub const SrcList = RecList(SrcRec, Src, struct {
     fn rec(it: Src) SrcRec {
         return .{ .name = .from(it.name), .src = .from(it.src) };
@@ -126,6 +143,9 @@ comptime {
     // search_words!'s (metal-vmm QUEUE 281): the 8-byte numbers at 0, the
     // bytes and the list after, the tag last.
     std.debug.assert(@offsetOf(WordRec, "count") == 0 and @offsetOf(WordRec, "word") == 8 and @sizeOf(WordRec) == std.mem.alignForward(usize, 8 + 3 * w, 8));
+    // search_messages!'s (metal-vmm QUEUE 282).
+    std.debug.assert(@offsetOf(HitRec, "at") == 0 and @offsetOf(HitRec, "length") == 8 and @offsetOf(HitRec, "start") == 16 and @offsetOf(HitRec, "base") == 24 and @offsetOf(HitRec, "window") == 24 + 15 * w and @offsetOf(HitRec, "found") == 24 + 18 * w and @offsetOf(HitRec, "kind") == 25 + 18 * w and @sizeOf(HitRec) == std.mem.alignForward(usize, 26 + 18 * w, 8));
+    std.debug.assert(@offsetOf(MessagesRec, "matched") == 0 and @offsetOf(MessagesRec, "unreadable") == 8 and @offsetOf(MessagesRec, "hits") == 16 and @offsetOf(MessagesRec, "status") == 16 + 3 * w and @sizeOf(MessagesRec) == std.mem.alignForward(usize, 17 + 3 * w, 8));
     std.debug.assert(@offsetOf(WordsRec, "unreadable") == 0 and @offsetOf(WordsRec, "words") == 8 and @offsetOf(WordsRec, "status") == 8 + 3 * w and @sizeOf(WordsRec) == std.mem.alignForward(usize, 8 + 3 * w + 1, 8));
     std.debug.assert(@sizeOf(StatRec) == 24 and @offsetOf(StatRec, "size") == 8 and @offsetOf(StatRec, "status") == 16);
     std.debug.assert(@sizeOf(route_mod.Presence) == 1);
@@ -149,6 +169,11 @@ pub const Entry = struct { name: []const u8, kind: route_mod.EntryKind };
 pub const Listing = union(route_mod.ReadStatus) { failed, found: []const Entry, missing };
 /// One word search_words! answers: the word, and how many messages hold it.
 pub const Word = struct { word: []const u8, count: u64 };
+/// One message search_messages! answers: its conversation's URL base and
+/// kind, its topic, id, sender and date, and its excerpt's window (HitRec).
+pub const Hit = struct { base: []const u8, kind: route_mod.HitConv, sid: []const u8, id: []const u8, from: []const u8, date: []const u8, window: []const u8, start: u64, length: u64, at: u64, found: route_mod.HitWord };
+/// search_messages!'s answer, where there is an index.
+pub const Messages = struct { hits: []const Hit, matched: u64, unreadable: u64 };
 /// search_words!'s answer, where there is an index.
 pub const Words = struct { words: []const Word, unreadable: u64 };
 /// A file's size in bytes and its last change in whole seconds since the

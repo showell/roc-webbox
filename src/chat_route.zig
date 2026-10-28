@@ -178,6 +178,13 @@ pub const Admission = enum(u8) { admitted, refused };
 /// not ready (it could not be built).
 pub const WordsStatus = enum(u8) { not_ready, ready };
 
+/// Host.roc's `search_messages!` hits: a DM's or a channel's.
+pub const HitConv = enum(u8) { channel, dm };
+
+/// Host.roc's `search_messages!` hits: whether the index found the word in
+/// the message where the excerpt is cut (`search_index.wordAt`), or not.
+pub const HitWord = enum(u8) { found, missing };
+
 /// Host.roc's `check_online!` answer: each id seen within the presence window of
 /// the request's time, or not (never seen is `offline`).
 pub const Presence = enum(u8) { offline, online };
@@ -213,7 +220,7 @@ pub const AsideEnd = enum(u8) { done, failed };
 
 comptime {
     @setEvalBranchQuota(20_000);
-    for (.{ Family, Part, Tail, Method, Area, Counting, Sniff, Kind, Form, BodyStatus, CountStatus, Hostility, ReadStatus, EntryKind, AccountKind, NameRead, AccountsStatus, FailReason, RenderStatus, AppendStatus, Surface, Presence, Membership, Admission, WordsStatus, Done, Serving, Dropped, Aside, AsideEnd }) |E| assertRocOrder(E);
+    for (.{ Family, Part, Tail, Method, Area, Counting, Sniff, Kind, Form, BodyStatus, CountStatus, Hostility, ReadStatus, EntryKind, AccountKind, NameRead, AccountsStatus, FailReason, RenderStatus, AppendStatus, Surface, Presence, Membership, Admission, WordsStatus, HitConv, HitWord, Done, Serving, Dropped, Aside, AsideEnd }) |E| assertRocOrder(E);
 }
 
 /// That `E`'s values are Roc's for the same tags: numbered from 0 in the
