@@ -310,50 +310,34 @@ local members = {}
 for d in zig_decls(src .. "chat_router.zig", {container = "Call"}) do
   if d.kind ~= "field" and d.kind ~= "test" then members[d.name] = sized(router, d.first, d.last) end
 end
-local wiring = {}
-local h = members["host"]
-local k = h.first
-while k <= h.last do
-  local m = re_find(router.text[k], "^\\s+\\.([a-z_]+) = [a-zA-Z_]+,")
-  if m ~= nil and m.group ~= "ctx" then
-    local fn = trim(split(split(router.text[k], "=")[2], ",")[1])
-    wiring[m.group] = fn
-  end
-  k = k + 1
-end
 local hosted = {}
 for line in lines(read("chat/platform/Host.roc")) do
   local m = re_find(line, "^\\t([a-z_]+)! :")
   if m ~= nil then push(hosted, m.group) end
 end
--- A hosted effect's Call member is the host field its export asks for
--- (`roc_chat_read_stat` asks `current("stat")`): a Roc name and the
--- host's field may differ (metal-vmm QUEUE 297's renames).
-local field_of = {}
-local export_now = nil
-for line in lines(read("src/chat_abi.zig")) do
-  local e = re_find(line, "^export fn roc_chat_([a-z_]+)\\(")
-  if e ~= nil then export_now = e.group end
-  local c = re_find(line, "current\\(\"([a-z_]+)\"\\)")
-  if c ~= nil and export_now ~= nil then
-    field_of[export_now] = c.group
-    export_now = nil
-  end
-end
+-- **A HOSTED FUNCTION'S CALL MEMBER IS ITS NAME** (src/chat_abi.zig's
+-- Table: the seam calls `Call.<name>`). One Call has not is answered by the
+-- seam alone (name_fault!).
 local classes = {}
 for name in hosted do
-  local fn = get(wiring, get(field_of, name, name))
-  if fn == nil then
-    print("  " .. name .. "!  (no Call member wired)")
+  local fn = name
+  if not has_key(members, fn) then
+    print("  " .. name .. "!  (the seam's alone: no Call member)")
   else
     local mem = members[fn]
     local one = mem
     local reached_roots = {}
     local callees = {}
-    -- One level: Call's own members it names, and chat declarations.
+    -- One level: Call's own members it names, bare or through `c.` (a
+    -- field's or another value's `.count`, `.remove` is no member's), and
+    -- chat declarations.
     local seen = {}
-    for t in router.tokens do
-      if t.line >= mem.first and t.line <= mem.last and t.tag == "identifier" and t.text ~= fn and has_key(members, t.text) and not has_key(seen, t.text) and t.text ~= "of" then
+    local toks = router.tokens
+    local j = 0
+    for t in toks do
+      j = j + 1
+      local named = j < 2 or toks[j - 1].tag ~= "period" or (j > 2 and toks[j - 2].tag == "identifier" and toks[j - 2].text == "c")
+      if named and t.line >= mem.first and t.line <= mem.last and t.tag == "identifier" and t.text ~= fn and has_key(members, t.text) and not has_key(seen, t.text) then
         seen[t.text] = true
         one = plus(one, members[t.text])
         push(callees, t.text)
