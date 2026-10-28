@@ -158,31 +158,72 @@ function holds_bool(tree, at)
   return false
 end
 
--- Each annotated function's argument types: {at, args} where args are the
--- lines of its `ty-fn`'s children but the last (the return type).
+-- **THE NAMES THE LANGUAGE FIXES**: the methods Roc's syntax and builtins
+-- call by name (docs/langref/static-dispatch.md's table: `==` calls
+-- `is_eq`, `<` `is_lt`, `+` `plus`, `!` `not`; operators.md's `[...]`
+-- calls `subscript`), and the encoding protocol's `encode` and `decode`,
+-- which a format calls by name. Their signatures are the language's, not
+-- the author's: no hunt of a signature (same_typed_args, bools'
+-- arguments, bool_returns) judges them.
+const fixed_names = " to_inspect is_eq to_hash plus minus times div_by div_trunc_by rem_by is_lt is_lte is_gt is_gte range_exclusive_to range_inclusive_to range_exclusive_from range_inclusive_from range_iter range_len_if_known negate not from_numeral from_quote from_interpolation iter next parser_for encoder_for map map! subscript encode decode "
+
+function is_fixed(name)
+  return contains(fixed_names, " " .. name .. " ")
+end
+
+-- Each annotated function's argument types: {at, name, args} where args
+-- are the lines of its `ty-fn`'s children but the last (the return type).
+-- A name the language fixes is left out.
 function annotated_functions(tree)
   local out = {}
   local i = 1
   while i < #tree.text do
     if starts_with(head(tree, i), "(s-type-anno ") and starts_with(head(tree, i + 1), "(ty-fn ") then
-      local kids = children(tree, i + 1)
-      push(out, {at = i, args = take(kids, #kids - 1)})
+      local name = between(head(tree, i), "(name \"", "\")") or ""
+      if not is_fixed(name) then
+        local kids = children(tree, i + 1)
+        push(out, {at = i, name = name, args = take(kids, #kids - 1)})
+      end
     end
     i = i + 1
   end
   return out
 end
 
+-- The `if` that the `if` at `at`'s `else` is, or nil.
+function else_if(tree, at)
+  local kids = children(tree, at)
+  local last = kids[#kids]
+  if last == nil then return nil end
+  if starts_with(head(tree, last), "(e-if-then-else ") then return last end
+  if starts_with(head(tree, last), "(e-block ") then
+    local block = children(tree, last)
+    if #block == 1 and starts_with(head(tree, block[1]), "(statements") then
+      local inside = children(tree, block[1])
+      if #inside == 1 and starts_with(head(tree, inside[1]), "(e-if-then-else ") then return inside[1] end
+    end
+  end
+  return nil
+end
+
 -- ── the hunts ────────────────────────────────────────────────────────────
 
 -- **NEIGHBOURING ARGUMENTS OF ONE TYPE**: swapped, they still type-check.
 -- A record names them; a nominal type tells them apart. Type variables
--- (`a, a`, a comparator's two sides) are not counted.
+-- (`a, a`, a comparator's two sides) are not counted, nor is a name the
+-- language fixes (`is_eq`, `is_lt`, `minus`: see fixed_names). **NOR IS AN
+-- OPERATION NO ORDER CHANGES** (order_free): `union(a, b)` is
+-- `union(b, a)`, so a swap there is no bug, and a record would only make
+-- one of two equal sides look first.
+const order_free = " union intersection max min plus times bitwise_and bitwise_or bitwise_xor abs_diff "
+
 function same_typed_args(tree)
   local found = {}
   for f in annotated_functions(tree) do
     local types = {}
-    for a in f.args do push(types, render(tree, a)) end
+    if not contains(order_free, " " .. f.name .. " ") then
+      for a in f.args do push(types, render(tree, a)) end
+    end
     local a = 1
     while a < #types do
       local b = a
@@ -199,35 +240,158 @@ end
 -- **A NUMBER THAT MEANS SOMETHING IT DOES NOT SAY**: a number literal, in
 -- an expression or a pattern: an integer, a typed one (`200.U8`), a
 -- fraction (`0.75`, `0.5.F32`). One between 32 and 126 is most likely a
--- byte, which a character literal ('_') says, and is marked `'?`. A line a
--- definition: where its first one is, then each.
+-- byte, which a character literal ('_') says, and is marked `'?`, unless
+-- it is a shift's or a mask's operand (`shift_left_by`, `bitwise_and`),
+-- which is a bit count or a mask. A line a definition: where its first one
+-- is, then each.
 --
--- **0 AND 1 ARE NEVER FLAGGED**, typed or not: they are the start, the
--- step and the empty (`index + 1`, `len == 0`) on nearly every line that
+-- **A DEFINITION THAT IS ONE LITERAL IS NO FINDING** (`min_shifts = 32`,
+-- `limit = 200.U8`): it names the number, which is the fix, not the fault.
+--
+-- **0 AND 1 ARE NOT FLAGGED**, typed or not: they are the start, the step
+-- and the empty (`index + 1`, `len == 0`) on nearly every line that
 -- counts, and a hunt that flagged them would bury the numbers that mean
--- something. The cost is a known miss: codes that are only 0 and 1 (a
--- `match` over a status, `0 => "ok"`, `1 => "bad"`) are a closed set a tag
--- would name, and go unflagged (plants/magic_numbers.roc's
--- `quiet_status_codes` holds the miss).
+-- something. **BUT ONE EXPRESSION COMPARED TO TWO DIFFERENT LITERALS** in
+-- one `match` (`0 => "ok"`, `1 => "bad"`) or one `if` chain (`x == 0` ...
+-- `else if x == 1`) is a closed set of codes a tag would name, and those
+-- literals are flagged, 0 and 1 too, marked `(compared in turn)`.
 const number_nodes = {"(e-int ", "(p-int ", "(e-typed-int ", "(p-typed-int ", "(e-frac ", "(p-frac ", "(e-typed-frac ", "(p-typed-frac "}
 const zero_and_one = " 0 1 0.0 1.0 "
 
+function is_number(tree, at)
+  for kind in number_nodes do if starts_with(head(tree, at), kind) then return true end end
+  return false
+end
+
+-- The line of the node that holds the node at `at`.
+function parent(tree, at)
+  local j = at - 1
+  while j > 1 and tree.depth[j] >= tree.depth[at] do j = j - 1 end
+  return j
+end
+
+-- The node at `at` and all under it, its places left out: two copies of
+-- one expression read alike.
+function shape(tree, at)
+  local parts = {}
+  local stop = past(tree, at)
+  local i = at
+  while i < stop do
+    push(parts, re_replace(head(tree, i), "@[0-9.-]+", ""))
+    i = i + 1
+  end
+  return join(parts, " ")
+end
+
+-- Whether the number at `at` is a definition's whole value (`x = 32`).
+function is_constant(tree, at)
+  return at > 2 and starts_with(head(tree, at - 1), "(p-ident ") and tree.depth[at - 1] == tree.depth[at] and starts_with(head(tree, at - 2), "(s-decl ") and tree.depth[at - 2] == tree.depth[at] - 1
+end
+
+-- Whether the number at `at` is a shift's or mask's operand: an argument
+-- of a call (`U64.shift_right_by(x, 56)`) or a method call
+-- (`x.bitwise_and(255)`) whose name starts `shift_`, `shl_`, `shr_`
+-- (`shr_zf_wrap`) or `bitwise_`.
+function is_bit_operand(tree, at)
+  local p = parent(tree, at)
+  local callee = ""
+  if starts_with(head(tree, p), "(e-apply ") then
+    local named = between(head(tree, p + 1), "(raw \"", "\")") or ""
+    local parts = split(named, ".")
+    callee = parts[#parts]
+  end
+  if head(tree, p) == "(args" then callee = between(head(tree, parent(tree, p)), "(method \".", "\")") or "" end
+  return starts_with(callee, "shift_") or starts_with(callee, "shl_") or starts_with(callee, "shr_") or starts_with(callee, "bitwise_")
+end
+
+-- The numbers one expression is compared to in turn, `{[line] = true}`:
+-- a `match`'s number patterns, or the `x == <number>` conditions of one
+-- `if` chain, grouped by the expression; each group of two or more
+-- different literals.
+function compared_in_turn(tree)
+  local marked = {}
+  local i = 1
+  while i <= #tree.text do
+    local t = head(tree, i)
+    -- Each group: the expression's shape, then its literals' lines.
+    local groups = {}
+    local keys = {}
+    if starts_with(t, "(e-match") then
+      push(keys, "match")
+      groups["match"] = {}
+      for part in children(tree, i) do
+        if head(tree, part) == "(branches" then
+          for b in children(tree, part) do
+            local pattern = children(tree, b)[1]
+            if pattern ~= nil and is_number(tree, pattern) then push(groups["match"], pattern) end
+          end
+        end
+      end
+    end
+    if starts_with(t, "(e-if-then-else ") then
+      local at = i
+      while at ~= nil do
+        local cond = children(tree, at)[1]
+        if starts_with(head(tree, cond), "(e-binop ") and contains(head(tree, cond), "(op \"==\")") then
+          local sides = children(tree, cond)
+          local literal = nil
+          local other = nil
+          if is_number(tree, sides[2]) and not is_number(tree, sides[1]) then
+            literal = sides[2]
+            other = sides[1]
+          end
+          if is_number(tree, sides[1]) and not is_number(tree, sides[2]) then
+            literal = sides[1]
+            other = sides[2]
+          end
+          if literal ~= nil then
+            local key = shape(tree, other)
+            if get(groups, key) == nil then
+              push(keys, key)
+              groups[key] = {}
+            end
+            push(groups[key], literal)
+          end
+        end
+        at = else_if(tree, at)
+      end
+    end
+    for key in keys do
+      local raws = {}
+      local different = 0
+      for at in groups[key] do
+        local raw = between(head(tree, at), "(raw \"", "\")") or ""
+        if get(raws, raw) == nil then
+          raws[raw] = true
+          different = different + 1
+        end
+      end
+      if different >= 2 then
+        for at in groups[key] do marked[tostring(at)] = true end
+      end
+    end
+    i = i + 1
+  end
+  return marked
+end
+
 function magic_numbers(tree)
+  local in_turn = compared_in_turn(tree)
   local order = {}
   local first = {}
   local numbers = {}
   local i = 1
   while i <= #tree.text do
-    local t = head(tree, i)
-    local number = false
-    for kind in number_nodes do if starts_with(t, kind) then number = true end end
-    if number then
+    if is_number(tree, i) and not is_constant(tree, i) then
+      local t = head(tree, i)
       local raw = between(t, "(raw \"", "\")")
-      if not contains(zero_and_one, " " .. raw .. " ") then
+      local turn = get(in_turn, tostring(i)) ~= nil
+      if turn or not contains(zero_and_one, " " .. raw .. " ") then
         local n = parse_int(raw)
-        if n ~= nil and n >= 32 and n <= 126 then raw = raw .. "'?" end
+        if n ~= nil and n >= 32 and n <= 126 and not is_bit_operand(tree, i) then raw = raw .. "'?" end
         local typed = between(t, "(type \"", "\")")
         if typed ~= nil and typed ~= "" then raw = raw .. "." .. typed end
+        if turn and contains(zero_and_one, " " .. between(t, "(raw \"", "\")") .. " ") then raw = raw .. " (compared in turn)" end
         local key = tree.file[i] .. " " .. tree.within[i]
         if get(first, key) == nil then
           push(order, key)
@@ -246,10 +410,12 @@ end
 
 -- **A BOOL WHERE A TAG WOULD SAY WHICH**: an argument whose type holds a
 -- `Bool` (`Bool`, `(Bool, U64)`, `List(Bool)`; not a callback's answer), a
--- record field whose type does, or a call handed a bare `True` or `False`,
--- qualified or not (`decode(bytes, True)`, `JsonOut.bool(Bool.False)`),
--- which finds the unannotated helper too. A return of `Bool` is
--- `bool_returns`' to judge.
+-- record field whose type does, a tag's payload in a type declaration
+-- (`Mark := [Seen(Bool), Unseen]`), or a call handed a bare `True` or
+-- `False`, qualified or not (`decode(bytes, True)`,
+-- `JsonOut.bool(Bool.False)`), which finds the unannotated helper too. A
+-- return of `Bool` is `bool_returns`' to judge; a name the language fixes
+-- (`is_eq : Bool, Bool -> Bool`) is not judged.
 function bools(tree)
   local found = {}
   for f in annotated_functions(tree) do
@@ -266,6 +432,23 @@ function bools(tree)
       local kids = children(tree, i)
       if #kids > 0 and holds_bool(tree, kids[1]) then
         push(found, where(tree, i) .. ": field " .. between(t, "(name \"", "\")") .. " is a Bool")
+      end
+    end
+    -- A type declaration's own tags: `Seen(Bool)`.
+    if starts_with(t, "(s-type-decl ") then
+      for u in children(tree, i) do
+        if starts_with(head(tree, u), "(ty-tag-union ") then
+          for tags in children(tree, u) do
+            for tag in children(tree, tags) do
+              if starts_with(head(tree, tag), "(ty-apply ") then
+                local parts = children(tree, tag)
+                for payload in drop(parts, 1) do
+                  if holds_bool(tree, payload) then push(found, where(tree, tag) .. ": tag " .. render(tree, parts[1]) .. "'s payload is a Bool") end
+                end
+              end
+            end
+          end
+        end
       end
     end
     -- A call's arguments: an `e-apply`'s children after the callee (a tag
@@ -334,22 +517,6 @@ end
 -- one block, each an `if` with no `else` whose block ends in `return`.
 -- Often a closed set of cases told apart by comparing, where a tag and a
 -- `match` would be exhaustive.
-
--- The `if` that the `if` at `at`'s `else` is, or nil.
-function else_if(tree, at)
-  local kids = children(tree, at)
-  local last = kids[#kids]
-  if last == nil then return nil end
-  if starts_with(head(tree, last), "(e-if-then-else ") then return last end
-  if starts_with(head(tree, last), "(e-block ") then
-    local block = children(tree, last)
-    if #block == 1 and starts_with(head(tree, block[1]), "(statements") then
-      local inside = children(tree, block[1])
-      if #inside == 1 and starts_with(head(tree, inside[1]), "(e-if-then-else ") then return inside[1] end
-    end
-  end
-  return nil
-end
 
 -- Whether the node at `at` is a guard: an `if` with no `else` whose block's
 -- last statement is a `return`.
@@ -508,7 +675,9 @@ end
 -- or a failure that wants a `Try` (`appended!` answering false when the
 -- store failed). The result counts when its type holds a `Bool` anywhere
 -- but in a function type: `Try(Bool, _)` and `(Bool, U64)` do; a `where`
--- clause is no part of the result.
+-- clause is no part of the result. A name the language fixes (`subscript`,
+-- `not`, `decode`: see fixed_names) answers a Bool by the language's
+-- contract, and is not judged.
 function bool_returns(tree)
   local found = {}
   for f in annotated_functions(tree) do
@@ -569,12 +738,29 @@ if arg("self_test", "") ~= "" then
     local fires = 0
     local counted = {}
     local before = #wrong
+    local n = 0
     for line in lines(read(plants)) do
+      n = n + 1
       local named = trim(split(trim(line), " ")[1])
       if starts_with(named, "fires_") and get(counted, named) == nil then
         counted[named] = true
         fires = fires + 1
         if not contains(text, " " .. named .. ":") then push(wrong, name .. ": a plant did not fire: " .. named) end
+      end
+      -- A plant no name can mark (a type, a name the language fixes) is
+      -- its line, ending `# fires` or `# quiet`; `# finding: <text>` is
+      -- how a finding must end (a number's mark).
+      local at = ".roc:" .. tostring(n) .. " "
+      if ends_with(line, "# fires") then
+        fires = fires + 1
+        if not contains(text, at) then push(wrong, name .. ": a plant did not fire: line " .. tostring(n) .. ", " .. trim(line)) end
+      end
+      if ends_with(line, "# quiet") and contains(text, at) then push(wrong, name .. ": a quiet plant fired: line " .. tostring(n) .. ", " .. trim(line)) end
+      if starts_with(line, "# finding: ") then
+        local want = sub(line, #"# finding: " + 1)
+        local held = false
+        for f in found do if ends_with(f, want) then held = true end end
+        if not held then push(wrong, name .. ": no finding ends `" .. want .. "`") end
       end
     end
     if fires == 0 then push(wrong, name .. ": its plants hold no fires_ definition") end

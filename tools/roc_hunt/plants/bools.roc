@@ -26,3 +26,16 @@ quiet_predicate : (U8 -> Bool), U8 -> U8
 
 # A tag wrapping a Bool is no call to a function.
 quiet_ok_true = |_| Ok(True)
+
+# A Bool in a tag's payload, in a type declaration: the line is the plant,
+# since a type's name cannot carry `fires_`.
+Mark := [Seen(Bool), Unseen] # fires
+
+# A tag's payload of no Bool.
+Count := [Seen(U64), Unseen] # quiet
+
+# The language fixes these signatures: Bool's own methods take a Bool.
+Flag := [On, Off].{
+	not : Flag, Bool -> Flag # quiet
+	is_eq : Bool, Bool -> Bool # quiet
+}

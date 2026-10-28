@@ -29,3 +29,12 @@ quiet_where : List(a) -> Str where [a.is_eq : a, a -> Bool]
 
 # A predicate returned is a function, not a Bool.
 quiet_predicate_maker : U8 -> (U8 -> Bool)
+
+# Names the language or a format calls by name answer a Bool by its
+# contract: each a line marked `# quiet`, since the name cannot carry
+# `quiet_`.
+Set := [].{
+	subscript : Set, U8 -> Bool # quiet
+	not : Set -> Bool # quiet
+	decode : src, fmt -> (Try(Bool, err), src) # quiet
+}
