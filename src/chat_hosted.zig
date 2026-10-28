@@ -208,12 +208,6 @@ test "the router: a topic's tails, a channel, an asset before the gate, the gate
         true,
     );
     try expectRoute(
-        "/docs/new",
-        false,
-        .{ .family = .docs, .rest = "/new" },
-        true,
-    );
-    try expectRoute(
         "/docsX",
         false,
         .{ .family = .not_found },
@@ -351,6 +345,7 @@ const Scripted = struct {
             .read_header = header,
             .check_hostile = hostile,
             .render = render,
+            .render_preview = renderPreview,
             .append_message = appendMessage,
             .index_message = indexMessage,
             .write_cache = writeCache,
@@ -719,6 +714,20 @@ const Scripted = struct {
             .{},
         );
         return &abi.test_srcs;
+    }
+    fn renderPreview(ctx: *anyopaque, markdown: []const u8) abi.Rendered {
+        say(
+            ctx,
+            "preview {s}",
+            .{markdown},
+        );
+        const s = me(ctx);
+        if (!s.render_ok) return .failed;
+        return .{ .rendered = std.fmt.allocPrint(
+            s.alloc,
+            "<p>{s}</p>",
+            .{markdown},
+        ) catch @panic("oom") };
     }
     fn render(ctx: *anyopaque, markdown: []const u8) abi.Rendered {
         say(

@@ -590,6 +590,8 @@ pub const Host = struct {
     /// Host.render!: a message's markdown as its frame's HTML, or `.failed`
     /// (the host has failed the request).
     render: *const fn (ctx: *anyopaque, markdown: []const u8) Rendered = noRender,
+    /// Host.render_preview!: as `render`, and hostile markdown counted.
+    render_preview: *const fn (ctx: *anyopaque, markdown: []const u8) Rendered = noRenderPreview,
     /// Host.append_message!: `block` appended to topic `sid`'s transcript in
     /// `conv`; the transcript's size after it, or `.failed` (the host has
     /// failed the request; nothing stored). Metal-vmm QUEUE 287.
@@ -754,6 +756,9 @@ fn noNow(_: *anyopaque) i64 {
 }
 fn noRender(_: *anyopaque, _: []const u8) Rendered {
     @panic("render asked of a host that does not answer it");
+}
+fn noRenderPreview(_: *anyopaque, _: []const u8) Rendered {
+    @panic("render_preview asked of a host that does not answer it");
 }
 fn noUnspent(_: *anyopaque) void {
     @panic("presence_unspent asked of a host that does not answer it");
@@ -1262,7 +1267,16 @@ export fn roc_chat_now() callconv(.c) i64 {
 
 export fn roc_chat_render(markdown: RocBytes) callconv(.c) RenderRec {
     const h = current("render");
-    return switch (h.render(h.ctx, markdown.slice())) {
+    return renderRec(h.render(h.ctx, markdown.slice()));
+}
+
+export fn roc_chat_render_preview(markdown: RocBytes) callconv(.c) RenderRec {
+    const h = current("render_preview");
+    return renderRec(h.render_preview(h.ctx, markdown.slice()));
+}
+
+fn renderRec(r: Rendered) RenderRec {
+    return switch (r) {
         .rendered => |html| .{ .html = .from(html), .status = .rendered },
         .failed => .{ .html = .from(""), .status = .failed },
     };

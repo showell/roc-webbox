@@ -18,6 +18,12 @@ Limits := [].{
 	accept : Str
 	accept = "image/png,image/jpeg,image/gif,image/webp,video/mp4,video/webm,video/quicktime"
 
+	## The largest a reading list grows, 1 MiB (reading_list
+	## `max_reading_list_bytes`, metal-vmm QUEUE 290): a save past it is
+	## refused, so a client saving over and over cannot grow it without end.
+	reading_list_bytes : U64
+	reading_list_bytes = 1024 * 1024
+
 	## The shortest word search looks up.
 	search_min : U64
 	search_min = 2

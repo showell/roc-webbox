@@ -292,6 +292,11 @@ Host := [].{
 	## could not be rendered (the request has failed): never an empty page.
 	render! : List(U8) => { html : List(U8), status : [Failed, Rendered] }
 
+	## **A DOC'S LIVE PREVIEW** (metal-vmm QUEUE 290): `render!`'s, and
+	## markdown too hostile to render is counted too (webbox's edge counter,
+	## `malformed_markdown`), shown as the processor's placeholder.
+	render_preview! : List(U8) => { html : List(U8), status : [Failed, Rendered] }
+
 	## **A MESSAGE'S BLOCK APPENDED** (metal-vmm QUEUE 287): `block`
 	## (Transcript.stored_form) appended to topic `sid`'s transcript in `conv`,
 	## and the transcript's size after it. `Failed` when the append failed

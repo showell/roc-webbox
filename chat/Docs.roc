@@ -2,10 +2,12 @@
 ## the three-pane editor (the member's list, the open doc's textarea, its
 ## preview) and the list's JSON, each from what the host read. The chrome
 ## is Chrome.roc's.
+import Bytes
 import Chrome
 import Html
 import JsonOut
 import Recent
+import ZigText
 
 Docs := [].{
 
@@ -103,6 +105,72 @@ Docs := [].{
 		)
 	}
 
+	## **A TITLE'S SLUG** (docs_store `slugifyTitle`): the title trimmed,
+	## ASCII letters lowered, every run of anything else between them one
+	## hyphen, none at either end; "untitled" for a title of no letter or
+	## digit; cut to 80, then its end trimmed again.
+	slug_of_title : Str -> Str
+	slug_of_title = |title| {
+		kept = List.fold(
+			ZigText.trim_str(title).to_utf8(),
+			{ out: [], hyphen: Bool.False },
+			|acc, raw| {
+				c = if raw >= 'A' and raw <= 'Z' raw + 32 else raw
+				if (c >= 'a' and c <= 'z') or (c >= '0' and c <= '9') {
+					{ out: List.append(acc.out, c), hyphen: Bool.False }
+				} else if acc.hyphen or acc.out.is_empty() {
+					acc
+				} else {
+					{ out: List.append(acc.out, '-'), hyphen: Bool.True }
+				}
+			},
+		)
+		slug = trim_hyphens(kept.out)
+		short = if List.len(slug) > 80 trim_hyphens(List.take_first(slug, 80)) else slug
+		match Str.from_utf8(short) {
+			Ok("") => "untitled"
+			Ok(s) => s
+			Err(_) => crash "Docs.slug_of_title: ASCII bytes made no text"
+		}
+	}
+
+	## **A MESSAGE SAVED FOR LATER** (reading_list `composeEntry`): the note
+	## as a heading ("read later" when it is blank), who and when on one
+	## line each, the way back to it, the message in a fence longer than any
+	## in it, and a rule.
+	reading_entry : {
+		note : Str,
+		from : Str,
+		at : Str,
+		url : Str,
+		body : Str,
+	} -> Str
+	reading_entry = |e| {
+		trimmed = ZigText.trim_str(e.note)
+		note = if trimmed == "" "read later" else one_line(trimmed)
+		fence = quote_fence(e.body)
+		Str.join_with(
+			[
+				"### ${note}\n\n",
+				"${one_line(e.from)} · ${one_line(e.at)} · [↩ open in chat](${e.url})\n\n",
+				"${fence} quote\n${e.body}\n${fence}\n\n---\n\n",
+			],
+			"",
+		)
+	}
+
+	## publishDocRecent's frame: the member's own recent feed told of a doc
+	## made or saved at `at`.
+	recent_frame : Str, Str -> List(U8)
+	recent_frame = |at, slug|
+		JsonOut.object([
+			("kind", JsonOut.string("doc")),
+			("at", JsonOut.string(at)),
+			("who", JsonOut.string("You")),
+			("slug", JsonOut.string(slug)),
+			("title", JsonOut.string(Recent.doc_title(slug))),
+		]).bytes()
+
 	## docsList: `{"me": uid, "docs": [{"slug", "title"}, ...]}`.
 	list_json : Str, List(Str) -> List(U8)
 	list_json = |me, slugs|
@@ -163,6 +231,45 @@ doc_list = |slugs, selected|
 		},
 		Html.trusted("</aside>"),
 	])
+
+## How many `~` start `line`.
+leading_tildes : List(U8) -> U64
+leading_tildes = |line|
+	match line {
+		['~', .. as rest] => 1 + leading_tildes(rest)
+		_ => 0
+	}
+
+## Hyphens off the end (a slug never ends in one).
+trim_hyphens : List(U8) -> List(U8)
+trim_hyphens = |bytes|
+	match List.last(bytes) {
+		Ok('-') => trim_hyphens(List.drop_last(bytes, 1))
+		_ => bytes
+	}
+
+## oneLine: every line break a space, so a field cannot break the block.
+one_line : Str -> Str
+one_line = |s|
+	match Str.from_utf8(List.map(s.to_utf8(), |c| if c == '\n' or c == '\r' ' ' else c)) {
+		Ok(t) => t
+		Err(_) => crash "Docs.one_line: a space for an ASCII byte split a codepoint"
+	}
+
+## quoteFence: one `~` more than the longest run of three or more that
+## starts a line of `body`, and never fewer than three.
+quote_fence : Str -> Str
+quote_fence = |body| {
+	longest = List.fold(
+		Bytes.split_byte(body.to_utf8(), '\n'),
+		0,
+		|most, line| {
+			run = leading_tildes(line)
+			if run >= 3 and run > most run else most
+		},
+	)
+	Str.repeat("~", (if longest > 2 longest else 2) + 1)
+}
 
 ## The docs page's own style (docs.zig `docs_css`).
 docs_css : Html
@@ -227,3 +334,52 @@ docs_css = Html.trusted(
 	\\</style>
 	,
 )
+
+# reading_list's composeEntry tests, here since its Zig is gone (metal-vmm
+# QUEUE 290): the block whole, a blank note's default, a note's line breaks
+# flattened, and a fence one longer than the body's.
+expect Docs.reading_entry({
+	note: "read later",
+	from: "apoorva",
+	at: "Jun 16",
+	url: "/chat/c/1_2/2026-05-28#msg-2026-05-28_5",
+	body: "hello",
+})
+	== Str.join_with(
+		[
+			"### read later\n\n",
+			"apoorva · Jun 16 · [↩ open in chat](/chat/c/1_2/2026-05-28#msg-2026-05-28_5)\n\n",
+			"~~~ quote\nhello\n~~~\n\n---\n\n",
+		],
+		"",
+	)
+expect Docs.reading_entry({
+	note: "   ",
+	from: "Steve",
+	at: "Jun 16",
+	url: "u",
+	body: "x",
+}).starts_with("### read later\n")
+expect Docs.reading_entry({
+	note: "line1\nline2",
+	from: "Steve",
+	at: "Jun 16",
+	url: "u",
+	body: "x",
+}).starts_with("### line1 line2\n")
+expect {
+	got = Docs.reading_entry({
+		note: "n",
+		from: "f",
+		at: "w",
+		url: "u",
+		body: "before\n~~~\ncode\n~~~\nafter",
+	})
+	got.contains("~~~~ quote\n") and got.contains("\n~~~~\n\n---\n\n")
+}
+
+# slugifyTitle's: letters lowered, the rest one hyphen, none at the ends,
+# "untitled" for none, cut to 80 and trimmed again.
+expect Docs.slug_of_title("  Caf\u(e9) Menu: 2026! ") == "caf-menu-2026"
+expect Docs.slug_of_title("!!!") == "untitled"
+expect Docs.slug_of_title("${Str.repeat("a", 79)} b") == Str.repeat("a", 79)
