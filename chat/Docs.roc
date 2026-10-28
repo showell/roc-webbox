@@ -38,7 +38,7 @@ Docs := [].{
 	## renderDocsPage: the member's docs (`slugs`, sorted), `open` among
 	## them, under the chrome `src` and `viewer` make.
 	editor : {
-		src : List(U8) -> Html,
+		src : List(U8) -> Str,
 		viewer : Str,
 		slugs : List(Str),
 		open : Open,
@@ -87,11 +87,15 @@ Docs := [].{
 						Html.trusted("Post to chat</button>"),
 						Html.trusted("<span class=\"docs-status\" id=\"docs-status\">"),
 						Html.trusted("</span></div>"),
-						Html.trusted("<textarea id=\"docs-body\" data-slug=\""),
-						Html.text(d.slug),
-						Html.trusted("\" spellcheck=\"true\">"),
-						Html.escape(d.markdown),
-						Html.trusted("</textarea>"),
+						Html.tag({
+							name: "textarea",
+							attrs: [
+								Attr("id", "docs-body"),
+								Attr("data-slug", d.slug),
+								Attr("spellcheck", "true"),
+							],
+							inner: Html.escape(d.markdown),
+						}),
 					])
 				},
 				Html.trusted("</section><section class=\"docs-preview\" id=\"docs-preview\">"),
@@ -771,19 +775,21 @@ doc_list = |slugs, selected|
 				Html.join(
 					List.map(
 						slugs,
-						|slug| Html.join([
-							if slug == selected {
-								Html.trusted("<li class=\"docs-item active\"><a href=\"/chat/docs/")
-							} else {
-								Html.trusted("<li class=\"docs-item\"><a href=\"/chat/docs/")
-							},
-							# A slug is lowercase letters, digits and hyphens:
-							# escaped, it is itself, as the Zig placed it.
-							Html.text(slug),
-							Html.trusted("\">"),
-							Html.text(Docs.title(slug)),
-							Html.trusted("</a></li>"),
-						]),
+						|slug|
+							Html.tag({
+								name: "li",
+								attrs: [
+									Attr(
+										"class",
+										if slug == selected "docs-item active" else "docs-item",
+									),
+								],
+								inner: Html.tag({
+									name: "a",
+									attrs: [Attr("href", "/chat/docs/${slug}")],
+									inner: Html.text(Docs.title(slug)),
+								}),
+							}),
 					),
 				),
 				Html.trusted("</ul>"),
@@ -930,3 +936,30 @@ expect Docs.slug_of_title("${Str.repeat("a", 79)} b") == Str.repeat("a", 79)
 # title: hyphens to spaces, the first letter up; a digit first stays.
 expect Docs.title("reading-list") == "Reading list"
 expect Docs.title("2026-plans") == "2026 plans" and Docs.title("") == ""
+
+# The docs list: each entry a link to its slug, the one open marked.
+expect (
+	Str.from_utf8(
+		Html.bytes(
+			doc_list(
+				["a-b", "c"],
+				"c",
+			),
+		),
+	) ?? ""
+).contains("<ul class=\"docs-items\"><li class=\"docs-item\"><a href=\"/chat/docs/a-b\">${Docs.title("a-b")}</a></li><li class=\"docs-item active\"><a href=\"/chat/docs/c\">${Docs.title("c")}</a></li></ul>")
+
+# The editor: the open doc's slug in the textarea's data, its markdown escaped.
+expect {
+	page = Docs.editor({
+		src: |_| "/x.js",
+		viewer: "v",
+		slugs: ["x"],
+		open: Doc({
+			slug: "x",
+			markdown: Str.to_utf8("md & <b>"),
+			rendered: Html.trusted(""),
+		}),
+	})
+	(Str.from_utf8(Html.bytes(page)) ?? "").contains("<textarea id=\"docs-body\" data-slug=\"x\" spellcheck=\"true\">md &amp; &lt;b&gt;</textarea>")
+}

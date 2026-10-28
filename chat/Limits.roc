@@ -37,13 +37,13 @@ Limits := [].{
 	page : {
 		image_max : U64,
 		video_max : U64,
-		accept : List(U8),
+		accept : Str,
 		search_min : U64,
 	}
 	page = {
 		image_max,
 		video_max,
-		accept: accept.to_utf8(),
+		accept,
 		search_min,
 	}
 }

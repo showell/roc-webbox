@@ -340,7 +340,7 @@ call = |req| {
 			limits = {
 				image_max: u64(arg(7)),
 				video_max: u64(arg(8)),
-				accept: arg(9),
+				accept: Str.from_utf8(arg(9)) ?? "",
 				search_min: u64(arg(10)),
 			}
 			match (
@@ -1075,7 +1075,7 @@ maybe = |t| match t {
 }
 
 ## The scripts' srcs, as `name, src` pairs from argument `from` on.
-srcs : List(List(U8)), U64 -> (List(U8) -> Html)
+srcs : List(List(U8)), U64 -> (List(U8) -> Str)
 srcs = |args, from| Chrome.src_in(
 	scripts(args, from),
 )

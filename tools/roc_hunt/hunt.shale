@@ -631,7 +631,10 @@ end
 -- opaque) is made from bytes only by `escape`, or by `trusted`, which takes
 -- markup as written: so a call to `Html.trusted` whose argument is not a
 -- string literal with no interpolation (or `Html.trusted` passed as a
--- value, its argument unseen). `Html.host_markup` (the host's script srcs)
+-- value, its argument unseen), or a literal holding an odd number of `"`,
+-- which leaves an attribute's quotes open for a value to be spliced into: an
+-- element with attributes is `Html.tag`'s, its values always escaped.
+-- `Html.host_markup` (the host's rendered markdown)
 -- is called in chat/Chrome.roc alone (and Html.roc's expects), and `Html.twin_script_json` by the
 -- twins alone (chat/twin.roc is never in the tree).
 function html_trusted_nonliteral(tree)
@@ -649,9 +652,18 @@ function html_trusted_nonliteral(tree)
           local at = head(tree, a)
           if a <= #tree.text and tree.depth[a] == tree.depth[i] and (starts_with(at, "(e-string ") or starts_with(at, "(e-multiline-string ")) then
             literal = true
+            local quotes = 0
             for c in children(tree, a) do
-              if not starts_with(head(tree, c), "(e-string-part ") then literal = false end
+              local part = head(tree, c)
+              if not starts_with(part, "(e-string-part ") then literal = false end
+              local raw = between(part, "(raw \"", "\")") or ""
+              local k = find(raw, "\"")
+              while k ~= nil do
+                quotes = quotes + 1
+                k = find(raw, "\"", k + 1)
+              end
             end
+            if literal and quotes % 2 == 1 then push(found, where(tree, i) .. ": Html.trusted leaves an attribute open: build the element with Html.tag") end
           end
         end
         if not literal then push(found, where(tree, i) .. ": Html.trusted of no string literal") end
