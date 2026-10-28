@@ -306,8 +306,8 @@ pub const Host = struct {
     report_fanout_failure: *const fn (ctx: *anyopaque, surface: route_mod.Surface, member: []const u8, key: []const u8, sid: []const u8, e: anyerror) void = noFanoutFailed,
     /// Host.read_header!: a request header's value, or none.
     read_header: *const fn (ctx: *anyopaque, name: []const u8) []const []const u8 = noHeader,
-    /// Host.check_hostile!.
-    check_hostile: *const fn (ctx: *anyopaque, markdown: []const u8) route_mod.Hostility = noHostile,
+    /// Host.check_hostile!: `refusal` what a refusal says.
+    check_hostile: *const fn (ctx: *anyopaque, markdown: []const u8, refusal: []const u8) route_mod.Hostility = noHostile,
     /// Host.serve_file!: `.serving` when the host holds the bytes of the file at `path`
     /// under the chat root (the seam has checked it), for a `held` answer.
     serve_file: *const fn (ctx: *anyopaque, path: []const u8) route_mod.Serving = noServeFile,
@@ -371,7 +371,7 @@ fn noFailAccount(_: *anyopaque, read: AccountRead, id: []const u8) void {
 fn noHeader(_: *anyopaque, _: []const u8) []const []const u8 {
     @panic("read_header asked of a host that does not answer it");
 }
-fn noHostile(_: *anyopaque, _: []const u8) route_mod.Hostility {
+fn noHostile(_: *anyopaque, _: []const u8, _: []const u8) route_mod.Hostility {
     @panic("check_hostile asked of a host that does not answer it");
 }
 
@@ -723,9 +723,9 @@ export fn roc_chat_read_header(name: RocBytes) callconv(.c) roc.RocBytesList {
     return .from(h.read_header(h.ctx, name.slice()));
 }
 
-export fn roc_chat_check_hostile(markdown: RocBytes) callconv(.c) route_mod.Hostility {
+export fn roc_chat_check_hostile(markdown: RocBytes, refusal: RocBytes) callconv(.c) route_mod.Hostility {
     const h = current("check_hostile");
-    return h.check_hostile(h.ctx, markdown.slice());
+    return h.check_hostile(h.ctx, markdown.slice(), refusal.slice());
 }
 
 export fn roc_chat_serve_file(path: RocBytes) callconv(.c) route_mod.Serving {

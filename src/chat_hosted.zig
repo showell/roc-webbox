@@ -162,6 +162,8 @@ const Scripted = struct {
     online_ids: []const []const u8 = &.{},
     is_async: bool = false,
     hostile_answer: route.Hostility = .fine,
+    /// What the last hostile check would say on a refusal.
+    refusal: []const u8 = "",
     /// Whether markdown renders (as `<p>` around it), and whether a
     /// message's block is stored.
     render_ok: bool = true,
@@ -304,8 +306,9 @@ const Scripted = struct {
         say(ctx, "header {s}", .{header_name});
         return if (me(ctx).is_async) &.{"1"} else &.{};
     }
-    fn hostile(ctx: *anyopaque, markdown: []const u8) route.Hostility {
+    fn hostile(ctx: *anyopaque, markdown: []const u8, refusal: []const u8) route.Hostility {
         say(ctx, "hostile {s}", .{markdown});
+        me(ctx).refusal = refusal;
         return me(ctx).hostile_answer;
     }
     fn raw(ctx: *anyopaque, path: []const u8) route.Serving {
@@ -1290,4 +1293,16 @@ test "the accounts are the Roc's to read: a guest's DM is opened, the roster is 
     try expectAct("/c/1_4/Plans/send", false, .POST, guest, .{ .redirect = "/chat/c/1_4/Plans" }, "member;presence;accounts;header x-chat-async;body;hostile hi;read users/1/last-sessions/1_4;write users/1/last-sessions/1_4 Plans\n;read users/1/last-conv;write users/1/last-conv 1_4\n;" ++ comptime sentAll(sent("dm 1_4 /chat/c/1_4 [1,4]", "1_4", "Plans", "Steve", "hi", "")));
     // Not an account: the Zig's to answer.
     try expectAct("/c/1_5/Plans/send", false, .POST, guest, .not_found, "member;presence;accounts;");
+}
+
+test "a doc too formatted to post is refused in the docs' own words, and nothing after the check is asked (metal-vmm QUEUE 278)" {
+    use(testing.allocator);
+    defer @import("roc_abi.zig").deinit();
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    var s: Scripted = .{ .alloc = arena.allocator(), .body = "slug=notes", .hostile_answer = .refused, .files = &.{.{ .path = "users/1/docs/notes.md", .read = .{ .found = "hi" } }} };
+    const got = try decide(arena.allocator(), "/docs/post", false, .POST, s.host());
+    try testing.expect(got.eql(.answered));
+    try testing.expectEqualStrings("member;presence;body;read users/1/docs/notes.md;hostile hi;", s.asked.items);
+    try testing.expectEqualStrings("not posted: too much markdown formatting; break the doc up\n", s.refusal);
 }

@@ -106,7 +106,7 @@ pub const Sniff = enum(u8) { allow, forbid };
 pub const Kind = enum(u8) { answered, found, held, malformed, not_allowed, not_found, redirect, respond, serve, to_login };
 
 /// Host.roc's `read_body!` argument: whose limit the body is read to.
-pub const Form = enum(u8) { message, reaction };
+pub const Form = enum(u8) { doc, message, reaction };
 
 /// Host.roc's `read_body!` answer's `status`: the body read (its bytes beside
 /// it), or answered by the host instead (too big) or failed.

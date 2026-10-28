@@ -119,6 +119,8 @@ served_by = |r|
 		# 271): whose it is, whether its topic is there, every 404. The Zig
 		# serves the tails handed back to it, authorized here.
 		Dm | Channel => Roc
+		# A doc posted to chat (metal-vmm QUEUE 278); the rest of docs is Zig's.
+		Docs => if r.rest == "/post" Roc else Zig
 		_ => Zig
 	}
 
@@ -133,6 +135,7 @@ act! = |req, route| {
 		Msg => redirect_to_msg!(route.rest.to_utf8())
 		Links => serve_links!(route.rest.to_utf8())
 		Recent => serve_recent!(route.rest.to_utf8())
+		Docs => post_doc!(req)
 		Images => serve_feed!(Images, route.rest.to_utf8())
 		Code => serve_feed!(Code, route.rest.to_utf8())
 		_ => serve_conversation!(req, route)
@@ -1145,7 +1148,7 @@ announce! : Paths.ConvKey, Chat.Conv, Who, Str, Str => Try({}, [Failed])
 announce! = |key, conv, who, topic, name|
 	match Topics.highest_general(load_topics!(key)) {
 		Ok(gen) if gen != topic =>
-			append_message!(conv, who, { at: { key, topic: gen }, name, markdown: "New topic: [${topic}](${key.base()}/${topic})", cid: "" })
+			append_message!(conv, who, { at: { key, topic: gen }, name, markdown: "New topic: [${topic}](${key.base()}/${topic})", cid: "" }).map_ok(|_| {})
 		_ => Ok({})
 	}
 
@@ -1210,7 +1213,7 @@ store! : Paths.TopicAt, Chat.Conv, Who, [Async, Sync], Posted => Chat.Answer
 store! = |at, conv, who, send, { markdown: md, cid }|
 	if ZigText.trim(md.to_utf8()) == [] {
 		refuse("not sent: the message is empty\n")
-	} else if Host.check_hostile!(md.to_utf8()) != Fine {
+	} else if Host.check_hostile!(md.to_utf8(), Str.to_utf8("not sent: malformed markdown — too much formatting; break it into smaller messages\n")) != Fine {
 		Chat.answered
 	} else {
 		match load_viewer!(who) {
@@ -1228,6 +1231,96 @@ store! = |at, conv, who, send, { markdown: md, cid }|
 		}
 	}
 
+## **A DOC POSTED TO CHAT** (POST /chat/docs/post, docs.zig `docsPost` as it
+## was, metal-vmm QUEUE 278): the member's doc `slug`, as it is on disk, a
+## message to their default partner's DM, at the topic they resume it at;
+## 200 with where it went, for the client to go there. Refused in the Zig's
+## words: a slug that is none, a doc empty or not there, one too formatted
+## (the host's 400), no partner to post to. A doc that is not UTF-8 text
+## fails the request (NotUtf8): it is the message.
+post_doc! : Chat.Request => Chat.Answer
+post_doc! = |req|
+	if req.method != Post {
+		Chat.not_allowed(Post)
+	} else {
+		body = Host.read_body!(Doc)
+		if body.status == Answered {
+			Chat.answered
+		} else {
+			match Form.field(body.bytes, "slug") {
+				Malformed => Chat.malformed
+				Found(slug) => post_slug!(ZigText.trim_str(slug))
+				Missing => post_slug!("")
+			}
+		}
+	}
+
+post_slug! : Str => Chat.Answer
+post_slug! = |slug|
+	match load_uid!({}) {
+		Err(Failed) => Chat.answered
+		Ok(me) =>
+			match Paths.doc_path(me, slug) {
+				Err(NotASlug) => refuse("bad slug\n")
+				Ok(path) =>
+					match Files.read_text!(path) {
+						Ok(text) => post_text!(me, text)
+						# readUserDoc: a doc not there reads empty.
+						Err(Missing) => post_text!(me, "")
+						Err(Failed) => Chat.answered
+						Err(NotUtf8) => {
+							Host.fail!(NotUtf8, path.bytes())
+							Chat.answered
+						}
+					}
+			}
+	}
+
+## The doc's text judged, its partner found, then stored as a message.
+post_text! : Uid, Str => Chat.Answer
+post_text! = |me, md|
+	if ZigText.trim(md.to_utf8()) == [] {
+		refuse("doc is empty\n")
+	} else if Host.check_hostile!(md.to_utf8(), Str.to_utf8("not posted: too much markdown formatting; break the doc up\n")) != Fine {
+		Chat.answered
+	} else {
+		match load_accounts!(Unasked) {
+			Err(Failed) => Chat.answered
+			Ok(accounts) =>
+				match fail_if_unreadable!(Accounts.authorized(accounts)) {
+					Err(Failed) => Chat.answered
+					Ok(roster) =>
+						match List.keep_if(roster, |u| u.id != me and u.id.to_str() == default_partner(me)) {
+							[] => refuse("no default chat partner available\n")
+							[partner, ..] => post_to!(me, Known(accounts), Paths.pair_key(me, partner.id), md)
+						}
+				}
+		}
+	}
+
+## defaultChatPartner: member 1's is 2, everyone else's 1.
+default_partner : Uid -> Str
+default_partner = |me| if me.to_str() == "1" "2" else "1"
+
+## The doc stored in DM `pair`, at the topic `me` resumes it at, by their
+## name, with no client id; the bookmark left as it was (appendMessage
+## wrote none).
+post_to! : Uid, Who, Paths.PairKey, Str => Chat.Answer
+post_to! = |me, who, pair, md| {
+	key = Dm(pair)
+	topic = resume_at!(me, pair, load_topics!(key))
+	bytes = key.bytes()
+	conv = { family: Dm, key: bytes, base: Conversation.dm_base(bytes), members: Conversation.dm_members(bytes) }
+	match load_viewer!(who) {
+		Err(Failed) => Chat.answered
+		Ok(name) =>
+			match append_message!(conv, who, { at: { key, topic }, name, markdown: md, cid: "" }) {
+				Err(Failed) => Chat.answered
+				Ok(id) => Chat.respond(200, json, JsonOut.object([("conv", JsonOut.string(pair.to_str())), ("session", JsonOut.string(topic)), ("id", JsonOut.string(id))]).bytes())
+			}
+	}
+}
+
 ## A message not yet stored: where it goes (`at`, its conversation and
 ## topic), its author's `name`, its `markdown`, and the sender's client id
 ## `cid`. Named fields because three are byte lists: in a row of
@@ -1243,9 +1336,10 @@ Draft : { at : Paths.TopicAt, name : Str, markdown : Str, cid : Str }
 ## the append, the count cache, the search index), then the frame published
 ## on the topic's key, then the fan-out (`fan_out!`, its steps Fanout.roc's,
 ## made before the store too). `who` holds a DM's accounts (the fan-out
-## names the other member). `Err(Failed)` when a step before the store failed (the
-## request has, with its error), and nothing was stored.
-append_message! : Chat.Conv, Who, Draft => Try({}, [Failed])
+## names the other member). Its id once stored; `Err(Failed)` when a step
+## before the store failed (the request has, with its error), and nothing
+## was stored.
+append_message! : Chat.Conv, Who, Draft => Try(Str, [Failed])
 append_message! = |conv, who, { at: topic_at, name, markdown: md, cid }|
 	# **NO MESSAGE WITHOUT AN AUTHOR** (the review of 156): the decoder
 	# refuses such a block on every read, so it would go out live and be
@@ -1304,7 +1398,7 @@ append_message! = |conv, who, { at: topic_at, name, markdown: md, cid }|
 								# failure counted and said.
 								Host.publish!(key.bytes(), frame)
 								fan_out!(topic_at, steps)
-								Ok({})
+								Ok(id)
 							}
 							_ => Err(Failed)
 						}

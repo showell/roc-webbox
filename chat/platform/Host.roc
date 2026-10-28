@@ -31,9 +31,9 @@ Host := [].{
 	list_accounts! : {} => { accounts : List({ id : List(U8), kind : [Agent, Guest, Member, Unreadable], name : List(U8), name_read : [Found, Unreadable] }), status : [Failed, Found] }
 
 	## The request's body, read to a form's limit (`which`: the react
-	## form's or a message's): `Read`, its bytes beside it; `Answered` when
-	## the host answered instead (too big) or failed.
-	read_body! : [Reaction, Message] => { bytes : List(U8), status : [Answered, Read] }
+	## form's, a message's or a doc's): `Read`, its bytes beside it;
+	## `Answered` when the host answered instead (too big) or failed.
+	read_body! : [Doc, Message, Reaction] => { bytes : List(U8), status : [Answered, Read] }
 
 	## **THE BUS, AS A PRIMITIVE** (webbox's `bus.publish`): `bytes` to every
 	## subscriber on `key`, each its own copy, as the stream writes it. It
@@ -194,6 +194,7 @@ Host := [].{
 	serve_rendered! : List(U8) => [Serving, NotServing]
 
 	## Whether markdown is hostile: `Fine`; `Refused`, the host having refused it
-	## (webbox's edge counter and its 400); or `Failed`, the check itself.
-	check_hostile! : List(U8) => [Fine, Refused, Failed]
+	## (webbox's edge counter and its 400, saying `refusal`, the Roc's words);
+	## or `Failed`, the check itself.
+	check_hostile! : List(U8), List(U8) => [Fine, Refused, Failed]
 }

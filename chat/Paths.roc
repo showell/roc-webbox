@@ -368,6 +368,11 @@ Paths := [].{
 			|> List.keep_if(is_doc_slug)
 			|> List.map(|slug| { slug, path: ChatPath.("users/${uid.to_str()}/docs/${slug}.md") })
 
+	## The member's doc `slug` (docs_store `docPath`), or `NotASlug` for a
+	## slug no slugifyTitle made (validDocSlug, its path-traversal check).
+	doc_path : Uid, Str -> Try(ChatPath, [NotASlug])
+	doc_path = |uid, slug| if is_doc_slug(slug) Ok(ChatPath.("users/${uid.to_str()}/docs/${slug}.md")) else Err(NotASlug)
+
 	## A topic's message count sidecar (countPath, chat_count.zig):
 	## {conv_dir}/sessions/<topic>.count.
 	count_path : TopicAt -> ChatPath
