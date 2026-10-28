@@ -33,7 +33,8 @@
   - `positional_lists` — a `List(List(U8))` read with `get`: parts known
     only by position (a record names them).
   - `if_chains` — `else if` three or more deep (often a `match` on a tag).
-  - `long_definitions` — definitions over 40 lines, longest first.
+  - `long_definitions` — definitions over 290 parse nodes, largest first
+    (nodes, not lines: stacking adds lines and no code).
   - `fs_bypass` — a call to Host's file primitives (`read!`, `write!`,
     `remove!`, `list!`, `append_line!`, `append_entry!`) outside
     `chat/Files.roc` and `chat/test/` (Files.roc takes only the
@@ -49,7 +50,9 @@
   Roc's or Zig's (main.roc's `served_by`, evaluated over its tree), each
   hosted function's Zig answer sized and classed, the chat's Zig called
   from outside it, what no live root reaches (twins and tests are not
-  live), and the number to watch: live chat Zig against chat Roc.
+  live), and the number to watch: live chat Zig against chat Roc. Sizes
+  are code, not layout: Zig tokens and Roc parse nodes, with code lines
+  beside them marked as layout's.
   `shale tools/roc_hunt/zig_census.shale`; its budget is in its header.
 
 A hunt worth running again is saved here, with plants; a one-off question is

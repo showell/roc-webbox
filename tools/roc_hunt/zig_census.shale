@@ -7,11 +7,11 @@
 --     Zig, and for Zig's the arm of chat.zig's `serve` or `topicRoute`
 --     that takes it;
 --   - **hosted functions**: each of chat/platform/Host.roc's, the
---     chat_router.zig `Call` member that answers it, its own lines plus
+--     chat_router.zig `Call` member that answers it, its own tokens plus
 --     what it calls one level deep (a Call member or a chat file's
 --     declaration), and the chat Zig it reaches in all; classed `primitive`
---     (reaches no chat Zig), `whole feature` (reaches over `feature_lines`)
---     or `primitive + decisions` (between);
+--     (reaches no chat Zig), `whole feature` (reaches over
+--     `feature_tokens`) or `primitive + decisions` (between);
 --   - **the old chat from outside**: each call into the chat's Zig from a
 --     file that is not the chat's, a test's, a twin's or a bench's, by
 --     caller (login.zig's welcome DM, docs, the router);
@@ -22,9 +22,15 @@
 -- the roots reach, a top-level declaration a node: chat_router.zig's
 -- `handle` and every declaration a call from outside names, then each
 -- declaration's bare names in its file and `alias.name` through an import.
--- A container (`Call`) is reached whole. Lines are code lines: not blank,
--- not a comment, tests left out; the Roc's the same, of chat/*.roc and
--- chat/platform/*.roc, less twin.roc.
+-- A container (`Call`) is reached whole.
+--
+-- **SIZE IS CODE, NOT LAYOUT**: the Zig in tokens (zig_tokens: no comment, no
+-- doc comment, and no trailing comma, which is how zig fmt is told to stack
+-- a list one item a line), the Roc in parse nodes (roc-ast's, one a line of
+-- its dump), of chat/*.roc and chat/platform/*.roc less twin.roc; Zig's
+-- tests left out. Code lines (not blank, not a comment) are printed beside
+-- them, marked as layout's: stacking a call one argument a line adds lines
+-- and no code.
 --
 -- Run from roc-webbox, angry-gopher's zig-server given as a mount path (a
 -- script's path may hold no `..`):
@@ -34,7 +40,13 @@
 const roc_ast = real("tools:roc-ast/bin/roc-ast")
 const gopher = arg("gopher", "repos:angry-gopher-chat/zig-server")
 const src = gopher .. "/src/"
-const feature_lines = 300
+-- A hosted function reaching more chat Zig than this is a whole feature:
+-- the 300 code lines it was, at the 12.0 tokens a line of the live chat Zig
+-- before it was stacked (34,923 / 2,907). Any of 916..6,053 classes those
+-- the same; 3,600 sits inside that gap.
+const feature_tokens = 3600
+-- A dead declaration this size or more is named in the by-file report.
+const named_dead_tokens = 50
 const chat_set = " chat.zig presence.zig recent.zig recent_feed.zig reactions.zig images.zig images_store.zig code.zig code_store.zig docs.zig docs_store.zig search_index.zig search_tokens.zig "
 
 function is_aside(name)
@@ -61,6 +73,28 @@ function code_lines(text, first, last)
   return n
 end
 
+-- Lines `first`..`last` of a read file `f` ({text, tokens, at_line}):
+-- {first, last, tokens, lines}, tokens the size, lines layout's.
+function sized(f, first, last)
+  local n = 0
+  local toks = f.tokens
+  local i = f.at_line[first]
+  while i <= #toks and toks[i].line <= last do
+    local tag = toks[i].tag
+    local trailing = tag == "comma" and i < #toks and (toks[i + 1].tag == "r_paren" or toks[i + 1].tag == "r_brace" or toks[i + 1].tag == "r_bracket")
+    if tag ~= "doc_comment" and tag ~= "container_doc_comment" and not trailing then n = n + 1 end
+    i = i + 1
+  end
+  return {first = first, last = last, tokens = n, lines = code_lines(f.text, first, last)}
+end
+
+-- `a` and `b` ({tokens, lines}) summed.
+function plus(a, b)
+  return {tokens = a.tokens + b.tokens, lines = a.lines + b.lines}
+end
+
+const nothing = {tokens = 0, lines = 0}
+
 -- ── the Zig, read once ───────────────────────────────────────────────────
 
 -- Each file: its lines, its top-level declarations by name, and its import
@@ -70,14 +104,6 @@ function read_zig(names)
   for name in names do
     local path = src .. name
     local text = lines(read(path))
-    local decls = {}
-    local order = {}
-    for d in zig_decls(path) do
-      if d.kind ~= "test" and d.kind ~= "comptime" and d.name ~= nil and d.name ~= "" then
-        decls[d.name] = {first = d.first, last = d.last, lines = code_lines(text, d.first, d.last)}
-        push(order, d.name)
-      end
-    end
     local aliases = {}
     for im in zig_imports(path) do
       if ends_with(im.target, ".zig") then
@@ -102,6 +128,15 @@ function read_zig(names)
       while j <= #tokens and tokens[j].line < ln do j = j + 1 end
       push(at_line, j)
       ln = ln + 1
+    end
+    local f = {text = text, tokens = tokens, at_line = at_line}
+    local decls = {}
+    local order = {}
+    for d in zig_decls(path) do
+      if d.kind ~= "test" and d.kind ~= "comptime" and d.name ~= nil and d.name ~= "" then
+        decls[d.name] = sized(f, d.first, d.last)
+        push(order, d.name)
+      end
     end
     files[name] = {text = text, decls = decls, order = order, aliases = aliases, tokens = tokens, at_line = at_line}
   end
@@ -164,13 +199,19 @@ function reach(files, roots)
   return seen
 end
 
-function reached_lines(files, seen, chat_only)
-  local n = 0
+-- The size of the declarations in `seen`, a set of `file:decl`.
+function reached_size(files, seen, chat_only)
+  local n = nothing
   for key in keys(seen) do
     local parts = split(key, ":")
-    if not chat_only or parts[1] ~= "chat_router.zig" then n = n + files[parts[1]].decls[parts[2]].lines end
+    if not chat_only or parts[1] ~= "chat_router.zig" then n = plus(n, files[parts[1]].decls[parts[2]]) end
   end
   return n
+end
+
+-- `s` ({tokens, lines}) as the reports print it: `<tokens> (<code lines>)`.
+function shown(s)
+  return tostring(s.tokens) .. " (" .. tostring(s.lines) .. ")"
 end
 
 -- ── the Roc ──────────────────────────────────────────────────────────────
@@ -245,12 +286,13 @@ function evaluate(tree, at, r)
   fail("served_by: a node the census cannot read: " .. t)
 end
 
--- A type's tags, as chat/Route.roc spells them: `Family : [A, B, ...]`.
+-- A type's tags, as chat/Route.roc spells them: `Family : [A, B, ...]`, on
+-- one line or stacked one a line (the trailing comma no tag).
 function tags(text, name)
   local m = re_find(text, "\n\t" .. name .. " : \\[([^\\]]*)\\]")
   if m == nil then fail("chat/Route.roc: no `" .. name .. " : [...]`") end
   local out = {}
-  for s in split(m.group, ",") do push(out, trim(s)) end
+  for s in split(m.group, ",") do if trim(s) ~= "" then push(out, trim(s)) end end
   return out
 end
 
@@ -400,11 +442,11 @@ print("  " .. tostring(roc_routes) .. " Roc's, " .. tostring(zig_routes) .. " Zi
 
 -- Hosted functions.
 print("")
-print("== hosted functions (Host.roc; chat_router.zig Call; own+one level / chat Zig reached)")
+print("== hosted functions (Host.roc; chat_router.zig Call; own+one level / chat Zig reached, in tokens (code lines, layout's))")
 local router = all["chat_router.zig"]
 local members = {}
 for d in zig_decls(src .. "chat_router.zig", {container = "Call"}) do
-  if d.kind ~= "field" and d.kind ~= "test" then members[d.name] = {first = d.first, last = d.last, lines = code_lines(router.text, d.first, d.last)} end
+  if d.kind ~= "field" and d.kind ~= "test" then members[d.name] = sized(router, d.first, d.last) end
 end
 local wiring = {}
 local h = members["host"]
@@ -429,7 +471,7 @@ for name in hosted do
     print("  " .. name .. "!  (no Call member wired)")
   else
     local mem = members[fn]
-    local one = mem.lines
+    local one = mem
     local reached_roots = {}
     local callees = {}
     -- One level: Call's own members it names, and chat declarations.
@@ -437,24 +479,24 @@ for name in hosted do
     for t in router.tokens do
       if t.line >= mem.first and t.line <= mem.last and t.tag == "identifier" and t.text ~= fn and has_key(members, t.text) and not has_key(seen, t.text) and t.text ~= "of" then
         seen[t.text] = true
-        one = one + members[t.text].lines
+        one = plus(one, members[t.text])
         push(callees, t.text)
         for r in refs(chat, "chat_router.zig", members[t.text].first, members[t.text].last) do if r[1] ~= "chat_router.zig" then push(reached_roots, r) end end
       end
     end
     for r in refs(chat, "chat_router.zig", mem.first, mem.last) do
       if r[1] ~= "chat_router.zig" then
-        one = one + chat[r[1]].decls[r[2]].lines
+        one = plus(one, chat[r[1]].decls[r[2]])
         push(callees, sub(r[1], 1, #r[1] - 4) .. "." .. r[2])
         push(reached_roots, r)
       end
     end
-    local deep = reached_lines(chat, reach(chat, reached_roots), true)
+    local deep = reached_size(chat, reach(chat, reached_roots), true)
     local class = "primitive + decisions"
-    if deep == 0 then class = "primitive" end
-    if deep > feature_lines then class = "whole feature" end
+    if deep.tokens == 0 then class = "primitive" end
+    if deep.tokens > feature_tokens then class = "whole feature" end
     classes[class] = get(classes, class, 0) + 1
-    print("  " .. name .. "!  " .. fn .. "  " .. tostring(one) .. " / " .. tostring(deep) .. "  " .. class .. "  [" .. join(callees, ", ") .. "]")
+    print("  " .. name .. "!  " .. fn .. "  " .. shown(one) .. " / " .. shown(deep) .. "  " .. class .. "  [" .. join(callees, ", ") .. "]")
   end
 end
 for c in sort(keys(classes)) do print("  " .. c .. ": " .. tostring(classes[c])) end
@@ -466,38 +508,47 @@ for o in sort(outside) do print("  " .. o) end
 
 -- Dead and live, by file.
 print("")
-print("== the chat's Zig by file: live / dead code lines (dead: no root reaches it)")
-local live_total = 0
-local dead_total = 0
+print("== the chat's Zig by file: live / dead in tokens (code lines, layout's) (dead: no root reaches it)")
+local live_total = nothing
+local dead_total = nothing
 for name in sort(keys(chat)) do
   local f = chat[name]
-  local l = 0
-  local d = 0
+  local l = nothing
+  local d = nothing
   local dead_names = {}
   for dn in f.order do
-    local n = f.decls[dn].lines
-    if has_key(live, name .. ":" .. dn) then l = l + n else
-      d = d + n
-      if n >= 5 then push(dead_names, dn .. "(" .. tostring(n) .. ")") end
+    local n = f.decls[dn]
+    if has_key(live, name .. ":" .. dn) then l = plus(l, n) else
+      d = plus(d, n)
+      if n.tokens >= named_dead_tokens then push(dead_names, dn .. "(" .. tostring(n.tokens) .. ")") end
     end
   end
-  live_total = live_total + l
-  dead_total = dead_total + d
-  local line = "  " .. name .. "  " .. tostring(l) .. " / " .. tostring(d)
+  live_total = plus(live_total, l)
+  dead_total = plus(dead_total, d)
+  local line = "  " .. name .. "  " .. shown(l) .. " / " .. shown(d)
   if #dead_names > 0 and #dead_names <= 12 then line = line .. "  dead: " .. join(dead_names, " ") end
   if #dead_names > 12 then line = line .. "  dead: " .. tostring(#dead_names) .. " declarations" end
   print(line)
 end
 
--- The Roc.
-local roc_total = 0
+-- The Roc: its parse nodes, a line of roc-ast's dump each (a file's
+-- `== <path>` heading is none), and its code lines.
 local roc_files = {}
 for p in glob("chat/*.roc") do if p ~= "chat/twin.roc" then push(roc_files, p) end end
 for p in glob("chat/platform/*.roc") do push(roc_files, p) end
+roc_files = sort(roc_files)
+local dump = run({roc_ast}, {timeout_ms = 300000, stdin = join(roc_files, "\n"), whole = 64000000})
+if dump.code ~= 0 then fail("roc-ast failed on the chat's Roc") end
+local roc_nodes = 0
+for line in lines(dump.out) do
+  if starts_with(trim(line), "(") then roc_nodes = roc_nodes + 1 end
+end
+local roc_lines = 0
 for p in roc_files do
   local text = lines(read(p))
-  roc_total = roc_total + code_lines(text, 1, #text)
+  roc_lines = roc_lines + code_lines(text, 1, #text)
 end
 
 print("")
-print("== the number to watch: the chat's Zig on live paths " .. tostring(live_total) .. " code lines (" .. tostring(dead_total) .. " unreached), its Roc " .. tostring(roc_total))
+print("== the number to watch: the chat's Zig on live paths " .. tostring(live_total.tokens) .. " tokens (" .. tostring(dead_total.tokens) .. " unreached), its Roc " .. tostring(roc_nodes) .. " parse nodes")
+print("   in code lines, which layout moves: Zig " .. tostring(live_total.lines) .. " (" .. tostring(dead_total.lines) .. " unreached), Roc " .. tostring(roc_lines))

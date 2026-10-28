@@ -13,7 +13,10 @@
 -- twin.roc: tests may hold literal data.
 
 const roc_ast = real("tools:roc-ast/bin/roc-ast")
-const long_lines = 40
+-- Over this many parse nodes is long. The chat's largest definitions are
+-- 304 nodes (main.roc's append_message_by!), then 281; 290 sits between, so
+-- the one the old 40-line rule found is the one this finds.
+const long_nodes = 290
 
 -- ── the trees ────────────────────────────────────────────────────────────
 
@@ -280,23 +283,22 @@ function if_chains(tree)
   return found
 end
 
--- **A LONG DEFINITION**: one spanning more than `long_lines` lines, longest
+-- **A LONG DEFINITION**: one of more than `long_nodes` parse nodes, largest
 -- first. Not wrong by itself; the place to look for a function to name.
+-- Nodes, not lines: a call stacked one argument a line is more lines and no
+-- more code.
 function long_definitions(tree)
   local found = {}
   local i = 1
   while i <= #tree.text do
-    local t = head(tree, i)
-    if starts_with(t, "(s-decl ") then
-      local span = sub(split(t, " ")[2], 2)
-      local first = parse_int(split(span, ".")[1])
-      local last = parse_int(split(split(span, "-")[2], ".")[1])
-      if first ~= nil and last ~= nil and last - first + 1 > long_lines then
-        -- Keyed by the length, zero-padded, so a sort of the strings is a
-        -- sort by length.
-        local key = tostring(last - first + 1)
+    if starts_with(head(tree, i), "(s-decl ") then
+      local nodes = past(tree, i) - i
+      if nodes > long_nodes then
+        -- Keyed by the size, zero-padded, so a sort of the strings is a
+        -- sort by size.
+        local key = tostring(nodes)
         while #key < 6 do key = "0" .. key end
-        push(found, key .. "|" .. where(tree, i) .. ": " .. tostring(last - first + 1) .. " lines")
+        push(found, key .. "|" .. where(tree, i) .. ": " .. tostring(nodes) .. " nodes")
       end
     end
     i = i + 1
