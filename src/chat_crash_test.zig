@@ -15,8 +15,7 @@ const Asker = struct {
     nest: bool = false,
     nested: ?anyerror = null,
 
-    fn ask(ctx: *anyopaque) abi.Asking {
-        const self: *Asker = @ptrCast(@alignCast(ctx));
+    pub fn identify(self: *Asker) abi.Asking {
         if (self.nest) {
             var inner: Asker = .{};
             if (abi.decide(
@@ -31,7 +30,7 @@ const Asker = struct {
     }
 
     fn member_(self: *Asker) abi.Host {
-        return abi.askingOnly(self, ask);
+        return .partly(&.{Asker}, self);
     }
 };
 
@@ -42,48 +41,17 @@ const Asker = struct {
 const Files = struct {
     asked: std.ArrayList(u8) = .empty,
     failed: ?anyerror = null,
-    /// Inside Host.aside!, and the aside's first failure.
+    /// Inside Host.mark_aside!, and the aside's first failure.
     aside: bool = false,
     aside_failed: ?anyerror = null,
 
     fn host(f: *Files) abi.Host {
-        var h = abi.askingOnly(f, yes);
-        h.read = read;
-        h.stat = stat;
-        h.read_at = readAt;
-        h.write = write;
-        h.remove = remove;
-        h.serve_file = raw;
-        h.serve_rendered = links;
-        h.list = list;
-        h.fail = fail;
-        h.fail_account = failAccount;
-        h.count = counted;
-        h.append = append;
-        h.publish = publish;
-        h.render = render;
-        h.serve_upload = serveUpload;
-        h.read_upload = readUpload;
-        h.reserve_upload = reserveUpload;
-        h.store_upload = storeUpload;
-        h.refuse_upload = refuseUpload;
-        h.retire_asked = retireAsked;
-        h.retire_note = retireNote;
-        h.retire_remove = retireRemove;
-        h.retire_replace = retireReplace;
-        h.retire_user = retireUser;
-        h.bundle_add = bundleAdd;
-        h.serve_bundle = serveBundle;
-        h.index_message = indexMessage;
-        h.write_cache = writeCache;
-        h.aside = asideOf;
-        h.check_online = online;
-        return h;
+        return .partly(&.{Files}, f);
     }
     /// Members 2 and 12 were seen lately; anyone else not.
-    fn online(ctx: *anyopaque, id: []const u8) @import("chat_route.zig").Presence {
+    pub fn check_online(f: *Files, id: []const u8) @import("chat_route.zig").Presence {
         say(
-            ctx,
+            f,
             "online",
             id,
         );
@@ -98,9 +66,8 @@ const Files = struct {
         )) .online else .offline;
     }
     /// An aside: a failure inside it is its own, answered at its end.
-    fn asideOf(ctx: *anyopaque, which: route.Aside) abi.AsideOutcome {
-        const f = of(ctx);
-        say(ctx, "aside", @tagName(which));
+    pub fn mark_aside(f: *Files, which: route.Aside) abi.AsideOutcome {
+        say(f, "aside", @tagName(which));
         switch (which) {
             .begin => f.aside = true,
             .end => {
@@ -112,12 +79,12 @@ const Files = struct {
         }
         return .done;
     }
-    fn counted(ctx: *anyopaque, kind: route.CountKind, text: []const u8) void {
-        of(ctx).asked.print(testing.allocator, "count {t} {s};", .{ kind, text }) catch @panic("oom");
+    pub fn count(f: *Files, kind: route.CountKind, text: []const u8) void {
+        f.asked.print(testing.allocator, "count {t} {s};", .{ kind, text }) catch @panic("oom");
     }
     /// `boom` will not render; anything else is its own HTML, marked.
-    fn render(ctx: *anyopaque, md: []const u8) abi.Rendered {
-        of(ctx).asked.print(
+    pub fn render(f: *Files, md: []const u8) abi.Rendered {
+        f.asked.print(
             testing.allocator,
             "render {s};",
             .{md},
@@ -127,74 +94,74 @@ const Files = struct {
             md,
             "boom",
         )) {
-            fail(ctx, error.OutOfMemory);
+            fail(f, error.OutOfMemory);
             return .failed;
         }
         return .{ .rendered = "<p>html</p>" };
     }
     /// Topic `Broken` will not take a block; any other's transcript is 42
     /// bytes after it.
-    fn serveUpload(ctx: *anyopaque, u: abi.Upload) @import("chat_route.zig").UploadServed {
-        of(ctx).asked.print(
+    pub fn serve_upload(f: *Files, u: abi.Upload) @import("chat_route.zig").UploadServed {
+        f.asked.print(
             testing.allocator,
             "upload {d} {d} {d} {s} {s} {t};",
             .{ u.first, u.last, u.size, u.content_type, u.path, u.part },
         ) catch @panic("oom");
         return .served;
     }
-    fn readUpload(ctx: *anyopaque) abi.UploadRead {
-        say(ctx, "read upload", "");
+    pub fn read_upload(f: *Files) abi.UploadRead {
+        say(f, "read upload", "");
         return .{ .read = .{ .size = 4242, .ext = "png", .filename = "cat \"1\".png" } };
     }
-    fn reserveUpload(ctx: *anyopaque, size: u64) @import("chat_route.zig").Reservation {
-        of(ctx).asked.print(testing.allocator, "reserve {d};", .{size}) catch @panic("oom");
+    pub fn reserve_upload(f: *Files, size: u64) @import("chat_route.zig").Reservation {
+        f.asked.print(testing.allocator, "reserve {d};", .{size}) catch @panic("oom");
         return .reserved;
     }
-    fn storeUpload(ctx: *anyopaque, folder: []const u8, ext: []const u8) abi.Stored {
-        of(ctx).asked.print(testing.allocator, "store {s} {s};", .{ folder, ext }) catch @panic("oom");
+    pub fn store_upload(f: *Files, folder: []const u8, ext: []const u8) abi.Stored {
+        f.asked.print(testing.allocator, "store {s} {s};", .{ folder, ext }) catch @panic("oom");
         return .{ .stored = "0123456789abcdef0123456789abcdef.png" };
     }
-    fn retireAsked(ctx: *anyopaque) abi.RetireAsked {
-        say(ctx, "retire asked", "");
+    pub fn retire_asked(f: *Files) abi.RetireAsked {
+        say(f, "retire asked", "");
         return .{ .days = 30, .keep = "Steve\napoorva", .now = -1_700_000_000 };
     }
-    fn retireNote(ctx: *anyopaque, kind: @import("chat_route.zig").RetireKind, label: []const u8) void {
-        of(ctx).asked.print(testing.allocator, "note {t} {s};", .{ kind, label }) catch @panic("oom");
+    pub fn retire_note(f: *Files, kind: @import("chat_route.zig").RetireKind, label: []const u8) void {
+        f.asked.print(testing.allocator, "note {t} {s};", .{ kind, label }) catch @panic("oom");
     }
-    fn retireRemove(ctx: *anyopaque, path: []const u8, what: @import("chat_route.zig").RetireRemoval) @import("chat_route.zig").Done {
-        of(ctx).asked.print(testing.allocator, "remove {t} {s};", .{ what, path }) catch @panic("oom");
+    pub fn retire_remove(f: *Files, path: []const u8, what: @import("chat_route.zig").RetireRemoval) @import("chat_route.zig").Done {
+        f.asked.print(testing.allocator, "remove {t} {s};", .{ what, path }) catch @panic("oom");
         return if (what == .tree) .ok else .failed;
     }
-    fn retireReplace(ctx: *anyopaque, path: []const u8, bytes: []const u8) @import("chat_route.zig").Done {
-        of(ctx).asked.print(testing.allocator, "replace {s} {f};", .{ path, std.zig.fmtString(bytes) }) catch @panic("oom");
+    pub fn retire_replace(f: *Files, path: []const u8, bytes: []const u8) @import("chat_route.zig").Done {
+        f.asked.print(testing.allocator, "replace {s} {f};", .{ path, std.zig.fmtString(bytes) }) catch @panic("oom");
         return .ok;
     }
-    fn retireUser(ctx: *anyopaque, uid: []const u8) @import("chat_route.zig").Done {
-        say(ctx, "retire user", uid);
+    pub fn retire_user(f: *Files, uid: []const u8) @import("chat_route.zig").Done {
+        say(f, "retire user", uid);
         return .ok;
     }
-    fn refuseUpload(ctx: *anyopaque, why: @import("chat_route.zig").UploadRefusal, message: []const u8) void {
-        of(ctx).asked.print(testing.allocator, "refuse {t} {s};", .{ why, message }) catch @panic("oom");
+    pub fn refuse_upload(f: *Files, why: @import("chat_route.zig").UploadRefusal, message: []const u8) void {
+        f.asked.print(testing.allocator, "refuse {t} {s};", .{ why, message }) catch @panic("oom");
     }
-    fn bundleAdd(ctx: *anyopaque, name: []const u8, path: []const u8) @import("chat_route.zig").Done {
-        of(ctx).asked.print(
+    pub fn bundle_add(f: *Files, name: []const u8, path: []const u8) @import("chat_route.zig").Done {
+        f.asked.print(
             testing.allocator,
             "add {s} {s};",
             .{ name, path },
         ) catch @panic("oom");
         return .ok;
     }
-    fn serveBundle(ctx: *anyopaque, name: []const u8) void {
-        say(ctx, "bundle", name);
+    pub fn serve_bundle(f: *Files, name: []const u8) void {
+        say(f, "bundle", name);
     }
     /// Every field of the message in Chat.Message's order.
-    fn indexMessage(
-        ctx: *anyopaque,
+    pub fn index_message(
+        f: *Files,
         dir: []const u8,
         sid: []const u8,
         m: abi.Message,
     ) void {
-        of(ctx).asked.print(
+        f.asked.print(
             testing.allocator,
             "index {s} {s} id={s} from={s} at={s} uid={s} md={s};",
             .{
@@ -208,8 +175,8 @@ const Files = struct {
             },
         ) catch @panic("oom");
     }
-    fn writeCache(ctx: *anyopaque, path: []const u8, bytes: []const u8) void {
-        of(ctx).asked.print(
+    pub fn write_cache(f: *Files, path: []const u8, bytes: []const u8) void {
+        f.asked.print(
             testing.allocator,
             "cache {s} {f};",
             .{ path, std.zig.fmtString(bytes) },
@@ -217,12 +184,12 @@ const Files = struct {
     }
     /// `users/1/broken`, `users/2/images.md` and topic `Broken`'s
     /// transcript will not take bytes; any other file is 42 bytes after.
-    fn append(
-        ctx: *anyopaque,
+    pub fn append(
+        f: *Files,
         path: []const u8,
         bytes: []const u8,
     ) abi.Appended {
-        of(ctx).asked.print(
+        f.asked.print(
             testing.allocator,
             "append {s} {f};",
             .{ path, std.zig.fmtString(bytes) },
@@ -232,17 +199,17 @@ const Files = struct {
             path,
             broken,
         )) {
-            fail(ctx, error.IsDir);
+            fail(f, error.IsDir);
             return .failed;
         };
         return .{ .appended = 42 };
     }
-    fn publish(
-        ctx: *anyopaque,
+    pub fn publish(
+        f: *Files,
         key: []const u8,
         bytes: []const u8,
     ) void {
-        of(ctx).asked.print(
+        f.asked.print(
             testing.allocator,
             "publish {s} {f};",
             .{ key, std.zig.fmtString(bytes) },
@@ -252,24 +219,24 @@ const Files = struct {
     /// An account's kind kept as error.SymLinkLoop, its name as
     /// error.IsDir: which one the request fails with shows which read the
     /// seam asked for.
-    fn failAccount(
-        ctx: *anyopaque,
+    pub fn fail_account(
+        f: *Files,
         which: abi.AccountRead,
         id: []const u8,
     ) void {
-        of(ctx).asked.print(
+        f.asked.print(
             testing.allocator,
             "fail_account {t} {s};",
             .{ which, id },
         ) catch @panic("oom");
-        fail(ctx, switch (which) {
+        fail(f, switch (which) {
             .kind => error.SymLinkLoop,
             .name => error.IsDir,
         });
     }
-    fn list(ctx: *anyopaque, path: []const u8) abi.Listing {
+    pub fn list(f: *Files, path: []const u8) abi.Listing {
         say(
-            ctx,
+            f,
             "list",
             path,
         );
@@ -292,31 +259,28 @@ const Files = struct {
             path,
             "1_2/sessions",
         )) {
-            fail(ctx, error.NotDir);
+            fail(f, error.NotDir);
             return .failed;
         }
         return .missing;
     }
-    fn of(ctx: *anyopaque) *Files {
-        return @ptrCast(@alignCast(ctx));
-    }
-    fn yes(_: *anyopaque) abi.Asking {
+    pub fn identify(_: *Files) abi.Asking {
         return .{ .known = "1" };
     }
     fn say(
-        ctx: *anyopaque,
+        f: *Files,
         what: []const u8,
         path: []const u8,
     ) void {
-        of(ctx).asked.print(
+        f.asked.print(
             testing.allocator,
             "{s} {s};",
             .{ what, path },
         ) catch @panic("oom");
     }
-    fn read(ctx: *anyopaque, path: []const u8) abi.Read {
+    pub fn read(f: *Files, path: []const u8) abi.Read {
         say(
-            ctx,
+            f,
             "read",
             path,
         );
@@ -330,16 +294,16 @@ const Files = struct {
             path,
             "users/1/broken",
         )) {
-            fail(ctx, error.IsDir);
+            fail(f, error.IsDir);
             return .failed;
         }
         return .missing;
     }
     /// `users/1/ok` is 2 bytes changed at 1790000001; `users/1/broken` a
     /// folder, whose stat fails; anything else is not there.
-    fn stat(ctx: *anyopaque, path: []const u8) abi.Stat {
+    pub fn read_stat(f: *Files, path: []const u8) abi.Stat {
         say(
-            ctx,
+            f,
             "stat",
             path,
         );
@@ -353,21 +317,21 @@ const Files = struct {
             path,
             "users/1/broken",
         )) {
-            fail(ctx, error.IsDir);
+            fail(f, error.IsDir);
             return .failed;
         }
         return .missing;
     }
     /// `users/1/ok` holds "hello"; `users/1/long` hands back more than it
     /// was asked for, which the seam cuts.
-    fn readAt(
-        ctx: *anyopaque,
+    pub fn read_at(
+        f: *Files,
         path: []const u8,
         offset: u64,
         max: u64,
     ) abi.Read {
         say(
-            ctx,
+            f,
             "read_at",
             path,
         );
@@ -385,44 +349,43 @@ const Files = struct {
         const from = @min(offset, text.len);
         return .{ .found = text[from..@min(text.len, from + max)] };
     }
-    fn write(
-        ctx: *anyopaque,
+    pub fn write(
+        f: *Files,
         path: []const u8,
         _: []const u8,
     ) route.Done {
         say(
-            ctx,
+            f,
             "write",
             path,
         );
         return .ok;
     }
-    fn remove(ctx: *anyopaque, path: []const u8) route.Done {
+    pub fn remove(f: *Files, path: []const u8) route.Done {
         say(
-            ctx,
+            f,
             "remove",
             path,
         );
         return .ok;
     }
-    fn raw(ctx: *anyopaque, path: []const u8) route.Serving {
+    pub fn serve_file(f: *Files, path: []const u8) route.Serving {
         say(
-            ctx,
+            f,
             "raw",
             path,
         );
         return .serving;
     }
-    fn links(ctx: *anyopaque, path: []const u8) route.Serving {
+    pub fn serve_rendered(f: *Files, path: []const u8) route.Serving {
         say(
-            ctx,
+            f,
             "links",
             path,
         );
         return .serving;
     }
-    fn fail(ctx: *anyopaque, e: anyerror) void {
-        const f = of(ctx);
+    pub fn fail(f: *Files, e: anyerror) void {
         if (f.aside) {
             if (f.aside_failed == null) f.aside_failed = e;
             return;
@@ -837,14 +800,14 @@ test "every account crosses with its id, kind and name, in the host's order, one
     defer roc.deinit();
     const S = struct {
         var fails: bool = false;
-        fn accounts(ctx: *anyopaque) abi.Accounts {
+        pub fn list_accounts(f: *Files) abi.Accounts {
             Files.say(
-                ctx,
+                f,
                 "accounts",
                 "",
             );
             if (fails) {
-                Files.fail(ctx, error.IsDir);
+                Files.fail(f, error.IsDir);
                 return .failed;
             }
             return .{ .found = &.{
@@ -885,8 +848,7 @@ test "every account crosses with its id, kind and name, in the host's order, one
         S.fails = fails;
         var f: Files = .{};
         defer f.asked.deinit(testing.allocator);
-        var h = f.host();
-        h.list_accounts = S.accounts;
+        const h: abi.Host = .partly(&.{ S, Files }, &f);
         const got = try abi.decide(
             arena.allocator(),
             "/accounts",

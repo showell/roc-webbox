@@ -187,7 +187,7 @@ pub const RetireKind = enum(u8) {
 /// Host.roc's `retire_remove!` what: one file, or a folder and all in it.
 pub const RetireRemoval = enum(u8) { file, tree };
 
-/// Host.roc's `welcome_pending!` answer (metal-vmm QUEUE 283): the member's
+/// Host.roc's `check_welcome!` answer (metal-vmm QUEUE 283): the member's
 /// welcome is pending, is not, or the look failed (the host has failed the
 /// request, or the aside).
 pub const Welcome = enum(u8) {

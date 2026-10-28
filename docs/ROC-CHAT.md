@@ -247,14 +247,19 @@ place.
 
 ### 5.3 Hosted functions
 
-They are `chat/platform/Host.roc`, answered by the
-`Host` vtable `decide` is handed (`chat_abi.zig`; angry-gopher's is
-`chat_router.zig` `Call`). Lists of records cross as flat lists of byte
-strings, one decoder each side. **After a failure the host does nothing
-more** for the call: every hosted function then answers its empty or
-failed value and writes nothing, and the host returns the first failure,
-a 500. What the platform still lacks (streams, files, generated layouts)
-is in §7.
+They are `chat/platform/Host.roc`, answered by the host `decide` is handed
+(`chat_abi.zig` `Host`): a host type declares a `pub fn` for each, named as
+Host.roc names it, its context first, and the seam makes its table at
+compile time. `Host.of` (angry-gopher's `chat_router.zig` `Call`) fails the
+build for a function the type lacks; `Host.partly` (a test's host) panics,
+naming it, when the Roc asks for it. Never a weak symbol's jump to 0 (R0):
+each `roc_chat_` export is the seam's, one per binary, and asks the host
+the call began with. Lists of records cross as flat lists of byte strings,
+one decoder each side. **After a failure the host does nothing more** for
+the call: the seam asks the host's `dead` first and answers the Roc the
+empty or failed value itself, nothing written, and the host returns the
+first failure, a 500. What the platform still lacks (streams, files,
+generated layouts) is in §7.
 
 ### 5.4 Frames: what is published is what goes out
 

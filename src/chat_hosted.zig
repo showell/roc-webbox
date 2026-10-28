@@ -10,7 +10,6 @@ const route = @import("chat_route.zig");
 pub const decide = abi.decide;
 pub const retire = abi.retire;
 pub const Host = abi.Host;
-pub const askingOnly = abi.askingOnly;
 pub const Routing = abi.Routing;
 pub const Decision = route.Decision;
 pub const Form = route.Form;
@@ -76,16 +75,18 @@ pub fn useRequest(request: std.mem.Allocator) void {
 
 const testing = std.testing;
 
-/// A host to which no one is asking.
-fn stranger() Host {
-    const S = struct {
-        fn no(_: *anyopaque) abi.Asking {
-            return .stranger;
-        }
-        var dummy: u8 = 0;
-    };
-    return askingOnly(&S.dummy, S.no);
-}
+/// A host to which no one is asking, and which answers nothing else.
+const Stranger = struct {
+    unused: u8 = 0,
+    var one: Stranger = .{};
+
+    fn host() Host {
+        return .partly(&.{Stranger}, &one);
+    }
+    pub fn identify(_: *Stranger) abi.Asking {
+        return .stranger;
+    }
+};
 
 /// A path that names nothing is the Roc's own 404 (metal-vmm QUEUE 286),
 /// its presence counted as the Zig's was.
@@ -210,7 +211,7 @@ test "the router: a topic's tails, a channel, a script before the gate, the gate
         "/c/1_2/general",
         false,
         .GET,
-        stranger(),
+        Stranger.host(),
     );
     try testing.expectEqualStrings("/chat/c/1_2/general", away.to_login);
     // **A SCRIPT BEFORE THE GATE**: served by the host to anyone, by any
@@ -250,7 +251,7 @@ const Scripted = struct {
     docs: []const []const u8 = &.{},
     body: ?[]const u8 = "",
     /// A topic's message count, or a count that failed.
-    count: abi.Count = .{ .counted = 3 },
+    message_count: abi.Count = .{ .counted = 3 },
     /// Whether a line appended to a topic's reactions is stored.
     append_line_ok: bool = true,
     /// A topic's reactions as stored (null: none), and whether a read of
@@ -282,7 +283,7 @@ const Scripted = struct {
     /// Inside an aside, and the error an append in it failed with.
     in_aside: bool = false,
     aside_failed: ?anyerror = null,
-    /// What Host.welcome_pending! answers (metal-vmm QUEUE 283); `welcome_done!`
+    /// What Host.check_welcome! answers (metal-vmm QUEUE 283); `clear_welcome!`
     /// makes it `.none`.
     welcome: route.Welcome = .none,
     /// A feed's path whose entry will not append, and its error.
@@ -305,172 +306,123 @@ const Scripted = struct {
     const File = struct { path: []const u8, read: abi.Read };
     const Channel = struct { name: []const u8, read: abi.Read };
 
-    fn host(self: *Scripted) Host {
-        return .{
-            .ctx = self,
-            .identify = identify,
-            .count_presence = presence,
-            .presence_unspent = presenceUnspent,
-            .list_accounts = accountsOf,
-            .me = meId,
-            .now = nowOf,
-            .read_body = bodyOf,
-            .publish = publish,
-            .append = appendOf,
-            .stat = statOf,
-            .read_at = readAtOf,
-            .read = readOf,
-            .write = writeOf,
-            .remove = removeOf,
-            .list = listOf,
-            .fail = failOf,
-            .fail_text = failTextOf,
-            .fail_account = failAccountOf,
-            .count = counted,
-            .aside = asideOf,
-            .check_online = onlineOf,
-            .read_header = header,
-            .check_hostile = hostile,
-            .render = render,
-            .render_preview = renderPreview,
-            .index_message = indexMessage,
-            .write_cache = writeCache,
-            .serve_file = raw,
-            .serve_rendered = links,
-            .srcs = srcs,
-            .welcome_pending = welcomeOf,
-            .welcome_done = welcomeDone,
-            .read_upload = readUpload,
-            .refuse_upload = refuseUpload,
-            .reserve_upload = reserveUpload,
-            .store_upload = storeUpload,
-            .admit = admitOf,
-            .read_query = queryOf,
-            .search_scope_add = scopeAdd,
-            .search_words = wordsOf,
-            .search_messages = messagesOf,
-        };
+    fn host(s: *Scripted) Host {
+        return .partly(&.{Scripted}, s);
     }
-    fn admitOf(ctx: *anyopaque) route.Admission {
-        say(ctx, "admit", .{});
+    pub fn admit(s: *Scripted) route.Admission {
+        say(s, "admit", .{});
         return .admitted;
     }
-    fn queryOf(ctx: *anyopaque, name: []const u8) []const []const u8 {
-        say(ctx, "query {s}", .{name});
-        const s = me(ctx);
+    pub fn read_query(s: *Scripted, name: []const u8) []const []const u8 {
+        say(s, "query {s}", .{name});
         const value = s.query orelse return &.{};
         return s.alloc.dupe([]const u8, &.{value}) catch @panic("oom");
     }
-    fn scopeAdd(ctx: *anyopaque, dir: []const u8) route.Done {
-        say(ctx, "scope {s}", .{dir});
+    pub fn search_scope_add(s: *Scripted, dir: []const u8) route.Done {
+        say(s, "scope {s}", .{dir});
         return .ok;
     }
-    fn wordsOf(ctx: *anyopaque, key: []const u8, most: u64) ?abi.Words {
-        say(ctx, "words {s} {d}", .{ key, most });
+    pub fn search_words(s: *Scripted, key: []const u8, most: u64) ?abi.Words {
+        say(s, "words {s} {d}", .{ key, most });
         return .{ .words = &.{}, .unreadable = 0 };
     }
-    fn messagesOf(ctx: *anyopaque, key: []const u8, most: u64) ?abi.Messages {
-        say(ctx, "messages {s} {d}", .{ key, most });
-        const s = me(ctx);
+    pub fn search_messages(s: *Scripted, key: []const u8, most: u64) ?abi.Messages {
+        say(s, "messages {s} {d}", .{ key, most });
         return .{ .hits = s.hits, .matched = s.hits.len, .unreadable = 0 };
     }
-    fn readUpload(ctx: *anyopaque) abi.UploadRead {
-        say(ctx, "read_upload", .{});
-        return me(ctx).upload;
+    pub fn read_upload(s: *Scripted) abi.UploadRead {
+        say(s, "read_upload", .{});
+        return s.upload;
     }
-    fn refuseUpload(ctx: *anyopaque, why: route.UploadRefusal, message: []const u8) void {
-        say(ctx, "refuse_upload {t} {s}", .{ why, message });
+    pub fn refuse_upload(s: *Scripted, why: route.UploadRefusal, message: []const u8) void {
+        say(s, "refuse_upload {t} {s}", .{ why, message });
     }
-    fn reserveUpload(ctx: *anyopaque, size: u64) route.Reservation {
-        say(ctx, "reserve_upload {d}", .{size});
-        return me(ctx).reservation;
+    pub fn reserve_upload(s: *Scripted, size: u64) route.Reservation {
+        say(s, "reserve_upload {d}", .{size});
+        return s.reservation;
     }
-    fn storeUpload(ctx: *anyopaque, folder: []const u8, ext: []const u8) abi.Stored {
-        say(ctx, "store_upload {s} {s}", .{ folder, ext });
+    pub fn store_upload(s: *Scripted, folder: []const u8, ext: []const u8) abi.Stored {
+        say(s, "store_upload {s} {s}", .{ folder, ext });
         return .{ .stored = "0123.png" };
     }
-    fn welcomeOf(ctx: *anyopaque) route.Welcome {
+    pub fn check_welcome(s: *Scripted) route.Welcome {
         say(
-            ctx,
+            s,
             "welcome?",
             .{},
         );
-        return me(ctx).welcome;
+        return s.welcome;
     }
-    fn welcomeDone(ctx: *anyopaque) route.Done {
+    pub fn clear_welcome(s: *Scripted) route.Done {
         say(
-            ctx,
+            s,
             "welcome done",
             .{},
         );
-        me(ctx).welcome = .none;
+        s.welcome = .none;
         return .ok;
     }
-    fn me(ctx: *anyopaque) *Scripted {
-        return @ptrCast(@alignCast(ctx));
-    }
     fn say(
-        ctx: *anyopaque,
+        s: *Scripted,
         comptime fmt: []const u8,
         args: anytype,
     ) void {
-        const s = me(ctx);
         s.asked.print(
             s.alloc,
             fmt ++ ";",
             args,
         ) catch @panic("oom");
     }
-    fn identify(ctx: *anyopaque) abi.Asking {
+    pub fn identify(s: *Scripted) abi.Asking {
         say(
-            ctx,
+            s,
             "identify",
             .{},
         );
-        return me(ctx).asking;
+        return s.asking;
     }
-    fn presence(ctx: *anyopaque) route.PresenceEdge {
+    pub fn count_presence(s: *Scripted) route.PresenceEdge {
         say(
-            ctx,
+            s,
             "presence",
             .{},
         );
-        return me(ctx).edge;
+        return s.edge;
     }
-    fn presenceUnspent(ctx: *anyopaque) void {
+    pub fn presence_unspent(s: *Scripted) void {
         say(
-            ctx,
+            s,
             "presence unspent",
             .{},
         );
     }
-    fn meId(_: *anyopaque) []const u8 {
+    pub fn read_uid(_: *Scripted) []const u8 {
         return "1";
     }
-    fn accountsOf(ctx: *anyopaque) abi.Accounts {
+    pub fn list_accounts(s: *Scripted) abi.Accounts {
         say(
-            ctx,
+            s,
             "accounts",
             .{},
         );
-        return .{ .found = me(ctx).accounts orelse return .failed };
+        return .{ .found = s.accounts orelse return .failed };
     }
-    fn bodyOf(ctx: *anyopaque, _: route.Form) ?[]const u8 {
+    pub fn read_body(s: *Scripted, _: route.Form) ?[]const u8 {
         say(
-            ctx,
+            s,
             "body",
             .{},
         );
-        return me(ctx).body;
+        return s.body;
     }
     /// The key and the bytes exactly, escaped, so a frame's every byte shows.
-    fn publish(
-        ctx: *anyopaque,
+    pub fn publish(
+        s: *Scripted,
         key: []const u8,
         bytes: []const u8,
     ) void {
         say(
-            ctx,
+            s,
             "publish {s} {f}",
             .{ key, std.zig.fmtString(bytes) },
         );
@@ -480,17 +432,16 @@ const Scripted = struct {
     /// block but where `store_ok` is not or its topic is `store_fails_for`,
     /// and is `transcript_before` bytes before it; a feed takes an entry
     /// but at `entry_fails`'s path, whose error is its aside's.
-    fn appendOf(
-        ctx: *anyopaque,
+    pub fn append(
+        s: *Scripted,
         path: []const u8,
         bytes: []const u8,
     ) abi.Appended {
         say(
-            ctx,
+            s,
             "append {s} {f}",
             .{ path, std.zig.fmtString(bytes) },
         );
-        const s = me(ctx);
         if (std.mem.endsWith(u8, path, ".reactions.jsonl")) {
             return if (s.append_line_ok) .{ .appended = 7 + bytes.len } else .failed;
         }
@@ -514,17 +465,17 @@ const Scripted = struct {
         return .{ .appended = 7 + bytes.len };
     }
     /// A transcript (`<dir>/sessions/<topic>.md`) is 7 bytes, but where
-    /// `count` failed (its stat fails); its sidecar says
-    /// `count` at 7, so it is believed. A topic's reactions are `sidecar`.
+    /// `message_count` failed (its stat fails); its sidecar says
+    /// `message_count` at 7, so it is believed. A topic's reactions are `sidecar`.
     /// Any other path is not there.
-    fn statOf(ctx: *anyopaque, path: []const u8) abi.Stat {
+    pub fn read_stat(s: *Scripted, path: []const u8) abi.Stat {
         say(
-            ctx,
+            s,
             "stat {s}",
             .{path},
         );
         if (std.mem.endsWith(u8, path, ".reactions.jsonl")) {
-            const bytes = me(ctx).sidecar orelse return .missing;
+            const bytes = s.sidecar orelse return .missing;
             return .{ .found = .{ .size = bytes.len, .mtime = 1761400000 } };
         }
         if (!std.mem.endsWith(
@@ -532,24 +483,23 @@ const Scripted = struct {
             path,
             ".md",
         )) return .missing;
-        return switch (me(ctx).count) {
+        return switch (s.message_count) {
             .counted => .{ .found = .{ .size = 7, .mtime = 1761400000 } },
             .failed => .failed,
         };
     }
-    fn readAtOf(
-        ctx: *anyopaque,
+    pub fn read_at(
+        s: *Scripted,
         path: []const u8,
         offset: u64,
         max: u64,
     ) abi.Read {
         say(
-            ctx,
+            s,
             "read_at {s}",
             .{path},
         );
         if (std.mem.endsWith(u8, path, ".reactions.jsonl")) {
-            const s = me(ctx);
             const bytes = s.sidecar orelse return .missing;
             if (s.sidecar_unread) return .failed;
             const from: usize = @intCast(@min(offset, bytes.len));
@@ -560,25 +510,24 @@ const Scripted = struct {
             path,
             ".count",
         )) return .missing;
-        return switch (me(ctx).count) {
+        return switch (s.message_count) {
             .counted => |n| .{ .found = std.fmt.allocPrint(
-                me(ctx).alloc,
+                s.alloc,
                 "{d} 7\n",
                 .{n},
             ) catch @panic("oom") },
             .failed => .missing,
         };
     }
-    fn nowOf(_: *anyopaque) i64 {
+    pub fn read_time(_: *Scripted) i64 {
         return 1761400000;
     }
-    fn readOf(ctx: *anyopaque, path: []const u8) abi.Read {
+    pub fn read(s: *Scripted, path: []const u8) abi.Read {
         say(
-            ctx,
+            s,
             "read {s}",
             .{path},
         );
-        const s = me(ctx);
         for (s.files) |f| if (std.mem.eql(
             u8,
             f.path,
@@ -598,13 +547,12 @@ const Scripted = struct {
         }
         return .missing;
     }
-    fn listOf(ctx: *anyopaque, path: []const u8) abi.Listing {
+    pub fn list(s: *Scripted, path: []const u8) abi.Listing {
         say(
-            ctx,
+            s,
             "list {s}",
             .{path},
         );
-        const s = me(ctx);
         var out: std.ArrayList(abi.Entry) = .empty;
         if (std.mem.eql(
             u8,
@@ -639,16 +587,15 @@ const Scripted = struct {
         } else return .missing;
         return .{ .found = out.items };
     }
-    fn counted(ctx: *anyopaque, kind: route.CountKind, text: []const u8) void {
-        say(ctx, "count {t} {s}", .{ kind, text });
+    pub fn count(s: *Scripted, kind: route.CountKind, text: []const u8) void {
+        say(s, "count {t} {s}", .{ kind, text });
     }
-    fn asideOf(ctx: *anyopaque, which: route.Aside) abi.AsideOutcome {
+    pub fn mark_aside(s: *Scripted, which: route.Aside) abi.AsideOutcome {
         say(
-            ctx,
+            s,
             "aside {t}",
             .{which},
         );
-        const s = me(ctx);
         switch (which) {
             .begin => s.in_aside = true,
             .end => {
@@ -660,117 +607,116 @@ const Scripted = struct {
         }
         return .done;
     }
-    fn writeOf(
-        ctx: *anyopaque,
+    pub fn write(
+        s: *Scripted,
         path: []const u8,
         bytes: []const u8,
     ) route.Done {
         say(
-            ctx,
+            s,
             "write {s} {s}",
             .{ path, bytes },
         );
-        return if (me(ctx).write_ok) .ok else .failed;
+        return if (s.write_ok) .ok else .failed;
     }
-    fn removeOf(ctx: *anyopaque, path: []const u8) route.Done {
+    pub fn remove(s: *Scripted, path: []const u8) route.Done {
         say(
-            ctx,
+            s,
             "remove {s}",
             .{path},
         );
-        return if (me(ctx).write_ok) .ok else .failed;
+        return if (s.write_ok) .ok else .failed;
     }
-    fn failOf(ctx: *anyopaque, e: anyerror) void {
+    pub fn fail(s: *Scripted, e: anyerror) void {
         say(
-            ctx,
+            s,
             "fail {t}",
             .{e},
         );
     }
-    fn failTextOf(ctx: *anyopaque, path: []const u8) void {
+    pub fn fail_text(s: *Scripted, path: []const u8) void {
         say(
-            ctx,
+            s,
             "fail not_utf8 {s}",
             .{path},
         );
     }
-    fn failAccountOf(
-        ctx: *anyopaque,
+    pub fn fail_account(
+        s: *Scripted,
         which: abi.AccountRead,
         id: []const u8,
     ) void {
         say(
-            ctx,
+            s,
             "fail {t} {s}",
             .{ which, id },
         );
     }
     /// Asked id by id by the seam, for the Roc's one asking.
-    fn onlineOf(ctx: *anyopaque, id: []const u8) route.Presence {
+    pub fn check_online(s: *Scripted, id: []const u8) route.Presence {
         say(
-            ctx,
+            s,
             "online {s}",
             .{id},
         );
-        for (me(ctx).online_ids) |o| if (std.mem.eql(
+        for (s.online_ids) |o| if (std.mem.eql(
             u8,
             o,
             id,
         )) return .online;
         return .offline;
     }
-    fn header(ctx: *anyopaque, header_name: []const u8) []const []const u8 {
+    pub fn read_header(s: *Scripted, header_name: []const u8) []const []const u8 {
         say(
-            ctx,
+            s,
             "header {s}",
             .{header_name},
         );
-        return if (me(ctx).is_async) &.{"1"} else &.{};
+        return if (s.is_async) &.{"1"} else &.{};
     }
-    fn hostile(
-        ctx: *anyopaque,
+    pub fn check_hostile(
+        s: *Scripted,
         markdown: []const u8,
         refusal: []const u8,
     ) route.Hostility {
         say(
-            ctx,
+            s,
             "hostile {s}",
             .{markdown},
         );
-        me(ctx).refusal = refusal;
-        return me(ctx).hostile_answer;
+        s.refusal = refusal;
+        return s.hostile_answer;
     }
-    fn raw(ctx: *anyopaque, path: []const u8) route.Serving {
+    pub fn serve_file(s: *Scripted, path: []const u8) route.Serving {
         say(
-            ctx,
+            s,
             "raw {s}",
             .{path},
         );
-        return if (me(ctx).transcript) .serving else .not_serving;
+        return if (s.transcript) .serving else .not_serving;
     }
-    fn links(ctx: *anyopaque, path: []const u8) route.Serving {
+    pub fn serve_rendered(s: *Scripted, path: []const u8) route.Serving {
         say(
-            ctx,
+            s,
             "links {s}",
             .{path},
         );
-        return if (me(ctx).linked) .serving else .not_serving;
+        return if (s.linked) .serving else .not_serving;
     }
-    fn srcs(ctx: *anyopaque) []const abi.Src {
+    pub fn list_srcs(s: *Scripted) []const abi.Src {
         say(
-            ctx,
+            s,
             "srcs",
             .{},
         );
         return &abi.test_srcs;
     }
-    fn renderPreview(ctx: *anyopaque, markdown: []const u8) abi.Rendered {
+    pub fn render_preview(s: *Scripted, markdown: []const u8) abi.Rendered {
         say(
-            ctx,
+            s,
             "preview {s}",
             .{markdown},
         );
-        const s = me(ctx);
         if (!s.render_ok) return .failed;
         return .{ .rendered = std.fmt.allocPrint(
             s.alloc,
@@ -778,13 +724,12 @@ const Scripted = struct {
             .{markdown},
         ) catch @panic("oom") };
     }
-    fn render(ctx: *anyopaque, markdown: []const u8) abi.Rendered {
+    pub fn render(s: *Scripted, markdown: []const u8) abi.Rendered {
         say(
-            ctx,
+            s,
             "render {s}",
             .{markdown},
         );
-        const s = me(ctx);
         if (!s.render_ok) return .failed;
         return .{ .rendered = std.fmt.allocPrint(
             s.alloc,
@@ -794,14 +739,14 @@ const Scripted = struct {
     }
     /// Every field of the message in Chat.Message's order, so a record laid
     /// out wrong across the seam shows.
-    fn indexMessage(
-        ctx: *anyopaque,
+    pub fn index_message(
+        s: *Scripted,
         dir: []const u8,
         sid: []const u8,
         m: abi.Message,
     ) void {
         say(
-            ctx,
+            s,
             "index {s} {s} {s}|{s}|{s}|{s}|{s}",
             .{
                 dir,
@@ -814,9 +759,9 @@ const Scripted = struct {
             },
         );
     }
-    fn writeCache(ctx: *anyopaque, path: []const u8, bytes: []const u8) void {
+    pub fn write_cache(s: *Scripted, path: []const u8, bytes: []const u8) void {
         say(
-            ctx,
+            s,
             "cache {s} {f}",
             .{
                 path,
@@ -983,7 +928,7 @@ test "a topic's reactions, react, pin and unpin are the Roc's: presence, the con
     try expectAct("/ops/Plans/react", true, .POST, blk: {
         var s = a;
         s.body = "msg=1&emoji=%F0%9F%91%8D";
-        s.count = .{ .counted = 0 };
+        s.message_count = .{ .counted = 0 };
         break :blk s;
     }, .{ .respond = .{
         .status = 400,
@@ -993,7 +938,7 @@ test "a topic's reactions, react, pin and unpin are the Roc's: presence, the con
     try expectAct("/c/1_2/Plans/react", false, .POST, blk: {
         var s = a;
         s.body = thumbs;
-        s.count = .failed;
+        s.message_count = .failed;
         break :blk s;
     }, .answered, dm_topic ++ "body;stat 1_2/sessions/Plans.md;");
     // **A TORN LINE STAYS ITS OWN LINE**: a sidecar whose last byte is no
@@ -1867,7 +1812,7 @@ test "a message is the Roc's: no author, no message; the count, the id, the stam
     // A count that failed: nothing rendered, stored or sent.
     try expectAct("/c/1_2/Plans/send", false, .POST, blk: {
         var s = a;
-        s.count = .failed;
+        s.message_count = .failed;
         break :blk s;
     }, .answered, before ++ "stat 1_2/sessions/Plans.md;");
     // **THE FRAME IS MADE BEFORE THE STORE**: a render that failed stores nothing.
@@ -1888,7 +1833,7 @@ test "a message is the Roc's: no author, no message; the count, the id, the stam
     defer arena.deinit();
     var first = a;
     first.alloc = arena.allocator();
-    first.count = .{ .counted = 0 };
+    first.message_count = .{ .counted = 0 };
     first.body = "markdown=one";
     _ = try decide(
         arena.allocator(),
@@ -1943,7 +1888,7 @@ test "the fan-out is the Roc's: every member in order, each member's notify (nev
     var s: Scripted = .{
         .alloc = arena.allocator(),
         .body = "markdown=<img%20a%0Ab>%20<IMG%09src=/x.png%20onerror=c>%0A```zig%0Ax%0A```%0A```%0Ay%0A```",
-        .count = .{ .counted = 0 },
+        .message_count = .{ .counted = 0 },
     };
     s.entry_fails = .{ .path = "users/2/images.md", .e = error.IsDir };
     const got = try decide(
@@ -2561,9 +2506,9 @@ test "a conversation's topics are the Roc's: its sessions folder listed, a folde
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const S = struct {
-        fn list(ctx: *anyopaque, path: []const u8) abi.Listing {
+        pub fn list(s: *Scripted, path: []const u8) abi.Listing {
             Scripted.say(
-                ctx,
+                s,
                 "list {s}",
                 .{path},
             );
@@ -2576,8 +2521,7 @@ test "a conversation's topics are the Roc's: its sessions folder listed, a folde
         }
     };
     var s: Scripted = .{ .alloc = arena.allocator() };
-    var h = s.host();
-    h.list = S.list;
+    const h: Host = .partly(&.{ S, Scripted }, &s);
     // The landing goes to the first by bytes: a link counts, a folder not.
     const got = try decide(
         arena.allocator(),
