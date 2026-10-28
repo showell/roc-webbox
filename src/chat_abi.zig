@@ -149,6 +149,8 @@ pub const Entry = struct { name: []const u8, kind: route_mod.EntryKind };
 pub const Listing = union(route_mod.ReadStatus) { failed, found: []const Entry, missing };
 /// One word search_words! answers: the word, and how many messages hold it.
 pub const Word = struct { word: []const u8, count: u64 };
+/// search_words!'s answer, where there is an index.
+pub const Words = struct { words: []const Word, unreadable: u64 };
 /// A file's size in bytes and its last change in whole seconds since the
 /// epoch, as stat! answers them.
 pub const Stat = union(route_mod.ReadStatus) { failed, found: struct { size: u64, mtime: i64 }, missing };
@@ -299,6 +301,13 @@ pub const Host = struct {
     /// whether `id` was seen within the presence window of the request's
     /// time. A read of process-lifetime state; it cannot fail.
     check_online: *const fn (ctx: *anyopaque, id: []const u8) route_mod.Presence = noOnline,
+    /// Host.admit!: whether the member may search now.
+    admit: *const fn (ctx: *anyopaque) route_mod.Admission = noAdmit,
+    /// Host.read_query!: the query field's value, as written, or none.
+    read_query: *const fn (ctx: *anyopaque, name: []const u8) []const []const u8 = noQuery,
+    /// Host.search_words!: the words beginning `key`, at most `most`; null
+    /// when there is no index.
+    search_words: *const fn (ctx: *anyopaque, key: []const u8, most: u64) ?Words = noWords,
     /// Host.srcs!: where a page names each script, by its name.
     srcs: *const fn (ctx: *anyopaque) []const Src = noSrcs,
     /// Host.me!: the member's id.
@@ -412,6 +421,15 @@ fn noFanoutFailed(_: *anyopaque, _: route_mod.Surface, _: []const u8, _: []const
     @panic("report_fanout_failure asked of a host that does not answer it");
 }
 
+fn noAdmit(_: *anyopaque) route_mod.Admission {
+    @panic("admit asked of a host that does not answer it");
+}
+fn noQuery(_: *anyopaque, _: []const u8) []const []const u8 {
+    @panic("read_query asked of a host that does not answer it");
+}
+fn noWords(_: *anyopaque, _: []const u8, _: u64) ?Words {
+    @panic("search_words asked of a host that does not answer it");
+}
 fn noOnline(_: *anyopaque, _: []const u8) route_mod.Presence {
     @panic("check_online asked of a host that does not answer it");
 }
@@ -457,6 +475,10 @@ pub const Routing = struct {
         h.serve_rendered = holdsNone;
         // An aside (the welcome on /chat) that meets no host account does nothing.
         h.aside = asideDone;
+        // Search's words (metal-vmm QUEUE 281) meet an index with none.
+        h.admit = admitted;
+        h.read_query = noQueryField;
+        h.search_words = noWordsHeld;
         return h;
     }
     fn of(ctx: *anyopaque) *Routing {
@@ -483,6 +505,15 @@ pub const Routing = struct {
     }
     fn asideDone(_: *anyopaque, _: route_mod.Aside) route_mod.AsideEnd {
         return .done;
+    }
+    fn admitted(_: *anyopaque) route_mod.Admission {
+        return .admitted;
+    }
+    fn noQueryField(_: *anyopaque, _: []const u8) []const []const u8 {
+        return &.{};
+    }
+    fn noWordsHeld(_: *anyopaque, _: []const u8, _: u64) ?Words {
+        return .{ .words = &.{}, .unreadable = 0 };
     }
     fn noFolder(_: *anyopaque, _: []const u8) Listing {
         return .missing;
@@ -657,6 +688,22 @@ export fn roc_chat_aside(which: route_mod.Aside) callconv(.c) route_mod.AsideEnd
 /// **ONE FLAG FOR EACH ID, IN ITS PLACE**: the Roc asks once for the whole
 /// roster, and the seam asks the host id by id, so the answer is exactly as
 /// long as the ids and never out of their order.
+export fn roc_chat_admit() callconv(.c) route_mod.Admission {
+    const h = current("admit");
+    return h.admit(h.ctx);
+}
+
+export fn roc_chat_read_query(name: RocBytes) callconv(.c) roc.RocBytesList {
+    const h = current("read_query");
+    return .from(h.read_query(h.ctx, name.slice()));
+}
+
+export fn roc_chat_search_words(key: RocBytes, most: u64) callconv(.c) WordsRec {
+    const h = current("search_words");
+    const found = h.search_words(h.ctx, key.slice(), most) orelse return .{ .unreadable = 0, .words = .from(&.{}), .status = .not_ready };
+    return .{ .unreadable = found.unreadable, .words = .from(found.words), .status = .ready };
+}
+
 export fn roc_chat_check_online(ids: roc.RocBytesList) callconv(.c) PresenceList {
     const h = current("check_online");
     const items = ids.slice();

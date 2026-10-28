@@ -52,6 +52,7 @@ import Saved
 import JsonOut
 import Limits
 import BusKey
+import Search
 
 handle! : Chat.Request => Chat.Answer
 handle! = |req|
@@ -121,6 +122,8 @@ served_by = |r|
 		Dm | Channel => Roc
 		# A doc posted to chat (metal-vmm QUEUE 278); the rest of docs is Zig's.
 		Docs => if r.rest == "/post" Roc else Zig
+		# Search's words (metal-vmm QUEUE 281); its messages are Zig's.
+		Search => if r.rest == "/words" Roc else Zig
 		_ => Zig
 	}
 
@@ -139,6 +142,7 @@ act! = |req, route| {
 		Links => serve_links!(route.rest.to_utf8())
 		Recent => serve_recent!(route.rest.to_utf8())
 		Docs => post_doc!(req)
+		Search => search_words!(req)
 		Images => serve_feed!(Images, route.rest.to_utf8())
 		Code => serve_feed!(Code, route.rest.to_utf8())
 		_ => serve_conversation!(req, route)
@@ -1273,6 +1277,31 @@ store! = |at, conv, who, send, { markdown: md, cid }|
 				} else {
 					Chat.redirect(List.concat(conv.base, "/${at.topic}".to_utf8()))
 				}
+		}
+	}
+
+## **SEARCH'S WORDS** (GET /chat/search/words, chat_search.zig `handle` as it
+## was, metal-vmm QUEUE 281): the method, the rate limit (the host's), the
+## typed `prefix` decoded (a bad escape is the site's 400) and made a key,
+## then the words the index holds that begin it, of what the member can see
+## (the host's); none for an empty key. 503 with no index.
+search_words! : Chat.Request => Chat.Answer
+search_words! = |req|
+	if req.method != Get {
+		Chat.not_allowed(Get)
+	} else if Host.admit!({}) == Refused {
+		Chat.respond(429, json, Str.to_utf8("{\"error\":\"too many searches; wait a second\"}"))
+	} else {
+		match Form.value(List.first(Host.read_query!(Str.to_utf8("prefix"))) ?? []) {
+			Err(BadEscape) => Chat.malformed
+			Ok(typed) => {
+				key = Search.key(typed)
+				got = Host.search_words!(key, if key == [] 0 else Search.most_words)
+				match got.status {
+					Ready => Chat.respond(200, json, Search.words_json(key, got.unreadable, got.words))
+					NotReady => Chat.respond(503, json, Str.to_utf8("{\"error\":\"search is not ready\"}"))
+				}
+			}
 		}
 	}
 

@@ -10,6 +10,11 @@ import Bytes
 Form := [].{
 	Field : [Found(Str), Missing, Malformed]
 
+	## A query's or a form's value, as written, decoded (formDecode: `+` a
+	## space, `%XX` a byte), or `BadEscape`.
+	value : List(U8) -> Try(List(U8), [BadEscape])
+	value = |raw| decode(raw)
+
 	## formField: the value of field `name`. A pair with no `=` is passed
 	## over.
 	field : List(U8), Str -> Field

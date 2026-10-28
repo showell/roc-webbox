@@ -128,6 +128,21 @@ Host := [].{
 	## fail; an id never seen is `Offline`.
 	check_online! : List(List(U8)) => List([Offline, Online])
 
+	## **SEARCH'S RATE LIMIT** (angry-gopher chat_search.zig `admit`): whether
+	## the member may search now, a few times a second; `Refused` past it.
+	admit! : {} => [Admitted, Refused]
+
+	## The value of the request's query field `name`, as written (not
+	## decoded), the first of them; none when there is no such field.
+	read_query! : List(U8) => List(List(U8))
+
+	## **SEARCH'S INDEX, ASKED** (angry-gopher search_index.zig `wordsFor`):
+	## the words beginning `key` (already a key: trimmed and folded) that
+	## the member can see, each with how many messages hold it, the most
+	## held first, at most `most`; and how many of their transcripts the
+	## index could not read. `NotReady` when there is no index to ask.
+	search_words! : List(U8), U64 => { status : [NotReady, Ready], unreadable : U64, words : List({ count : U64, word : List(U8) }) }
+
 	## Where a page names each script, by its name (a src's hash is of bytes
 	## the host holds).
 	srcs! : {} => List({ name : List(U8), src : List(U8) })

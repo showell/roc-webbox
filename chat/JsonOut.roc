@@ -11,6 +11,12 @@ JsonOut :: List(U8).{
 	string : Str -> JsonOut
 	string = |s| JsonOut.(ZigText.json_string(s))
 
+	## Bytes as a string, as chat_search.zig's `str` writes them: each byte
+	## that does not begin a whole UTF-8 sequence is U+FFFD (a word the
+	## index read from a transcript, a key typed as `%FF`).
+	lossy : List(U8) -> JsonOut
+	lossy = |b| string(whole_or_replaced(b, 0, ""))
+
 	## A whole number, in decimal.
 	number : U64 -> JsonOut
 	number = |n| JsonOut.(Str.to_utf8(U64.to_str(n)))
@@ -37,6 +43,36 @@ JsonOut :: List(U8).{
 	bytes = |JsonOut.(b)| b
 }
 
+whole_or_replaced : List(U8), U64, Str -> Str
+whole_or_replaced = |b, i, out|
+	match List.get(b, i) {
+		Err(_) => out
+		Ok(c) => {
+			n = sequence_length(c)
+			whole = if n > 0 and i + n <= List.len(b) Str.from_utf8(List.sublist(b, { start: i, len: n })) else Err(Short)
+			match whole {
+				Ok(text) => whole_or_replaced(b, i + n, Str.concat(out, text))
+				Err(_) => whole_or_replaced(b, i + 1, Str.concat(out, "\u(fffd)"))
+			}
+		}
+	}
+
+## std.unicode.utf8ByteSequenceLength: from a sequence's first byte, or 0
+## for a byte no sequence begins with.
+sequence_length : U8 -> U64
+sequence_length = |c|
+	if c < 0x80 {
+		1
+	} else if c >= 0xC0 and c < 0xE0 {
+		2
+	} else if c >= 0xE0 and c < 0xF0 {
+		3
+	} else if c >= 0xF0 and c < 0xF8 {
+		4
+	} else {
+		0
+	}
+
 comma : List(List(U8)) -> List(U8)
 comma = |items| List.join(List.intersperse(items, [',']))
 
@@ -44,3 +80,5 @@ expect JsonOut.object([("a", JsonOut.number(1)), ("b", JsonOut.array([JsonOut.st
 expect JsonOut.object([]).bytes() == Str.to_utf8("{}")
 expect JsonOut.array([]).bytes() == Str.to_utf8("[]")
 expect JsonOut.signed(-3).bytes() == Str.to_utf8("-3")
+# lossy: a torn sequence is one U+FFFD a byte; a whole one passes.
+expect JsonOut.lossy([0x6C, 0x61, 0xFF, 0xE2, 0x82]).bytes() == Str.to_utf8("\"la\u(fffd)\u(fffd)\u(fffd)\"") and JsonOut.lossy(Str.to_utf8("caf\u(e9)")).bytes() == Str.to_utf8("\"caf\u(e9)\"")

@@ -12,6 +12,7 @@ platform ""
 	packages {}
 	provides { "roc_chat_handle": handle_for_host! }
 	hosted {
+		"roc_chat_admit": Host.admit!,
 		"roc_chat_append_entry": Host.append_entry!,
 		"roc_chat_append_line": Host.append_line!,
 		"roc_chat_aside": Host.aside!,
@@ -31,9 +32,11 @@ platform ""
 		"roc_chat_read_at": Host.read_at!,
 		"roc_chat_read_body": Host.read_body!,
 		"roc_chat_read_header": Host.read_header!,
+		"roc_chat_read_query": Host.read_query!,
 		"roc_chat_remove": Host.remove!,
 		"roc_chat_render": Host.render!,
 		"roc_chat_report_fanout_failure": Host.report_fanout_failure!,
+		"roc_chat_search_words": Host.search_words!,
 		"roc_chat_serve_file": Host.serve_file!,
 		"roc_chat_serve_rendered": Host.serve_rendered!,
 		"roc_chat_srcs": Host.srcs!,
