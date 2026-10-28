@@ -1067,7 +1067,7 @@ serve_download! = |
 	}
 
 ## The bundle's files, each with its name in the tar: the transcript,
-## the reactions when there, then the uploads in the folder's order.
+## the reactions when there, then the uploads by name.
 bundle_files! : Paths.TopicAt,
 Paths.ChatPath => Try(
 	List({ name : Str, path : Paths.ChatPath }),
@@ -1084,11 +1084,18 @@ bundle_files! = |at, md| {
 	uploads = match Files.list!(Paths.uploads_folder(at)) {
 		Ok(listed) =>
 			Ok(
-				List.keep_if(listed.entries, |e| e.kind != Dir)
+				# **BY NAME, NOT THE DISK'S ORDER**: a folder's order is its
+				# filesystem's, and the tar must not be.
+				Paths.sort_by_bytes(
+					List.map(
+						List.keep_if(listed.entries, |e| e.kind != Dir),
+						|e| e.name,
+					),
+				)
 					|> List.map(
-						|e| {
-							name: "${sid}/uploads/${e.name}",
-							path: Paths.upload_path(at, e.name),
+						|name| {
+							name: "${sid}/uploads/${name}",
+							path: Paths.upload_path(at, name),
 						},
 					),
 			)
