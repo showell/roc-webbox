@@ -122,6 +122,16 @@ pub fn build(b: *std.Build) void {
     });
     chat_test.addObjectFile(chat_roc);
     tests.dependOn(&b.addRunArtifact(b.addTest(.{ .root_module = chat_test })).step);
+    // roc glue's layout of one seam record held to the hand-laid one
+    // (metal-vmm QUEUE 280), the chat's Roc linked for the seam's exports.
+    const glue_test = b.createModule(.{
+        .root_source_file = b.path("src/chat_glue_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = imports,
+    });
+    glue_test.addObjectFile(chat_roc);
+    tests.dependOn(&b.addRunArtifact(b.addTest(.{ .root_module = glue_test })).step);
     // A Roc crash through the chat's seam: the planted crash (chat/test/
     // crash.roc) linked in place of the router, for the tests alone.
     const crash_test = b.createModule(.{
