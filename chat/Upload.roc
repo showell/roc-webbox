@@ -215,7 +215,13 @@ Upload := [].{
 }
 
 ## The allowance spent on the file, then the file stored and its answer.
-keep! : { size : U64, ext : List(U8), filename : List(U8), status : _ }, { kind : Str, at : Paths.TopicAt } => Chat.Answer
+keep! : {
+	size : U64,
+	ext : List(U8),
+	filename : List(U8),
+	status : _,
+},
+{ kind : Str, at : Paths.TopicAt } => Chat.Answer
 keep! = |form, { kind, at }|
 	match Host.reserve_upload!(form.size) {
 		Failed => Chat.answered

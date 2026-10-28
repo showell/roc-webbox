@@ -5,6 +5,7 @@
 ## ones. Pure; angry-gopher's chat_twin_test.zig holds each to its Zig.
 import JsonOut
 import Bytes
+import Fence
 import ZigText
 import ChatUrl
 import SafeImg
@@ -53,7 +54,7 @@ Feeds := [].{
 			blocks_of(text.to_utf8()),
 			[],
 			|out, block| {
-				(line, body) = match find_byte(
+				(line, body) = match Bytes.find_byte(
 					block,
 					'\n',
 					0,
@@ -90,61 +91,6 @@ Feeds := [].{
 	img_tags : Str -> List(Str)
 	img_tags = |s| tags_in(s.to_utf8())
 
-	## **A BYTE'S NEXT PLACE, REMEMBERED** (metal-vmm QUEUE 268): what one
-	## search found (`At`), or that there is none (`Never`), answers every
-	## later search from a place at or before it, so a scan that searches
-	## from each of many openers (`<img ` after `<img `, `![` after `![`)
-	## costs one pass of a message, not one per opener. `from` must not go
-	## back between calls that share one.
-	Seen : [
-		Unknown,
-		At(U64),
-		Never,
-	]
-
-	find_seen : List(U8), U8, U64, Seen -> (Try(U64, [NotFound]), Seen)
-	find_seen = |
-		s,
-		b,
-		from,
-		seen,
-	|
-		match seen {
-			At(k) if k >= from => (Ok(k), seen)
-			Never => (Err(NotFound), Never)
-			_ =>
-				match find_byte(
-					s,
-					b,
-					from,
-				) {
-					Ok(k) => (Ok(k), At(k))
-					Err(NotFound) => (Err(NotFound), Never)
-				}
-		}
-
-	find_byte : List(U8), U8, U64 -> Try(U64, [NotFound])
-	find_byte = |
-		s,
-		b,
-		i,
-	| match List.get(s, i) {
-		Ok(c) => if c == b Ok(i) else find_byte(
-			s,
-			b,
-			i + 1,
-		)
-		Err(_) => Err(NotFound)
-	}
-
-	lower : List(U8) -> List(U8)
-	lower = |s| List.map(s, |c| if c >= 'A' and c <= 'Z' c - 'A' + 'a' else c)
-
-	## A space, tab, newline, CR, form feed (12) or vertical tab (11): Roc's
-	## character literals have no escape for the last two.
-	is_space : U8 -> Bool
-	is_space = |c| c == ' ' or c == '\t' or c == '\n' or c == '\r' or c == 12 or c == 11
-
 	## code_store `parseCodeFile`: every block with a header line and a body
 	## holding at least one fence that is not a quote.
 	code : Str -> List((Header, List(Block)))
@@ -153,7 +99,7 @@ Feeds := [].{
 			blocks_of(text.to_utf8()),
 			[],
 			|out, block|
-				match find_byte(
+				match Bytes.find_byte(
 					block,
 					'\n',
 					0,
@@ -181,114 +127,6 @@ Feeds := [].{
 	## lines skipped.
 	code_blocks : Str -> List(Block)
 	code_blocks = |body| blocks_in(body.to_utf8())
-
-	close_at : List(List(U8)), U8, U64, U64 -> U64
-	close_at = |
-		ls,
-		char,
-		count,
-		j,
-	| match List.get(ls, j) {
-		Err(_) => j
-		Ok(line) => if is_close(
-			line,
-			char,
-			count,
-		) j else close_at(
-			ls,
-			char,
-			count,
-			j + 1,
-		)
-	}
-
-	## markdown_fence `parseOpen`: up to three spaces, 3 to 10 of '`' or '~',
-	## and an info string whose first word is the language (no '`' in a
-	## backtick fence's).
-	fence_open : List(U8) -> Try(
-		{
-			char : U8,
-			count : U64,
-			lang : List(U8),
-		},
-		[NotAFence],
-	)
-	fence_open = |line| {
-		indent = smaller(
-			Bytes.leading(
-				line,
-				' ',
-				0,
-			),
-			4,
-		)
-		match List.get(line, indent) {
-			Err(_) => Err(NotAFence)
-			Ok(f) =>
-				if indent >= 4 or (f != '`' and f != '~') {
-					Err(NotAFence)
-				} else {
-					count = Bytes.leading(
-						List.drop_first(line, indent),
-						f,
-						0,
-					)
-					info = trim_info(List.drop_first(line, indent + count))
-					if count < 3 or count > 10 or (f == '`' and List.contains(info, '`')) {
-						Err(NotAFence)
-					} else {
-						lang = List.take_first(
-							info,
-							count_while(
-								info,
-								|c| c != ' ' and c != '\t',
-								0,
-							),
-						)
-						Ok({
-							char: f,
-							count,
-							lang,
-						})
-					}
-				}
-		}
-	}
-
-	## How many bytes from `i` on keep `keep`.
-	count_while : List(U8), (U8 -> Bool), U64 -> U64
-	count_while = |
-		s,
-		keep,
-		i,
-	| match List.get(s, i) {
-		Ok(c) if keep(c) => count_while(
-			s,
-			keep,
-			i + 1,
-		)
-		_ => i
-	}
-
-	## How many bytes from the end keep `keep`.
-	count_back : List(U8), (U8 -> Bool), U64 -> U64
-	count_back = |
-		s,
-		keep,
-		n,
-	|
-		if n >= List.len(s) {
-			n
-		} else {
-			match List.get(s, List.len(s) - 1 - n) {
-				Ok(c) if keep(c) => count_back(
-					s,
-					keep,
-					n + 1,
-				)
-				_ => n
-			}
-		}
 
 	## The Images page's JSON: the newest `most` entries, each as
 	## images_store `encodeImagesEvent` writes it.
@@ -420,7 +258,7 @@ tags_in = |s| List.map(
 	text_of,
 )
 
-img_tags_from : List(U8), U64, List(List(U8)), Feeds.Seen -> List(List(U8))
+img_tags_from : List(U8), U64, List(List(U8)), Bytes.Seen -> List(List(U8))
 img_tags_from = |
 	s,
 	i,
@@ -437,13 +275,13 @@ img_tags_from = |
 				c,
 				d,
 				e,
-			] if Feeds.lower([
+			] if Bytes.lower([
 				a,
 				b,
 				c,
 				d,
-			]) == Str.to_utf8("<img") and Feeds.is_space(e) =>
-				match Feeds.find_seen(
+			]) == Str.to_utf8("<img") and Bytes.is_space(e) =>
+				match Bytes.find_seen(
 					s,
 					'>',
 					i + 4,
@@ -490,14 +328,14 @@ blocks_from = |
 	match List.get(ls, i) {
 		Err(_) => out
 		Ok(line) =>
-			match Feeds.fence_open(line) {
+			match Fence.fence_open(line) {
 				Err(NotAFence) => blocks_from(
 					ls,
 					i + 1,
 					out,
 				)
 				Ok(fo) => {
-					j = Feeds.close_at(
+					j = Fence.close_at(
 						ls,
 						fo.char,
 						fo.count,
@@ -515,56 +353,6 @@ blocks_from = |
 				}
 			}
 	}
-
-## markdown_fence `isClose`: up to three spaces, at least `count` of
-## `char`, then only whitespace.
-is_close : List(U8), U8, U64 -> Bool
-is_close = |
-	line,
-	char,
-	count,
-| {
-	indent = smaller(
-		Bytes.leading(
-			line,
-			' ',
-			0,
-		),
-		4,
-	)
-	if indent >= 4 {
-		Bool.False
-	} else {
-		n = Bytes.leading(
-			List.drop_first(line, indent),
-			char,
-			0,
-		)
-		n >= count and trim_info(List.drop_first(line, indent + n)) == []
-	}
-}
-
-## `std.mem.trim(u8, s, " \t\r")`.
-trim_info : List(U8) -> List(U8)
-trim_info = |s| {
-	ws = |c| c == ' ' or c == '\t' or c == '\r'
-	front = List.drop_first(
-		s,
-		Feeds.count_while(
-			s,
-			ws,
-			0,
-		),
-	)
-	List.drop_last(
-		front,
-		Feeds.count_back(
-			front,
-			ws,
-			0,
-		),
-	)
-}
 
 ## The fields every feed entry starts with, from its header.
 head_fields : Header -> List((Str, JsonOut))

@@ -33,7 +33,6 @@ import Pages
 import Chrome
 import Html
 import Paths
-import Topics
 import Form
 import ZigText
 import Uid
@@ -399,43 +398,6 @@ serve_saved! = |route|
 				Err(Failed) => Chat.answered
 			}
 	}
-
-## **HOW MANY MESSAGES A TOPIC HOLDS** (chat_count.messageCount, metal-vmm
-## QUEUE 275): the N that numbers the next one. **THE SIDECAR IS A CACHE;
-## THE TRANSCRIPT IS THE TRUTH**: the `.count` is believed only when the
-## transcript is still the size it was taken at (one stat), else the
-## transcript is read and its blocks counted (Count.count_blocks): a sidecar
-## whose read failed among them, a miss (metal-vmm QUEUE 284). No
-## transcript is no messages; one that will not be looked at or read fails
-## the request, never 0, which would number the next message onto the last.
-## The Roc only reads the sidecar; the host writes it with every message.
-count_messages! : Paths.TopicAt => Try(U64, [Failed])
-count_messages! = |at| {
-	transcript = Paths.transcript_path(at)
-	match Files.stat!(transcript) {
-		Err(Missing) => Ok(0)
-		Err(Failed) => Err(Failed)
-		Ok({ size, mtime: _ }) =>
-			match believed_count!(at, size) {
-				Ok(n) => Ok(n)
-				Err(Recount) =>
-					match Files.read_bytes!(transcript) {
-						Ok(raw) => Ok(Count.count_blocks(raw))
-						# Gone since the stat: no messages.
-						Err(Missing) => Ok(0)
-						Err(Failed) => Err(Failed)
-					}
-			}
-	}
-}
-
-## The sidecar's count when it was taken at `size` (readCount, then
-## believedCount, Last.sidecar!): a sidecar missing, past readCount's 1 KiB,
-## that does not parse, or whose read failed (metal-vmm QUEUE 284) is a
-## recount.
-believed_count! : Paths.TopicAt, U64 => Try(U64, [Recount])
-believed_count! = |at, size|
-	Count.believed(Last.sidecar!(at), size).map_err(|_| Recount)
 
 ## A topic's page, or its raw transcript: a read, then the work.
 serve_page_or_raw! : Chat.Request, Route.R, AtTopic => Chat.Answer
@@ -965,7 +927,7 @@ store_reaction! = |
 |
 	match (Members.load_viewer!(who), Members.load_uid!({})) {
 		(Ok(name), Ok(uid)) => {
-			match count_messages!(topic_at) {
+			match Last.messages!(topic_at) {
 				Err(Failed) => Failed
 				Ok(count) =>
 				# Message numbers start at 1 (the N of MSG_<topic>_N).
@@ -1703,7 +1665,7 @@ serve_conversations! = |{}|
 		(Ok(members), Ok(me)) => Chat.respond(
 			200,
 			json,
-			Topics.conversations_json(
+			Conversation.conversations_json(
 				me,
 				load_dm_entries!(
 					me,
@@ -1734,7 +1696,7 @@ List(
 	},
 ),
 U64,
-List(Topics.Entry) => List(Topics.Entry)
+List(Conversation.Entry) => List(Conversation.Entry)
 load_dm_entries! = |
 	me,
 	members,
@@ -1944,7 +1906,7 @@ make_topic! = |
 			[],
 			Str.to_utf8("Topic must be letters, digits, and hyphens only — no spaces, underscores, or punctuation.\n"),
 		)
-	} else if Topics.is_same_name(topic, "new") {
+	} else if topic.caseless_ascii_equals("new") {
 		Chat.respond(
 			400,
 			[],
@@ -1999,7 +1961,7 @@ make_topic! = |
 					Chat.respond(
 						200,
 						json,
-						Topics.made_json({ key, topic }),
+						Conversation.made_json({ key, topic }),
 					)
 				}
 			}
@@ -2017,7 +1979,7 @@ announce! = |
 	topic,
 	name,
 |
-	match Topics.highest_general(load_topics!(key)) {
+	match Conversation.highest_general(load_topics!(key)) {
 		Ok(gen) if gen != topic =>
 			append_message!(
 				conv,
@@ -2447,7 +2409,7 @@ append_message_by! = |
 		Err(Failed)
 	} else {
 		topic = topic_at.topic
-		match count_messages!(topic_at) {
+		match Last.messages!(topic_at) {
 			Ok(count) => {
 				index = count
 				# A count of the largest U64 has no next number: the call
@@ -2610,7 +2572,7 @@ fan_out! = |at, steps|
 				AppendFeed(f) => {
 					got = Files.append_entry!(
 						f.path,
-						Feeds.sep,
+						f.sep,
 						f.entry,
 					)
 					match got.status {

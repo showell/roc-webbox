@@ -237,7 +237,11 @@ Chat := [].{
 
 	## The site's 400, in `why`'s words.
 	refuse : Str -> Answer
-	refuse = |why| respond(400, [], Str.to_utf8(why))
+	refuse = |why| respond(
+		400,
+		[],
+		Str.to_utf8(why),
+	)
 
 	## `status` with `body`, typed `content_type` when it is not empty.
 	respond : U16, List(U8), List(U8) -> Answer

@@ -944,4 +944,5 @@ expect Docs.slug_of_title("  Caf\u(e9) Menu: 2026! ") == "caf-menu-2026"
 expect Docs.slug_of_title("!!!") == "untitled"
 expect Docs.slug_of_title("${Str.repeat("a", 79)} b") == Str.repeat("a", 79)
 # title: hyphens to spaces, the first letter up; a digit first stays.
-expect Docs.title("reading-list") == "Reading list" and Docs.title("2026-plans") == "2026 plans" and Docs.title("") == ""
+expect Docs.title("reading-list") == "Reading list"
+expect Docs.title("2026-plans") == "2026 plans" and Docs.title("") == ""

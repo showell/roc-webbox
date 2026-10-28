@@ -4,7 +4,7 @@
 ## Pure; angry-gopher's chat_twin_test.zig holds it to the Zig.
 import JsonOut
 import Bytes
-import Feeds
+import Fence
 import Time
 import Uid
 import ZigText
@@ -215,14 +215,14 @@ quotes_from = |
 	match List.get(ls, i) {
 		Err(_) => out
 		Ok(line) =>
-			match Feeds.fence_open(line) {
+			match Fence.fence_open(line) {
 				Err(NotAFence) => quotes_from(
 					ls,
 					i + 1,
 					List.append(List.concat(out, line), '\n'),
 				)
 				Ok(fo) => {
-					j = Feeds.close_at(
+					j = Fence.close_at(
 						ls,
 						fo.char,
 						fo.count,
@@ -259,8 +259,8 @@ html_images = |s| html_from(
 )
 
 ## Linear (metal-vmm QUEUE 268): where the next `>` is, or that there is
-## none, is remembered across openers (Feeds.find_seen).
-html_from : List(U8), U64, List(U8), Feeds.Seen -> List(U8)
+## none, is remembered across openers (Bytes.find_seen).
+html_from : List(U8), U64, List(U8), Bytes.Seen -> List(U8)
 html_from = |
 	s,
 	i,
@@ -270,13 +270,13 @@ html_from = |
 	match List.get(s, i) {
 		Err(_) => out
 		Ok(c) => {
-			opens = i + 4 <= List.len(s) and Feeds.lower(
+			opens = i + 4 <= List.len(s) and Bytes.lower(
 				List.sublist(
 					s,
 					{ start: i, len: 4 },
 				),
 			) == Str.to_utf8("<img") and !is_word_byte(List.get(s, i + 4) ?? ' ')
-			(found, seen) = if opens Feeds.find_seen(
+			(found, seen) = if opens Bytes.find_seen(
 				s,
 				'>',
 				i + 4,
@@ -312,9 +312,9 @@ md_images = |s| md_from(
 )
 
 ## Linear (metal-vmm QUEUE 268): where the next `]` and `)` are, or that
-## there are none, is remembered across `![`s (Feeds.find_seen); every
+## there are none, is remembered across `![`s (Bytes.find_seen); every
 ## search from a later `![` starts at or after the one before it.
-md_from : List(U8), U64, List(U8), { br : Feeds.Seen, pa : Feeds.Seen } -> List(U8)
+md_from : List(U8), U64, List(U8), { br : Bytes.Seen, pa : Bytes.Seen } -> List(U8)
 md_from = |
 	s,
 	i,
@@ -348,16 +348,16 @@ md_from = |
 
 md_image : List(U8),
 U64,
-{ br : Feeds.Seen, pa : Feeds.Seen } -> (
+{ br : Bytes.Seen, pa : Bytes.Seen } -> (
 	Try(U64, [NotAnImage]),
-	{ br : Feeds.Seen, pa : Feeds.Seen },
+	{ br : Bytes.Seen, pa : Bytes.Seen },
 )
 md_image = |
 	s,
 	start,
 	seen,
 |
-	match Feeds.find_seen(
+	match Bytes.find_seen(
 		s,
 		']',
 		start + 2,
@@ -368,7 +368,7 @@ md_image = |
 			if List.get(s, alt_end + 1) != Ok('(') {
 				(Err(NotAnImage), { ..seen, br })
 			} else {
-				match Feeds.find_seen(
+				match Bytes.find_seen(
 					s,
 					')',
 					alt_end + 2,
@@ -388,7 +388,7 @@ collapse_ws = |s| {
 		s,
 		([], Bool.False),
 		|(acc, in_ws), c|
-			if Feeds.is_space(c) {
+			if Bytes.is_space(c) {
 				(acc, Bool.True)
 			} else {
 				(List.append(if in_ws and acc != [] List.append(acc, ' ') else acc, c), Bool.False)
@@ -421,7 +421,7 @@ cap_from = |
 			List.concat(
 				List.drop_last(
 					head,
-					Feeds.count_back(
+					Bytes.count_back(
 						head,
 						|c| c == ' ',
 						0,

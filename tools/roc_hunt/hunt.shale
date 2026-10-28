@@ -701,6 +701,15 @@ const kept_alone = {
   -- The platform: the app's boundary, whoever calls it.
   Chat = "the platform's types, the app's boundary",
   Host = "the platform's hosted functions, the app's boundary",
+  -- A route whole: main's dispatch is its one caller, and the route's
+  -- flow is read in one module, not main's thousands of lines.
+  Docs = "the docs feature whole (/chat/docs): main only dispatches to it",
+  Upload = "an upload's route whole (POST and GET): main only dispatches to it",
+  Retire = "the admin retire whole (its own area): main only dispatches to it",
+  -- An effect kept apart from what it reads.
+  Last = "a topic's count and last message from its sidecar, effectful; main reads both through it, and Count (pure, the twin's) holds the rules",
+  -- A rule to audit alone.
+  SafeImg = "a security rule (which <img> a page may hold), auditable alone; its one caller is Feeds",
   -- The plants' own (tools/roc_hunt/plants/single_caller/).
   QuietKept = "a plant: allowlisted, so quiet",
 }

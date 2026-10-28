@@ -1,7 +1,8 @@
 ## A TOPIC'S `.count` SIDECAR, AND WHEN IT IS BELIEVED (angry-gopher
 ## chat_count.zig): "<count> <size>\n", then "<offset> <uid>\n" where the
 ## last message begins and who sent it. The sidecar is a cache and the
-## transcript the truth: each rule here says when the cache may answer.
+## transcript the truth: each rule here says when the cache may answer (the
+## flow that asks them is Last.roc's `messages!`).
 import ZigText
 import Bytes
 import Transcript
@@ -170,6 +171,7 @@ Count := [].{
 				Err(_) => Err(NotBelieved)
 			}
 		}
+
 }
 
 parse_last : List(U8) -> Last
