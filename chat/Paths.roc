@@ -417,13 +417,6 @@ Paths := [].{
 		sort_by_bytes(doc_slugs(entries))
 			|> List.map(|slug| { slug, path: ChatPath.("users/${uid.to_str()}/docs/${slug}.md") })
 
-	## The same docs in the folder's order (mostRecentDocSlug's walk, whose
-	## first of a tie wins).
-	docs_in_order : Uid, List(Entry) -> List({ slug : Str, path : ChatPath })
-	docs_in_order = |uid, entries|
-		doc_slugs(entries)
-			|> List.map(|slug| { slug, path: ChatPath.("users/${uid.to_str()}/docs/${slug}.md") })
-
 	## The member's doc `slug` (docs_store `docPath`), or `NotASlug` for a
 	## slug no slugifyTitle made (validDocSlug, its path-traversal check).
 	doc_path : Uid, Str -> Try(ChatPath, [NotASlug])

@@ -4,7 +4,7 @@
 --
 --   - **routes**: every route chat/main.roc's `served_by` decides, the
 --     families, parts and tails from chat/Route.roc, each Roc's or handed to
---     Zig, and for Zig's the arm of chat.zig's `serve` or `topicRoute`
+--     Zig, and for Zig's the arm of chat.zig's `serve` (or `topicRoute`, while it lived)
 --     that takes it;
 --   - **hosted functions**: each of chat/platform/Host.roc's, the
 --     chat_router.zig `Call` member that answers it, its own tokens plus
@@ -402,7 +402,9 @@ while i < #main.text do
 end
 if serves_at == nil then fail("chat/main.roc: no served_by") end
 local serve_arms = arms(all["chat.zig"], "serve")
-local tail_arms = arms(all["chat.zig"], "topicRoute")
+-- A topic's tails: none left in the Zig since metal-vmm QUEUE 292.
+local tail_arms = {}
+if has_key(all["chat.zig"].decls, "topicRoute") then tail_arms = arms(all["chat.zig"], "topicRoute") end
 local roc_routes = 0
 local zig_routes = 0
 print("== routes (chat/main.roc served_by; Zig's arm in chat.zig)")

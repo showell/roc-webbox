@@ -135,9 +135,7 @@ zig = |route| Chat.zig(Route.to_wire(route))
 ## Which side serves a route. The Roc serves: /chat and /chat/default, the recent,
 ## images and code pages and every stream (metal-vmm QUEUE 286), /chat/links,
 ## /chat/conversations, /chat/msg/<id>; and every route of a DM or a
-## channel, handing back to the Zig only a topic's uploads, upload,
-## stream, download and saved, once it has found them the viewer's.
-## Every other route is Zig's.
+## channel. Every other route is Zig's.
 served_by : Route.R -> [Roc, Zig]
 served_by = |r|
 	match r.family {
@@ -147,8 +145,8 @@ served_by = |r|
 		Recent | Images | Code | Notifications | SidebarStream => Roc
 		NotFound => Roc
 		# **THE ROC DECIDES EVERY CONVERSATION'S ROUTE** (metal-vmm QUEUE
-		# 271): whose it is, whether its topic is there, every 404. The Zig
-		# serves the tails handed back to it, authorized here.
+		# 271): whose it is, whether its topic is there, every 404, and
+		# each tail's work (the last, an upload's POST: QUEUE 292).
 		Dm | Channel => Roc
 		# The docs: posted to chat (metal-vmm QUEUE 278), the read pages
 		# (289), the writes and the live preview (290).
@@ -626,12 +624,12 @@ docs_read! = |req, rest|
 			}
 	}
 
-## The member's docs, sorted by slug, and in the folder's order (a folder
-## not there holds none). `Failed` when it would not list.
+## The member's docs, sorted by slug (a folder not there holds none).
+## `Failed` when it would not list.
 load_docs! : Uid => Try(List({ slug : Str, path : Paths.ChatPath }), [Failed])
 load_docs! = |me|
 	match Files.list!(Paths.docs_folder(me)) {
-		Ok(listed) => Ok(Paths.docs_in_order(me, listed.entries))
+		Ok(listed) => Ok(Paths.docs(me, listed.entries))
 		Err(Missing) => Ok([])
 		Err(Failed) => Err(Failed)
 	}
@@ -651,8 +649,9 @@ docs_landing! = |me|
 			}
 	}
 
-## Of `docs`, in the folder's order, the one changed last, the first of a
-## tie, against `best` so far; one gone since the listing is passed over.
+## Of `docs`, sorted by slug, the one changed last, the first by name of
+## a tie (a folder's order differs by machine), against `best` so far; one
+## gone since the listing is passed over.
 last_touched! : List({ slug : Str, path : Paths.ChatPath }),
 Try({ slug : Str, mtime : I64 }, [None]) => Try(
 	Try({ slug : Str, mtime : I64 }, [None]),
@@ -673,9 +672,9 @@ last_touched! = |docs, best|
 			}
 	}
 
-## The slugs of `docs`, sorted (listUserDocs' order).
+## The slugs of `docs`, sorted as load_docs! sorts them (listUserDocs' order).
 sorted_slugs : List({ slug : Str, path : Paths.ChatPath }) -> List(Str)
-sorted_slugs = |docs| Paths.sort_by_bytes(List.map(docs, |d| d.slug))
+sorted_slugs = |docs| List.map(docs, |d| d.slug)
 
 ## docsList: the member's docs as JSON, for an API client.
 docs_list! : Uid => Chat.Answer
@@ -978,6 +977,92 @@ serve_page_or_raw! = |
 		}
 	}
 
+## **AN UPLOAD'S POST** (chat_upload `handleUpload`, metal-vmm QUEUE 292):
+## the form read and its file's type sniffed by the host, which holds the
+## bytes; then here, in the Zig's order, a type the chat takes not, a file
+## past its kind's cap, the member's allowance, the file stored, and the
+## answer the compose box reads.
+post_upload! : Chat.Request, Route.R, AtTopic => Chat.Answer
+post_upload! = |
+	req,
+	route,
+	found,
+|
+	if req.method != Post {
+		Chat.not_allowed(Post)
+	} else {
+		form = Host.read_upload!({})
+		match form.status {
+			Answered => Chat.answered
+			NoFile => {
+				Host.refuse_upload!(Malformed, "no file\n".to_utf8())
+				Chat.answered
+			}
+			Unsupported => Chat.respond(
+				415,
+				[],
+				Upload.unsupported.to_utf8(),
+			)
+			Read =>
+				match Upload.kind_of(form.ext) {
+					Err(NotTaken) => crash "post_upload!: the host sniffed a type not taken"
+					Ok(kind) =>
+						if form.size > kind.cap {
+							Host.refuse_upload!(
+								TooLarge,
+								Upload.too_large({ noun: kind.noun, cap: kind.cap }).to_utf8(),
+							)
+							Chat.answered
+						} else {
+							keep_upload!(
+								form,
+								kind.name,
+								{ key: found.key, topic: route.topic },
+							)
+						}
+				}
+		}
+	}
+
+## The allowance spent on the file, then the file stored and its answer.
+keep_upload! : {
+	size : U64,
+	ext : List(U8),
+	filename : List(U8),
+	status : _,
+},
+Str,
+Paths.TopicAt => Chat.Answer
+keep_upload! = |
+	form,
+	kind,
+	at,
+|
+	match Host.reserve_upload!(form.size) {
+		Failed => Chat.answered
+		Refused => Chat.respond(
+			403,
+			[],
+			Upload.allowance_spent.to_utf8(),
+		)
+		Reserved => {
+			stored = Host.store_upload!(Paths.uploads_folder(at).bytes(), form.ext)
+			name = Str.from_utf8_lossy(stored.name)
+			match stored.status {
+				Failed => Chat.answered
+				Stored => Chat.respond(
+					200,
+					json,
+					Upload.stored_answer({
+						url: "${Paths.ConvKey.base(at.key)}/${at.topic}/uploads/${name}",
+						filename: form.filename,
+						kind,
+					}),
+				)
+			}
+		}
+	}
+
 ## **AN UPLOAD SERVED** (chat_upload `serveUpload`, metal-vmm QUEUE 291):
 ## a GET's or a HEAD's, of a name an upload has, typed by it; whole, or the
 ## range asked for, or the 416 for one that cannot be. The host serves the
@@ -1148,9 +1233,11 @@ serve_topic! = |
 			route,
 			found,
 		)
-		# The tail the Zig serves, the conversation and the topic found the
-		# viewer's here.
-		Upload => zig(route)
+		Upload => post_upload!(
+			req,
+			route,
+			found,
+		)
 		# The topic's stream (metal-vmm QUEUE 286): its key and transcript
 		# the Roc's, the backlog's replay and the live stream the host's.
 		Stream =>

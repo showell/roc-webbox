@@ -24,6 +24,11 @@ Limits := [].{
 	reading_list_bytes : U64
 	reading_list_bytes = 1024 * 1024
 
+	## The most one member uploads, all their files together, ever: 1 GiB
+	## (users `max_upload_lifetime_bytes`).
+	upload_lifetime : U64
+	upload_lifetime = 1024 * 1024 * 1024
+
 	## The shortest word search looks up.
 	search_min : U64
 	search_min = 2

@@ -3,6 +3,8 @@
 ## `Range` asks for. The host carries the answer out (Host.serve_upload!).
 ## Pure.
 import Bytes
+import JsonOut
+import Limits
 import ZigText
 
 Upload := [].{
@@ -52,6 +54,66 @@ Upload := [].{
 			}
 			_ => Err(Unsatisfiable)
 		}
+
+	## A stored extension's kind: its name, its noun in a refusal, and the
+	## largest file of it the chat takes (UploadKind.cap); `NotTaken` for
+	## one the chat does not take.
+	kind_of : List(U8) -> Try(
+		{
+			name : Str,
+			noun : Str,
+			cap : U64,
+		},
+		[NotTaken],
+	)
+	kind_of = |ext|
+		match List.find_first(types, |t| t.ext.to_utf8() == ext) {
+			Ok(t) if t.mime.starts_with("image/") => Ok({
+				name: "image",
+				noun: "Image",
+				cap: Limits.image_max,
+			})
+			Ok(_) => Ok({
+				name: "video",
+				noun: "Screencast",
+				cap: Limits.video_max,
+			})
+			Err(_) => Err(NotTaken)
+		}
+
+	## The 415 for a file of a type the chat takes not.
+	unsupported : Str
+	unsupported = "unsupported file type (images: png, jpeg, gif, webp; video: mp4, webm, mov)\n"
+
+	## The 403 for a member whose lifetime allowance would be passed.
+	allowance_spent : Str
+	allowance_spent = {
+		gb = (Limits.upload_lifetime // (1024 * 1024 * 1024)).to_str()
+		"Upload limit reached — you've used your ${gb} GB upload allowance.\n"
+	}
+
+	## The 413 for a file past its kind's cap (`noun`, `cap` as kind_of's).
+	too_large : { noun : Str, cap : U64 } -> Str
+	too_large = |kind| {
+		mb = (kind.cap // (1024 * 1024)).to_str()
+		"${kind.noun} too large — the limit is ${mb} MB.\n"
+	}
+
+	## handleUpload's answer: where the file is now, the client's name for
+	## it as text (a byte not UTF-8 its U+FFFD), its kind; no size yet.
+	stored_answer : {
+		url : Str,
+		filename : List(U8),
+		kind : Str,
+	} -> List(U8)
+	stored_answer = |a|
+		JsonOut.object([
+			("url", JsonOut.string(a.url)),
+			("name", JsonOut.lossy(a.filename)),
+			("kind", JsonOut.string(a.kind)),
+			("width", JsonOut.number(0)),
+			("height", JsonOut.number(0)),
+		]).bytes()
 
 	## The most one range answers, 8 MiB (chat_upload `range_window`): a
 	## player asks again for the rest.
