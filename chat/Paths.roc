@@ -159,7 +159,7 @@ Paths := [].{
 	is_channel_name : Str -> Bool
 	is_channel_name = |text| match text.to_utf8() {
 		[first, .. as more] =>
-			text.count_utf8_bytes() <= 40 and Ascii.is_alphabetic(first) and List.all(
+			text.count_utf8_bytes() <= 40 and Ascii.is_letter(first) and List.all(
 				more,
 				|c| Ascii.is_alphanumeric(c) or c == '-',
 			)

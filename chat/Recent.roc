@@ -273,7 +273,7 @@ html_from = |
 					s,
 					{ start: i, len: 4 },
 				),
-				Ascii.to_lower,
+				Ascii.to_lowercase,
 			) == Str.to_utf8("<img") and !is_word_byte(List.get(s, i + 4) ?? ' ')
 			(found, seen) = if opens Bytes.find_seen(
 				s,

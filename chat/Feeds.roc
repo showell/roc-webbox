@@ -286,7 +286,7 @@ img_tags_from = |
 					c,
 					d,
 				],
-				Ascii.to_lower,
+				Ascii.to_lowercase,
 			) == Str.to_utf8("<img") and Ascii.is_whitespace(e) =>
 				match Bytes.find_seen(
 					s,
