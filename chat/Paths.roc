@@ -388,6 +388,15 @@ Paths := [].{
 	)
 
 	## A topic's transcript: {conv_dir}/sessions/<topic>.md.
+	## A topic's uploads folder (chat_upload): <conv>/sessions/<topic>.uploads.
+	uploads_folder : TopicAt -> ChatPath
+	uploads_folder = |at| ChatPath.("${conv_dir(at.key)}/sessions/${at.topic}.uploads")
+
+	## The upload `name` in a topic's uploads folder: a name a listing gave,
+	## or one Upload.content_type passed (one segment either way).
+	upload_path : TopicAt, Str -> ChatPath
+	upload_path = |at, name| ChatPath.("${conv_dir(at.key)}/sessions/${at.topic}.uploads/${name}")
+
 	transcript_path : TopicAt -> ChatPath
 	transcript_path = |at| ChatPath.("${conv_dir(at.key)}/sessions/${at.topic}.md")
 

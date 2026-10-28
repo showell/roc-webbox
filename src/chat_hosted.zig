@@ -49,6 +49,8 @@ pub const Hit = abi.Hit;
 pub const Messages = abi.Messages;
 pub const Membership = route.Membership;
 pub const Done = route.Done;
+pub const Upload = abi.Upload;
+pub const UploadServed = route.UploadServed;
 pub const Welcome = route.Welcome;
 pub const Serving = route.Serving;
 pub const Dropped = route.Dropped;
@@ -1235,21 +1237,30 @@ test "a topic's reactions, react, pin and unpin are the Roc's: presence, the con
         s.accounts = &.{steve};
         break :blk s;
     }, .not_found, "member;presence;accounts;");
-    // A tail the Zig serves, handed back once the Roc found the
-    // conversation and the topic the member's; a stream counts no presence.
+    // A tail the Zig serves (an upload's POST), handed back once the Roc
+    // found the conversation and the topic the member's; a name no upload
+    // has is the Roc's own 404 (metal-vmm QUEUE 291); a stream counts no
+    // presence.
     try expectAct(
-        "/c/1_2/Plans/uploads/a.png",
+        "/c/1_2/Plans/upload",
         false,
-        .GET,
+        .POST,
         a,
         .{ .serve = .{ .route = .{
             .family = .dm,
             .key = "1_2",
             .topic = "Plans",
             .part = .topic,
-            .tail = .uploads,
-            .rest = "a.png",
+            .tail = .upload,
         } } },
+        dm_topic,
+    );
+    try expectAct(
+        "/c/1_2/Plans/uploads/a.png",
+        false,
+        .GET,
+        a,
+        .not_found,
         dm_topic,
     );
     try expectAct(
@@ -1265,16 +1276,16 @@ test "a topic's reactions, react, pin and unpin are the Roc's: presence, the con
         "member;accounts;list 1_2/sessions;",
     );
     try expectAct(
-        "/ops/Plans/download",
+        "/ops/Plans/upload",
         true,
-        .GET,
+        .POST,
         a,
         .{ .serve = .{ .route = .{
             .family = .channel,
             .key = "ops",
             .topic = "Plans",
             .part = .topic,
-            .tail = .download,
+            .tail = .upload,
         } } },
         ops_topic,
     );

@@ -55,6 +55,7 @@ import Limits
 import BusKey
 import ChatUrl
 import Docs
+import Upload
 import Search
 
 handle! : Chat.Request => Chat.Answer
@@ -977,6 +978,148 @@ serve_page_or_raw! = |
 		}
 	}
 
+## **AN UPLOAD SERVED** (chat_upload `serveUpload`, metal-vmm QUEUE 291):
+## a GET's or a HEAD's, of a name an upload has, typed by it; whole, or the
+## range asked for, or the 416 for one that cannot be. The host serves the
+## bytes (Host.serve_upload!).
+serve_upload! : Chat.Request, Route.R, AtTopic => Chat.Answer
+serve_upload! = |
+	req,
+	route,
+	found,
+|
+	if req.method != Get and req.method != Head {
+		Chat.not_allowed(Get)
+	} else {
+		match Upload.content_type(route.rest) {
+			Err(NotAnUpload) => Chat.not_found
+			Ok(content_type) => {
+				path = Paths.upload_path({ key: found.key, topic: route.topic }, route.rest)
+				match Files.stat!(path) {
+					Err(Missing) => Chat.not_found
+					Err(Failed) => Chat.answered
+					Ok(st) => {
+						part = match Host.read_header!("range".to_utf8()) {
+							[] => Whole({ first: 0, last: 0 })
+							[asked, ..] =>
+								match Upload.range(asked, st.size) {
+									Ok(r) => Range(r)
+									Err(Unsatisfiable) => Unsatisfiable({ first: 0, last: 0 })
+								}
+						}
+						(kind, r) = match part {
+							Whole(at) => (Whole, at)
+							Range(at) => (Range, at)
+							Unsatisfiable(at) => (Unsatisfiable, at)
+						}
+						served = Host.serve_upload!({
+							first: r.first,
+							last: r.last,
+							size: st.size,
+							content_type: content_type.to_utf8(),
+							path: path.bytes(),
+							part: kind,
+						})
+						match served {
+							Served => Chat.answered
+							# Gone since its stat: nothing was answered.
+							Gone => Chat.not_found
+						}
+					}
+				}
+			}
+		}
+	}
+
+## **A TOPIC'S BUNDLE** (chat_download `serveBundle`, metal-vmm QUEUE 291):
+## its transcript, its reactions when anyone reacted, and every upload (a
+## folder in the uploads passed over), named under the topic, then served
+## as `<topic>.tar.gz`. A topic with no transcript is a 404; anything else
+## that will not read fails the download: the whole topic or nothing.
+serve_download! : Chat.Request, Route.R, AtTopic => Chat.Answer
+serve_download! = |
+	req,
+	route,
+	found,
+|
+	if req.method != Get and req.method != Head {
+		Chat.not_allowed(Get)
+	} else {
+		at = { key: found.key, topic: route.topic }
+		sid = route.topic
+		md = Paths.transcript_path(at)
+		match Files.stat!(md) {
+			Err(Missing) => Chat.not_found
+			Err(Failed) => Chat.answered
+			Ok(_) =>
+				match bundle_files!(at, md) {
+					Err(Failed) => Chat.answered
+					Ok(files) =>
+						match add_all!(files) {
+							Err(Failed) => Chat.answered
+							Ok({}) => {
+								Host.serve_bundle!(sid.to_utf8())
+								Chat.answered
+							}
+						}
+				}
+		}
+	}
+
+## The bundle's files, each with its name in the tar: the transcript,
+## the reactions when there, then the uploads in the folder's order.
+bundle_files! : Paths.TopicAt,
+Paths.ChatPath => Try(
+	List({ name : Str, path : Paths.ChatPath }),
+	[Failed],
+)
+bundle_files! = |at, md| {
+	sid = at.topic
+	reactions = Paths.reactions_path(at)
+	with_reactions = match Files.stat!(reactions) {
+		Ok(_) => Ok([{ name: "${sid}/${sid}.reactions.jsonl", path: reactions }])
+		Err(Missing) => Ok([])
+		Err(Failed) => Err(Failed)
+	}
+	uploads = match Files.list!(Paths.uploads_folder(at)) {
+		Ok(listed) =>
+			Ok(
+				List.keep_if(listed.entries, |e| e.kind != Dir)
+					|> List.map(
+						|e| {
+							name: "${sid}/uploads/${e.name}",
+							path: Paths.upload_path(at, e.name),
+						},
+					),
+			)
+		Err(Missing) => Ok([])
+		Err(Failed) => Err(Failed)
+	}
+	match (with_reactions, uploads) {
+		(Ok(rx), Ok(ups)) => Ok(
+			List.join([
+				[{ name: "${sid}/${sid}.md", path: md }],
+				rx,
+				ups,
+			]),
+		)
+		_ => Err(Failed)
+	}
+}
+
+## Each file added to the host's bundle, in turn; the first that will not
+## read fails it.
+add_all! : List({ name : Str, path : Paths.ChatPath }) => Try({}, [Failed])
+add_all! = |files|
+	match files {
+		[] => Ok({})
+		[f, .. as more] =>
+			match Files.bundle_add!(f.name.to_utf8(), f.path) {
+				Ok({}) => add_all!(more)
+				Err(Failed) => Err(Failed)
+			}
+	}
+
 ## A topic that is there: the method, then the work.
 serve_topic! : Chat.Request, Route.R, AtTopic => Chat.Answer
 serve_topic! = |
@@ -986,9 +1129,21 @@ serve_topic! = |
 | {
 	who = found.who
 	match route.tail {
-		# The tails the Zig serves, the conversation and the topic found
-		# the viewer's here.
-		Uploads | Upload | Download => zig(route)
+		# An upload and the bundle (metal-vmm QUEUE 291): the Roc decides,
+		# the host serves the bytes.
+		Uploads => serve_upload!(
+			req,
+			route,
+			found,
+		)
+		Download => serve_download!(
+			req,
+			route,
+			found,
+		)
+		# The tail the Zig serves, the conversation and the topic found the
+		# viewer's here.
+		Upload => zig(route)
 		# The topic's stream (metal-vmm QUEUE 286): its key and transcript
 		# the Roc's, the backlog's replay and the live stream the host's.
 		Stream =>
