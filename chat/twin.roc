@@ -26,6 +26,7 @@ import Uid
 import JsonOut
 import Route
 import Limits
+import Saved
 import BusKey
 import ChatUrl
 
@@ -419,6 +420,9 @@ call = |req| {
 		# The limits the conversation page tells its client, the Roc's
 		# constants: image, video, accept, search's shortest word.
 		73 => [Str.to_utf8(U64.to_str(Limits.image_max)), Str.to_utf8(U64.to_str(Limits.video_max)), Limits.accept.to_utf8(), Str.to_utf8(U64.to_str(Limits.search_min))]
+		# Saved.refs (parseRefs): each ref's conversation, topic and id, in
+		# order.
+		74 => List.join(List.map(Saved.refs(arg(0)), |r| [r.conv, r.topic, r.id]))
 		_ => crash "twin: no function ${U8.to_str(req.which)}"
 	}
 }

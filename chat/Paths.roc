@@ -350,6 +350,11 @@ Paths := [].{
 	transcript_path : TopicAt -> ChatPath
 	transcript_path = |at| ChatPath.("${conv_dir(at.key)}/sessions/${at.topic}.md")
 
+	## The member's reading list, the doc a save appends to (docs_store's
+	## `reading-list`): users/<uid>/docs/reading-list.md.
+	reading_list_path : Uid -> ChatPath
+	reading_list_path = |uid| ChatPath.("users/${uid.to_str()}/docs/reading-list.md")
+
 	## The member's links page (the links route's file): users/<uid>/links.md.
 	links_path : Uid -> ChatPath
 	links_path = |uid| ChatPath.("users/${uid.to_str()}/links.md")

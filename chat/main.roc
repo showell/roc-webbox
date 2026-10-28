@@ -46,6 +46,8 @@ import Frame
 import Time
 import Transcript
 import Fanout
+import Saved
+import JsonOut
 import Limits
 import BusKey
 
@@ -196,6 +198,26 @@ conv_key = |route|
 ## its title, and the conversation's topics as they were listed to find it.
 AtTopic : { key : Paths.ConvKey, conv : Chat.Conv, who : Who, title : Str, topics : List(Str) }
 
+## **THE IDS SAVED FROM THIS TOPIC** (GET <topic>/saved, metal-vmm QUEUE
+## 273): the member's reading list read and its refs here taken
+## (Saved.ids), as a JSON array, for the page to mark its bubbles. No list
+## is nothing saved. Read whole each time: no cache.
+serve_saved! : Route.R => Chat.Answer
+serve_saved! = |route|
+	match load_uid!({}) {
+		Err(Failed) => Chat.answered
+		Ok(me) =>
+			match Files.read_bytes!(Paths.reading_list_path(me)) {
+				Ok(text) => {
+					ids = Saved.ids(text, route.key.to_utf8(), route.topic.to_utf8())
+					# An id is ASCII by its rule (Paths.is_valid_msg_ref_id).
+					Chat.respond(200, json, JsonOut.array(List.map(ids, |id| JsonOut.string(Str.from_utf8_lossy(id)))).bytes())
+				}
+				Err(Missing) => Chat.respond(200, json, Str.to_utf8("[]"))
+				Err(Failed) => Chat.answered
+			}
+	}
+
 ## A topic's page, or its raw transcript: a read, then the work.
 serve_page_or_raw! : Chat.Request, Route.R, AtTopic => Chat.Answer
 serve_page_or_raw! = |req, route, found|
@@ -218,7 +240,8 @@ serve_topic! = |req, route, found| {
 	match route.tail {
 		# The tails the Zig serves, the conversation and the topic found
 		# the viewer's here.
-		Uploads | Upload | Stream | Download | Saved => zig(route, Uncounted)
+		Uploads | Upload | Stream | Download => zig(route, Uncounted)
+		Saved => if req.method != Get and req.method != Head Chat.not_allowed(Get) else serve_saved!(route)
 		Invalid => Chat.not_found
 		Page | Raw => serve_page_or_raw!(req, route, found)
 		Reactions =>
