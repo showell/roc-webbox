@@ -45,8 +45,18 @@ Frame := [].{
 	## (JsonOut.zig_bytes); `from_uid` only when the block has a `uid:`, and
 	## no `cid` (a backlog frame never has one). `html` is its markdown
 	## rendered.
-	stored : { index : U64, block : Transcript.Block, html : List(U8) } -> List(U8)
-	stored = |{ index, block: b, html }| frame(
+	stored : {
+		index : U64,
+		block : Transcript.Block,
+		html : List(U8),
+	} -> List(U8)
+	stored = |
+		{
+			index,
+			block: b,
+			html,
+		},
+	| frame(
 		index,
 		List.join([
 			[

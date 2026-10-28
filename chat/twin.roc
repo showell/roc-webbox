@@ -855,7 +855,11 @@ call = |req| {
 				List.prepend(
 					List.map(
 						Backlog.from(d.blocks, { topic: arg(1), since: u64(arg(2)) }),
-						|m| [num(m.index), m.block.id, m.block.uid],
+						|m| [
+							num(m.index),
+							m.block.id,
+							m.block.uid,
+						],
 					),
 					[num(List.len(d.refused))],
 				),

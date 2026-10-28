@@ -158,9 +158,11 @@ Chat := [].{
 	## - `ToLogin`: a 303 to the login page, to come back to `location` after
 	##   (the request's own path, so the host checks that it is on the site).
 	## - `Stream`: the live stream on the bus key `location`, held by the
-	##   host (metal-vmm QUEUE 286); a topic's, with its backlog replayed
-	##   first from the transcript at `body` (a path under the chat root),
-	##   its messages numbered in topic `route.topic`. `body` empty: live only.
+	##   host (metal-vmm QUEUE 286), subscribed in this call's turn. A
+	##   topic's sends `body` first (its backlog: the preamble and the
+	##   frames, never empty), then each blob published as it is (a
+	##   finished frame); `body` empty is a member's, each blob one `data:`
+	##   frame.
 	Kind : [
 		Serve,
 		Redirect,
@@ -307,15 +309,14 @@ Chat := [].{
 		location: key,
 	}
 
-	## A topic's stream on the bus key `key`: its backlog first, from the
-	## transcript at `transcript`, numbered in `topic`.
-	topic_stream : List(U8), { transcript : List(U8), topic : List(U8) } -> Answer
-	topic_stream = |key, { transcript, topic }| {
+	## A topic's stream on the bus key `key`: `backlog` first (Backlog.roc's
+	## preamble, then its frames), then each frame published as it is.
+	topic_stream : { key : List(U8), backlog : List(U8) } -> Answer
+	topic_stream = |{ key, backlog }| {
 		..none,
 		kind: Stream,
 		location: key,
-		body: transcript,
-		route: { ..family(NotFound), topic },
+		body: backlog,
 	}
 
 	## To the login page, to come back to `next` after.

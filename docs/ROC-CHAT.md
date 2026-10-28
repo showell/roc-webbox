@@ -130,8 +130,8 @@ render) would corrupt it. So:
   a call starts, refusing a call inside or beside one; the runtime's
   functions and every hosted function panic when no call is open.
 - **No Roc in render or in any hook before the turn.** A topic stream's
-  blob is its finished frame, and its render (`chat_sse.zig` `verbatim`)
-  only copies it.
+  blob is its finished frame, and its render (angry-gopher
+  `chat_router.zig` `verbatim`) only copies it.
 - **A delegated handler runs after the call.** `decide` (`src/chat_abi.zig`)
   copies the answer out and ends the call before it returns.
 - **Writes inside a call are safe on metal**: a pump runs the kernel's turn
@@ -259,10 +259,10 @@ Every blob on a chat bus key is exactly what a browser is sent, or its
 `data:` payload. **`Forward`** (webbox `sse.forward`) writes
 `data: <blob>\n\n`, for the per-user streams (`ntf:`, `sb:`, `rec:`, `img:`,
 `code:`). **`Verbatim`** writes the blob as it is, for topic streams: a
-message frame (`chat_frame.zig` `messageFrame`, `chat/Frame.roc`) or a
-reaction frame (`reactionFrame`). A Roc publisher builds byte-identical
-frames, with the same function for live and backlog, so a message reads the
-same either way. The client decides `mine` (`from_uid` against the page's
+message frame (`chat/Frame.roc`: `message` live, `stored` in a backlog,
+one layout) or a reaction frame (`reaction`). The Roc builds every frame,
+the backlog's too (`chat/TopicStream.roc`), so a message reads the same
+either way. The client decides `mine` (`from_uid` against the page's
 `data-me`, the name only for blocks before `uid:`), and `cid` goes to every
 viewer; only the sending tab shows "sent".
 

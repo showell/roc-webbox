@@ -462,13 +462,13 @@ pub const Decision = union(enum) {
     /// request's own, which the host checks is on the site (a 400 if not).
     to_login: []const u8,
     /// The live stream on bus key `key`, held by the host (metal-vmm QUEUE
-    /// 286); a topic's replays its backlog first, from `transcript` (a path
-    /// under the chat root, its messages numbered in `topic`). `transcript`
-    /// empty: live only.
+    /// 286), subscribed in the turn the Roc decided it in. A topic's sends
+    /// `backlog` first (the Roc's preamble and frames, never empty), then
+    /// each frame published as it is; `backlog` empty is a member's, each
+    /// blob one `data:` frame.
     stream: struct {
         key: []const u8,
-        transcript: []const u8 = "",
-        topic: []const u8 = "",
+        backlog: []const u8 = "",
     },
 
     pub fn eql(a: Decision, b: Decision) bool {
@@ -507,12 +507,8 @@ pub const Decision = union(enum) {
                 b.stream.key,
             ) and std.mem.eql(
                 u8,
-                s.transcript,
-                b.stream.transcript,
-            ) and std.mem.eql(
-                u8,
-                s.topic,
-                b.stream.topic,
+                s.backlog,
+                b.stream.backlog,
             ),
             .held => |h| h.status == b.held.status and h.nosniff == b.held.nosniff and std.mem.eql(
                 u8,
@@ -546,13 +542,12 @@ pub const Decision = union(enum) {
             .not_found => try w.writeAll("404"),
             .found => |l| try w.print("302 {s}", .{l}),
             .to_login => |l| try w.print("303 to login, then {s}", .{l}),
-            .stream => |s| if (s.transcript.len == 0) try w.print(
+            .stream => |s| if (s.backlog.len == 0) try w.print(
                 "stream {s}",
                 .{s.key},
-            ) else try w.print("stream {s}, its backlog from {s} in {s}", .{
+            ) else try w.print("stream {s}, its backlog {d} bytes", .{
                 s.key,
-                s.transcript,
-                s.topic,
+                s.backlog.len,
             }),
             .held => |h| try w.print("{d} \"{s}\"{s} {d} bytes, the host's, {d} bytes", .{
                 h.status,

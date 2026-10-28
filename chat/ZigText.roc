@@ -30,7 +30,8 @@ ZigText := [].{
 			_ => (Plus, s)
 		}
 		digits = List.keep_if(body, |c| c != '_')
-		if body == [] or List.first(body) == Ok('_') or List.last(body) == Ok('_') or !List.all(digits, Ascii.is_digit) {
+		edged = List.first(body) == Ok('_') or List.last(body) == Ok('_')
+		if body == [] or edged or !List.all(digits, Ascii.is_digit) {
 			Err(NotANumber)
 		} else if sign == Minus {
 			if List.all(digits, |c| c == '0') Ok(0) else Err(TooBig)

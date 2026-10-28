@@ -59,6 +59,7 @@ import Search
 import Retire
 import Members
 import Bytes
+import TopicStream
 
 handle! : Chat.Request => Chat.Answer
 handle! = |req|
@@ -509,17 +510,13 @@ serve_topic! = |req, { route, found }| {
 		)
 		Download => serve_download!(req, { route, found })
 		Upload => Upload.post!(req, { key: found.key, topic: route.topic })
-		# The topic's stream (metal-vmm QUEUE 286): its key and transcript
-		# the Roc's, the backlog's replay and the live stream the host's.
+		# The topic's stream: its key and its backlog the Roc's
+		# (TopicStream.roc), holding the connection the host's.
 		Stream =>
 			if req.method != Get {
 				Chat.not_allowed(Get)
 			} else {
-				at = { key: found.key, topic: route.topic }
-				Chat.topic_stream(
-					BusKey.topic(at).bytes(),
-					{ transcript: Paths.transcript_path(at).bytes(), topic: route.topic.to_utf8() },
-				)
+				TopicStream.answer!({ key: found.key, topic: route.topic })
 			}
 		Saved =>
 			if req.method != Get and req.method != Head {

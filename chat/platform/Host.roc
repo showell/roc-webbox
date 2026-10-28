@@ -215,6 +215,12 @@ Host := [].{
 	## operator's count, kept by the host for /admin/host.
 	count_malformed_channel! : List(U8) => {}
 
+	## Count a transcript block the decoder refused (Transcript.decode_blocks:
+	## no id, author or date), `first` its first line: the operator's count of
+	## reads that met one, and the last one's line, kept by the host for
+	## /admin/host.
+	count_refused_block! : List(U8) => {}
+
 	## **WHAT THE CHAT DROPPED RATHER THAN FAIL A REQUEST FOR** (metal-vmm
 	## QUEUE 267), counted for the operator (/admin/host), about `whose`: a
 	## DM's new-topic announcement that failed after the topic was made (the

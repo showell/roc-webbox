@@ -52,7 +52,15 @@ Backlog := [].{
 }
 
 ## A source's number, `trimmed` taken off both its ends first.
-parsed : Backlog.Given, List(U8) -> Try(U64, [NotANumber, TooBig, Unsent])
+parsed : Backlog.Given,
+List(U8) -> Try(
+	U64,
+	[
+		NotANumber,
+		TooBig,
+		Unsent,
+	],
+)
 parsed = |given, trimmed|
 	match given {
 		Sent(v) => ZigText.std_parse_u64(Bytes.trim(v, trimmed))
@@ -63,24 +71,43 @@ parsed = |given, trimmed|
 u64_most : U64
 u64_most = 18446744073709551615
 
+## A source sent as `s`, for the expects.
+sent : Str -> Backlog.Given
+sent = |s| Sent(Str.to_utf8(s))
+
 # sse.resumeAt's own table: Last-Event-ID resumes after n, ?since at n,
 # junk falls through, and the largest never overflows.
-expect Backlog.resume_at({ last_event_id: Sent(Str.to_utf8("5")), since: Unsent }) == 6
-expect Backlog.resume_at({ last_event_id: Sent(Str.to_utf8("  5 ")), since: Unsent }) == 6
-expect Backlog.resume_at({ last_event_id: Unsent, since: Sent(Str.to_utf8("5")) }) == 5
+expect Backlog.resume_at({ last_event_id: sent("5"), since: Unsent }) == 6
+expect Backlog.resume_at({ last_event_id: sent("  5 "), since: Unsent }) == 6
+expect Backlog.resume_at({ last_event_id: Unsent, since: sent("5") }) == 5
 expect Backlog.resume_at({ last_event_id: Unsent, since: Unsent }) == 0
-expect Backlog.resume_at({ last_event_id: Sent(Str.to_utf8("5")), since: Sent(Str.to_utf8("99")) }) == 6
-expect Backlog.resume_at({ last_event_id: Sent(Str.to_utf8("garbage")), since: Sent(Str.to_utf8("5")) }) == 5
-expect Backlog.resume_at({ last_event_id: Sent(Str.to_utf8("x")), since: Sent(Str.to_utf8("y")) }) == 0
-expect Backlog.resume_at({ last_event_id: Sent(Str.to_utf8("18446744073709551614")), since: Unsent }) == u64_most
-expect Backlog.resume_at({ last_event_id: Sent(Str.to_utf8("18446744073709551615")), since: Unsent }) == u64_most
-expect Backlog.resume_at({ last_event_id: Sent(Str.to_utf8("18446744073709551616")), since: Sent(Str.to_utf8("5")) }) == 5
+expect Backlog.resume_at({ last_event_id: sent("5"), since: sent("99") }) == 6
+expect Backlog.resume_at({ last_event_id: sent("garbage"), since: sent("5") }) == 5
+expect Backlog.resume_at({ last_event_id: sent("x"), since: sent("y") }) == 0
+expect Backlog.resume_at({ last_event_id: sent("18446744073709551614"), since: Unsent }) == u64_most
+expect Backlog.resume_at({ last_event_id: sent("18446744073709551615"), since: Unsent }) == u64_most
+expect Backlog.resume_at({ last_event_id: sent("18446744073709551616"), since: sent("5") }) == 5
 
 # A reconnect past a refused block misses nothing: t_2 was refused, so the
 # blocks are t_1, t_3, t_4, and a client that saw t_3 (index 2) asks from 3.
 expect {
-	block = |id| { id: Str.to_utf8(id), from: ['a'], at: ['d'], uid: [], markdown: ['x'] }
-	blocks = [block("t_1"), block("t_3"), block("t_4")]
+	block = |id| {
+		id: Str.to_utf8(id),
+		from: ['a'],
+		at: ['d'],
+		uid: [],
+		markdown: ['x'],
+	}
+	blocks = [
+		block("t_1"),
+		block("t_3"),
+		block("t_4"),
+	]
 	ids = |since| List.map(Backlog.from(blocks, { topic: ['t'], since }), |m| m.index)
-	ids(3) == [3] and ids(0) == [0, 2, 3] and ids(1) == [2, 3] and ids(4) == []
+	every = [
+		0,
+		2,
+		3,
+	]
+	ids(3) == [3] and ids(0) == every and ids(1) == [2, 3] and ids(4) == []
 }

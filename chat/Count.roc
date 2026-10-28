@@ -169,6 +169,23 @@ Count := [].{
 		}
 
 }
+# A message's number has one spelling: digits after the topic and its
+# underscore. Spellings Zig's parseInt took are no message's.
+expect Count.index_of(Str.to_utf8("topic_1"), Str.to_utf8("topic")) == Ok(0)
+expect Count.index_of(Str.to_utf8("topic_10"), Str.to_utf8("topic")) == Ok(9)
+expect
+	List.all(
+		[
+			"topic_1_0",
+			"topic_+5",
+			"topic_-0",
+			"topic_ 1",
+			"topic_",
+			"topic_0",
+			"topic1",
+		],
+		|id| Count.index_of(Str.to_utf8(id), Str.to_utf8("topic")) == Err(NoMessage),
+	)
 
 parse_last : List(U8) -> Last
 parse_last = |line| match tokens(line) {

@@ -719,6 +719,7 @@ const kept_alone = {
   Docs = "the docs feature whole (/chat/docs): main only dispatches to it",
   Upload = "an upload's route whole (POST and GET): main only dispatches to it",
   Retire = "the admin retire whole (its own area): main only dispatches to it",
+  TopicStream = "a topic's stream whole (its backlog read, resumed and framed): main only dispatches to it, and Backlog (pure, the twin's) holds the rules",
   -- An effect kept apart from what it reads.
   Last = "a topic's count and last message from its sidecar, effectful; main reads both through it, and Count (pure, the twin's) holds the rules",
   -- A rule to audit alone.

@@ -25,6 +25,7 @@ platform ""
 		"roc_chat_count_dropped": Host.count_dropped!,
 		"roc_chat_count_malformed_channel": Host.count_malformed_channel!,
 		"roc_chat_count_presence": Host.count_presence!,
+		"roc_chat_count_refused_block": Host.count_refused_block!,
 		"roc_chat_fail": Host.fail!,
 		"roc_chat_index_message": Host.index_message!,
 		"roc_chat_list": Host.list!,

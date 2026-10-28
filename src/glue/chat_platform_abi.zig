@@ -3726,6 +3726,13 @@ pub const HostCount_malformed_channelArgs = extern struct {
     arg0: RocListWith(u8, false),
 };
 
+/// Arguments for Host.count_refused_block!
+/// Roc signature: List(U8) => {}
+/// Refcounted fields are owned by the hosted function.
+pub const HostCount_refused_blockArgs = extern struct {
+    arg0: RocListWith(u8, false),
+};
+
 /// Arguments for Host.fail!
 /// Roc signature: [KindUnreadable, MalformedChannel, NameUnreadable, NoAuthor, NotAUid, NotUtf8], List(U8) => {}
 /// Refcounted fields are owned by the hosted function.
@@ -4406,6 +4413,13 @@ pub extern fn roc_chat_count_malformed_channel(arg0: RocListWith(u8, false)) cal
 /// Hosted symbol for Host.count_presence!
 /// Roc signature: {} => [CameOnline, Steady]
 pub extern fn roc_chat_count_presence() callconv(.c) CameOnlineOrSteady;
+
+/// Hosted symbol for Host.count_refused_block!
+/// Roc signature: List(U8) => {}
+/// Owned arguments. Release each exactly once before returning, unless it is
+/// moved into storage or into the result:
+///     arg0.decref(roc_host);
+pub extern fn roc_chat_count_refused_block(arg0: RocListWith(u8, false)) callconv(.c) void;
 
 /// Hosted symbol for Host.fail!
 /// Roc signature: [KindUnreadable, MalformedChannel, NameUnreadable, NoAuthor, NotAUid, NotUtf8], List(U8) => {}
