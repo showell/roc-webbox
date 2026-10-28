@@ -261,6 +261,18 @@ pub const UploadPart = enum(u8) { range, unsatisfiable, whole };
 /// (nothing answered), or served.
 pub const UploadServed = enum(u8) { gone, served };
 
+/// Host.roc's `read_upload!` answer's `status` (metal-vmm QUEUE 292).
+pub const UploadRead = enum(u8) { answered, no_file, read, unsupported };
+
+/// Host.roc's `refuse_upload!` argument: which edge counter refuses it.
+pub const UploadRefusal = enum(u8) { malformed, too_large };
+
+/// Host.roc's `reserve_upload!` answer.
+pub const Reservation = enum(u8) { failed, refused, reserved };
+
+/// Host.roc's `store_upload!` answer's `status`.
+pub const UploadStored = enum(u8) { failed, stored };
+
 /// Host.roc's `count_dropped!`: what the chat dropped, counted, rather than
 /// fail the request for (metal-vmm QUEUE 267): a DM's new-topic announcement
 /// that failed after the topic was made, a feed's entry or a recent row
@@ -314,6 +326,10 @@ comptime {
         Serving,
         UploadPart,
         UploadServed,
+        UploadRead,
+        UploadRefusal,
+        Reservation,
+        UploadStored,
         Dropped,
         Aside,
         AsideEnd,

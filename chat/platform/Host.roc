@@ -369,6 +369,46 @@ Host := [].{
 		],
 	} => [Gone, Served]
 
+	## **AN UPLOAD'S FORM READ** (metal-vmm QUEUE 292): the request's
+	## multipart body read to the largest upload's limit, its `file` part
+	## found and its type sniffed from its first bytes; the host holds the
+	## bytes, never handed to Roc. `Read`: the file's `size`, the extension
+	## its bytes say (`ext`) and the name the client gave it (`filename`, as
+	## sent); `NoFile`: no multipart form, or none with a file;
+	## `Unsupported`: a file of a type the chat takes not; `Answered`: the
+	## host answered (a body too big) or failed.
+	read_upload! : {} => {
+		size : U64,
+		ext : List(U8),
+		filename : List(U8),
+		status : [
+			Answered,
+			NoFile,
+			Read,
+			Unsupported,
+		],
+	}
+
+	## **AN UPLOAD REFUSED** as the client's mistake, counted on webbox's
+	## edge counter (`Malformed`: malformed_multipart, a 400; `TooLarge`:
+	## body_too_large, a 413) and answered `message`.
+	refuse_upload! : [Malformed, TooLarge], List(U8) => {}
+
+	## **THE MEMBER'S ALLOWANCE SPENT** by `size` bytes, if it holds them
+	## (`Reserved`), else nothing spent (`Refused`); `Failed` when the
+	## allowance would not read (the request has failed).
+	reserve_upload! : U64 => [
+		Failed,
+		Refused,
+		Reserved,
+	]
+
+	## **THE UPLOAD STORED** in the folder `folder` under the chat root
+	## (checked as `read!`'s is), by a fresh name of 32 hex digits and the
+	## extension `ext`: that name. `Failed` when it could not be stored (the
+	## request has failed, and the bytes reserved are given back).
+	store_upload! : List(U8), List(U8) => { name : List(U8), status : [Failed, Stored] }
+
 	## **A TOPIC'S BUNDLE, A FILE AT A TIME** (metal-vmm QUEUE 291): the file
 	## at `path` under the chat root (checked as `read!`'s is) added to the
 	## bundle the host holds as the entry `name`. `Failed` when it would not

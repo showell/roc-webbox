@@ -144,6 +144,39 @@ handle! = |req|
 			[],
 			Str.to_utf8(if got == Served "served" else "gone"),
 		)
+	} else if starts(req.sub, "/upload-form") {
+		# An upload's form read, every field of its answer said; then the
+		# allowance and the store asked, so each record laid out wrong shows
+		# (metal-vmm QUEUE 292).
+		got = Host.read_upload!({})
+		said = match got.status {
+			Read => "read"
+			NoFile => "nofile"
+			Unsupported => "unsupported"
+			Answered => "answered"
+		}
+		reserved = match Host.reserve_upload!(got.size) {
+			Reserved => "reserved"
+			Refused => "refused"
+			Failed => "failed"
+		}
+		stored = Host.store_upload!(
+			Str.to_utf8("1_2/sessions/Plans.uploads"),
+			got.ext,
+		)
+		Host.refuse_upload!(TooLarge, Str.to_utf8("too big"))
+		Chat.respond(
+			200,
+			[],
+			List.join([
+				Str.to_utf8("${said} ${U64.to_str(got.size)} "),
+				got.ext,
+				[' '],
+				got.filename,
+				Str.to_utf8(" ${reserved} "),
+				if stored.status == Stored stored.name else Str.to_utf8("not stored"),
+			]),
+		)
 	} else if starts(req.sub, "/bundle/") {
 		# Two files added to a bundle, then the bundle served as `<name>`.
 		name = List.drop_first(req.sub, 8)

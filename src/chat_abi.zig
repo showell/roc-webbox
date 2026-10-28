@@ -144,6 +144,18 @@ pub const AppendedAtRec = extern struct { size: u64, status: route_mod.AppendSta
 /// Host.roc's `serve_upload!` record (metal-vmm QUEUE 291): `{ first, last,
 /// size : U64, content_type, path : List(U8), part : [Range, Unsatisfiable,
 /// Whole] }`, the numbers first, the bytes by name, the tag last.
+/// Host.roc's `read_upload!` answer (metal-vmm QUEUE 292): `{ size : U64,
+/// ext, filename : List(U8), status }`, the number first, the bytes by name,
+/// the tag last.
+pub const UploadReadRec = extern struct {
+    size: u64,
+    ext: RocBytes,
+    filename: RocBytes,
+    status: route_mod.UploadRead,
+};
+/// Host.roc's `store_upload!` answer: `{ name : List(U8), status : [Failed,
+/// Stored] }`, a ReadRec's shape.
+pub const StoredRec = extern struct { name: RocBytes, status: route_mod.UploadStored };
 pub const UploadRec = extern struct {
     first: u64,
     last: u64,
@@ -260,6 +272,13 @@ comptime {
     std.debug.assert(@sizeOf(RocBytes) == 3 * w and @sizeOf(Request) == 4 * w and @sizeOf(RouteRec) == 10 * w and @sizeOf(Answer) == 20 * w and @sizeOf(Got) == 4 * w and @sizeOf(ConvRec) == 10 * w and @sizeOf(ReadRec) == 4 * w and @sizeOf(EntryRec) == 4 * w and @sizeOf(SrcRec) == 6 * w and @sizeOf(ListRec) == 4 * w and @sizeOf(AccountRec) == 7 * w and @sizeOf(AccountsRec) == 4 * w and @sizeOf(RenderRec) == 4 * w and @sizeOf(MessageRec) == 15 * w);
     std.debug.assert(@sizeOf(AppendRec) == 4);
     std.debug.assert(@sizeOf(AppendedAtRec) == 16 and @offsetOf(AppendedAtRec, "size") == 0 and @offsetOf(AppendedAtRec, "status") == 8);
+    // read_upload!'s and store_upload!'s (metal-vmm QUEUE 292).
+    std.debug.assert(@offsetOf(UploadReadRec, "size") == 0 and
+        @offsetOf(UploadReadRec, "ext") == 8 and
+        @offsetOf(UploadReadRec, "filename") == 8 + 3 * w and
+        @offsetOf(UploadReadRec, "status") == 8 + 6 * w and
+        @sizeOf(UploadReadRec) == std.mem.alignForward(usize, 8 + 6 * w + 1, 8));
+    std.debug.assert(@offsetOf(StoredRec, "name") == 0 and @offsetOf(StoredRec, "status") == 3 * w and @sizeOf(StoredRec) == 4 * w);
     // serve_upload!'s (metal-vmm QUEUE 291): three numbers, two lists, a tag.
     std.debug.assert(@offsetOf(UploadRec, "first") == 0 and
         @offsetOf(UploadRec, "last") == 8 and
@@ -413,6 +432,18 @@ pub const Count = union(route_mod.CountStatus) { counted: u64, failed };
 /// **A MESSAGE'S MARKDOWN AS THE HOST RENDERED IT**, or a render that
 /// failed (the host has failed the request): never "" for one that failed.
 pub const Rendered = union(route_mod.RenderStatus) { failed, rendered: []const u8 };
+
+/// Host.read_upload!'s answer, its bytes as slices: the file's size, the
+/// extension its bytes say and the client's name for it.
+pub const UploadRead = union(route_mod.UploadRead) {
+    answered,
+    no_file,
+    read: struct { size: u64, ext: []const u8, filename: []const u8 },
+    unsupported,
+};
+
+/// Host.store_upload!'s answer: the fresh name, or `.failed`.
+pub const Stored = union(route_mod.UploadStored) { failed, stored: []const u8 };
 
 /// An upload as Host.serve_upload! names it (UploadRec, its bytes as slices).
 pub const Upload = struct {
@@ -687,6 +718,14 @@ pub const Host = struct {
     ) route_mod.Serving = noServeRendered,
     /// Host.serve_upload!: the upload answered, or gone since the Roc's look.
     serve_upload: *const fn (ctx: *anyopaque, upload: Upload) route_mod.UploadServed = noServeUpload,
+    /// Host.read_upload!: the form read and its file sniffed, its bytes held.
+    read_upload: *const fn (ctx: *anyopaque) UploadRead = noReadUpload,
+    /// Host.refuse_upload!: refused on the edge counter `why`, answered `message`.
+    refuse_upload: *const fn (ctx: *anyopaque, why: route_mod.UploadRefusal, message: []const u8) void = noRefuseUpload,
+    /// Host.reserve_upload!: the member's allowance spent by `size`, if it holds it.
+    reserve_upload: *const fn (ctx: *anyopaque, size: u64) route_mod.Reservation = noReserveUpload,
+    /// Host.store_upload!: the held bytes stored in `folder` as `<fresh>.<ext>`.
+    store_upload: *const fn (ctx: *anyopaque, folder: []const u8, ext: []const u8) Stored = noStoreUpload,
     /// Host.bundle_add!: the file at `path` added to the bundle as `name`.
     bundle_add: *const fn (ctx: *anyopaque, name: []const u8, path: []const u8) route_mod.Done = noBundleAdd,
     /// Host.serve_bundle!: the bundle answered as `<name>.tar.gz`.
@@ -706,6 +745,18 @@ fn noAppendLine(
     _: []const u8,
 ) route_mod.Done {
     @panic("append_line asked of a host that does not answer it");
+}
+fn noReadUpload(_: *anyopaque) UploadRead {
+    @panic("read_upload asked of a host that does not answer it");
+}
+fn noRefuseUpload(_: *anyopaque, _: route_mod.UploadRefusal, _: []const u8) void {
+    @panic("refuse_upload asked of a host that does not answer it");
+}
+fn noReserveUpload(_: *anyopaque, _: u64) route_mod.Reservation {
+    @panic("reserve_upload asked of a host that does not answer it");
+}
+fn noStoreUpload(_: *anyopaque, _: []const u8, _: []const u8) Stored {
+    @panic("store_upload asked of a host that does not answer it");
 }
 fn noServeUpload(_: *anyopaque, _: Upload) route_mod.UploadServed {
     @panic("serve_upload asked of a host that does not answer it");
@@ -1469,6 +1520,35 @@ export fn roc_chat_serve_file(path: RocBytes) callconv(.c) route_mod.Serving {
     const h = current("serve_file");
     if (!underRoot(h, path.slice())) return .not_serving;
     return h.serve_file(h.ctx, path.slice());
+}
+
+export fn roc_chat_read_upload() callconv(.c) UploadReadRec {
+    const h = current("read_upload");
+    return switch (h.read_upload(h.ctx)) {
+        .read => |f| .{ .size = f.size, .ext = .from(f.ext), .filename = .from(f.filename), .status = .read },
+        .answered => .{ .size = 0, .ext = .from(""), .filename = .from(""), .status = .answered },
+        .no_file => .{ .size = 0, .ext = .from(""), .filename = .from(""), .status = .no_file },
+        .unsupported => .{ .size = 0, .ext = .from(""), .filename = .from(""), .status = .unsupported },
+    };
+}
+
+export fn roc_chat_refuse_upload(why: route_mod.UploadRefusal, message: RocBytes) callconv(.c) void {
+    const h = current("refuse_upload");
+    h.refuse_upload(h.ctx, why, message.slice());
+}
+
+export fn roc_chat_reserve_upload(size: u64) callconv(.c) route_mod.Reservation {
+    const h = current("reserve_upload");
+    return h.reserve_upload(h.ctx, size);
+}
+
+export fn roc_chat_store_upload(folder: RocBytes, ext: RocBytes) callconv(.c) StoredRec {
+    const h = current("store_upload");
+    if (!underRoot(h, folder.slice())) return .{ .name = .from(""), .status = .failed };
+    return switch (h.store_upload(h.ctx, folder.slice(), ext.slice())) {
+        .stored => |name| .{ .name = .from(name), .status = .stored },
+        .failed => .{ .name = .from(""), .status = .failed },
+    };
 }
 
 export fn roc_chat_serve_upload(rec: UploadRec) callconv(.c) route_mod.UploadServed {

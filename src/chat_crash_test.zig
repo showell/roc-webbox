@@ -61,6 +61,10 @@ const Files = struct {
         h.render = render;
         h.append_message = appendMessage;
         h.serve_upload = serveUpload;
+        h.read_upload = readUpload;
+        h.reserve_upload = reserveUpload;
+        h.store_upload = storeUpload;
+        h.refuse_upload = refuseUpload;
         h.bundle_add = bundleAdd;
         h.serve_bundle = serveBundle;
         h.index_message = indexMessage;
@@ -157,6 +161,21 @@ const Files = struct {
             .{ u.first, u.last, u.size, u.content_type, u.path, u.part },
         ) catch @panic("oom");
         return .served;
+    }
+    fn readUpload(ctx: *anyopaque) abi.UploadRead {
+        say(ctx, "read upload", "");
+        return .{ .read = .{ .size = 4242, .ext = "png", .filename = "cat \"1\".png" } };
+    }
+    fn reserveUpload(ctx: *anyopaque, size: u64) @import("chat_route.zig").Reservation {
+        of(ctx).asked.print(testing.allocator, "reserve {d};", .{size}) catch @panic("oom");
+        return .reserved;
+    }
+    fn storeUpload(ctx: *anyopaque, folder: []const u8, ext: []const u8) abi.Stored {
+        of(ctx).asked.print(testing.allocator, "store {s} {s};", .{ folder, ext }) catch @panic("oom");
+        return .{ .stored = "0123456789abcdef0123456789abcdef.png" };
+    }
+    fn refuseUpload(ctx: *anyopaque, why: @import("chat_route.zig").UploadRefusal, message: []const u8) void {
+        of(ctx).asked.print(testing.allocator, "refuse {t} {s};", .{ why, message }) catch @panic("oom");
     }
     fn bundleAdd(ctx: *anyopaque, name: []const u8, path: []const u8) @import("chat_route.zig").Done {
         of(ctx).asked.print(
@@ -714,6 +733,12 @@ test "a message's render and store cross the seam: the HTML or a render that fai
         "/upload/" ++ p[0],
         "served",
         "upload 11 22 33 image/png 1_2/sessions/Plans.uploads/a.png " ++ p[1] ++ ";",
+        null,
+    );
+    try probe(
+        "/upload-form",
+        "read 4242 png cat \"1\".png reserved 0123456789abcdef0123456789abcdef.png",
+        "read upload ;reserve 4242;store 1_2/sessions/Plans.uploads png;refuse too_large too big;",
         null,
     );
     try probe(
