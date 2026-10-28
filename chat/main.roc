@@ -125,7 +125,7 @@ zig : Route.R, Chat.Counting -> Chat.Answer
 zig = |route, counting| Chat.zig(Route.to_wire(route), counting)
 
 ## Which side serves a route. The Roc serves: /chat and /chat/default, the recent,
-## images and code pages (not their streams), /chat/links,
+## images and code pages and every stream (metal-vmm QUEUE 286), /chat/links,
 ## /chat/conversations, /chat/msg/<id>; and every route of a DM or a
 ## channel, handing back to the Zig only a topic's uploads, upload,
 ## stream, download and saved, once it has found them the viewer's.
@@ -134,7 +134,10 @@ served_by : Route.R -> [Roc, Zig]
 served_by = |r|
 	match r.family {
 		Default | Links | Conversations | Msg => Roc
-		Recent | Images | Code => if r.rest == "/stream" Zig else Roc
+		# The pages and their streams (metal-vmm QUEUE 286): the Roc picks
+		# the member's bus key, the host holds the stream.
+		Recent | Images | Code | Notifications | SidebarStream => Roc
+		NotFound => Roc
 		# **THE ROC DECIDES EVERY CONVERSATION'S ROUTE** (metal-vmm QUEUE
 		# 271): whose it is, whether its topic is there, every 404. The Zig
 		# serves the tails handed back to it, authorized here.
@@ -160,14 +163,46 @@ act! = |req, route| {
 		Conversations => if req.method != Get Chat.not_allowed(Get) else serve_conversations!({})
 		Msg => redirect_to_msg!(route.rest.to_utf8())
 		Links => serve_links!(route.rest.to_utf8())
-		Recent => serve_recent!(route.rest.to_utf8())
+		Recent =>
+			if route.rest == "/stream" {
+				member_stream!(req, BusKey.recent)
+			} else {
+				serve_recent!(route.rest.to_utf8())
+			}
 		Docs => post_doc!(req)
 		Search => search!(req, route.rest)
-		Images => serve_feed!(Images, route.rest.to_utf8())
-		Code => serve_feed!(Code, route.rest.to_utf8())
+		Images =>
+			if route.rest == "/stream" {
+				member_stream!(req, BusKey.images)
+			} else {
+				serve_feed!(Images, route.rest.to_utf8())
+			}
+		Code =>
+			if route.rest == "/stream" {
+				member_stream!(req, BusKey.code)
+			} else {
+				serve_feed!(Code, route.rest.to_utf8())
+			}
+		Notifications => member_stream!(req, BusKey.notify)
+		SidebarStream => member_stream!(req, BusKey.sidebar)
+		NotFound => Chat.not_found
 		_ => serve_conversation!(req, route)
 	}
 }
+
+## **A MEMBER'S OWN STREAM** (metal-vmm QUEUE 286): their feed, their
+## notifications or their sidebar, on the bus key `key` makes of their uid,
+## live only (the page is the backlog). A GET's, as every stream is.
+member_stream! : Chat.Request, (Uid -> BusKey) => Chat.Answer
+member_stream! = |req, key|
+	if req.method != Get {
+		Chat.not_allowed(Get)
+	} else {
+		match load_uid!({}) {
+			Ok(me) => Chat.stream(key(me).bytes())
+			Err(Failed) => Chat.answered
+		}
+	}
 
 ## A DM's or a channel's, in the Zig's order: a new topic and a send look
 ## their conversation up themselves (a send makes its topic); the landing
@@ -361,7 +396,20 @@ serve_topic! = |
 	match route.tail {
 		# The tails the Zig serves, the conversation and the topic found
 		# the viewer's here.
-		Uploads | Upload | Stream | Download => zig(route, Uncounted)
+		Uploads | Upload | Download => zig(route, Uncounted)
+		# The topic's stream (metal-vmm QUEUE 286): its key and transcript
+		# the Roc's, the backlog's replay and the live stream the host's.
+		Stream =>
+			if req.method != Get {
+				Chat.not_allowed(Get)
+			} else {
+				at = { key: found.key, topic: route.topic }
+				Chat.topic_stream(
+					BusKey.topic(at).bytes(),
+					Paths.transcript_path(at).bytes(),
+					route.topic.to_utf8(),
+				)
+			}
 		Saved => if req.method != Get and req.method != Head Chat.not_allowed(Get) else serve_saved!(route)
 		Invalid => Chat.not_found
 		Page | Raw => serve_page_or_raw!(

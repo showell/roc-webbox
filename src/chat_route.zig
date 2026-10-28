@@ -113,6 +113,7 @@ pub const Kind = enum(u8) {
     redirect,
     respond,
     serve,
+    stream,
     to_login,
 };
 
@@ -417,6 +418,15 @@ pub const Decision = union(enum) {
     /// A 303 to the login page, to come back to this path after: the
     /// request's own, which the host checks is on the site (a 400 if not).
     to_login: []const u8,
+    /// The live stream on bus key `key`, held by the host (metal-vmm QUEUE
+    /// 286); a topic's replays its backlog first, from `transcript` (a path
+    /// under the chat root, its messages numbered in `topic`). `transcript`
+    /// empty: live only.
+    stream: struct {
+        key: []const u8,
+        transcript: []const u8 = "",
+        topic: []const u8 = "",
+    },
 
     pub fn eql(a: Decision, b: Decision) bool {
         if (std.meta.activeTag(a) != std.meta.activeTag(b)) return false;
@@ -447,6 +457,19 @@ pub const Decision = union(enum) {
                 u8,
                 l,
                 b.to_login,
+            ),
+            .stream => |s| std.mem.eql(
+                u8,
+                s.key,
+                b.stream.key,
+            ) and std.mem.eql(
+                u8,
+                s.transcript,
+                b.stream.transcript,
+            ) and std.mem.eql(
+                u8,
+                s.topic,
+                b.stream.topic,
             ),
             .held => |h| h.status == b.held.status and h.nosniff == b.held.nosniff and std.mem.eql(
                 u8,
@@ -480,6 +503,14 @@ pub const Decision = union(enum) {
             .not_found => try w.writeAll("404"),
             .found => |l| try w.print("302 {s}", .{l}),
             .to_login => |l| try w.print("303 to login, then {s}", .{l}),
+            .stream => |s| if (s.transcript.len == 0) try w.print(
+                "stream {s}",
+                .{s.key},
+            ) else try w.print("stream {s}, its backlog from {s} in {s}", .{
+                s.key,
+                s.transcript,
+                s.topic,
+            }),
             .held => |h| try w.print("{d} \"{s}\"{s} {d} bytes, the host's, {d} bytes", .{
                 h.status,
                 h.content_type,

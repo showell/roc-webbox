@@ -101,6 +101,13 @@ fn expectRoute(
         routing.host(),
     );
     if (got == .serve and routing.marked) got.serve.presence = true;
+    // A path that names nothing is the Roc's own 404 (metal-vmm QUEUE 286),
+    // its presence counted as the Zig's was.
+    if (want.family == .not_found) {
+        if (got == .not_found and routing.marked == presence) return;
+        std.debug.print("{s}: got {f}, want the Roc's 404\n", .{ sub, got });
+        return error.TestUnexpectedResult;
+    }
     const expected: Decision = .{ .serve = .{ .route = want, .presence = presence } };
     if (!got.eql(expected)) {
         std.debug.print("{s}: got {f}, want {f}\n", .{
@@ -1196,13 +1203,11 @@ test "a topic's reactions, react, pin and unpin are the Roc's: presence, the con
         false,
         .GET,
         a,
-        .{ .serve = .{ .route = .{
-            .family = .dm,
-            .key = "1_2",
+        .{ .stream = .{
+            .key = "1_2/Plans",
+            .transcript = "1_2/sessions/Plans.md",
             .topic = "Plans",
-            .part = .topic,
-            .tail = .stream,
-        }, .presence = false } },
+        } },
         "member;accounts;list 1_2/sessions;",
     );
     try expectAct(

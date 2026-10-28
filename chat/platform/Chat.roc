@@ -153,6 +153,10 @@ Chat := [].{
 	##   out), then `location`.
 	## - `ToLogin`: a 303 to the login page, to come back to `location` after
 	##   (the request's own path, so the host checks that it is on the site).
+	## - `Stream`: the live stream on the bus key `location`, held by the
+	##   host (metal-vmm QUEUE 286); a topic's, with its backlog replayed
+	##   first from the transcript at `body` (a path under the chat root),
+	##   its messages numbered in topic `route.topic`. `body` empty: live only.
 	Kind : [
 		Serve,
 		Redirect,
@@ -164,6 +168,7 @@ Chat := [].{
 		Found,
 		Held,
 		ToLogin,
+		Stream,
 	]
 
 	## Whether a request Zig serves counts as the member's presence.
@@ -291,6 +296,30 @@ Chat := [].{
 		..none,
 		kind: Found,
 		location,
+	}
+
+	## The live stream on the bus key `key`, nothing replayed: a member's
+	## feed, notifications or sidebar.
+	stream : List(U8) -> Answer
+	stream = |key| {
+		..none,
+		kind: Stream,
+		location: key,
+	}
+
+	## A topic's stream on the bus key `key`: its backlog first, from the
+	## transcript at `transcript`, numbered in `topic`.
+	topic_stream : List(U8), List(U8), List(U8) -> Answer
+	topic_stream = |
+		key,
+		transcript,
+		topic,
+	| {
+		..none,
+		kind: Stream,
+		location: key,
+		body: transcript,
+		route: { ..family(NotFound), topic },
 	}
 
 	## To the login page, to come back to `next` after.

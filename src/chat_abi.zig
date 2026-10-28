@@ -1471,6 +1471,16 @@ pub fn decide(
         .not_found => .not_found,
         .found => .{ .found = try alloc.dupe(u8, a.location.slice()) },
         .to_login => .{ .to_login = try alloc.dupe(u8, a.location.slice()) },
+        .stream => blk: {
+            // A transcript the host replays is a file the Roc names, held
+            // to the chat root as every file call is (QUEUE 268).
+            if (a.body.slice().len > 0 and !roc.inRoot(a.body.slice())) return error.PathOutsideChatRoot;
+            break :blk .{ .stream = .{
+                .key = try alloc.dupe(u8, a.location.slice()),
+                .transcript = try alloc.dupe(u8, a.body.slice()),
+                .topic = try alloc.dupe(u8, a.route.topic.slice()),
+            } };
+        },
         .held => .{ .held = .{
             .status = a.status,
             .content_type = try alloc.dupe(u8, a.content_type.slice()),
