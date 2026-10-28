@@ -470,9 +470,23 @@ for line in lines(read("chat/platform/Host.roc")) do
   local m = re_find(line, "^\\t([a-z_]+)! :")
   if m ~= nil then push(hosted, m.group) end
 end
+-- A hosted effect's Call member is the host field its export asks for
+-- (`roc_chat_read_stat` asks `current("stat")`): a Roc name and the
+-- host's field may differ (metal-vmm QUEUE 297's renames).
+local field_of = {}
+local export_now = nil
+for line in lines(read("src/chat_abi.zig")) do
+  local e = re_find(line, "^export fn roc_chat_([a-z_]+)\\(")
+  if e ~= nil then export_now = e.group end
+  local c = re_find(line, "current\\(\"([a-z_]+)\"\\)")
+  if c ~= nil and export_now ~= nil then
+    field_of[export_now] = c.group
+    export_now = nil
+  end
+end
 local classes = {}
 for name in hosted do
-  local fn = get(wiring, name)
+  local fn = get(wiring, get(field_of, name, name))
   if fn == nil then
     print("  " .. name .. "!  (no Call member wired)")
   else
