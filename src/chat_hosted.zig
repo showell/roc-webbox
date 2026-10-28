@@ -329,6 +329,11 @@ const Scripted = struct {
     /// bytes against the member's allowance says (metal-vmm QUEUE 292).
     upload: abi.UploadRead = .no_file,
     reservation: route.Reservation = .reserved,
+    /// Every query field's value, as Host.read_query! answers it.
+    query: []const u8 = "",
+    /// What Host.search_messages! finds, each hit's `conv` a place in the
+    /// scope the Roc handed.
+    hits: []const abi.Hit = &.{},
     asked: std.ArrayList(u8) = .empty,
     alloc: std.mem.Allocator,
 
@@ -378,7 +383,34 @@ const Scripted = struct {
             .refuse_upload = refuseUpload,
             .reserve_upload = reserveUpload,
             .store_upload = storeUpload,
+            .admit = admitOf,
+            .read_query = queryOf,
+            .search_scope_add = scopeAdd,
+            .search_words = wordsOf,
+            .search_messages = messagesOf,
         };
+    }
+    fn admitOf(ctx: *anyopaque) route.Admission {
+        say(ctx, "admit", .{});
+        return .admitted;
+    }
+    fn queryOf(ctx: *anyopaque, name: []const u8) []const []const u8 {
+        say(ctx, "query {s}", .{name});
+        const s = me(ctx);
+        return s.alloc.dupe([]const u8, &.{s.query}) catch @panic("oom");
+    }
+    fn scopeAdd(ctx: *anyopaque, dir: []const u8) route.Done {
+        say(ctx, "scope {s}", .{dir});
+        return .ok;
+    }
+    fn wordsOf(ctx: *anyopaque, key: []const u8, most: u64) ?abi.Words {
+        say(ctx, "words {s} {d}", .{ key, most });
+        return .{ .words = &.{}, .unreadable = 0 };
+    }
+    fn messagesOf(ctx: *anyopaque, key: []const u8, most: u64) ?abi.Messages {
+        say(ctx, "messages {s} {d}", .{ key, most });
+        const s = me(ctx);
+        return .{ .hits = s.hits, .matched = s.hits.len, .unreadable = 0 };
     }
     fn readUpload(ctx: *anyopaque) abi.UploadRead {
         say(ctx, "read_upload", .{});
@@ -2476,6 +2508,79 @@ test "/chat/msg: every channel's roster, which are the member's, and their order
         };
         break :blk s;
     }, .answered, "identify;accounts;presence;list channels;read channels/Abad.channel;malformed Abad;read channels/ops.channel;");
+}
+
+test "what a search walks is the Roc's (the pure-Roc plan's item 8): a DM with every other member and the agent, then the member's channels by bytes, each handed to the host a call at a time; each hit's conversation the scope's at its place, one past it a crash" {
+    use(testing.allocator);
+    defer @import("roc_abi.zig").deinit();
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const script: Scripted = .{
+        .alloc = a,
+        .accounts = &.{
+            .{ .id = "3", .name = .{ .found = "Claude" }, .kind = .agent },
+            steve,
+            .{ .id = "5", .name = .{ .found = "Gus" }, .kind = .guest },
+            .{ .id = "2", .name = .{ .found = "Debbie" }, .kind = .member },
+        },
+        // The member is in ops and Zed, not zeta; 9lives is no channel's name.
+        .channels = &.{
+            .{ .name = "ops", .read = .{ .found = "1\n3\n" } },
+            .{ .name = "zeta", .read = .{ .found = "2\n" } },
+            .{ .name = "Zed", .read = .{ .found = "# us\n1\n" } },
+            .{ .name = "9lives", .read = .{ .found = "1\n" } },
+        },
+        .query = "Lantern",
+    };
+    const walked = "identify;accounts;presence;admit;query {s};list channels;read channels/ops.channel;read channels/zeta.channel;read channels/Zed.channel;malformed 9lives;scope 1_2;scope 1_3;scope channels/Zed;scope channels/ops;";
+    const hit: abi.Hit = .{
+        .conv = 3,
+        .sid = "Lamps",
+        .id = "Lamps_1",
+        .from = "Someone",
+        .date = "d",
+        .window = "lantern x",
+        .start = 0,
+        .length = 9,
+        .at = 0,
+        .found = .found,
+    };
+    {
+        var s = script;
+        s.hits = &.{ hit, .{
+            .conv = 0,
+            .sid = "Plans",
+            .id = "Plans_2",
+            .from = "Someone",
+            .date = "d",
+            .window = "a lantern",
+            .start = 0,
+            .length = 9,
+            .at = 2,
+            .found = .found,
+        } };
+        const d = try decide(a, "/search/messages", false, .GET, s.host());
+        try testing.expectEqual(@as(u16, 200), d.respond.status);
+        const ops = std.mem.indexOf(u8, d.respond.body, "{\"conv\":\"/channel/ops\",\"kind\":\"channel\",\"sid\":\"Lamps\",\"id\":\"Lamps_1\"").?;
+        const dm = std.mem.indexOf(u8, d.respond.body, "{\"conv\":\"/chat/c/1_2\",\"kind\":\"dm\",\"sid\":\"Plans\",\"id\":\"Plans_2\"").?;
+        try testing.expect(ops < dm);
+        try testing.expectEqualStrings(try std.fmt.allocPrint(a, walked ++ "messages lantern 500;", .{"word"}), s.asked.items);
+    }
+    {
+        var s = script;
+        const d = try decide(a, "/search/words", false, .GET, s.host());
+        try testing.expectEqual(@as(u16, 200), d.respond.status);
+        try testing.expectEqualStrings(try std.fmt.allocPrint(a, walked ++ "words lantern 20;", .{"prefix"}), s.asked.items);
+    }
+    // **A PLACE PAST THE SCOPE IS THE HOST'S BUG**: four were handed.
+    {
+        var s = script;
+        var past = hit;
+        past.conv = 4;
+        s.hits = &.{past};
+        try testing.expectError(error.RocCrashed, decide(a, "/search/messages", false, .GET, s.host()));
+    }
 }
 
 test "a channel's member file is the Roc's: a malformed one fails its own route by its reason (never the 404 of a channel not the member's); a missing one is no channel" {

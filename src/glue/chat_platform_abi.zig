@@ -1215,16 +1215,16 @@ comptime {
     }
 }
 
-/// Element type for __AnonStruct_f89294d37b2cb861
-pub const __AnonStruct_f89294d37b2cb861 = if (@sizeOf(usize) == 4) extern struct {
+/// Element type for __AnonStruct_79d8af0d7e2563b8
+pub const __AnonStruct_79d8af0d7e2563b8 = if (@sizeOf(usize) == 4) extern struct {
     matched: u64,
     unreadable: u64,
-    hits: RocList(__AnonStruct_c682b78e33d5848f),
+    hits: RocList(__AnonStruct_5f997c9eb9a5630d),
     status: NotReadyOrReady,
     /// Recursively decrement Roc-owned fields.
     pub fn decref(self: @This(), roc_host: *RocHost) void {
         const value = self;
-        decrefListOf__AnonStruct_c682b78e33d5848f(value.hits, roc_host);
+        decrefListOf__AnonStruct_5f997c9eb9a5630d(value.hits, roc_host);
         value.status.decref(roc_host);
     }
 
@@ -1237,12 +1237,12 @@ pub const __AnonStruct_f89294d37b2cb861 = if (@sizeOf(usize) == 4) extern struct
 } else extern struct {
     matched: u64,
     unreadable: u64,
-    hits: RocList(__AnonStruct_c682b78e33d5848f),
+    hits: RocList(__AnonStruct_5f997c9eb9a5630d),
     status: NotReadyOrReady,
     /// Recursively decrement Roc-owned fields.
     pub fn decref(self: @This(), roc_host: *RocHost) void {
         const value = self;
-        decrefListOf__AnonStruct_c682b78e33d5848f(value.hits, roc_host);
+        decrefListOf__AnonStruct_5f997c9eb9a5630d(value.hits, roc_host);
         value.status.decref(roc_host);
     }
 
@@ -1256,100 +1256,90 @@ pub const __AnonStruct_f89294d37b2cb861 = if (@sizeOf(usize) == 4) extern struct
 
 comptime {
     if (@sizeOf(usize) == 8) {
-        if (@sizeOf(__AnonStruct_f89294d37b2cb861) != 48) @compileError("__AnonStruct_f89294d37b2cb861 size mismatch");
-        if (@alignOf(__AnonStruct_f89294d37b2cb861) != 8) @compileError("__AnonStruct_f89294d37b2cb861 alignment mismatch");
+        if (@sizeOf(__AnonStruct_79d8af0d7e2563b8) != 48) @compileError("__AnonStruct_79d8af0d7e2563b8 size mismatch");
+        if (@alignOf(__AnonStruct_79d8af0d7e2563b8) != 8) @compileError("__AnonStruct_79d8af0d7e2563b8 alignment mismatch");
     }
     if (@sizeOf(usize) == 4) {
-        if (@sizeOf(__AnonStruct_f89294d37b2cb861) != 32) @compileError("__AnonStruct_f89294d37b2cb861 size mismatch");
-        if (@alignOf(__AnonStruct_f89294d37b2cb861) != 8) @compileError("__AnonStruct_f89294d37b2cb861 alignment mismatch");
+        if (@sizeOf(__AnonStruct_79d8af0d7e2563b8) != 32) @compileError("__AnonStruct_79d8af0d7e2563b8 size mismatch");
+        if (@alignOf(__AnonStruct_79d8af0d7e2563b8) != 8) @compileError("__AnonStruct_79d8af0d7e2563b8 alignment mismatch");
     }
 }
 
-/// Element type for __AnonStruct_c682b78e33d5848f
-pub const __AnonStruct_c682b78e33d5848f = if (@sizeOf(usize) == 4) extern struct {
+/// Element type for __AnonStruct_5f997c9eb9a5630d
+pub const __AnonStruct_5f997c9eb9a5630d = if (@sizeOf(usize) == 4) extern struct {
     at: u64,
+    conv: u64,
     length: u64,
     start: u64,
-    base: RocListWith(u8, false),
     date: RocListWith(u8, false),
     from: RocListWith(u8, false),
     id: RocListWith(u8, false),
     sid: RocListWith(u8, false),
     window: RocListWith(u8, false),
     found: FoundOrMissing,
-    kind: ChannelOrDm,
     /// Recursively decrement Roc-owned fields.
     pub fn decref(self: @This(), roc_host: *RocHost) void {
         const value = self;
-        value.base.decref(roc_host);
         value.date.decref(roc_host);
         value.from.decref(roc_host);
         value.id.decref(roc_host);
         value.sid.decref(roc_host);
         value.window.decref(roc_host);
         value.found.decref(roc_host);
-        value.kind.decref(roc_host);
     }
 
     /// Increment Roc-owned fields.
     pub fn incref(self: @This(), amount: isize) void {
         const value = self;
-        value.base.incref(amount);
         value.date.incref(amount);
         value.from.incref(amount);
         value.id.incref(amount);
         value.sid.incref(amount);
         value.window.incref(amount);
         value.found.incref(amount);
-        value.kind.incref(amount);
     }
 } else extern struct {
     at: u64,
+    conv: u64,
     length: u64,
     start: u64,
-    base: RocListWith(u8, false),
     date: RocListWith(u8, false),
     from: RocListWith(u8, false),
     id: RocListWith(u8, false),
     sid: RocListWith(u8, false),
     window: RocListWith(u8, false),
     found: FoundOrMissing,
-    kind: ChannelOrDm,
     /// Recursively decrement Roc-owned fields.
     pub fn decref(self: @This(), roc_host: *RocHost) void {
         const value = self;
-        value.base.decref(roc_host);
         value.date.decref(roc_host);
         value.from.decref(roc_host);
         value.id.decref(roc_host);
         value.sid.decref(roc_host);
         value.window.decref(roc_host);
         value.found.decref(roc_host);
-        value.kind.decref(roc_host);
     }
 
     /// Increment Roc-owned fields.
     pub fn incref(self: @This(), amount: isize) void {
         const value = self;
-        value.base.incref(amount);
         value.date.incref(amount);
         value.from.incref(amount);
         value.id.incref(amount);
         value.sid.incref(amount);
         value.window.incref(amount);
         value.found.incref(amount);
-        value.kind.incref(amount);
     }
 };
 
 comptime {
     if (@sizeOf(usize) == 8) {
-        if (@sizeOf(__AnonStruct_c682b78e33d5848f) != 176) @compileError("__AnonStruct_c682b78e33d5848f size mismatch");
-        if (@alignOf(__AnonStruct_c682b78e33d5848f) != 8) @compileError("__AnonStruct_c682b78e33d5848f alignment mismatch");
+        if (@sizeOf(__AnonStruct_5f997c9eb9a5630d) != 160) @compileError("__AnonStruct_5f997c9eb9a5630d size mismatch");
+        if (@alignOf(__AnonStruct_5f997c9eb9a5630d) != 8) @compileError("__AnonStruct_5f997c9eb9a5630d alignment mismatch");
     }
     if (@sizeOf(usize) == 4) {
-        if (@sizeOf(__AnonStruct_c682b78e33d5848f) != 104) @compileError("__AnonStruct_c682b78e33d5848f size mismatch");
-        if (@alignOf(__AnonStruct_c682b78e33d5848f) != 8) @compileError("__AnonStruct_c682b78e33d5848f alignment mismatch");
+        if (@sizeOf(__AnonStruct_5f997c9eb9a5630d) != 96) @compileError("__AnonStruct_5f997c9eb9a5630d size mismatch");
+        if (@alignOf(__AnonStruct_5f997c9eb9a5630d) != 8) @compileError("__AnonStruct_5f997c9eb9a5630d alignment mismatch");
     }
 }
 
@@ -2777,34 +2767,6 @@ comptime {
     }
 }
 
-/// Tag union: ChannelOrDm
-pub const ChannelOrDm = enum(u8) {
-    channel = 0,
-    dm = 1,
-    /// Recursively decrement Roc-owned payloads.
-    pub fn decref(self: @This(), roc_host: *RocHost) void {
-        _ = self;
-        _ = roc_host;
-    }
-
-    /// Increment Roc-owned payloads.
-    pub fn incref(self: @This(), amount: isize) void {
-        _ = self;
-        _ = amount;
-    }
-};
-
-comptime {
-    if (@sizeOf(usize) == 8) {
-        if (@sizeOf(ChannelOrDm) != 1) @compileError("ChannelOrDm size mismatch");
-        if (@alignOf(ChannelOrDm) != 1) @compileError("ChannelOrDm alignment mismatch");
-    }
-    if (@sizeOf(usize) == 4) {
-        if (@sizeOf(ChannelOrDm) != 1) @compileError("ChannelOrDm size mismatch");
-        if (@alignOf(ChannelOrDm) != 1) @compileError("ChannelOrDm alignment mismatch");
-    }
-}
-
 /// Tag union: FailedOrNoneOrPending
 pub const FailedOrNoneOrPending = enum(u8) {
     failed = 0,
@@ -3668,12 +3630,12 @@ comptime {
 pub const HostSearch_messagesRetRecord = if (@sizeOf(usize) == 4) extern struct {
     matched: u64,
     unreadable: u64,
-    hits: RocList(__AnonStruct_c682b78e33d5848f),
+    hits: RocList(__AnonStruct_5f997c9eb9a5630d),
     status: NotReadyOrReady,
 } else extern struct {
     matched: u64,
     unreadable: u64,
-    hits: RocList(__AnonStruct_c682b78e33d5848f),
+    hits: RocList(__AnonStruct_5f997c9eb9a5630d),
     status: NotReadyOrReady,
 };
 
@@ -3952,11 +3914,18 @@ pub const HostRetire_userArgs = extern struct {
 };
 
 /// Arguments for Host.search_messages!
-/// Roc signature: List(U8), U64 => { hits : List({ at : U64, base : List(U8), date : List(U8), found : [Found, Missing], from : List(U8), id : List(U8), kind : [Channel, Dm], length : U64, sid : List(U8), start : U64, window : List(U8) }), matched : U64, status : [NotReady, Ready], unreadable : U64 }
+/// Roc signature: List(U8), U64 => { hits : List({ at : U64, conv : U64, date : List(U8), found : [Found, Missing], from : List(U8), id : List(U8), length : U64, sid : List(U8), start : U64, window : List(U8) }), matched : U64, status : [NotReady, Ready], unreadable : U64 }
 /// Refcounted fields are owned by the hosted function.
 pub const HostSearch_messagesArgs = extern struct {
     arg0: RocListWith(u8, false),
     arg1: u64,
+};
+
+/// Arguments for Host.search_scope_add!
+/// Roc signature: List(U8) => Try({}, [Failed])
+/// Refcounted fields are owned by the hosted function.
+pub const HostSearch_scope_addArgs = extern struct {
+    arg0: RocListWith(u8, false),
 };
 
 /// Arguments for Host.search_words!
@@ -4104,8 +4073,9 @@ pub const HostRetire_asked = __AnonStruct_308de772291a51ac;
 pub const HostRetire_removeResult = HostAppend_lineResult;
 pub const HostRetire_replaceResult = HostAppend_lineResult;
 pub const HostRetire_userResult = HostAppend_lineResult;
-pub const HostSearch_messages = __AnonStruct_f89294d37b2cb861;
-pub const HostSearch_messagesHits = __AnonStruct_c682b78e33d5848f;
+pub const HostSearch_messages = __AnonStruct_79d8af0d7e2563b8;
+pub const HostSearch_messagesHits = __AnonStruct_5f997c9eb9a5630d;
+pub const HostSearch_scope_addResult = HostAppend_lineResult;
 pub const HostSearch_words = __AnonStruct_83145539046baccf;
 pub const HostSearch_wordsWords = __AnonStruct_693f516d634a2126;
 pub const HostServe_uploadArg0 = __AnonStruct_5ad6bf82dad4a993;
@@ -4183,14 +4153,14 @@ pub const __AnonStruct_693f516d634a2126Release = struct {
     }
 };
 
-pub const __AnonStruct_f89294d37b2cb861Release = struct {
-    pub fn release(value: __AnonStruct_f89294d37b2cb861, roc_host: *RocHost) void {
+pub const __AnonStruct_79d8af0d7e2563b8Release = struct {
+    pub fn release(value: __AnonStruct_79d8af0d7e2563b8, roc_host: *RocHost) void {
         value.decref(roc_host);
     }
 };
 
-pub const __AnonStruct_c682b78e33d5848fRelease = struct {
-    pub fn release(value: __AnonStruct_c682b78e33d5848f, roc_host: *RocHost) void {
+pub const __AnonStruct_5f997c9eb9a5630dRelease = struct {
+    pub fn release(value: __AnonStruct_5f997c9eb9a5630d, roc_host: *RocHost) void {
         value.decref(roc_host);
     }
 };
@@ -4323,12 +4293,12 @@ pub fn decrefListOf__AnonStruct_693f516d634a2126(value: RocList(__AnonStruct_693
     value.deinitWith(__AnonStruct_693f516d634a2126Release, roc_host);
 }
 
-/// Release one owned reference to a `RocList(__AnonStruct_c682b78e33d5848f)`.
+/// Release one owned reference to a `RocList(__AnonStruct_5f997c9eb9a5630d)`.
 ///
 /// The allocation's final reference is claimed atomically before any element
 /// is read, so concurrent owners cannot skip or duplicate element teardown.
-pub fn decrefListOf__AnonStruct_c682b78e33d5848f(value: RocList(__AnonStruct_c682b78e33d5848f), roc_host: *RocHost) void {
-    value.deinitWith(__AnonStruct_c682b78e33d5848fRelease, roc_host);
+pub fn decrefListOf__AnonStruct_5f997c9eb9a5630d(value: RocList(__AnonStruct_5f997c9eb9a5630d), roc_host: *RocHost) void {
+    value.deinitWith(__AnonStruct_5f997c9eb9a5630dRelease, roc_host);
 }
 
 /// Release one owned reference to a `RocList(__AnonStruct_7dfaf577f6008fb0)`.
@@ -4357,9 +4327,9 @@ fn rocReleasePolicy(comptime T: type) type {
     if (T == __AnonStruct_83145539046baccf) return __AnonStruct_83145539046baccfRelease;
     if (T == RocList(__AnonStruct_693f516d634a2126)) return RocListRelease(RocList(__AnonStruct_693f516d634a2126), __AnonStruct_693f516d634a2126Release);
     if (T == __AnonStruct_693f516d634a2126) return __AnonStruct_693f516d634a2126Release;
-    if (T == __AnonStruct_f89294d37b2cb861) return __AnonStruct_f89294d37b2cb861Release;
-    if (T == RocList(__AnonStruct_c682b78e33d5848f)) return RocListRelease(RocList(__AnonStruct_c682b78e33d5848f), __AnonStruct_c682b78e33d5848fRelease);
-    if (T == __AnonStruct_c682b78e33d5848f) return __AnonStruct_c682b78e33d5848fRelease;
+    if (T == __AnonStruct_79d8af0d7e2563b8) return __AnonStruct_79d8af0d7e2563b8Release;
+    if (T == RocList(__AnonStruct_5f997c9eb9a5630d)) return RocListRelease(RocList(__AnonStruct_5f997c9eb9a5630d), __AnonStruct_5f997c9eb9a5630dRelease);
+    if (T == __AnonStruct_5f997c9eb9a5630d) return __AnonStruct_5f997c9eb9a5630dRelease;
     if (T == RocList(__AnonStruct_7dfaf577f6008fb0)) return RocListRelease(RocList(__AnonStruct_7dfaf577f6008fb0), __AnonStruct_7dfaf577f6008fb0Release);
     if (T == __AnonStruct_7dfaf577f6008fb0) return __AnonStruct_7dfaf577f6008fb0Release;
     if (T == __AnonStruct_a7430791c7b5a122) return __AnonStruct_a7430791c7b5a122Release;
@@ -4678,12 +4648,19 @@ pub extern fn roc_chat_retire_replace(arg0: RocListWith(u8, false), arg1: RocLis
 pub extern fn roc_chat_retire_user(arg0: RocListWith(u8, false)) callconv(.c) HostAppend_lineResult;
 
 /// Hosted symbol for Host.search_messages!
-/// Roc signature: List(U8), U64 => { hits : List({ at : U64, base : List(U8), date : List(U8), found : [Found, Missing], from : List(U8), id : List(U8), kind : [Channel, Dm], length : U64, sid : List(U8), start : U64, window : List(U8) }), matched : U64, status : [NotReady, Ready], unreadable : U64 }
+/// Roc signature: List(U8), U64 => { hits : List({ at : U64, conv : U64, date : List(U8), found : [Found, Missing], from : List(U8), id : List(U8), length : U64, sid : List(U8), start : U64, window : List(U8) }), matched : U64, status : [NotReady, Ready], unreadable : U64 }
 /// Owned arguments. Release each exactly once before returning, unless it is
 /// moved into storage or into the result:
 ///     arg0.decref(roc_host);
 /// The result is owned by Roc: return exactly one owned reference.
-pub extern fn roc_chat_search_messages(arg0: RocListWith(u8, false), arg1: u64) callconv(.c) __AnonStruct_f89294d37b2cb861;
+pub extern fn roc_chat_search_messages(arg0: RocListWith(u8, false), arg1: u64) callconv(.c) __AnonStruct_79d8af0d7e2563b8;
+
+/// Hosted symbol for Host.search_scope_add!
+/// Roc signature: List(U8) => Try({}, [Failed])
+/// Owned arguments. Release each exactly once before returning, unless it is
+/// moved into storage or into the result:
+///     arg0.decref(roc_host);
+pub extern fn roc_chat_search_scope_add(arg0: RocListWith(u8, false)) callconv(.c) HostAppend_lineResult;
 
 /// Hosted symbol for Host.search_words!
 /// Roc signature: List(U8), U64 => { status : [NotReady, Ready], unreadable : U64, words : List({ count : U64, word : List(U8) }) }

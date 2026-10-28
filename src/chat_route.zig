@@ -214,9 +214,6 @@ pub const Admission = enum(u8) { admitted, refused };
 /// not ready (it could not be built).
 pub const WordsStatus = enum(u8) { not_ready, ready };
 
-/// Host.roc's `search_messages!` hits: a DM's or a channel's.
-pub const HitConv = enum(u8) { channel, dm };
-
 /// Host.roc's `search_messages!` hits: whether the index found the word in
 /// the message where the excerpt is cut (`search_index.wordAt`), or not.
 pub const HitWord = enum(u8) { found, missing };
@@ -336,7 +333,6 @@ comptime {
         Identity,
         Admission,
         WordsStatus,
-        HitConv,
         HitWord,
         Done,
         Welcome,

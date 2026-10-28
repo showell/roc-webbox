@@ -92,24 +92,24 @@ pub const WordsRec = extern struct {
     words: WordList,
     status: route_mod.WordsStatus,
 };
-/// One of Host.roc's `search_messages!` hits: `{ at, length, start : U64,
-/// base, date, from, id, sid, window : List(U8), found, kind }`. **THE
-/// 8-BYTE NUMBERS FIRST, BY NAME, THEN THE BYTES, BY NAME, THEN THE TAGS.**
-/// `window` is the message's bytes from `start`, through the one past the
-/// excerpt's end (its cut looks there), of a message `length` long; `at`
-/// where the word is in the message, when `found`.
+/// One of Host.roc's `search_messages!` hits: `{ at, conv, length, start :
+/// U64, date, from, id, sid, window : List(U8), found }`. **THE 8-BYTE
+/// NUMBERS FIRST, BY NAME, THEN THE BYTES, BY NAME, THEN THE TAG.** `conv`
+/// is the hit's conversation's place among those Host.search_scope_add!
+/// named, from 0; `window` is the message's bytes from `start`, through the
+/// one past the excerpt's end (its cut looks there), of a message `length`
+/// long; `at` where the word is in the message, when `found`.
 pub const HitRec = extern struct {
     at: u64,
+    conv: u64,
     length: u64,
     start: u64,
-    base: RocBytes,
     date: RocBytes,
     from: RocBytes,
     id: RocBytes,
     sid: RocBytes,
     window: RocBytes,
     found: route_mod.HitWord,
-    kind: route_mod.HitConv,
 };
 /// Host.roc's `search_messages!` answer: `{ hits : List(...), matched,
 /// unreadable : U64, status : [NotReady, Ready] }`: the numbers, the list,
@@ -251,16 +251,15 @@ pub const HitList = RecList(HitRec, Hit, struct {
     fn rec(it: Hit) HitRec {
         return .{
             .at = it.at,
+            .conv = it.conv,
             .length = it.length,
             .start = it.start,
-            .base = .from(it.base),
             .date = .from(it.date),
             .from = .from(it.from),
             .id = .from(it.id),
             .sid = .from(it.sid),
             .window = .from(it.window),
             .found = it.found,
-            .kind = it.kind,
         };
     }
 }.rec);
@@ -331,19 +330,19 @@ comptime {
     // search_messages!'s (metal-vmm QUEUE 282).
     std.debug.assert(@offsetOf(HitRec, "at") == 0 and @offsetOf(
         HitRec,
-        "length",
-    ) == 8 and @offsetOf(HitRec, "start") == 16 and @offsetOf(HitRec, "base") == 24 and @offsetOf(
+        "conv",
+    ) == 8 and @offsetOf(HitRec, "length") == 16 and @offsetOf(HitRec, "start") == 24 and @offsetOf(
+        HitRec,
+        "date",
+    ) == 32 and @offsetOf(
         HitRec,
         "window",
-    ) == 24 + 15 * w and @offsetOf(
+    ) == 32 + 12 * w and @offsetOf(
         HitRec,
         "found",
-    ) == 24 + 18 * w and @offsetOf(
-        HitRec,
-        "kind",
-    ) == 25 + 18 * w and @sizeOf(HitRec) == std.mem.alignForward(
+    ) == 32 + 15 * w and @sizeOf(HitRec) == std.mem.alignForward(
         usize,
-        26 + 18 * w,
+        33 + 15 * w,
         8,
     ));
     std.debug.assert(@offsetOf(MessagesRec, "matched") == 0 and @offsetOf(
@@ -401,11 +400,11 @@ pub const Listing = union(route_mod.ReadStatus) {
 };
 /// One word search_words! answers: the word, and how many messages hold it.
 pub const Word = struct { word: []const u8, count: u64 };
-/// One message search_messages! answers: its conversation's URL base and
-/// kind, its topic, id, sender and date, and its excerpt's window (HitRec).
+/// One message search_messages! answers: its conversation's place among
+/// those Host.search_scope_add! named, its topic, id, sender and date, and
+/// its excerpt's window (HitRec).
 pub const Hit = struct {
-    base: []const u8,
-    kind: route_mod.HitConv,
+    conv: u64,
     sid: []const u8,
     id: []const u8,
     from: []const u8,
@@ -663,15 +662,22 @@ pub const Host = struct {
     admit: *const fn (ctx: *anyopaque) route_mod.Admission = noAdmit,
     /// Host.read_query!: the query field's value, as written, or none.
     read_query: *const fn (ctx: *anyopaque, name: []const u8) []const []const u8 = noQuery,
-    /// Host.search_words!: the words beginning `key`, at most `most`; null
-    /// when there is no index.
+    /// Host.search_scope_add!: the conversation in folder `dir` under the
+    /// chat root (the seam has checked it) added to what this request's
+    /// searches walk, after those before it. `.failed` when it could not
+    /// be held (the host has failed the request).
+    search_scope_add: *const fn (ctx: *anyopaque, dir: []const u8) route_mod.Done = noScopeAdd,
+    /// Host.search_words!: the words beginning `key`, at most `most`, in
+    /// the conversations search_scope_add named; null when there is no
+    /// index.
     search_words: *const fn (
         ctx: *anyopaque,
         key: []const u8,
         most: u64,
     ) ?Words = noWords,
-    /// Host.search_messages!: the messages holding `key`, at most `most`;
-    /// null when there is no index.
+    /// Host.search_messages!: the messages holding `key`, at most `most`,
+    /// in the conversations search_scope_add named, in their order; null
+    /// when there is no index.
     search_messages: *const fn (
         ctx: *anyopaque,
         key: []const u8,
@@ -958,6 +964,9 @@ fn noAdmit(_: *anyopaque) route_mod.Admission {
 fn noQuery(_: *anyopaque, _: []const u8) []const []const u8 {
     @panic("read_query asked of a host that does not answer it");
 }
+fn noScopeAdd(_: *anyopaque, _: []const u8) route_mod.Done {
+    @panic("search_scope_add asked of a host that does not answer it");
+}
 fn noWords(
     _: *anyopaque,
     _: []const u8,
@@ -1057,6 +1066,7 @@ pub const Routing = struct {
         // Search's words (metal-vmm QUEUE 281) meet an index with none.
         h.admit = admitted;
         h.read_query = noQueryField;
+        h.search_scope_add = scopeHeld;
         h.search_words = noWordsHeld;
         h.search_messages = noMessagesHeld;
         // No member's welcome is pending (metal-vmm QUEUE 283).
@@ -1095,6 +1105,9 @@ pub const Routing = struct {
     }
     fn noQueryField(_: *anyopaque, _: []const u8) []const []const u8 {
         return &.{};
+    }
+    fn scopeHeld(_: *anyopaque, _: []const u8) route_mod.Done {
+        return .ok;
     }
     fn noWordsHeld(
         _: *anyopaque,
@@ -1371,6 +1384,12 @@ pub export fn roc_chat_admit() callconv(.c) route_mod.Admission {
 pub export fn roc_chat_read_query(name: RocBytes) callconv(.c) roc.RocBytesList {
     const h = current("read_query");
     return .from(h.read_query(h.ctx, name.slice()));
+}
+
+pub export fn roc_chat_search_scope_add(dir: RocBytes) callconv(.c) route_mod.Done {
+    const h = current("search_scope_add");
+    if (!underRoot(h, dir.slice())) return .failed;
+    return h.search_scope_add(h.ctx, dir.slice());
 }
 
 pub export fn roc_chat_search_words(key: RocBytes, most: u64) callconv(.c) WordsRec {

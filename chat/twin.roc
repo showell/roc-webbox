@@ -810,16 +810,15 @@ call = |req| {
 		75 => {
 			hit = {
 				at: u64(arg(3)),
+				conv: 0,
 				length: u64(arg(2)),
 				start: u64(arg(1)),
-				base: [],
 				date: [],
 				from: [],
 				id: [],
 				sid: [],
 				window: arg(0),
 				found: if arg(4) == [49] Found else Missing,
-				kind: Dm,
 			}
 			ex = Search.excerpt(hit, u64(arg(5)))
 			[
