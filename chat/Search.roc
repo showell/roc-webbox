@@ -2,12 +2,45 @@
 ## search_tokens.zig `key` as they were, metal-vmm QUEUE 281): what was
 ## typed made a key as the index holds words, and the answer's JSON. The
 ## index and the rate limit are the host's (Host.search_words!,
-## Host.admit!). Pure.
+## Host.admit!); which conversations a search walks is the Roc's
+## (`scope`). Pure.
 import JsonOut
 import Ascii
 import Bytes
+import Paths
+import Uid
 
 Search := [].{
+
+	## **WHAT A MEMBER'S SEARCH WALKS** (angry-gopher chat_paths.zig
+	## `visibleConvs`, which /admin/search walks still): a DM with every
+	## other one the roster lists (`roster`, Accounts.authorized's: every
+	## member and the agent, by id), then each of the member's channels
+	## (`channels`, Paths.member_channels's: sorted by bytes) whose name is a
+	## channel's, in that order. **NARROWER THAN THE ROUTES, ON PURPOSE**, as
+	## the sidebar lists them: never the DM with oneself, nor one with a
+	## guest, an account with no password or one retired, which the DM route
+	## would open. The host walks exactly these (Host.search_scope_add!).
+	scope : {
+		me : Uid,
+		roster : List({ id : Uid, name : Str }),
+		channels : List(Str),
+	} -> List(Paths.ConvKey)
+	scope = |
+		{
+			me,
+			roster,
+			channels,
+		},
+	|
+		List.concat(
+			List.keep_if(roster, |u| u.id != me)
+				|> List.map(|u| Dm(Paths.pair_key(me, u.id))),
+			List.keep_oks(
+				channels,
+				|name| Paths.channel_name_from_str(name).map_ok(|valid| Channel(valid)),
+			),
+		)
 
 	## The longest word a key can name, in bytes (search_tokens `max_word`).
 	max_word : U64
@@ -38,20 +71,20 @@ Search := [].{
 	excerpt_pad : U64
 	excerpt_pad = 90
 
-	## A message the index found, as the host hands it: its excerpt's window
+	## A message the index found, as the host hands it: its conversation by
+	## its place in the scope (`conv`), and its excerpt's window
 	## (Host.search_messages!).
 	Hit : {
 		at : U64,
+		conv : U64,
 		length : U64,
 		start : U64,
-		base : List(U8),
 		date : List(U8),
 		from : List(U8),
 		id : List(U8),
 		sid : List(U8),
 		window : List(U8),
 		found : [Found, Missing],
-		kind : [Channel, Dm],
 	}
 
 	## chat_search `excerptOf`: the word as written, where the index found
@@ -91,12 +124,15 @@ Search := [].{
 		}
 	}
 
-	## The answer: `{"word":…,"matched":N,"unreadable":N,"messages":[{"conv":…,"kind":…,"sid":…,"id":…,"from":…,"date":…,"before":…,"mark":…,"after":…},…]}`.
+	## The answer: `{"word":…,"matched":N,"unreadable":N,"messages":[{"conv":…,"kind":…,"sid":…,"id":…,"from":…,"date":…,"before":…,"mark":…,"after":…},…]}`,
+	## each hit's conversation (its URL base and kind) the one at its place
+	## in `scope`, the list the host walked.
 	messages_json : List(U8),
 	{
 		matched : U64,
 		unreadable : U64,
 		hits : List(Hit),
+		scope : List(Paths.ConvKey),
 	} -> List(U8)
 	messages_json = |
 		word,
@@ -104,13 +140,22 @@ Search := [].{
 			matched,
 			unreadable,
 			hits,
+			scope: walked,
 		},
 	|
 		JsonOut.object([
 			("word", JsonOut.lossy(word)),
 			("matched", JsonOut.number(matched)),
 			("unreadable", JsonOut.number(unreadable)),
-			("messages", JsonOut.array(List.map(hits, |h| hit_json(h, List.len(word))))),
+			(
+				"messages",
+				JsonOut.array(
+					List.map(
+						hits,
+						|h| hit_json(h, { key_len: List.len(word), key: in_scope(walked, h.conv) }),
+					),
+				),
+			),
 		]).bytes()
 
 	## The answer: `{"prefix":…,"most":20,"unreadable":N,"words":[{"word":…,"count":N},…]}`.
@@ -139,12 +184,22 @@ Search := [].{
 		]).bytes()
 }
 
-hit_json : Search.Hit, U64 -> JsonOut
-hit_json = |h, key_len| {
+## The conversation at place `at` of the scope the host walked. **A PLACE
+## PAST IT IS THE HOST'S BUG**: a crash (a 500), never a hit shown under
+## another conversation.
+in_scope : List(Paths.ConvKey), U64 -> Paths.ConvKey
+in_scope = |scope, at|
+	match List.get(scope, at) {
+		Ok(key) => key
+		Err(_) => crash "Search: a hit's conversation past the scope the host was handed"
+	}
+
+hit_json : Search.Hit, { key_len : U64, key : Paths.ConvKey } -> JsonOut
+hit_json = |h, { key_len, key }| {
 	ex = Search.excerpt(h, key_len)
 	JsonOut.object([
-		("conv", JsonOut.lossy(h.base)),
-		("kind", JsonOut.string(if h.kind == Dm "dm" else "channel")),
+		("conv", JsonOut.string(key.base())),
+		("kind", JsonOut.string(if key.kind() == Dm "dm" else "channel")),
 		("sid", JsonOut.lossy(h.sid)),
 		("id", JsonOut.lossy(h.id)),
 		("from", JsonOut.lossy(h.from)),
@@ -227,6 +282,44 @@ trimmed = List.map(
 	],
 	Str.to_utf8,
 )
+
+# scope: a DM with each other one on the roster, in its order, never with
+# oneself; then each channel whose name is a channel's, in the order given;
+# each conversation's folder as the index knows it.
+expect {
+	roster = List.keep_oks(
+		[
+			"3",
+			"7",
+			"10",
+		],
+		|id| Uid.from_str(id).map_ok(|uid| { id: uid, name: "" }),
+	)
+	match Uid.from_str("7") {
+		Ok(me) => {
+			walked = Search.scope({
+				me,
+				roster,
+				channels: [
+					"Zed",
+					"9lives",
+					"ops",
+				],
+			})
+			List.map(walked, |k| Paths.conv_folder(k).bytes())
+				== List.map(
+					[
+						"3_7",
+						"7_10",
+						"channels/Zed",
+						"channels/ops",
+					],
+					Str.to_utf8,
+				)
+		}
+		Err(_) => Bool.False
+	}
+}
 
 # key: spaces and edge punctuation trimmed, ASCII folded, a curly quote gone.
 expect Search.key(Str.to_utf8(" \"La\u(201D)! ")) == Str.to_utf8("la") and Search.key(Str.to_utf8("CAF\u(C9)")) == Str.to_utf8("caf\u(C9)") and Search.key(

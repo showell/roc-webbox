@@ -281,8 +281,9 @@ Paths := [].{
 	channels_folder : ChatPath
 	channels_folder = ChatPath.("channels")
 
-	## A conversation's own folder (dmConvDir, channelConvDir): the one
-	## search's index files its topics under.
+	## A conversation's own folder (dmConvDir, channelConvDir): a DM's
+	## `<pair key>`, a channel's `channels/<name>`; what search's index
+	## knows it by (Host.search_scope_add!).
 	conv_folder : ConvKey -> ChatPath
 	conv_folder = |key| ChatPath.(conv_dir(key))
 

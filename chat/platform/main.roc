@@ -53,6 +53,7 @@ platform ""
 		"roc_chat_retire_replace": Host.retire_replace!,
 		"roc_chat_retire_user": Host.retire_user!,
 		"roc_chat_search_messages": Host.search_messages!,
+		"roc_chat_search_scope_add": Host.search_scope_add!,
 		"roc_chat_search_words": Host.search_words!,
 		"roc_chat_serve_bundle": Host.serve_bundle!,
 		"roc_chat_serve_file": Host.serve_file!,

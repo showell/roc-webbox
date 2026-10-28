@@ -275,11 +275,21 @@ Host := [].{
 	## decoded), the first of them; none when there is no such field.
 	read_query! : List(U8) => List(List(U8))
 
+	## **WHAT THIS REQUEST'S SEARCHES WALK, A CONVERSATION A CALL**: the
+	## folder `dir` under the chat root (a DM's `<pair key>`, a channel's
+	## `channels/<name>`; checked as `read!`'s path is) added after those
+	## added before it. `search_words!` and `search_messages!` walk these, in
+	## this order, and no others. **WHOSE CONVERSATIONS THEY ARE IS THE
+	## ROC'S** (Search.scope): the host holds the index, never who may see
+	## what. `Err(Failed)` when it could not be held (the request has failed).
+	search_scope_add! : List(U8) => Try({}, [Failed])
+
 	## **SEARCH'S INDEX, ASKED** (angry-gopher search_index.zig `wordsFor`):
-	## the words beginning `key` (already a key: trimmed and folded) that
-	## the member can see, each with how many messages hold it, the most
-	## held first, at most `most`; and how many of their transcripts the
-	## index could not read. `NotReady` when there is no index to ask.
+	## the words beginning `key` (already a key: trimmed and folded) in the
+	## conversations `search_scope_add!` named, each with how many messages
+	## hold it, the most held first, at most `most`; and how many of their
+	## transcripts the index could not read. `NotReady` when there is no
+	## index to ask.
 	search_words! : List(U8),
 	U64 => {
 		status : [NotReady, Ready],
@@ -288,11 +298,13 @@ Host := [].{
 	}
 
 	## **SEARCH'S INDEX, ASKED FOR MESSAGES** (angry-gopher search_index.zig
-	## `messagesFor`): the messages holding the word `key` the member can
-	## see, at most `most`, within the byte cap; how many hold it in all;
-	## the unreadable count. Each hit's excerpt window, not the message: its
-	## bytes from `start` through the one past the excerpt's end, of a
-	## message `length` long, the word `at` when `found`.
+	## `messagesFor`): the messages holding the word `key` in the
+	## conversations `search_scope_add!` named, in their order, at most
+	## `most`, within the byte cap; how many hold it in all; the unreadable
+	## count. Each hit's conversation by its place among those named
+	## (`conv`, from 0), and its excerpt window, not the message: its bytes
+	## from `start` through the one past the excerpt's end, of a message
+	## `length` long, the word `at` when `found`.
 	search_messages! : List(U8),
 	U64 => {
 		status : [NotReady, Ready],
@@ -301,16 +313,15 @@ Host := [].{
 		hits : List(
 			{
 				at : U64,
+				conv : U64,
 				length : U64,
 				start : U64,
-				base : List(U8),
 				date : List(U8),
 				from : List(U8),
 				id : List(U8),
 				sid : List(U8),
 				window : List(U8),
 				found : [Found, Missing],
-				kind : [Channel, Dm],
 			},
 		),
 	}

@@ -175,7 +175,7 @@ act! = |req, { route, accounts }| {
 				serve_recent!(route.rest.to_utf8(), accounts)
 			}
 		Docs => docs!(req, { rest: route.rest, accounts })
-		Search => search!(req, route.rest)
+		Search => search!(req, { rest: route.rest, accounts })
 		Images =>
 			if route.rest == "/stream" {
 				member_stream!(req, BusKey.images)
@@ -2073,27 +2073,62 @@ store! = |
 	}
 
 ## /chat/search/words or /messages; anything else under it the Zig's 404.
-search! : Chat.Request, Str => Chat.Answer
-search! = |req, rest|
+search! : Chat.Request, { rest : Str, accounts : List(Accounts.Account) } => Chat.Answer
+search! = |req, { rest, accounts }|
 	if rest == "/words" {
-		search_words!(req)
+		search_words!(req, accounts)
 	} else if rest == "/messages" {
-		search_messages!(req)
+		search_messages!(req, accounts)
 	} else {
 		Chat.not_found
+	}
+
+## **WHAT THE MEMBER'S SEARCH WALKS, HANDED TO THE HOST** (the pure-Roc
+## plan's item 8; chat_paths.visibleConvs's reads, in its order): every
+## account the door listed, the roster failing on one that will not read
+## (listAuthorized), then every channel's roster (listUserChannels: a
+## malformed one skipped and counted); the choice Search.scope's, each
+## conversation's folder then handed to the host a call at a time, in
+## order. `Failed` when a read or a hand-over failed (the request has).
+search_scope! : List(Accounts.Account) => Try(List(Paths.ConvKey), [Failed])
+search_scope! = |accounts| {
+	me = Members.load_uid!({})?
+	roster = Members.fail_if_unreadable!(Accounts.authorized(accounts))?
+	rosters = load_channel_rosters!({})?
+	scope = Search.scope({
+		me,
+		roster,
+		channels: Paths.member_channels(rosters, me),
+	})
+	scope_add_all!(scope)?
+	Ok(scope)
+}
+
+## Each conversation's folder handed to the host's search, in turn; the
+## first it would not hold fails it.
+scope_add_all! : List(Paths.ConvKey) => Try({}, [Failed])
+scope_add_all! = |keys|
+	match keys {
+		[] => Ok({})
+		[key, .. as more] =>
+			match Host.search_scope_add!(Paths.conv_folder(key).bytes()) {
+				Ok({}) => scope_add_all!(more)
+				Err(Failed) => Err(Failed)
+			}
 	}
 
 ## **SEARCH'S WORDS** (GET /chat/search/words, chat_search.zig `handle` as it
 ## was, metal-vmm QUEUE 281): the method, the rate limit (the host's), the
 ## typed `prefix` decoded (a bad escape is the site's 400) and made a key,
-## then the words the index holds that begin it, of what the member can see
-## (the host's); none for an empty key. 503 with no index.
+## then what the member's search walks (`search_scope!`, asked for an empty
+## key too, as the Zig walked it), then the words the index holds that
+## begin the key there; none for an empty key. 503 with no index.
 ## A search's refusal as its JSON says it: `{"error":<text>}`.
 search_error : Str -> List(U8)
 search_error = |text| JsonOut.object([("error", JsonOut.string(text))]).bytes()
 
-search_words! : Chat.Request => Chat.Answer
-search_words! = |req|
+search_words! : Chat.Request, List(Accounts.Account) => Chat.Answer
+search_words! = |req, accounts|
 	if req.method != Get {
 		Chat.not_allowed(Get)
 	} else if Host.admit!({}) == Refused {
@@ -2104,35 +2139,40 @@ search_words! = |req|
 	} else {
 		match Form.decode(List.first(Host.read_query!(Str.to_utf8("prefix"))) ?? []) {
 			Err(BadEscape) => Chat.malformed
-			Ok(typed) => {
-				key = Search.key(typed)
-				got = Host.search_words!(key, if key == [] 0 else Search.most_words)
-				match got.status {
-					Ready => Chat.respond(
-						200,
-						{
-							content_type: json,
-							body: Search.words_json(
-								key,
-								{ unreadable: got.unreadable, words: got.words },
-							),
-						},
-					)
-					NotReady => Chat.respond(
-						503,
-						{ content_type: json, body: search_error("search is not ready") },
-					)
+			Ok(typed) =>
+				match search_scope!(accounts) {
+					Err(Failed) => Chat.answered
+					Ok(_) => {
+						key = Search.key(typed)
+						got = Host.search_words!(key, if key == [] 0 else Search.most_words)
+						match got.status {
+							Ready => Chat.respond(
+								200,
+								{
+									content_type: json,
+									body: Search.words_json(
+										key,
+										{ unreadable: got.unreadable, words: got.words },
+									),
+								},
+							)
+							NotReady => Chat.respond(
+								503,
+								{ content_type: json, body: search_error("search is not ready") },
+							)
+						}
+					}
 				}
-			}
 		}
 	}
 
 ## **SEARCH'S MESSAGES** (GET /chat/search/messages, chat_search.zig
 ## `handle` as it was, metal-vmm QUEUE 282): as the words are asked, the
 ## `word` field; a key shorter than a word finds nothing; each hit's
-## excerpt cut here (Search.excerpt) from the window the host hands.
-search_messages! : Chat.Request => Chat.Answer
-search_messages! = |req|
+## conversation the scope's at its place, its excerpt cut here
+## (Search.excerpt) from the window the host hands.
+search_messages! : Chat.Request, List(Accounts.Account) => Chat.Answer
+search_messages! = |req, accounts|
 	if req.method != Get {
 		Chat.not_allowed(Get)
 	} else if Host.admit!({}) == Refused {
@@ -2143,33 +2183,38 @@ search_messages! = |req|
 	} else {
 		match Form.decode(List.first(Host.read_query!(Str.to_utf8("word"))) ?? []) {
 			Err(BadEscape) => Chat.malformed
-			Ok(typed) => {
-				key = Search.key(typed)
-				got = Host.search_messages!(
-					key,
-					if List.len(key) < Search.min_len 0 else Search.most_messages,
-				)
-				match got.status {
-					Ready => Chat.respond(
-						200,
-						{
-							content_type: json,
-							body: Search.messages_json(
-								key,
+			Ok(typed) =>
+				match search_scope!(accounts) {
+					Err(Failed) => Chat.answered
+					Ok(scope) => {
+						key = Search.key(typed)
+						got = Host.search_messages!(
+							key,
+							if List.len(key) < Search.min_len 0 else Search.most_messages,
+						)
+						match got.status {
+							Ready => Chat.respond(
+								200,
 								{
-									matched: got.matched,
-									unreadable: got.unreadable,
-									hits: got.hits,
+									content_type: json,
+									body: Search.messages_json(
+										key,
+										{
+											matched: got.matched,
+											unreadable: got.unreadable,
+											hits: got.hits,
+											scope,
+										},
+									),
 								},
-							),
-						},
-					)
-					NotReady => Chat.respond(
-						503,
-						{ content_type: json, body: search_error("search is not ready") },
-					)
+							)
+							NotReady => Chat.respond(
+								503,
+								{ content_type: json, body: search_error("search is not ready") },
+							)
+						}
+					}
 				}
-			}
 		}
 	}
 

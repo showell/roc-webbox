@@ -215,15 +215,14 @@ test "a field swap fails the check, naming the function, the field and the offse
     const HitSwapped = extern struct {
         length: u64,
         at: u64,
+        conv: u64,
         start: u64,
-        base: abi.RocBytes,
         date: abi.RocBytes,
         from: abi.RocBytes,
         id: abi.RocBytes,
         sid: abi.RocBytes,
         window: abi.RocBytes,
         found: route.HitWord,
-        kind: route.HitConv,
     };
     const Hits = extern struct { ptr: ?[*]HitSwapped, length: usize, capacity_or_alloc_ptr: usize };
     const Messages = extern struct { matched: u64, unreadable: u64, hits: Hits, status: route.WordsStatus };
