@@ -4,7 +4,7 @@
 import Bytes
 import Chrome
 import Html
-import JsonText
+import JsonOut
 import Paths
 import Uid
 import ZigText
@@ -308,49 +308,49 @@ Pages := [].{
 	sidebar_json = |sb| {
 		person = |u| {
 			pk = Paths.pair_key(sb.uid, u.id).to_str()
-			online = if u.presence == Online [("online", JsonText.bool(Bool.True))] else []
-			JsonText.obj(
+			online = if u.presence == Online [("online", JsonOut.bool(Bool.True))] else []
+			JsonOut.object(
 				List.concat(
 					[
-						("id", JsonText.str("uid:${u.id.to_str()}")),
-						("label", JsonText.str(u.name)),
-						("url", JsonText.str("/chat/c/${pk}")),
-						("active", JsonText.bool(sb.kind == Dm and pk == sb.key)),
+						("id", JsonOut.string("uid:${u.id.to_str()}")),
+						("label", JsonOut.string(u.name)),
+						("url", JsonOut.string("/chat/c/${pk}")),
+						("active", JsonOut.bool(sb.kind == Dm and pk == sb.key)),
 					],
 					online,
 				),
 			)
 		}
 		room = |name|
-			JsonText.obj([
-				("id", JsonText.str("ch:${name}")),
-				("label", JsonText.str("# ${name}")),
-				("url", JsonText.str("/channel/${name}")),
-				("active", JsonText.bool(sb.kind == Channel and name == sb.key)),
+			JsonOut.object([
+				("id", JsonOut.string("ch:${name}")),
+				("label", JsonOut.string("# ${name}")),
+				("url", JsonOut.string("/channel/${name}")),
+				("active", JsonOut.bool(sb.kind == Channel and name == sb.key)),
 			])
 		topic = |s|
-			JsonText.obj([
-				("id", JsonText.str(s)),
-				("label", JsonText.str(s)),
-				("url", JsonText.str("${sb.base}/${s}")),
-				("active", JsonText.bool(s == sb.topic)),
+			JsonOut.object([
+				("id", JsonOut.string(s)),
+				("label", JsonOut.string(s)),
+				("url", JsonOut.string("${sb.base}/${s}")),
+				("active", JsonOut.bool(s == sb.topic)),
 			])
 		pinned = List.keep_if(sb.topics, |s| List.contains(sb.pins, s))
 		rest = List.drop_if(sb.topics, |s| List.contains(sb.pins, s))
 		Html.script_safe(
-			JsonText.obj([
+			JsonOut.object([
 				(
 					"conversations",
-					JsonText.arr(
+					JsonOut.array(
 						List.concat(
 							List.map(sb.others, person),
 							List.map(sb.channels, room),
 						),
 					),
 				),
-				("pinned_sessions", JsonText.arr(List.map(pinned, topic))),
-				("topics", JsonText.arr(List.map(rest, topic))),
-			]),
+				("pinned_sessions", JsonOut.array(List.map(pinned, topic))),
+				("topics", JsonOut.array(List.map(rest, topic))),
+			]).bytes(),
 		)
 	}
 

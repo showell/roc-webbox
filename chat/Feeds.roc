@@ -3,7 +3,7 @@
 ## read as the Zig reads them, and the JSON their pages boot with, byte for
 ## byte. Text in and out; the scanning is over its bytes, cut only at ASCII
 ## ones. Pure; angry-gopher's chat_twin_test.zig holds each to its Zig.
-import JsonText
+import JsonOut
 import Bytes
 import ZigText
 import ChatUrl
@@ -295,13 +295,13 @@ Feeds := [].{
 	images_json : List((Header, List(Str))), U64 -> List(U8)
 	images_json = |entries, most| {
 		tail = List.drop_first(entries, List.len(entries) - smaller(most, List.len(entries)))
-		JsonText.arr(List.map(tail, |(h, tags)| images_event(h, tags)))
+		JsonOut.array(List.map(tail, |(h, tags)| images_event(h, tags))).bytes()
 	}
 
 	## The Code page's JSON: every entry, as code_store `encodeCodeEvent`
 	## writes it.
 	code_json : List((Header, List(Block))) -> List(U8)
-	code_json = |entries| JsonText.arr(List.map(entries, |(h, bs)| code_event(h, bs)))
+	code_json = |entries| JsonOut.array(List.map(entries, |(h, bs)| code_event(h, bs))).bytes()
 
 	## images_store `encodeImagesEvent`: one entry as its page and its live
 	## stream (`img:<uid>`) send it, fields in its order, none left out.
@@ -311,15 +311,15 @@ Feeds := [].{
 	## rule (SafeImg) and one it refuses is dropped. Here, where the page's
 	## backlog and the live event both pass, so the entries already on disk
 	## are rebuilt too.
-	images_event : Header, List(Str) -> List(U8)
+	images_event : Header, List(Str) -> JsonOut
 	images_event = |h, tags| {
 		safe = List.keep_oks(tags, SafeImg.rebuild)
-		JsonText.obj(
+		JsonOut.object(
 			List.concat(
 				head_fields(h),
 				[
-					("images", JsonText.arr(List.map(safe, JsonText.str))),
-					("source_url", JsonText.str(ChatUrl.source(h.conv, h.source_id).to_str())),
+					("images", JsonOut.array(List.map(safe, JsonOut.string))),
+					("source_url", JsonOut.string(ChatUrl.source(h.conv, h.source_id).to_str())),
 				],
 			),
 		)
@@ -327,20 +327,23 @@ Feeds := [].{
 
 	## code_store `encodeCodeEvent`: one entry as its page and its live
 	## stream (`code:<uid>`) send it.
-	code_event : Header, List(Block) -> List(U8)
+	code_event : Header, List(Block) -> JsonOut
 	code_event = |h, bs| {
-		blocks = JsonText.arr(
+		blocks = JsonOut.array(
 			List.map(
 				bs,
-				|b| JsonText.obj([("lang", JsonText.str(b.lang)), ("body", JsonText.str(b.body))]),
+				|b| JsonOut.object([
+					("lang", JsonOut.string(b.lang)),
+					("body", JsonOut.string(b.body)),
+				]),
 			),
 		)
-		JsonText.obj(
+		JsonOut.object(
 			List.concat(
 				head_fields(h),
 				[
 					("blocks", blocks),
-					("source_url", JsonText.str(ChatUrl.source(h.conv, h.source_id).to_str())),
+					("source_url", JsonOut.string(ChatUrl.source(h.conv, h.source_id).to_str())),
 				],
 			),
 		)
@@ -564,12 +567,12 @@ trim_info = |s| {
 }
 
 ## The fields every feed entry starts with, from its header.
-head_fields : Header -> List((Str, List(U8)))
+head_fields : Header -> List((Str, JsonOut))
 head_fields = |h| [
-	("source_id", JsonText.str(h.source_id)),
-	("from", JsonText.str(h.from)),
-	("conv", JsonText.str(h.conv)),
-	("at", JsonText.str(h.at)),
+	("source_id", JsonOut.string(h.source_id)),
+	("from", JsonOut.string(h.from)),
+	("conv", JsonOut.string(h.conv)),
+	("at", JsonOut.string(h.at)),
 ]
 
 ## The header line every entry starts with, as `header` reads it back.
@@ -662,7 +665,7 @@ expect {
 				"<img src=\"/up/a.png\" width=\"40\" onload=\"alert(2)\">",
 				"<img src=\"https://evil.example/t.png\">",
 			],
-		),
+		).bytes(),
 	)
 	json == Ok("{\"source_id\":\"t_1\",\"from\":\"ann\",\"conv\":\"1_2\",\"at\":\"2026-10-27T00:00:00Z\",\"images\":[\"<img src=\\\"/up/a.png\\\" width=\\\"40\\\">\"],\"source_url\":\"/chat/c/1_2/t#msg-t_1\"}")
 }

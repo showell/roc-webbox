@@ -2,7 +2,7 @@
 ## rows main.roc gathered, each named for the viewer, dated, excerpted and
 ## put newest first, as the JSON /chat/recent boots with, byte for byte.
 ## Pure; angry-gopher's chat_twin_test.zig holds it to the Zig.
-import JsonText
+import JsonOut
 import Bytes
 import Feeds
 import Time
@@ -81,19 +81,19 @@ Recent := [].{
 	## The page's JSON: every row newest first (a tie by its URL or slug,
 	## else as gathered), each as recent_feed's encoders write it.
 	json : Uid, List(Row) -> List(U8)
-	json = |me, rs| JsonText.arr(List.map(sort(rs), |r| event(me, r)))
+	json = |me, rs| JsonOut.array(List.map(sort(rs), |r| event(me, r))).bytes()
 
 	## A row as recent_feed's encoders write it: empty fields left out.
-	event : Uid, Row -> List(U8)
+	event : Uid, Row -> JsonOut
 	event = |me, r| {
-		at = JsonText.str(Time.rfc3339(r.secs))
+		at = JsonOut.string(Time.rfc3339(r.secs))
 		if r.kind == Doc {
-			JsonText.obj(
+			JsonOut.object(
 				List.join([
-					[("kind", JsonText.str("doc")), ("at", at)],
-					JsonText.opt("who", "You"),
-					JsonText.opt("slug", r.key),
-					JsonText.opt("title", r.label),
+					[("kind", JsonOut.string("doc")), ("at", at)],
+					JsonOut.optional("who", "You"),
+					JsonOut.optional("slug", r.key),
+					JsonOut.optional("title", r.label),
 				]),
 			)
 		} else {
@@ -124,17 +124,17 @@ Recent := [].{
 	## recent_feed `encodeChatEvent`: `kind` and `at`, then url, who, where,
 	## topic and excerpt each left out when empty, then `"dm":true` for a
 	## DM. The page's backlog and the live stream (`rec:<uid>`) send it.
-	chat_event : ChatEvent -> List(U8)
+	chat_event : ChatEvent -> JsonOut
 	chat_event = |e|
-		JsonText.obj(
+		JsonOut.object(
 			List.join([
-				[("kind", JsonText.str("chat")), ("at", JsonText.str(e.at))],
-				JsonText.opt("url", e.url),
-				JsonText.opt("who", e.who),
-				JsonText.opt("where", e.label),
-				JsonText.opt("topic", e.topic),
-				JsonText.opt("excerpt", e.excerpt),
-				if e.dm == Dm [("dm", JsonText.bool(Bool.True))] else [],
+				[("kind", JsonOut.string("chat")), ("at", JsonOut.string(e.at))],
+				JsonOut.optional("url", e.url),
+				JsonOut.optional("who", e.who),
+				JsonOut.optional("where", e.label),
+				JsonOut.optional("topic", e.topic),
+				JsonOut.optional("excerpt", e.excerpt),
+				if e.dm == Dm [("dm", JsonOut.bool(Bool.True))] else [],
 			]),
 		)
 

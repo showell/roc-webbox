@@ -683,7 +683,7 @@ call = |req| {
 						topic,
 						excerpt,
 						dm: if arg(6) == [49] Dm else Channel,
-					}),
+					}).bytes(),
 				]
 				_ => []
 			}
@@ -706,7 +706,7 @@ call = |req| {
 						conv,
 						at,
 					}
-					[Feeds.images_entry(h, tags), Feeds.images_event(h, tags)]
+					[Feeds.images_entry(h, tags), Feeds.images_event(h, tags).bytes()]
 				}
 				_ => []
 			}
@@ -734,7 +734,7 @@ call = |req| {
 						0,
 						[],
 					)
-					[Feeds.code_entry(h, blocks), Feeds.code_event(h, blocks)]
+					[Feeds.code_entry(h, blocks), Feeds.code_event(h, blocks).bytes()]
 				}
 				_ => []
 			}

@@ -65,6 +65,11 @@ JsonOut :: List(U8).{
 		]),
 	)
 
+	## A string field, or none when `s` is empty (an encoder that leaves an
+	## empty field out): for `object(List.join([..., optional("url", key), ...]))`.
+	optional : Str, Str -> List((Str, JsonOut))
+	optional = |name, s| if s == "" [] else [(name, string(s))]
+
 	## The value's bytes.
 	bytes : JsonOut -> List(U8)
 	bytes = |JsonOut.(b)| b

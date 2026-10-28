@@ -3,7 +3,7 @@
 ## glyph, `on` "1" (or absent) to add it and anything else to take it back.
 import Form
 import ZigText
-import JsonText
+import JsonOut
 import Uid
 
 Reaction := [].{
@@ -36,14 +36,14 @@ Reaction := [].{
 			at,
 		},
 	|
-		JsonText.obj([
-			("msg", Str.to_utf8(U64.to_str(msg))),
-			("uid", JsonText.str(uid.to_str())),
-			("from", JsonText.str(from)),
-			("emoji", JsonText.str(emoji)),
-			("on", JsonText.bool(is_added(change))),
-			("at", JsonText.str(at)),
-		])
+		JsonOut.object([
+			("msg", JsonOut.number(msg)),
+			("uid", JsonOut.string(uid.to_str())),
+			("from", JsonOut.string(from)),
+			("emoji", JsonOut.string(emoji)),
+			("on", JsonOut.bool(is_added(change))),
+			("at", JsonOut.string(at)),
+		]).bytes()
 
 	## Whether the reactor put the glyph on the message or took it back.
 	Change : [Added, Removed]

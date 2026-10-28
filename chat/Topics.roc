@@ -1,7 +1,7 @@
 ## A CONVERSATION'S TOPICS, AS /chat'S ROUTES JUDGE THEM (angry-gopher
 ## chat.zig): a name without case, the `general<N>` a new DM topic is
 ## announced in, the conversations JSON and the new topic's answer.
-import JsonText
+import JsonOut
 import Paths
 import Uid
 import ZigText
@@ -51,30 +51,30 @@ Topics := [].{
 	conversations_json : Uid, List(Entry) -> List(U8)
 	conversations_json = |me, entries| {
 		one = |e|
-			JsonText.obj([
-				("conv", JsonText.str(e.conv.to_str())),
+			JsonOut.object([
+				("conv", JsonOut.string(e.conv.to_str())),
 				(
 					"partner",
-					JsonText.obj([
-						("id", JsonText.str(e.id.to_str())),
-						("name", JsonText.str(e.name)),
+					JsonOut.object([
+						("id", JsonOut.string(e.id.to_str())),
+						("name", JsonOut.string(e.name)),
 					]),
 				),
-				("default", JsonText.str(e.default)),
-				("sessions", JsonText.arr(List.map(e.sessions, JsonText.str))),
+				("default", JsonOut.string(e.default)),
+				("sessions", JsonOut.array(List.map(e.sessions, JsonOut.string))),
 			])
-		JsonText.obj([
-			("me", JsonText.str(me.to_str())),
-			("conversations", JsonText.arr(List.map(entries, one))),
-		])
+		JsonOut.object([
+			("me", JsonOut.string(me.to_str())),
+			("conversations", JsonOut.array(List.map(entries, one))),
+		]).bytes()
 	}
 
 	## newTopic's answer: the conversation and the topic made.
 	made_json : { key : Paths.ConvKey, topic : Str } -> List(U8)
-	made_json = |{ key, topic }| JsonText.obj([
-		("conv", JsonText.str(key.to_str())),
-		("sid", JsonText.str(topic)),
-	])
+	made_json = |{ key, topic }| JsonOut.object([
+		("conv", JsonOut.string(key.to_str())),
+		("sid", JsonOut.string(topic)),
+	]).bytes()
 }
 
 # is_same_name: ASCII case folds, nothing past ASCII does.

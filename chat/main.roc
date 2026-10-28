@@ -2973,6 +2973,10 @@ search! = |req, rest|
 ## typed `prefix` decoded (a bad escape is the site's 400) and made a key,
 ## then the words the index holds that begin it, of what the member can see
 ## (the host's); none for an empty key. 503 with no index.
+## A search's refusal as its JSON says it: `{"error":<text>}`.
+search_error : Str -> List(U8)
+search_error = |text| JsonOut.object([("error", JsonOut.string(text))]).bytes()
+
 search_words! : Chat.Request => Chat.Answer
 search_words! = |req|
 	if req.method != Get {
@@ -2981,7 +2985,7 @@ search_words! = |req|
 		Chat.respond(
 			429,
 			json,
-			Str.to_utf8("{\"error\":\"too many searches; wait a second\"}"),
+			search_error("too many searches; wait a second"),
 		)
 	} else {
 		match Form.value(List.first(Host.read_query!(Str.to_utf8("prefix"))) ?? []) {
@@ -3002,7 +3006,7 @@ search_words! = |req|
 					NotReady => Chat.respond(
 						503,
 						json,
-						Str.to_utf8("{\"error\":\"search is not ready\"}"),
+						search_error("search is not ready"),
 					)
 				}
 			}
@@ -3021,7 +3025,7 @@ search_messages! = |req|
 		Chat.respond(
 			429,
 			json,
-			Str.to_utf8("{\"error\":\"too many searches; wait a second\"}"),
+			search_error("too many searches; wait a second"),
 		)
 	} else {
 		match Form.value(List.first(Host.read_query!(Str.to_utf8("word"))) ?? []) {
@@ -3046,7 +3050,7 @@ search_messages! = |req|
 					NotReady => Chat.respond(
 						503,
 						json,
-						Str.to_utf8("{\"error\":\"search is not ready\"}"),
+						search_error("search is not ready"),
 					)
 				}
 			}
