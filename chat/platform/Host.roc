@@ -97,6 +97,21 @@ Host := [].{
 	## operator's count, kept by the host for /admin/host.
 	count_malformed_channel! : List(U8) => {}
 
+	## **WHAT THE CHAT DROPPED RATHER THAN FAIL A REQUEST FOR** (metal-vmm
+	## QUEUE 267), counted for the operator (/admin/host), about `whose`: a
+	## DM's new-topic announcement that failed after the topic was made (the
+	## topic), a feed's entries whose bytes are not UTF-8 (the feed's path),
+	## a recent row whose text is not (its key).
+	count_dropped! : [Announcement, FeedEntry, RecentRow], List(U8) => {}
+
+	## **AN ASIDE: WORK WHOSE FAILURE IS ITS OWN** (STORED IS DONE): from
+	## `Begin` to `End`, a primitive that fails fails the aside, never the
+	## request, and the aside's later calls do nothing, as a failed
+	## request's do. `End` answers `Failed` when anything in it failed, and
+	## the request goes on. `Begin` answers `Failed` only for a request that
+	## has failed already.
+	aside! : [Begin, End] => [Done, Failed]
+
 	## **WHO IS ONLINE, AT THE REQUEST'S TIME** (angry-gopher presence.zig
 	## `isOnline`): for each of `ids`, in their order, whether it was seen
 	## within the presence window of the request's `now`. A read of the

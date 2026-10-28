@@ -285,6 +285,14 @@ pub const Host = struct {
     /// Host.count_malformed_channel!: channel `name`'s member file skipped by a
     /// listing as malformed, counted for the operator.
     count_malformed_channel: *const fn (ctx: *anyopaque, name: []const u8) void = noMalformed,
+    /// Host.count_dropped!: something the chat dropped rather than fail the
+    /// request for (`what`, about `whose`: a topic, a feed's path, a recent
+    /// row's key), counted for the operator.
+    count_dropped: *const fn (ctx: *anyopaque, what: route_mod.Dropped, whose: []const u8) void = noDropped,
+    /// Host.aside!: from `begin` to `end`, a failure is the aside's, kept
+    /// apart and said at `end`, never the request's; after one, the aside's
+    /// later calls do nothing, as after a request's failure.
+    aside: *const fn (ctx: *anyopaque, which: route_mod.Aside) route_mod.AsideEnd = noAside,
     /// Host.check_online!, asked by the seam once for each of the Roc's ids:
     /// whether `id` was seen within the presence window of the request's
     /// time. A read of process-lifetime state; it cannot fail.
@@ -364,6 +372,12 @@ fn noFailText(_: *anyopaque, path: []const u8) void {
 }
 fn noMalformed(_: *anyopaque, _: []const u8) void {
     @panic("count_malformed_channel asked of a host that does not answer it");
+}
+fn noDropped(_: *anyopaque, _: route_mod.Dropped, _: []const u8) void {
+    @panic("count_dropped asked of a host that does not answer it");
+}
+fn noAside(_: *anyopaque, _: route_mod.Aside) route_mod.AsideEnd {
+    @panic("aside asked of a host that does not answer it");
 }
 fn noAccounts(_: *anyopaque) Accounts {
     @panic("list_accounts asked of a host that does not answer it");
@@ -617,6 +631,16 @@ export fn roc_chat_fail(reason: route_mod.FailReason, whose: RocBytes) callconv(
 export fn roc_chat_count_malformed_channel(name: RocBytes) callconv(.c) void {
     const h = current("count_malformed_channel");
     h.count_malformed_channel(h.ctx, name.slice());
+}
+
+export fn roc_chat_count_dropped(what: route_mod.Dropped, whose: RocBytes) callconv(.c) void {
+    const h = current("count_dropped");
+    h.count_dropped(h.ctx, what, whose.slice());
+}
+
+export fn roc_chat_aside(which: route_mod.Aside) callconv(.c) route_mod.AsideEnd {
+    const h = current("aside");
+    return h.aside(h.ctx, which);
 }
 
 /// **ONE FLAG FOR EACH ID, IN ITS PLACE**: the Roc asks once for the whole

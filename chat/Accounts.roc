@@ -59,15 +59,18 @@ Accounts := [].{
 
 	## **AN ACCOUNT DECODED WHERE THE HOST HANDS IT**: its id a Uid, its
 	## name text (`stored_name`'s cut first). The host lists only folders a
-	## counter named, and a name is UTF-8 when it is set (users.zig
-	## validateUserName), so either failing is corrupt data: `NotAUid` or
-	## `NameNotUtf8`, each with the folder's bytes.
-	from_host : { id : List(U8), kind : [Agent, Guest, Member, Unreadable], name : List(U8), name_read : [Found, Unreadable] } -> Try(Account, [NotAUid(List(U8)), NameNotUtf8(List(U8))])
+	## counter named, so an id that is not one is corrupt data, `NotAUid`
+	## with the folder's bytes, and fails the listing. **A NAME THAT IS NOT
+	## UTF-8 IS ONE ACCOUNT'S** (metal-vmm QUEUE 267): the account is listed
+	## with its name `Unreadable`, as a name that would not read is, so only
+	## a lookup of that name fails, never every member's chat. (The host
+	## lists such a name as unreadable itself, with error.NotUtf8 kept.)
+	from_host : { id : List(U8), kind : [Agent, Guest, Member, Unreadable], name : List(U8), name_read : [Found, Unreadable] } -> Try(Account, [NotAUid(List(U8))])
 	from_host = |a|
 		match (Uid.from_utf8(a.id), Str.from_utf8(stored_name(a.name))) {
 			(Ok(id), Ok(text)) => Ok({ id, kind: a.kind, name: text, name_read: a.name_read })
+			(Ok(id), Err(_)) => Ok({ id, kind: a.kind, name: "", name_read: Unreadable })
 			(Err(_), _) => Err(NotAUid(a.id))
-			(Ok(_), Err(_)) => Err(NameNotUtf8(a.id))
 		}
 
 	## **LISTAUTHORIZED**: every member and the agent, never a guest, each
@@ -116,5 +119,5 @@ stored_name : List(U8) -> List(U8)
 stored_name = |bytes| List.drop_last(bytes, ZigText.count_back_while(bytes, |c| c == '\r' or c == '\n', 0))
 
 expect Accounts.from_host({ id: Str.to_utf8("7"), kind: Member, name: Str.to_utf8("caf\u(e9)\r\n"), name_read: Found }).map_ok(|a| a.name) == Ok("caf\u(e9)")
-expect Accounts.from_host({ id: Str.to_utf8("7"), kind: Member, name: [0x41, 0xff], name_read: Found }) == Err(NameNotUtf8(Str.to_utf8("7")))
+expect Accounts.from_host({ id: Str.to_utf8("7"), kind: Member, name: [0x41, 0xff], name_read: Found }).map_ok(|a| (a.name, a.name_read)) == Ok(("", Unreadable))
 expect Accounts.from_host({ id: Str.to_utf8("07"), kind: Member, name: [0xff], name_read: Found }) == Err(NotAUid(Str.to_utf8("07")))

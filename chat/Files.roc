@@ -26,6 +26,26 @@ Files := [].{
 		}
 	}
 
+	## Host.read!'s answer, **NOT DECODED**: the file's bytes as stored, for
+	## a file served as it is (a topic's reactions: its client drops a bad
+	## line) or decoded part by part, where one damaged line, entry or
+	## block is that part's alone, skipped and counted, never the whole
+	## page's (metal-vmm QUEUE 267). `Missing` and `Failed` as `read!`'s.
+	read_bytes! : Paths.ChatPath => Try(List(U8), [Missing, Failed])
+	read_bytes! = |path| {
+		got = Host.read!(Paths.bytes(path))
+		answer(got.status, got.bytes)
+	}
+
+	## Host.read!'s answer as text, **BYTES THAT ARE NOT UTF-8 AN ANSWER**
+	## (`NotUtf8`), not the request's failure: for a file one of many, which
+	## a listing skips as damaged and counts (a channel's member file).
+	read_text! : Paths.ChatPath => Try(Str, [Missing, Failed, NotUtf8])
+	read_text! = |path| {
+		got = Host.read!(Paths.bytes(path))
+		decoded(answer(got.status, got.bytes))
+	}
+
 	## Host.write!: the whole file as `bytes`.
 	write! : Paths.ChatPath, List(U8) => Try({}, [Failed])
 	write! = |path, bytes| Host.write!(Paths.bytes(path), bytes)

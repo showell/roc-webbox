@@ -44,6 +44,9 @@ pub const Presence = route.Presence;
 pub const Membership = route.Membership;
 pub const Done = route.Done;
 pub const Serving = route.Serving;
+pub const Dropped = route.Dropped;
+pub const Aside = route.Aside;
+pub const AsideEnd = route.AsideEnd;
 
 /// roc_abi.zig's arena, from `base`, once, as the host starts.
 pub fn use(base: std.mem.Allocator) void {
@@ -149,6 +152,10 @@ const Scripted = struct {
     /// message's block is stored.
     render_ok: bool = true,
     store_ok: bool = true,
+    /// A topic whose message will not store, alone (an announcement's).
+    store_fails_for: ?[]const u8 = null,
+    /// What Host.aside!(End) answers.
+    aside_end: route.AsideEnd = .done,
     /// A feed's path whose entry will not append, and its error.
     entry_fails: ?struct { path: []const u8, e: anyerror } = null,
     transcript: bool = true,
@@ -160,7 +167,7 @@ const Scripted = struct {
     const Channel = struct { name: []const u8, read: abi.Read };
 
     fn host(self: *Scripted) Host {
-        return .{ .ctx = self, .check_member = member, .count_presence = presence, .list_accounts = accountsOf, .me = meId, .now = nowOf, .read_body = bodyOf, .publish = publish, .append_line = appendLine, .message_count = messageCount, .read = readOf, .write = writeOf, .remove = removeOf, .list = listOf, .fail = failOf, .fail_text = failTextOf, .fail_account = failAccountOf, .count_malformed_channel = malformed, .check_online = onlineOf, .limits = limitsOf, .read_header = header, .check_hostile = hostile, .render = render, .store_message = storeMessage, .append_entry = appendEntry, .report_fanout_failure = fanoutFailed, .serve_file = raw, .serve_rendered = links, .srcs = srcs };
+        return .{ .ctx = self, .check_member = member, .count_presence = presence, .list_accounts = accountsOf, .me = meId, .now = nowOf, .read_body = bodyOf, .publish = publish, .append_line = appendLine, .message_count = messageCount, .read = readOf, .write = writeOf, .remove = removeOf, .list = listOf, .fail = failOf, .fail_text = failTextOf, .fail_account = failAccountOf, .count_malformed_channel = malformed, .count_dropped = dropped, .aside = asideOf, .check_online = onlineOf, .limits = limitsOf, .read_header = header, .check_hostile = hostile, .render = render, .store_message = storeMessage, .append_entry = appendEntry, .report_fanout_failure = fanoutFailed, .serve_file = raw, .serve_rendered = links, .srcs = srcs };
     }
     fn me(ctx: *anyopaque) *Scripted {
         return @ptrCast(@alignCast(ctx));
@@ -235,6 +242,13 @@ const Scripted = struct {
     fn malformed(ctx: *anyopaque, channel: []const u8) void {
         say(ctx, "malformed {s}", .{channel});
     }
+    fn dropped(ctx: *anyopaque, what: route.Dropped, whose: []const u8) void {
+        say(ctx, "dropped {t} {s}", .{ what, whose });
+    }
+    fn asideOf(ctx: *anyopaque, which: route.Aside) route.AsideEnd {
+        say(ctx, "aside {t}", .{which});
+        return if (which == .end) me(ctx).aside_end else .done;
+    }
     fn writeOf(ctx: *anyopaque, path: []const u8, bytes: []const u8) route.Done {
         say(ctx, "write {s} {s}", .{ path, bytes });
         return if (me(ctx).write_ok) .ok else .failed;
@@ -293,7 +307,9 @@ const Scripted = struct {
     fn storeMessage(ctx: *anyopaque, conv: Conv, sid: []const u8, block: []const u8, index: u64, m: abi.Message) route.Done {
         sayConv(ctx, "store", conv);
         say(ctx, " {s} {f} {d} {s}|{s}|{s}|{s}|{s}", .{ sid, std.zig.fmtString(block), index, m.id, m.from, m.at, m.uid, m.markdown });
-        return if (me(ctx).store_ok) .ok else .failed;
+        const s = me(ctx);
+        if (s.store_fails_for) |t| if (std.mem.eql(u8, t, sid)) return .failed;
+        return if (s.store_ok) .ok else .failed;
     }
     /// The separator and the entry escaped, so their every byte shows.
     fn appendEntry(ctx: *anyopaque, path: []const u8, separator: []const u8, entry: []const u8) abi.Appended {
@@ -456,8 +472,9 @@ test "a topic's reactions, react, pin and unpin are the Roc's: presence, the con
         s.files = &.{.{ .path = sidecar, .read = .failed }};
         break :blk s;
     }, .answered, dm_topic ++ "read " ++ sidecar ++ ";");
-    // Text with `é` and an emoji is served as stored; bytes that are not
-    // UTF-8 fail the request at Files.read!'s door, about the file's path.
+    // Text with `é` and an emoji is served as stored; **SO ARE BYTES THAT
+    // ARE NOT UTF-8** (metal-vmm QUEUE 267): a line torn mid-emoji is the
+    // client's to drop, as the Zig's was, never a 500 for good.
     try expectAct("/c/1_2/Plans/reactions", false, .GET, blk: {
         var s = a;
         s.files = &.{.{ .path = sidecar, .read = .{ .found = "{\"emoji\":\"caf\xc3\xa9 \xf0\x9f\x91\x8d\"}\n" } }};
@@ -467,7 +484,7 @@ test "a topic's reactions, react, pin and unpin are the Roc's: presence, the con
         var s = a;
         s.files = &.{.{ .path = sidecar, .read = .{ .found = "{\"msg\":1}\xff\n" } }};
         break :blk s;
-    }, .answered, dm_topic ++ "read " ++ sidecar ++ ";fail not_utf8 " ++ sidecar ++ ";");
+    }, .{ .respond = .{ .status = 200, .content_type = ndjson, .body = "{\"msg\":1}\xff\n" } }, dm_topic ++ "read " ++ sidecar ++ ";");
     try expectAct("/ops/Plans/reactions", true, .GET, a, .{ .respond = .{ .status = 200, .content_type = ndjson, .body = "" } }, ops_topic ++ "read channels/ops/sessions/Plans.reactions.jsonl;");
     // The set is the Roc's (ChatState.pinned), and its file's name: read,
     // changed, written back sorted by bytes, or removed when emptied. A
@@ -865,7 +882,21 @@ test "a send is the Roc's: the conversation, the method, the header, the body, t
         s.body = "topic=Ideas";
         s.topics = &.{ "general2", "Plans" };
         break :blk s;
-    }, .{ .respond = .{ .status = 200, .content_type = "application/json; charset=utf-8", .body = "{\"conv\":\"1_2\",\"sid\":\"Ideas\"}" } }, "member;presence;accounts;body;list 1_2/sessions;" ++ bookmarked("Ideas") ++ comptime sentAll(sent(dm_said, "1_2", "Ideas", "Steve", "hi", "")) ++ "list 1_2/sessions;" ++ sentAll(sent(dm_said, "1_2", "general2", "Steve", "New topic: [Ideas](/chat/c/1_2/Ideas)", "")));
+    }, .{ .respond = .{ .status = 200, .content_type = "application/json; charset=utf-8", .body = "{\"conv\":\"1_2\",\"sid\":\"Ideas\"}" } }, "member;presence;accounts;body;list 1_2/sessions;" ++ bookmarked("Ideas") ++ comptime sentAll(sent(dm_said, "1_2", "Ideas", "Steve", "hi", "")) ++ "aside begin;list 1_2/sessions;" ++ sentAll(sent(dm_said, "1_2", "general2", "Steve", "New topic: [Ideas](/chat/c/1_2/Ideas)", "")) ++ "aside end;");
+    // **STORED IS DONE** (metal-vmm QUEUE 267): the topic is made once its
+    // "hi" is stored, so an announcement that fails is the aside's, counted,
+    // and the create still its 200, never a 500 whose retry is a 409.
+    try expectAct("/c/1_2/new", false, .POST, blk: {
+        var s = a;
+        s.body = "topic=Ideas";
+        s.topics = &.{ "general2", "Plans" };
+        s.store_fails_for = "general2";
+        s.aside_end = .failed;
+        break :blk s;
+    }, .{ .respond = .{ .status = 200, .content_type = "application/json; charset=utf-8", .body = "{\"conv\":\"1_2\",\"sid\":\"Ideas\"}" } }, "member;presence;accounts;body;list 1_2/sessions;" ++ bookmarked("Ideas") ++ comptime sentAll(sent(dm_said, "1_2", "Ideas", "Steve", "hi", "")) ++ "aside begin;list 1_2/sessions;" ++ blk: {
+        const g = sent(dm_said, "1_2", "general2", "Steve", "New topic: [Ideas](/chat/c/1_2/Ideas)", "");
+        break :blk g.count ++ g.render ++ g.store;
+    } ++ "aside end;dropped announcement Ideas;");
 }
 
 test "a topic's raw transcript and /chat/links are the Roc's: a transcript the host has not is a plain 404, never handed back" {
@@ -933,6 +964,22 @@ test "the member's bookmarks are the Roc's files: the topic last viewed first, t
         _ = try decide(arena.allocator(), feed[0], false, .GET, s.host());
         try testing.expectEqualStrings(try std.fmt.allocPrint(arena.allocator(), "member;presence;accounts;read {s};srcs;", .{feed[1]}), s.asked.items);
     }
+    // **ONE DAMAGED ENTRY IS ITS OWN** (metal-vmm QUEUE 267): an entry torn
+    // mid-character is skipped and the feed counted, and the page served
+    // with the others; never a 500 for that member for good.
+    const head = "Sent by Steve at 2025-10-25T13:46:40Z, source MSG_Plans_{d} in 1_2:\n";
+    for ([_][3][]const u8{
+        .{ "/images", "users/1/images.md", std.fmt.comptimePrint(head, .{1}) ++ "<img src=\"/a.png\">\n\n-------------\n\n" ++ std.fmt.comptimePrint(head, .{2}) ++ "<img src=\"/\xf0\x9f.png\">" },
+        .{ "/code", "users/1/code.md", std.fmt.comptimePrint(head, .{1}) ++ "```\nok\n```\n\n-------------\n\n" ++ std.fmt.comptimePrint(head, .{2}) ++ "```\n\xff\n```" },
+    }) |feed| {
+        var arena = std.heap.ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        var s: Scripted = .{ .alloc = arena.allocator(), .files = &.{.{ .path = feed[1], .read = .{ .found = feed[2] } }} };
+        const d = try decide(arena.allocator(), feed[0], false, .GET, s.host());
+        try testing.expectEqual(@as(u16, 200), d.respond.status);
+        try testing.expect(std.mem.indexOf(u8, d.respond.body, "Plans_1") != null and std.mem.indexOf(u8, d.respond.body, "Plans_2") == null);
+        try testing.expectEqualStrings(try std.fmt.allocPrint(arena.allocator(), "member;presence;accounts;read {s};srcs;dropped feed_entry {s};", .{ feed[1], feed[1] }), s.asked.items);
+    }
 }
 
 test "/chat/msg: every channel's roster, which are the member's, and their order, are the Roc's; a malformed one skipped and counted" {
@@ -940,6 +987,13 @@ test "/chat/msg: every channel's roster, which are the member's, and their order
     defer @import("roc_abi.zig").deinit();
     // Only the member: no DM to search.
     const a: Scripted = .{ .alloc = undefined, .accounts = &.{steve} };
+    // **A MEMBER FILE THAT IS NOT UTF-8 IS MALFORMED** (metal-vmm QUEUE
+    // 267): skipped and counted like one, never every member's chat down.
+    try expectAct("/msg/Plans_1", false, .GET, blk: {
+        var s = a;
+        s.channels = &.{ .{ .name = "bad", .read = .{ .found = "1\n\xff\n" } }, .{ .name = "ops", .read = .{ .found = "1\n" } } };
+        break :blk s;
+    }, .{ .found = "/channel/ops/Plans#msg-Plans_1" }, "member;presence;accounts;list channels;read channels/bad.channel;malformed bad;read channels/ops.channel;list channels/ops/sessions;");
     // channels/ listed, each member file read in the listing's order, not
     // sorted: the member is in ops, Zed and a name that sorts high, not in
     // zeta. Every topic list has Plans, so the first of the member's by
@@ -1110,7 +1164,7 @@ test "an account that will not read fails only what reads it, with its own read'
         // is sent all the same.
         const s = sent(dm_said, "1_2", "Ideas", "Steve", "hi", "");
         break :blk s.count ++ s.render ++ s.store ++ s.publish ++ dmFanned("1_2", "2", "Ideas", "Steve", "", "hi");
-    } ++ "list 1_2/sessions;");
+    } ++ "aside begin;list 1_2/sessions;aside end;");
     for ([_][]const u8{ "/links", "/images", "" }) |sub| {
         var arena = std.heap.ArenaAllocator.init(testing.allocator);
         defer arena.deinit();

@@ -25,6 +25,22 @@ Recent := [].{
 	rows : List(Written) -> Try(List(Row), [NotUtf8(List(U8))])
 	rows = |ws| List.map_try(ws, decoded)
 
+	## The host's rows, **ONE DAMAGED ROW ITS OWN** (metal-vmm QUEUE 267): a
+	## row with a field that is not UTF-8 (a torn last transcript block) is
+	## left out, its key's bytes in `damaged` for the host to count, and the
+	## page served with the rest.
+	rows_of : List(Written) -> { rows : List(Row), damaged : List(List(U8)) }
+	rows_of = |ws|
+		List.fold(
+			ws,
+			{ rows: [], damaged: [] },
+			|got, w|
+				match decoded(w) {
+					Ok(r) => { ..got, rows: List.append(got.rows, r) }
+					Err(NotUtf8(_)) => { ..got, damaged: List.append(got.damaged, w.key) }
+				},
+		)
+
 	decoded : Written -> Try(Row, [NotUtf8(List(U8))])
 	decoded = |w| {
 		text = |bytes| Str.from_utf8(bytes).map_err(|_| NotUtf8(bytes))
@@ -238,3 +254,9 @@ expect Recent.excerpt(Str.repeat("👍", 351)) == Str.concat(Str.repeat("👍", 
 expect Recent.excerpt(Str.concat(Str.repeat("a", 348), " \u(e9)\u(e9)")) == Str.concat(Str.repeat("a", 348), " \u(e9)…")
 expect Recent.excerpt(Str.repeat("\u(e9)", 350)) == Str.repeat("\u(e9)", 350)
 expect Recent.excerpt("caf\u(e9) ![x](y.png)  <img src=a>\n```quote\nhi\n```") == "caf\u(e9) [image] [image] [quoted text]"
+# rows_of: a row with a field torn mid-character is left out and its key kept for the count; the rest are read.
+expect {
+	w = |key, md| { kind: Message, secs: Str.to_utf8("1"), uid: Str.to_utf8("1"), name: Str.to_utf8("ann"), key: Str.to_utf8(key), label: Str.to_utf8("to x"), topic: Str.to_utf8("t"), markdown: md, dm: Dm }
+	got = Recent.rows_of([w("/a", Str.to_utf8("hi")), w("/b", [0xe2, 0x82]), w("/c", Str.to_utf8("ok"))])
+	List.map(got.rows, |r| r.key) == ["/a", "/c"] and got.damaged == [Str.to_utf8("/b")]
+}

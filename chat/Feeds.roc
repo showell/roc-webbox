@@ -50,6 +50,23 @@ Feeds := [].{
 			},
 		)
 
+	## `images`, from the file's bytes as stored: **ONE DAMAGED ENTRY IS ITS
+	## OWN** (metal-vmm QUEUE 267). An entry whose bytes are not UTF-8 (one
+	## torn mid-character) is skipped and counted in `damaged`, and the rest
+	## read as `images` reads them, so the member's page is served.
+	images_of : List(U8) -> { entries : List((Header, List(Str))), damaged : U64 }
+	images_of = |bytes| {
+		(text, damaged) = text_blocks(bytes)
+		{ entries: images(text), damaged }
+	}
+
+	## `code`, from the file's bytes as stored, as `images_of` reads them.
+	code_of : List(U8) -> { entries : List((Header, List(Block))), damaged : U64 }
+	code_of = |bytes| {
+		(text, damaged) = text_blocks(bytes)
+		{ entries: code(text), damaged }
+	}
+
 	## images_store `extractImageTags`: every `<img` (any case) followed by
 	## whitespace, to the next `>`.
 	img_tags : Str -> List(Str)
@@ -227,6 +244,23 @@ text_of = |bytes|
 		Err(_) => crash "Feeds: a cut split a codepoint"
 	}
 
+## The file's blocks whose bytes are text, joined again by `sep`, and how
+## many were not. A block is cut at the separator's ASCII bytes, so a torn
+## character is its block's alone, and the blocks kept read as they were.
+text_blocks : List(U8) -> (Str, U64)
+text_blocks = |bytes| {
+	(good, bad) = List.fold(
+		blocks_of(bytes),
+		([], 0),
+		|(kept, n), b|
+			match Str.from_utf8(b) {
+				Ok(_) => (List.append(kept, b), n)
+				Err(_) => (kept, n + 1)
+			},
+	)
+	(text_of(List.join(List.intersperse(good, Feeds.sep))), bad)
+}
+
 ## The file's blocks between separators, trimmed, the empty ones gone.
 blocks_of : List(U8) -> List(List(U8))
 blocks_of = |text|
@@ -318,6 +352,19 @@ expect {
 	back = Feeds.code(text_of(List.join([real, Feeds.sep, other])))
 	List.map(back, |(h, bs)| (h.from, List.map(bs, |b| b.body))) == [("ann", [forged]), ("bob", ["ok"])]
 }
+# images_of and code_of: an entry torn mid-character is skipped and counted, the others read.
+expect {
+	h = |id| Str.to_utf8("Sent by ann at t, source MSG_${id} in 1_2:\n")
+	file = List.join([h("a_1"), Str.to_utf8("<img src=\"/a.png\">"), Feeds.sep, h("a_2"), [0xf0, 0x9f], Feeds.sep, h("a_3"), Str.to_utf8("<img src=\"/c.png\">")])
+	got = Feeds.images_of(file)
+	got.damaged == 1 and List.map(got.entries, |(hd, _)| hd.source_id) == ["a_1", "a_3"]
+}
+expect {
+	file = List.join([Str.to_utf8("Sent by ann at t, source MSG_c_1 in 1_2:\n```\nx\n```"), Feeds.sep, Str.to_utf8("Sent by ann at t, source MSG_c_2 in 1_2:\n```\n"), [0xff], Str.to_utf8("\n```")])
+	got = Feeds.code_of(file)
+	got.damaged == 1 and List.map(got.entries, |(hd, _)| hd.source_id) == ["c_1"]
+}
+expect Feeds.images_of(Str.to_utf8("Sent by ann at t, source MSG_a_1 in 1_2:\n<img src=\"/a.png\">")).damaged == 0
 # images_event: a stored tag rebuilt by the renderer's rule, a hostile one dropped (images_store's plants).
 expect {
 	json = Str.from_utf8(Feeds.images_event({ from: "ann", at: "2026-10-27T00:00:00Z", source_id: "t_1", conv: "1_2" }, ["<img src=x onerror=\"alert(1)\">", "<img src=\"/up/a.png\" width=\"40\" onload=\"alert(2)\">", "<img src=\"https://evil.example/t.png\">"]))

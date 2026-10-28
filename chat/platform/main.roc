@@ -14,9 +14,11 @@ platform ""
 	hosted {
 		"roc_chat_append_entry": Host.append_entry!,
 		"roc_chat_append_line": Host.append_line!,
+		"roc_chat_aside": Host.aside!,
 		"roc_chat_check_hostile": Host.check_hostile!,
 		"roc_chat_check_member": Host.check_member!,
 		"roc_chat_check_online": Host.check_online!,
+		"roc_chat_count_dropped": Host.count_dropped!,
 		"roc_chat_count_malformed_channel": Host.count_malformed_channel!,
 		"roc_chat_count_presence": Host.count_presence!,
 		"roc_chat_fail": Host.fail!,

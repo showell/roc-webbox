@@ -189,6 +189,20 @@ pub const Done = enum(u8) { failed, ok };
 /// failed).
 pub const Serving = enum(u8) { not_serving, serving };
 
+/// Host.roc's `count_dropped!`: what the chat dropped, counted, rather than
+/// fail the request for (metal-vmm QUEUE 267): a DM's new-topic announcement
+/// that failed after the topic was made, a feed's entry or a recent row
+/// whose bytes are not UTF-8.
+pub const Dropped = enum(u8) { announcement, feed_entry, recent_row };
+
+/// Host.roc's `aside!` argument: the start or the end of work whose failure
+/// is its own, never the request's.
+pub const Aside = enum(u8) { begin, end };
+
+/// Host.roc's `aside!` answer: `End`'s, whether anything in the aside failed
+/// (`Begin`'s is `failed` only for a request that has failed already).
+pub const AsideEnd = enum(u8) { done, failed };
+
 /// Host.roc's `gather_recent!`: each row's `kind`, a doc or a chat message.
 pub const RowKind = enum(u8) { doc, message };
 
@@ -197,7 +211,7 @@ pub const RowConv = enum(u8) { channel, dm };
 
 comptime {
     @setEvalBranchQuota(20_000);
-    for (.{ Family, Part, Tail, Method, Area, Counting, Sniff, Kind, Form, BodyStatus, CountStatus, Hostility, ReadStatus, EntryKind, AccountKind, NameRead, AccountsStatus, FailReason, RenderStatus, AppendStatus, Surface, Presence, RowKind, RowConv, Membership, Done, Serving }) |E| assertRocOrder(E);
+    for (.{ Family, Part, Tail, Method, Area, Counting, Sniff, Kind, Form, BodyStatus, CountStatus, Hostility, ReadStatus, EntryKind, AccountKind, NameRead, AccountsStatus, FailReason, RenderStatus, AppendStatus, Surface, Presence, RowKind, RowConv, Membership, Done, Serving, Dropped, Aside, AsideEnd }) |E| assertRocOrder(E);
 }
 
 /// That `E`'s values are Roc's for the same tags: numbered from 0 in the

@@ -193,10 +193,10 @@ serve_topic! = |req, route, found| {
 			if req.method != Get {
 				Chat.not_allowed(Get)
 			} else {
-				# readReactions's: nobody has reacted yet is no events.
+				# readReactions's: none yet is no events; bytes as stored (QUEUE 267).
 				ndjson = Str.to_utf8("application/x-ndjson; charset=utf-8")
-				match Files.read!(Paths.reactions_path({ key: found.key, topic: route.topic })) {
-					Ok(text) => Chat.respond(200, ndjson, Str.to_utf8(text))
+				match Files.read_bytes!(Paths.reactions_path({ key: found.key, topic: route.topic })) {
+					Ok(bytes) => Chat.respond(200, ndjson, bytes)
 					Err(Missing) => Chat.respond(200, ndjson, [])
 					Err(Failed) => Chat.answered
 				}
@@ -270,12 +270,13 @@ load_accounts! = |who|
 			got = Host.list_accounts!({})
 			match got.status {
 				# **EACH ID AND NAME DECODED HERE, AT THE DOOR**
-				# (Accounts.from_host): one that is no uid, or a name that is
-				# not UTF-8, fails the request (NotUtf8, about the account).
+				# (Accounts.from_host): one that is no uid fails the request
+				# (NotUtf8, about the account); a name that is not UTF-8 is
+				# that account's alone, listed as unreadable.
 				Found =>
 					match List.map_try(got.accounts, Accounts.from_host) {
 						Ok(all) => Ok(all)
-						Err(NotAUid(bad)) | Err(NameNotUtf8(bad)) => {
+						Err(NotAUid(bad)) => {
 							Host.fail!(NotUtf8, bad)
 							Err(Failed)
 						}
@@ -380,8 +381,16 @@ load_rosters_from! = |names, i, out|
 		Err(_) => Ok(out)
 		Ok(name) =>
 			match Paths.channel_name_from_str(name) {
-				Ok(valid) =>
-					match Paths.roster(name, Files.read!(Paths.channel_path(valid))) {
+				Ok(valid) => {
+					# A member file that is not UTF-8 is malformed: skipped and
+					# counted, never every member's chat down (QUEUE 267).
+					part = match Files.read_text!(Paths.channel_path(valid)) {
+						Ok(text) => Paths.roster(name, Ok(text))
+						Err(Missing) => Paths.roster(name, Err(Missing))
+						Err(Failed) => Paths.roster(name, Err(Failed))
+						Err(NotUtf8) => Malformed
+					}
+					match part {
 						Listed(r) => load_rosters_from!(names, i + 1, List.append(out, r))
 						Malformed => {
 							Host.count_malformed_channel!(name.to_utf8())
@@ -390,6 +399,7 @@ load_rosters_from! = |names, i, out|
 						Gone => load_rosters_from!(names, i + 1, out)
 						Failed => Err(Failed)
 					}
+				}
 				Err(Invalid) => {
 					Host.count_malformed_channel!(name.to_utf8())
 					load_rosters_from!(names, i + 1, out)
@@ -571,15 +581,12 @@ serve_recent! = |rest|
 	} else {
 		match (load_viewer!(Unasked), load_uid!({})) {
 			(Ok(viewer), Ok(me)) => {
-				# A row whose text is not UTF-8 is stored data gone bad: the
-				# request fails (NotUtf8, about the field's bytes).
-				match Recent.rows(Host.gather_recent!({})) {
-					Ok(rows) => Chat.respond(200, html, Html.bytes(Pages.recent(Chrome.src_in(Host.srcs!({})), { viewer, json: Recent.json(me, rows) })))
-					Err(NotUtf8(bad)) => {
-						Host.fail!(NotUtf8, bad)
-						Chat.answered
-					}
-				}
+				# **ONE DAMAGED ROW IS ITS OWN** (QUEUE 267): a row whose
+				# text is not UTF-8 (a torn last block) is left out and
+				# counted, and the page served with the rest.
+				got = Recent.rows_of(Host.gather_recent!({}))
+				List.for_each!(got.damaged, |key| Host.count_dropped!(RecentRow, key))
+				Chat.respond(200, html, Html.bytes(Pages.recent(Chrome.src_in(Host.srcs!({})), { viewer, json: Recent.json(me, got.rows) })))
 			}
 			_ => Chat.answered
 		}
@@ -597,15 +604,25 @@ serve_feed! = |which, rest|
 			(Ok(viewer), Ok(me)) => {
 				# A feed that failed is the request's failure; the page made
 				# of nothing is not sent.
-				file = match Files.read!(Paths.feed_path(me, which)) {
-					Ok(text) => text
-					Err(Missing) | Err(Failed) => ""
+				# **ONE DAMAGED ENTRY IS ITS OWN** (QUEUE 267): an entry
+				# whose bytes are not UTF-8 is skipped and counted.
+				path = Paths.feed_path(me, which)
+				file = match Files.read_bytes!(path) {
+					Ok(bytes) => bytes
+					Err(Missing) | Err(Failed) => []
 				}
 				src = Chrome.src_in(Host.srcs!({}))
-				page = match which {
-					Images => Pages.images(src, { viewer, json: Feeds.images_json(Feeds.images(file), 20) })
-					Code => Pages.code(src, { viewer, json: Feeds.code_json(Feeds.code(file)) })
+				(page, damaged) = match which {
+					Images => {
+						got = Feeds.images_of(file)
+						(Pages.images(src, { viewer, json: Feeds.images_json(got.entries, 20) }), got.damaged)
+					}
+					Code => {
+						got = Feeds.code_of(file)
+						(Pages.code(src, { viewer, json: Feeds.code_json(got.entries) }), got.damaged)
+					}
 				}
+				if damaged > 0 Host.count_dropped!(FeedEntry, Paths.bytes(path)) else {}
 				Chat.respond(200, html, Html.bytes(page))
 			}
 		}
@@ -884,9 +901,21 @@ make_topic! = |key, conv, who, topic| {
 					Chat.answered
 				} else if append_message!(conv, who, { at: { key, topic }, name, markdown: "hi", cid: "" }).is_err() {
 					Chat.answered
-				} else if dm and announce!(key, conv, who, topic, name).is_err() {
-					Chat.answered
 				} else {
+					# **STORED IS DONE** (metal-vmm QUEUE 267): the topic is
+					# made once its "hi" is stored, so the announcement is an
+					# aside, best-effort, counted when it fails, never a 500
+					# whose retry is a 409.
+					if dm {
+						_ = Host.aside!(Begin)
+						_ = announce!(key, conv, who, topic, name)
+						match Host.aside!(End) {
+							Done => {}
+							Failed => Host.count_dropped!(Announcement, topic.to_utf8())
+						}
+					} else {
+						{}
+					}
 					Chat.respond(200, json, Topics.made_json({ key, topic }))
 				}
 			}
