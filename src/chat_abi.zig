@@ -141,6 +141,9 @@ pub const AppendRec = extern struct { fault: u16, status: route_mod.AppendStatus
 /// Host.roc's `append_message!` answer (metal-vmm QUEUE 287): `{ size : U64,
 /// status : [Appended, Failed] }`, the transcript's size after the append.
 pub const AppendedAtRec = extern struct { size: u64, status: route_mod.AppendStatus };
+/// Host.roc's `append_message!` record (metal-vmm QUEUE 297): `{ sid,
+/// block : List(U8) }`, the bytes by name.
+pub const AppendMessageArgs = extern struct { block: RocBytes, sid: RocBytes };
 /// Host.roc's `serve_upload!` record (metal-vmm QUEUE 291): `{ first, last,
 /// size : U64, content_type, path : List(U8), part : [Range, Unsatisfiable,
 /// Whole] }`, the numbers first, the bytes by name, the tag last.
@@ -282,6 +285,8 @@ comptime {
         @offsetOf(UploadReadRec, "status") == 8 + 6 * w and
         @sizeOf(UploadReadRec) == std.mem.alignForward(usize, 8 + 6 * w + 1, 8));
     std.debug.assert(@offsetOf(StoredRec, "name") == 0 and @offsetOf(StoredRec, "status") == 3 * w and @sizeOf(StoredRec) == 4 * w);
+    // The hosted effects' argument records (metal-vmm QUEUE 297).
+    std.debug.assert(@offsetOf(AppendMessageArgs, "block") == 0 and @offsetOf(AppendMessageArgs, "sid") == 3 * w and @sizeOf(AppendMessageArgs) == 6 * w);
     // retire_asked!'s (metal-vmm QUEUE 293).
     std.debug.assert(@offsetOf(RetireAskedRec, "days") == 0 and @offsetOf(RetireAskedRec, "now") == 8 and @offsetOf(RetireAskedRec, "keep") == 16 and @sizeOf(RetireAskedRec) == 16 + 3 * w);
     // serve_upload!'s (metal-vmm QUEUE 291): three numbers, two lists, a tag.
@@ -1411,11 +1416,9 @@ fn renderRec(r: Rendered) RenderRec {
     };
 }
 
-export fn roc_chat_append_message(
-    conv: ConvRec,
-    sid: RocBytes,
-    block: RocBytes,
-) callconv(.c) AppendedAtRec {
+export fn roc_chat_append_message(conv: ConvRec, args: AppendMessageArgs) callconv(.c) AppendedAtRec {
+    const sid = args.sid;
+    const block = args.block;
     const h = current("append_message");
     if (!onePart(conv.key.slice()) or !onePart(sid.slice())) {
         h.fail(h.ctx, error.PathOutsideChatRoot);

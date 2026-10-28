@@ -2508,11 +2508,7 @@ store_block! = |
 		message,
 	},
 | {
-	appended = Host.append_message!(
-		conv,
-		at.topic.to_utf8(),
-		block,
-	)
+	appended = Host.append_message!(conv, { sid: at.topic.to_utf8(), block })
 	match appended.status {
 		Failed => Err(Failed)
 		Appended => {

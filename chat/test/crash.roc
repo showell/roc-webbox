@@ -110,11 +110,7 @@ handle! = |req|
 		# size after; then message 9 told to the index, every field of the
 		# message a different string, so a record laid out wrong shows.
 		topic = List.drop_first(req.sub, 7)
-		got = Host.append_message!(
-			dm12,
-			topic,
-			Str.to_utf8("the block"),
-		)
+		got = Host.append_message!(dm12, { sid: topic, block: Str.to_utf8("the block") })
 		match got.status {
 			Appended => {
 				Host.index_message!(

@@ -336,7 +336,11 @@ Host := [].{
 	## (the request has failed, and nothing was stored). The count and the
 	## search index are the Roc's to tell after (`write_cache!`,
 	## `index_message!`).
-	append_message! : Chat.Conv, List(U8), List(U8) => { size : U64, status : [Appended, Failed] }
+	append_message! : Chat.Conv,
+	{ sid : List(U8), block : List(U8) } => {
+		size : U64,
+		status : [Appended, Failed],
+	}
 
 	## **THE SEARCH INDEX TOLD OF A MESSAGE AS IT LANDS** (search_index
 	## `noteAppend`): process-lifetime state, so a primitive. It never fails:
