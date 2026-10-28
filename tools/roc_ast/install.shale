@@ -26,4 +26,8 @@ end
 
 local built = run({real("zig016:zig"), "build", "--fork=" .. src, "--prefix", real("tools:roc-ast")}, {timeout_ms = 1800000, tail = 20, cwd = "tools/roc_ast"})
 print(built.out)
+-- Installed only when the build said so and the binary is there: a failed
+-- fetch or compile once printed this line anyway (metal-vmm QUEUE 263).
+if built.ended ~= "exit" or built.code ~= 0 then fail("roc-ast: the build " .. (built.ended == "exit" and ("exited " .. built.code) or built.ended) .. "; nothing installed (its last lines are above)") end
+if not exists("tools:roc-ast/bin/roc-ast") then fail("roc-ast: the build finished but left no ~/tools/roc-ast/bin/roc-ast") end
 print("roc-ast: Roc " .. short .. "'s parser, installed at ~/tools/roc-ast/bin/roc-ast")
