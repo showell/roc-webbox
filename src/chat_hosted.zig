@@ -47,6 +47,7 @@ pub const Hit = abi.Hit;
 pub const Messages = abi.Messages;
 pub const Membership = route.Membership;
 pub const Done = route.Done;
+pub const Welcome = route.Welcome;
 pub const Serving = route.Serving;
 pub const Dropped = route.Dropped;
 pub const Aside = route.Aside;
@@ -179,6 +180,9 @@ const Scripted = struct {
     store_fails_for: ?[]const u8 = null,
     /// What Host.aside!(End) answers.
     aside_end: route.AsideEnd = .done,
+    /// What Host.welcome_pending! answers (metal-vmm QUEUE 283); `welcome_done!`
+    /// makes it `.none`.
+    welcome: route.Welcome = .none,
     /// A feed's path whose entry will not append, and its error.
     entry_fails: ?struct { path: []const u8, e: anyerror } = null,
     transcript: bool = true,
@@ -190,7 +194,16 @@ const Scripted = struct {
     const Channel = struct { name: []const u8, read: abi.Read };
 
     fn host(self: *Scripted) Host {
-        return .{ .ctx = self, .check_member = member, .count_presence = presence, .list_accounts = accountsOf, .me = meId, .now = nowOf, .read_body = bodyOf, .publish = publish, .append_line = appendLine, .stat = statOf, .read_at = readAtOf, .read = readOf, .write = writeOf, .remove = removeOf, .list = listOf, .fail = failOf, .fail_text = failTextOf, .fail_account = failAccountOf, .count_malformed_channel = malformed, .count_dropped = dropped, .aside = asideOf, .check_online = onlineOf, .read_header = header, .check_hostile = hostile, .render = render, .store_message = storeMessage, .append_entry = appendEntry, .report_fanout_failure = fanoutFailed, .serve_file = raw, .serve_rendered = links, .srcs = srcs };
+        return .{ .ctx = self, .check_member = member, .count_presence = presence, .list_accounts = accountsOf, .me = meId, .now = nowOf, .read_body = bodyOf, .publish = publish, .append_line = appendLine, .stat = statOf, .read_at = readAtOf, .read = readOf, .write = writeOf, .remove = removeOf, .list = listOf, .fail = failOf, .fail_text = failTextOf, .fail_account = failAccountOf, .count_malformed_channel = malformed, .count_dropped = dropped, .aside = asideOf, .check_online = onlineOf, .read_header = header, .check_hostile = hostile, .render = render, .store_message = storeMessage, .append_entry = appendEntry, .report_fanout_failure = fanoutFailed, .serve_file = raw, .serve_rendered = links, .srcs = srcs, .welcome_pending = welcomeOf, .welcome_done = welcomeDone };
+    }
+    fn welcomeOf(ctx: *anyopaque) route.Welcome {
+        say(ctx, "welcome?", .{});
+        return me(ctx).welcome;
+    }
+    fn welcomeDone(ctx: *anyopaque) route.Done {
+        say(ctx, "welcome done", .{});
+        me(ctx).welcome = .none;
+        return .ok;
     }
     fn me(ctx: *anyopaque) *Scripted {
         return @ptrCast(@alignCast(ctx));
@@ -383,10 +396,9 @@ fn expectAct(sub: []const u8, channel: bool, method: std.http.Method, script: Sc
     }
 }
 
-/// What /chat asks first, for member 1, the host: the welcome's aside
-/// (metal-vmm QUEUE 279), which reads the accounts and finds the member is
-/// the host, so seeds nothing.
-const welcome_checked = "member;aside begin;accounts;aside end;";
+/// What /chat asks first: the welcome's aside (metal-vmm QUEUE 279), which
+/// finds no welcome pending (QUEUE 283), so reads nothing more.
+const welcome_checked = "member;aside begin;welcome?;aside end;";
 
 /// What finding DM 1_2's topic Plans asks: the accounts (whether 2 is one,
 /// and its name, the title, before the topics, as findTopic read them),

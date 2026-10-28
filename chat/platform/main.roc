@@ -43,6 +43,8 @@ platform ""
 		"roc_chat_srcs": Host.srcs!,
 		"roc_chat_stat": Host.stat!,
 		"roc_chat_store_message": Host.store_message!,
+		"roc_chat_welcome_done": Host.welcome_done!,
+		"roc_chat_welcome_pending": Host.welcome_pending!,
 		"roc_chat_write": Host.write!,
 	}
 	targets: {

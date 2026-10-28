@@ -199,6 +199,11 @@ pub const Membership = enum(u8) { member, outsider };
 /// `failed` means the host has failed the request.
 pub const Done = enum(u8) { failed, ok };
 
+/// Host.roc's `welcome_pending!` answer (metal-vmm QUEUE 283): the member's
+/// welcome is pending, is not, or the look failed (the host has failed the
+/// request, or the aside).
+pub const Welcome = enum(u8) { failed, none, pending };
+
 /// Host.roc's `serve_file!` and `serve_rendered!` answer: the host holds
 /// the file's bytes for a `held` answer, or it is not there (or its read
 /// failed).
@@ -220,7 +225,7 @@ pub const AsideEnd = enum(u8) { done, failed };
 
 comptime {
     @setEvalBranchQuota(20_000);
-    for (.{ Family, Part, Tail, Method, Area, Counting, Sniff, Kind, Form, BodyStatus, CountStatus, Hostility, ReadStatus, EntryKind, AccountKind, NameRead, AccountsStatus, FailReason, RenderStatus, AppendStatus, Surface, Presence, Membership, Admission, WordsStatus, HitConv, HitWord, Done, Serving, Dropped, Aside, AsideEnd }) |E| assertRocOrder(E);
+    for (.{ Family, Part, Tail, Method, Area, Counting, Sniff, Kind, Form, BodyStatus, CountStatus, Hostility, ReadStatus, EntryKind, AccountKind, NameRead, AccountsStatus, FailReason, RenderStatus, AppendStatus, Surface, Presence, Membership, Admission, WordsStatus, HitConv, HitWord, Done, Welcome, Serving, Dropped, Aside, AsideEnd }) |E| assertRocOrder(E);
 }
 
 /// That `E`'s values are Roc's for the same tags: numbered from 0 in the

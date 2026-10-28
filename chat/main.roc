@@ -945,44 +945,65 @@ json : List(U8)
 json = Str.to_utf8("application/json; charset=utf-8")
 
 ## **THE HOST'S WELCOME** (login.zig `sendHostWelcome` as it was, metal-vmm
-## QUEUE 279): a member's DM with the host (member 1), while it has no
-## topic, gets the host's automated hello, in `general`, by the host's name,
-## and the member's bookmark at it, so /chat opens on it. Not the host's
-## own, and none when there is no host. **BEST-EFFORT, IN AN ASIDE**: a read
-## or a store that fails means no welcome this time, never a failed /chat;
-## the next visit tries again. The accounts it read, for the rest of the
-## request (`Unasked` when the aside failed).
+## QUEUE 279), **FOR A MEMBER MADE FROM NOW ON** (QUEUE 283): signup marks
+## the welcome pending, in the gopher's own users folder, and the member's
+## first /chat gives it: their DM with the host (member 1) gets the host's
+## automated hello, in `general`, by the host's name, and the member's
+## bookmark at it, so /chat opens on it; then the mark goes. An account with
+## no mark is never welcomed, whatever its DMs. **ONCE**: a DM with the host
+## that has a topic already (a welcome stored before a crash took the mark's
+## removal with it, or the member's own words) only clears the mark. With no
+## host yet the mark stays, for the next visit; the host's own mark goes.
+## **BEST-EFFORT, IN AN ASIDE**: a read or a store that fails means no
+## welcome this time, never a failed /chat; the next visit tries again. The
+## accounts it read, for the rest of the request (`Unasked` when it read
+## none, or the aside failed).
 welcome! : {} => Who
 welcome! = |{}| {
 	_ = Host.aside!(Begin)
 	got = seed_welcome!({})
 	match (Host.aside!(End), got) {
-		(Done, Ok(accounts)) => Known(accounts)
+		(Done, Ok(who)) => who
 		_ => Unasked
 	}
 }
 
-seed_welcome! : {} => Try(List(Accounts.Account), [Failed])
+## The host's hello in the DM `key`, and the member's bookmark at it.
+hello! : List(Accounts.Account), Uid, Paths.ConvKey => Try({}, [Failed])
+hello! = |accounts, host, key| {
+	name = fail_if_unreadable!(Accounts.name(accounts, host))?
+	bytes = key.bytes()
+	conv = { family: Dm, key: bytes, base: Conversation.dm_base(bytes), members: Conversation.dm_members(bytes) }
+	text = "Hi, this is an automated message from ${name}. Please say hello and ${name} will get back to you soon."
+	_ = append_message_by!(conv, Known(accounts), host, { at: { key, topic: "general" }, name, markdown: text, cid: "" })?
+	bookmark!(key, "general")
+}
+
+seed_welcome! : {} => Try(Who, [Failed])
 seed_welcome! = |{}| {
 	me = load_uid!({})?
-	accounts = load_accounts!(Unasked)?
-	match List.keep_if(accounts, |a| a.id.to_str() == "1") {
-		[host, ..] if host.id != me => {
-			name = fail_if_unreadable!(Accounts.name(accounts, host.id))?
-			pair = Paths.pair_key(host.id, me)
-			key = Dm(pair)
-			if !Paths.first_of(load_topics!(key)).is_empty() {
-				Ok(accounts)
-			} else {
-				bytes = key.bytes()
-				conv = { family: Dm, key: bytes, base: Conversation.dm_base(bytes), members: Conversation.dm_members(bytes) }
-				text = "Hi, this is an automated message from ${name}. Please say hello and ${name} will get back to you soon."
-				_ = append_message_by!(conv, Known(accounts), host.id, { at: { key, topic: "general" }, name, markdown: text, cid: "" })?
-				bookmark!(key, "general")?
-				Ok(accounts)
+	match Host.welcome_pending!({}) {
+		Failed => Err(Failed)
+		None => Ok(Unasked)
+		Pending => {
+			accounts = load_accounts!(Unasked)?
+			match List.keep_if(accounts, |a| a.id.to_str() == "1") {
+				[host, ..] if host.id != me => {
+					pair = Paths.pair_key(host.id, me)
+					key = Dm(pair)
+					if Paths.first_of(load_topics!(key)).is_empty() {
+						hello!(accounts, host.id, key)?
+					}
+					Host.welcome_done!({})?
+					Ok(Known(accounts))
+				}
+				[_, ..] => {
+					Host.welcome_done!({})?
+					Ok(Known(accounts))
+				}
+				[] => Ok(Known(accounts))
 			}
 		}
-		_ => Ok(accounts)
 	}
 }
 

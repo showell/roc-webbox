@@ -336,6 +336,11 @@ pub const Host = struct {
     /// Host.search_messages!: the messages holding `key`, at most `most`;
     /// null when there is no index.
     search_messages: *const fn (ctx: *anyopaque, key: []const u8, most: u64) ?Messages = noMessages,
+    /// Host.welcome_pending!: whether the member's welcome is pending, a
+    /// fact signup wrote (metal-vmm QUEUE 283).
+    welcome_pending: *const fn (ctx: *anyopaque) route_mod.Welcome = noWelcome,
+    /// Host.welcome_done!: the member's welcome given; the pending mark goes.
+    welcome_done: *const fn (ctx: *anyopaque) route_mod.Done = noWelcomeDone,
     /// Host.srcs!: where a page names each script, by its name.
     srcs: *const fn (ctx: *anyopaque) []const Src = noSrcs,
     /// Host.me!: the member's id.
@@ -461,6 +466,12 @@ fn noWords(_: *anyopaque, _: []const u8, _: u64) ?Words {
 fn noMessages(_: *anyopaque, _: []const u8, _: u64) ?Messages {
     @panic("search_messages asked of a host that does not answer it");
 }
+fn noWelcome(_: *anyopaque) route_mod.Welcome {
+    @panic("welcome_pending asked of a host that does not answer it");
+}
+fn noWelcomeDone(_: *anyopaque) route_mod.Done {
+    @panic("welcome_done asked of a host that does not answer it");
+}
 fn noOnline(_: *anyopaque, _: []const u8) route_mod.Presence {
     @panic("check_online asked of a host that does not answer it");
 }
@@ -511,6 +522,8 @@ pub const Routing = struct {
         h.read_query = noQueryField;
         h.search_words = noWordsHeld;
         h.search_messages = noMessagesHeld;
+        // No member's welcome is pending (metal-vmm QUEUE 283).
+        h.welcome_pending = noneWelcome;
         return h;
     }
     fn of(ctx: *anyopaque) *Routing {
@@ -552,6 +565,9 @@ pub const Routing = struct {
     }
     fn noFolder(_: *anyopaque, _: []const u8) Listing {
         return .missing;
+    }
+    fn noneWelcome(_: *anyopaque) route_mod.Welcome {
+        return .none;
     }
 };
 
@@ -723,6 +739,16 @@ export fn roc_chat_aside(which: route_mod.Aside) callconv(.c) route_mod.AsideEnd
 /// **ONE FLAG FOR EACH ID, IN ITS PLACE**: the Roc asks once for the whole
 /// roster, and the seam asks the host id by id, so the answer is exactly as
 /// long as the ids and never out of their order.
+export fn roc_chat_welcome_pending() callconv(.c) route_mod.Welcome {
+    const h = current("welcome_pending");
+    return h.welcome_pending(h.ctx);
+}
+
+export fn roc_chat_welcome_done() callconv(.c) route_mod.Done {
+    const h = current("welcome_done");
+    return h.welcome_done(h.ctx);
+}
+
 export fn roc_chat_admit() callconv(.c) route_mod.Admission {
     const h = current("admit");
     return h.admit(h.ctx);

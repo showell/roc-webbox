@@ -151,6 +151,16 @@ Host := [].{
 	## message `length` long, the word `at` when `found`.
 	search_messages! : List(U8), U64 => { status : [NotReady, Ready], matched : U64, unreadable : U64, hits : List({ at : U64, length : U64, start : U64, base : List(U8), date : List(U8), from : List(U8), id : List(U8), sid : List(U8), window : List(U8), found : [Found, Missing], kind : [Channel, Dm] }) }
 
+	## **THE WELCOME, PENDING** (angry-gopher users.zig `welcomePending`,
+	## metal-vmm QUEUE 283): whether the member's welcome is pending, a fact
+	## signup wrote in the gopher's own users folder. `Failed` when the look
+	## failed (the host has failed the request).
+	welcome_pending! : {} => [Failed, None, Pending]
+
+	## The member's welcome given: the pending mark goes (one gone already
+	## is done). `Err(Failed)` when it failed.
+	welcome_done! : {} => Try({}, [Failed])
+
 	## Where a page names each script, by its name (a src's hash is of bytes
 	## the host holds).
 	srcs! : {} => List({ name : List(U8), src : List(U8) })
