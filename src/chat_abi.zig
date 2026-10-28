@@ -419,6 +419,9 @@ pub const Message = struct {
 /// A feed's entry appended (Host.append_entry!), or why not: the
 /// fan-out's failure, never the request's.
 pub const Appended = union(route_mod.AppendStatus) { appended, failed: anyerror };
+/// What Host.append_message! answers: the transcript's size after the
+/// append, or that it failed (the host has failed the request).
+pub const AppendedAt = union(route_mod.AppendStatus) { appended: u64, failed };
 
 /// Which of an account's reads a lookup needed, and failed on: its kind
 /// (the password's stat) or its name.
@@ -585,18 +588,31 @@ pub const Host = struct {
     /// Host.render!: a message's markdown as its frame's HTML, or `.failed`
     /// (the host has failed the request).
     render: *const fn (ctx: *anyopaque, markdown: []const u8) Rendered = noRender,
-    /// Host.store_message!: `block`, message `index` of topic `sid` in
-    /// `conv`, appended to its transcript, then the count cache and the
-    /// search index told of `message`. `.failed` when the append failed (the
-    /// host has failed the request; nothing stored).
-    store_message: *const fn (
+    /// Host.append_message!: `block` appended to topic `sid`'s transcript in
+    /// `conv`; the transcript's size after it, or `.failed` (the host has
+    /// failed the request; nothing stored). Metal-vmm QUEUE 287.
+    append_message: *const fn (
         ctx: *anyopaque,
         conv: Conv,
         sid: []const u8,
         block: []const u8,
-        index: u64,
+    ) AppendedAt = noAppendMessage,
+    /// Host.index_message!: the search index told of `message`, topic `sid`
+    /// of `conv`. It cannot fail.
+    index_message: *const fn (
+        ctx: *anyopaque,
+        conv: Conv,
+        sid: []const u8,
         message: Message,
-    ) route_mod.Done = noStoreMessage,
+    ) void = noIndexMessage,
+    /// Host.write_cache!: a cache's whole file under the chat root (the seam
+    /// has checked the path). A write that failed is the host's to log,
+    /// never the request's failure.
+    write_cache: *const fn (
+        ctx: *anyopaque,
+        path: []const u8,
+        bytes: []const u8,
+    ) void = noWriteCache,
     /// Host.append_entry!: `entry` appended to the feed file at `path`
     /// under the chat root (the seam has checked it), `separator` first
     /// when the file is not empty. **IT NEVER FAILS THE REQUEST**: a write
@@ -737,15 +753,14 @@ fn noNow(_: *anyopaque) i64 {
 fn noRender(_: *anyopaque, _: []const u8) Rendered {
     @panic("render asked of a host that does not answer it");
 }
-fn noStoreMessage(
-    _: *anyopaque,
-    _: Conv,
-    _: []const u8,
-    _: []const u8,
-    _: u64,
-    _: Message,
-) route_mod.Done {
-    @panic("store_message asked of a host that does not answer it");
+fn noAppendMessage(_: *anyopaque, _: Conv, _: []const u8, _: []const u8) AppendedAt {
+    @panic("append_message asked of a host that does not answer it");
+}
+fn noIndexMessage(_: *anyopaque, _: Conv, _: []const u8, _: Message) void {
+    @panic("index_message asked of a host that does not answer it");
+}
+fn noWriteCache(_: *anyopaque, _: []const u8, _: []const u8) void {
+    @panic("write_cache asked of a host that does not answer it");
 }
 fn noAppendEntry(
     _: *anyopaque,
@@ -1242,26 +1257,48 @@ export fn roc_chat_render(markdown: RocBytes) callconv(.c) RenderRec {
     };
 }
 
-export fn roc_chat_store_message(
+export fn roc_chat_append_message(
     conv: ConvRec,
     sid: RocBytes,
     block: RocBytes,
-    index: u64,
-    message: MessageRec,
-) callconv(.c) route_mod.Done {
-    const h = current("store_message");
+) callconv(.c) AppendedAtRec {
+    const h = current("append_message");
     if (!onePart(conv.key.slice()) or !onePart(sid.slice())) {
         h.fail(h.ctx, error.PathOutsideChatRoot);
-        return .failed;
+        return .{ .size = 0, .status = .failed };
     }
-    return h.store_message(
+    return switch (h.append_message(
         h.ctx,
         .of(conv),
         sid.slice(),
         block.slice(),
-        index,
+    )) {
+        .appended => |size| .{ .size = size, .status = .appended },
+        .failed => .{ .size = 0, .status = .failed },
+    };
+}
+
+export fn roc_chat_index_message(
+    conv: ConvRec,
+    sid: RocBytes,
+    message: MessageRec,
+) callconv(.c) void {
+    const h = current("index_message");
+    // Its topic was the append's, which the seam checked: a bad one now is
+    // no topic, and the index is told of nothing.
+    if (!onePart(conv.key.slice()) or !onePart(sid.slice())) return;
+    h.index_message(
+        h.ctx,
+        .of(conv),
+        sid.slice(),
         .of(message),
     );
+}
+
+export fn roc_chat_write_cache(path: RocBytes, bytes: RocBytes) callconv(.c) void {
+    const h = current("write_cache");
+    if (!underRoot(h, path.slice())) return;
+    h.write_cache(h.ctx, path.slice(), bytes.slice());
 }
 
 /// An error as the Roc carries it: a number only the host reads. **EVERY

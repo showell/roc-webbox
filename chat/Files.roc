@@ -87,6 +87,11 @@ Files := [].{
 		}
 	}
 
+	## **A CACHE WRITTEN** (Host.write_cache!, metal-vmm QUEUE 287): the
+	## whole file as `bytes`; one not written is a miss for the next read.
+	write_cache! : Paths.ChatPath, List(U8) => {}
+	write_cache! = |path, bytes| Host.write_cache!(path.bytes(), bytes)
+
 	## Host.write!: the whole file as `bytes`.
 	write! : Paths.ChatPath, List(U8) => Try({}, [Failed])
 	write! = |path, bytes| Host.write!(path.bytes(), bytes)

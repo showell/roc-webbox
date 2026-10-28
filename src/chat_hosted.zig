@@ -24,6 +24,7 @@ pub const Rendered = abi.Rendered;
 pub const RenderStatus = route.RenderStatus;
 pub const Message = abi.Message;
 pub const Appended = abi.Appended;
+pub const AppendedAt = abi.AppendedAt;
 pub const AppendStatus = route.AppendStatus;
 pub const Surface = route.Surface;
 pub const Hostility = route.Hostility;
@@ -299,6 +300,8 @@ const Scripted = struct {
     store_ok: bool = true,
     /// A topic whose message will not store, alone (an announcement's).
     store_fails_for: ?[]const u8 = null,
+    /// The transcript's size before an append (Host.append_message!).
+    transcript_before: u64 = 100,
     /// What Host.aside!(End) answers.
     aside_end: route.AsideEnd = .done,
     /// What Host.welcome_pending! answers (metal-vmm QUEUE 283); `welcome_done!`
@@ -341,7 +344,9 @@ const Scripted = struct {
             .read_header = header,
             .check_hostile = hostile,
             .render = render,
-            .store_message = storeMessage,
+            .append_message = appendMessage,
+            .index_message = indexMessage,
+            .write_cache = writeCache,
             .append_entry = appendEntry,
             .report_fanout_failure = fanoutFailed,
             .serve_file = raw,
@@ -714,33 +719,25 @@ const Scripted = struct {
             .{markdown},
         ) catch @panic("oom") };
     }
-    /// The block escaped and every field of the message in Chat.Message's
-    /// order, so a record laid out wrong across the seam shows.
-    fn storeMessage(
+    /// The block escaped, so its every byte shows; the transcript was
+    /// `transcript_before` bytes, so its size after is that and the block.
+    fn appendMessage(
         ctx: *anyopaque,
         conv: Conv,
         sid: []const u8,
         block: []const u8,
-        index: u64,
-        m: abi.Message,
-    ) route.Done {
+    ) abi.AppendedAt {
         sayConv(
             ctx,
-            "store",
+            "append",
             conv,
         );
         say(
             ctx,
-            " {s} {f} {d} {s}|{s}|{s}|{s}|{s}",
+            " {s} {f}",
             .{
                 sid,
                 std.zig.fmtString(block),
-                index,
-                m.id,
-                m.from,
-                m.at,
-                m.uid,
-                m.markdown,
             },
         );
         const s = me(ctx);
@@ -749,7 +746,40 @@ const Scripted = struct {
             t,
             sid,
         )) return .failed;
-        return if (s.store_ok) .ok else .failed;
+        if (!s.store_ok) return .failed;
+        return .{ .appended = s.transcript_before + block.len };
+    }
+    /// Every field of the message in Chat.Message's order, so a record laid
+    /// out wrong across the seam shows.
+    fn indexMessage(
+        ctx: *anyopaque,
+        conv: Conv,
+        sid: []const u8,
+        m: abi.Message,
+    ) void {
+        say(
+            ctx,
+            "index {s} {s} {s}|{s}|{s}|{s}|{s}",
+            .{
+                conv.key,
+                sid,
+                m.id,
+                m.from,
+                m.at,
+                m.uid,
+                m.markdown,
+            },
+        );
+    }
+    fn writeCache(ctx: *anyopaque, path: []const u8, bytes: []const u8) void {
+        say(
+            ctx,
+            "cache {s} {f}",
+            .{
+                path,
+                std.zig.fmtString(bytes),
+            },
+        );
     }
     /// The separator and the entry escaped, so their every byte shows.
     fn appendEntry(
@@ -1505,6 +1535,9 @@ test "a page's sidebar is the Roc's (sidebarOf): the roster but the viewer, each
 const Sent = struct {
     count: []const u8,
     render: []const u8,
+    /// The append alone: what a send whose append fails asks.
+    append: []const u8,
+    /// The append, the count and the index (metal-vmm QUEUE 287).
     store: []const u8,
     publish: []const u8,
     fan_out: []const u8,
@@ -1523,7 +1556,13 @@ fn sent(
     const block = "\n\n-------------\nMSG_" ++ id ++ "\nfrom: " ++ name ++ "\ndate: " ++ at ++ "\nuid: 1\n\n" ++ md;
     const frame = "id: 3\ndata: {\"index\":3,\"from\":\"" ++ name ++ "\",\"from_uid\":\"1\",\"at\":\"" ++ at ++ "\",\"html\":\"<p>" ++ md ++ "</p>\",\"markdown\":\"" ++ md ++ "\",\"id\":\"" ++ id ++ "\"" ++ (if (cid.len == 0) "" else ",\"cid\":\"" ++ cid ++ "\"") ++ "}\n\n";
     const message = id ++ "|" ++ name ++ "|" ++ at ++ "|1|" ++ md;
+    const appended = std.fmt.comptimePrint("append {s} {s} {f};", .{
+        conv,
+        sid,
+        std.zig.fmtString(block),
+    });
     return comptime .{
+        .append = appended,
         .count = blk: {
             const dir = if (std.mem.startsWith(
                 u8,
@@ -1533,12 +1572,25 @@ fn sent(
             break :blk "stat " ++ dir ++ "/sessions/" ++ sid ++ ".md;read_at " ++ dir ++ "/sessions/" ++ sid ++ ".count;";
         },
         .render = "render " ++ md ++ ";",
-        .store = std.fmt.comptimePrint("store {s} {s} {f} 3 {s};", .{
-            conv,
-            sid,
-            std.zig.fmtString(block),
-            message,
-        }),
+        // The append, then the count the Roc writes (metal-vmm QUEUE 287:
+        // 4 messages, the transcript's 100 bytes and the block, the block
+        // at 100 by member 1), then the index.
+        .store = blk: {
+            const dir = if (std.mem.startsWith(
+                u8,
+                conv,
+                "dm ",
+            )) key else "channels/" ++ key;
+            break :blk std.fmt.comptimePrint("{s}cache {s}/sessions/{s}.count 4 {d}\\n100 1\\n;index {s} {s} {s};", .{
+                appended,
+                dir,
+                sid,
+                100 + block.len,
+                key,
+                sid,
+                message,
+            });
+        },
         .publish = std.fmt.comptimePrint("publish {s}/{s} {f};", .{
             key,
             sid,
@@ -1767,7 +1819,7 @@ test "a message is the Roc's: no author, no message; the count, the id, the stam
         var s = a;
         s.store_ok = false;
         break :blk s;
-    }, .answered, before ++ plans.count ++ plans.render ++ plans.store);
+    }, .answered, before ++ plans.count ++ plans.render ++ plans.append);
     // A topic's first message is index 0: its id `_1`, its block with no
     // separator before it, its frame `id: 0`.
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
@@ -1785,7 +1837,8 @@ test "a message is the Roc's: no author, no message; the count, the id, the stam
     );
     const at = "2025-10-25T13:46:40Z";
     for ([_][]const u8{
-        "store " ++ dm_said ++ " Plans MSG_Plans_1\\nfrom: Steve\\ndate: " ++ at ++ "\\nuid: 1\\n\\none 0 Plans_1|Steve|" ++ at ++ "|1|one;",
+        "append " ++ dm_said ++ " Plans MSG_Plans_1\\nfrom: Steve\\ndate: " ++ at ++ "\\nuid: 1\\n\\none;",
+        "index 1_2 Plans Plans_1|Steve|" ++ at ++ "|1|one;",
         "publish 1_2/Plans id: 0\\ndata: {\\\"index\\\":0,",
     }) |want| if (std.mem.indexOf(
         u8,
@@ -1998,7 +2051,7 @@ test "a send is the Roc's: the conversation, the method, the header, the body, t
             "hi",
             "c-1",
         );
-        break :blk s.count ++ s.render ++ s.store;
+        break :blk s.count ++ s.render ++ s.append;
     });
     // Judged by the Roc before the host is asked to: empty; not UTF-8, which
     // the form's door refuses as malformed.
@@ -2082,7 +2135,7 @@ test "a send is the Roc's: the conversation, the method, the header, the body, t
             "New topic: [Ideas](/chat/c/1_2/Ideas)",
             "",
         );
-        break :blk g.count ++ g.render ++ g.store;
+        break :blk g.count ++ g.render ++ g.append;
     } ++ "aside end;dropped announcement Ideas;");
 }
 

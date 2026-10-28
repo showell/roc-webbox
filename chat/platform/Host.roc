@@ -285,14 +285,23 @@ Host := [].{
 	## could not be rendered (the request has failed): never an empty page.
 	render! : List(U8) => { html : List(U8), status : [Failed, Rendered] }
 
-	## **A MESSAGE STORED**: `block` (Transcript.stored_form of message
-	## `index` of topic `sid` in `conv`) appended to the topic's transcript,
-	## then the store's infrastructure told: the count cache (`index` + 1,
-	## the transcript's new size, the block's offset and its author) and the
-	## search index (`message`, as it lands). `Err(Failed)` when the append failed
-	## (the request has failed, and nothing was stored). **STORED IS DONE**:
-	## the count and the search are best-effort and never fail it.
-	store_message! : Chat.Conv, List(U8), List(U8), U64, Chat.Message => Try({}, [Failed])
+	## **A MESSAGE'S BLOCK APPENDED** (metal-vmm QUEUE 287): `block`
+	## (Transcript.stored_form) appended to topic `sid`'s transcript in `conv`,
+	## and the transcript's size after it. `Failed` when the append failed
+	## (the request has failed, and nothing was stored). The count and the
+	## search index are the Roc's to tell after (`write_cache!`,
+	## `index_message!`).
+	append_message! : Chat.Conv, List(U8), List(U8) => { size : U64, status : [Appended, Failed] }
+
+	## **THE SEARCH INDEX TOLD OF A MESSAGE AS IT LANDS** (search_index
+	## `noteAppend`): process-lifetime state, so a primitive. It never fails:
+	## an index that cannot take the message drops itself, to be rebuilt.
+	index_message! : Chat.Conv, List(U8), Chat.Message => {}
+
+	## **A CACHE WRITTEN** (a topic's `.count`): the whole file as `bytes`,
+	## under the chat root. **NEVER THE REQUEST'S FAILURE**: a cache not
+	## written is a miss, recounted (QUEUE 284); the host logs it.
+	write_cache! : List(U8), List(U8) => {}
 
 	## **THE FAN-OUT'S PRIMITIVES NEVER FAIL THE REQUEST** (metal-vmm QUEUE
 	## 172, 156(c)): the fan-out runs after the store, and **STORED IS DONE**.

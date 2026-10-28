@@ -15,6 +15,7 @@ platform ""
 		"roc_chat_admit": Host.admit!,
 		"roc_chat_append_entry": Host.append_entry!,
 		"roc_chat_append_line": Host.append_line!,
+		"roc_chat_append_message": Host.append_message!,
 		"roc_chat_aside": Host.aside!,
 		"roc_chat_check_hostile": Host.check_hostile!,
 		"roc_chat_check_member": Host.check_member!,
@@ -23,6 +24,7 @@ platform ""
 		"roc_chat_count_malformed_channel": Host.count_malformed_channel!,
 		"roc_chat_count_presence": Host.count_presence!,
 		"roc_chat_fail": Host.fail!,
+		"roc_chat_index_message": Host.index_message!,
 		"roc_chat_list": Host.list!,
 		"roc_chat_list_accounts": Host.list_accounts!,
 		"roc_chat_me": Host.me!,
@@ -42,10 +44,10 @@ platform ""
 		"roc_chat_serve_rendered": Host.serve_rendered!,
 		"roc_chat_srcs": Host.srcs!,
 		"roc_chat_stat": Host.stat!,
-		"roc_chat_store_message": Host.store_message!,
 		"roc_chat_welcome_done": Host.welcome_done!,
 		"roc_chat_welcome_pending": Host.welcome_pending!,
 		"roc_chat_write": Host.write!,
+		"roc_chat_write_cache": Host.write_cache!,
 	}
 	targets: {
 		x64musl: {

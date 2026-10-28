@@ -15,7 +15,7 @@
 ## stamp, its line and its frame), stored and sent through the primitives
 ## (`append_line!`, `message_count!`, `publish!`); a message is the Roc's
 ## too (`append_message!`: its author, number, stamp, block and frame), stored
-## through `store_message!` (the append, the count cache, the search index),
+## through `store_block!` (the append, the count cache, the search index),
 ## and its fan-out (Fanout.roc: every member's surfaces, their keys, events
 ## and feed entries) through `publish!`, `append_entry!` and
 ## `report_fanout_failure!`, the message's parts its own (Fanout.parts_of). The files and folders it reads by name (the member's own, a
@@ -2312,8 +2312,8 @@ Draft : {
 ## `topic` of `conv` (as the request spelled it), with the
 ## sender's client id `cid` ("" for none). Its number is the topic's count
 ## (`message_count!`), its id `<topic>_<n>`, its stamp the request's time; its
-## block and its frame are made, then the block stored (`store_message!`:
-## the append, the count cache, the search index), then the frame published
+## block and its frame are made, then the block stored (`store_block!`: the
+## append, the count cache, the search index), then the frame published
 ## on the topic's key, then the fan-out (`fan_out!`, its steps Fanout.roc's,
 ## made before the store too). `who` holds a DM's accounts (the fan-out
 ## names the other member). Its id once stored; `Err(Failed)` when a step
@@ -2428,9 +2428,8 @@ append_message_by! = |
 									},
 									Fanout.parts_of(md),
 								)
-								Host.store_message!(
-									conv,
-									topic.to_utf8(),
+								store_block!(
+									{ conv, at: topic_at },
 									block,
 									index,
 									stored,
@@ -2452,6 +2451,55 @@ append_message_by! = |
 			Err(Failed) => Err(Failed)
 		}
 	}
+
+## **A MESSAGE STORED, IN ITS ORDER** (chat_store `storeMessage` as it was,
+## metal-vmm QUEUE 287): `block`, message `index`, appended to the topic's
+## transcript (the one primitive that can fail the send); then the `.count`
+## (`index` + 1, the transcript's new size, where the block begins and who
+## wrote it), the text the backfill writes for the same transcript; then the
+## search index told of `message`. **A CRASH BETWEEN THE APPEND AND THE
+## COUNT** leaves a count whose size is not the transcript's, which the next
+## count refuses and recounts (Count.believed): the size is the protection,
+## not the order. **STORED IS DONE**: the count and the index never fail it.
+## Where a block goes: its conversation, as the host takes it, and its topic.
+BlockAt : { conv : Chat.Conv, at : Paths.TopicAt }
+
+store_block! : BlockAt, List(U8), U64, Chat.Message => Try({}, [Failed])
+store_block! = |
+	{ conv, at },
+	block,
+	index,
+	message,
+| {
+	appended = Host.append_message!(
+		conv,
+		at.topic.to_utf8(),
+		block,
+	)
+	match appended.status {
+		Failed => Err(Failed)
+		Appended => {
+			last = Known({
+				offset: appended.size - List.len(block),
+				uid: message.uid,
+			})
+			Files.write_cache!(
+				Paths.count_path(at),
+				Count.text(
+					index + 1,
+					appended.size,
+					last,
+				),
+			)
+			Host.index_message!(
+				conv,
+				at.topic.to_utf8(),
+				message,
+			)
+			Ok({})
+		}
+	}
+}
 
 ## **THE FAN-OUT, CARRIED OUT IN ITS ORDER** (Fanout.steps): each publish
 ## sent; each feed's entry appended and only then its event sent; each

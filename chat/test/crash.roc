@@ -95,20 +95,41 @@ handle! = |req|
 			List.concat(Str.to_utf8(said), got.html),
 		)
 	} else if starts(req.sub, "/store/") {
-		# Message 9 of DM 1_2's topic `<topic>`: every field of the message a
-		# different string, so a record laid out wrong shows.
+		# A block appended to DM 1_2's topic `<topic>`, and the transcript's
+		# size after; then message 9 told to the index, every field of the
+		# message a different string, so a record laid out wrong shows.
+		topic = List.drop_first(req.sub, 7)
+		got = Host.append_message!(
+			dm12,
+			topic,
+			Str.to_utf8("the block"),
+		)
+		match got.status {
+			Appended => {
+				Host.index_message!(
+					dm12,
+					topic,
+					probe_message,
+				)
+				Chat.respond(
+					200,
+					[],
+					Str.to_utf8("appended ${U64.to_str(got.size)}"),
+				)
+			}
+			Failed => Chat.respond(
+				200,
+				[],
+				Str.to_utf8("failed"),
+			)
+		}
+	} else if starts(req.sub, "/cache/") {
+		# A cache written at `<path>`: never the request's failure.
+		Host.write_cache!(List.drop_first(req.sub, 7), Str.to_utf8("7 99\n"))
 		Chat.respond(
 			200,
 			[],
-			done(
-				Host.store_message!(
-					dm12,
-					List.drop_first(req.sub, 7),
-					Str.to_utf8("the block"),
-					8,
-					probe_message,
-				),
-			),
+			Str.to_utf8("written"),
 		)
 	} else if starts(req.sub, "/entry/") {
 		# An entry appended to `<path>`; one that failed is said for member 2
