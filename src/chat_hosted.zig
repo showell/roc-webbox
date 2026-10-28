@@ -30,6 +30,7 @@ pub const Hostility = route.Hostility;
 pub const ReadStatus = route.ReadStatus;
 pub const Read = abi.Read;
 pub const Listing = abi.Listing;
+pub const Stat = abi.Stat;
 pub const Entry = abi.Entry;
 pub const Src = abi.Src;
 pub const RecentRow = abi.RecentRow;

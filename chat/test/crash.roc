@@ -2,7 +2,8 @@
 ## the chat's platform that crashes on `/crash` and answers anything else,
 ## so the host's answer to a Roc crash (a 500, the call's memory dropped,
 ## the next request served) is seen. It also names any path a test likes
-## to the file primitives (`/read/<path>`, `/write/<path>`,
+## to the file primitives (`/read/<path>`, `/stat/<path>`,
+## `/read_at/<offset>/<max>/<path>`, `/write/<path>`,
 ## `/remove/<path>`, `/list/<path>`, `/append/<path>`, `/raw/<path>`,
 ## `/links/<path>`), as the chat's own
 ## Roc never would, so the seam's check of each is seen; it publishes
@@ -21,6 +22,26 @@ handle! : Chat.Request => Chat.Answer
 handle! = |req|
 	if starts(req.sub, "/read/") {
 		got = Host.read!(List.drop_first(req.sub, 6))
+		said = match got.status {
+			Found => "found "
+			Missing => "missing"
+			Failed => "failed"
+		}
+		Chat.respond(200, [], List.concat(Str.to_utf8(said), got.bytes))
+	} else if starts(req.sub, "/stat/") {
+		got = Host.stat!(List.drop_first(req.sub, 6))
+		said = match got.status {
+			Found => "found size=${U64.to_str(got.size)} mtime=${I64.to_str(got.mtime)}"
+			Missing => "missing size=${U64.to_str(got.size)} mtime=${I64.to_str(got.mtime)}"
+			Failed => "failed"
+		}
+		Chat.respond(200, [], Str.to_utf8(said))
+	} else if starts(req.sub, "/read_at/") {
+		# /read_at/<offset>/<max>/<path>: one digit each.
+		rest = List.drop_first(req.sub, 9)
+		offset = U8.to_u64((List.get(rest, 0) ?? '0') - '0')
+		max = U8.to_u64((List.get(rest, 2) ?? '0') - '0')
+		got = Host.read_at!(List.drop_first(rest, 4), offset, max)
 		said = match got.status {
 			Found => "found "
 			Missing => "missing"

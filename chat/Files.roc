@@ -46,6 +46,24 @@ Files := [].{
 		decoded(answer(got.status, got.bytes))
 	}
 
+	## Host.stat!: the file's size and its mtime in seconds.
+	stat! : Paths.ChatPath => Try({ size : U64, mtime : I64 }, [Missing, Failed])
+	stat! = |path| {
+		got = Host.stat!(path.bytes())
+		match got.status {
+			Found => Ok({ size: got.size, mtime: got.mtime })
+			Missing => Err(Missing)
+			Failed => Err(Failed)
+		}
+	}
+
+	## Host.read_at!: at most `max` bytes from `offset`, as bytes.
+	read_at! : Paths.ChatPath, U64, U64 => Try(List(U8), [Missing, Failed])
+	read_at! = |path, offset, max| {
+		got = Host.read_at!(path.bytes(), offset, max)
+		answer(got.status, got.bytes)
+	}
+
 	## Host.write!: the whole file as `bytes`.
 	write! : Paths.ChatPath, List(U8) => Try({}, [Failed])
 	write! = |path, bytes| Host.write!(path.bytes(), bytes)

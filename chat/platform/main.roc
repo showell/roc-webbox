@@ -30,6 +30,7 @@ platform ""
 		"roc_chat_now": Host.now!,
 		"roc_chat_publish": Host.publish!,
 		"roc_chat_read": Host.read!,
+		"roc_chat_read_at": Host.read_at!,
 		"roc_chat_read_body": Host.read_body!,
 		"roc_chat_read_header": Host.read_header!,
 		"roc_chat_remove": Host.remove!,
@@ -38,6 +39,7 @@ platform ""
 		"roc_chat_serve_file": Host.serve_file!,
 		"roc_chat_serve_rendered": Host.serve_rendered!,
 		"roc_chat_srcs": Host.srcs!,
+		"roc_chat_stat": Host.stat!,
 		"roc_chat_store_message": Host.store_message!,
 		"roc_chat_write": Host.write!,
 	}

@@ -40,6 +40,8 @@ const Files = struct {
     fn host(f: *Files) abi.Host {
         var h = abi.askingOnly(f, yes);
         h.read = read;
+        h.stat = stat;
+        h.read_at = readAt;
         h.write = write;
         h.remove = remove;
         h.serve_file = raw;
@@ -153,6 +155,27 @@ const Files = struct {
         }
         return .missing;
     }
+    /// `users/1/ok` is 2 bytes changed at 1790000001; `users/1/broken` a
+    /// folder, whose stat fails; anything else is not there.
+    fn stat(ctx: *anyopaque, path: []const u8) abi.Stat {
+        say(ctx, "stat", path);
+        if (std.mem.eql(u8, path, "users/1/ok")) return .{ .found = .{ .size = 2, .mtime = 1790000001 } };
+        if (std.mem.eql(u8, path, "users/1/broken")) {
+            fail(ctx, error.IsDir);
+            return .failed;
+        }
+        return .missing;
+    }
+    /// `users/1/ok` holds "hello"; `users/1/long` hands back more than it
+    /// was asked for, which the seam cuts.
+    fn readAt(ctx: *anyopaque, path: []const u8, offset: u64, max: u64) abi.Read {
+        say(ctx, "read_at", path);
+        if (std.mem.eql(u8, path, "users/1/long")) return .{ .found = "0123456789" };
+        if (!std.mem.eql(u8, path, "users/1/ok")) return .missing;
+        const text = "hello";
+        const from = @min(offset, text.len);
+        return .{ .found = text[from..@min(text.len, from + max)] };
+    }
     fn write(ctx: *anyopaque, path: []const u8, _: []const u8) route.Done {
         say(ctx, "write", path);
         return .ok;
@@ -193,7 +216,7 @@ test "a path that would leave the chat root fails the request at the seam, the h
     roc.use(arena.allocator());
     defer roc.deinit();
     // Outside the root, by every way out: the request fails, nothing asked.
-    for ([_][]const u8{ "/read/../x", "/read//etc/passwd", "/read/", "/read/users/../../x", "/write/../x", "/write//etc/passwd", "/write/", "/remove/users/../../x", "/remove/", "/raw/../x", "/raw//etc/passwd", "/raw/", "/links/users/../../x", "/links//etc/passwd" }) |sub|
+    for ([_][]const u8{ "/stat/../x", "/stat//etc/passwd", "/read_at/0/1/../x", "/read/../x", "/read//etc/passwd", "/read/", "/read/users/../../x", "/write/../x", "/write//etc/passwd", "/write/", "/remove/users/../../x", "/remove/", "/raw/../x", "/raw//etc/passwd", "/raw/", "/links/users/../../x", "/links//etc/passwd" }) |sub|
         try probe(sub, "failed", "", error.PathOutsideChatRoot);
     try probe("/raw/1_2/sessions/Plans.md", "done", "raw 1_2/sessions/Plans.md;", null);
     try probe("/links/users/1/links.md", "done", "links users/1/links.md;", null);
@@ -201,6 +224,15 @@ test "a path that would leave the chat root fails the request at the seam, the h
     try probe("/read/users/1/ok", "found hi", "read users/1/ok;", null);
     try probe("/read/users/1/gone", "missing", "read users/1/gone;", null);
     try probe("/read/users/1/broken", "failed", "read users/1/broken;", error.IsDir);
+    // stat! and read_at! (metal-vmm QUEUE 274): every field in its place.
+    try probe("/stat/users/1/ok", "found size=2 mtime=1790000001", "stat users/1/ok;", null);
+    try probe("/stat/users/1/gone", "missing size=0 mtime=0", "stat users/1/gone;", null);
+    try probe("/stat/users/1/broken", "failed", "stat users/1/broken;", error.IsDir);
+    try probe("/read_at/1/3/users/1/ok", "found ell", "read_at users/1/ok;", null);
+    try probe("/read_at/3/9/users/1/ok", "found lo", "read_at users/1/ok;", null);
+    try probe("/read_at/7/2/users/1/ok", "found ", "read_at users/1/ok;", null);
+    try probe("/read_at/0/4/users/1/long", "found 0123", "read_at users/1/long;", null);
+    try probe("/read_at/0/4/users/1/gone", "missing", "read_at users/1/gone;", null);
     try probe("/write/users/1/pinned-sessions/1_2", "done", "write users/1/pinned-sessions/1_2;", null);
     try probe("/remove/users/1/last-conv", "done", "remove users/1/last-conv;", null);
 }

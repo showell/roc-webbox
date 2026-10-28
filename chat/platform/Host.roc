@@ -67,6 +67,18 @@ Host := [].{
 	## as "no file" would write over what could not be seen.
 	read! : List(U8) => { bytes : List(U8), status : [Failed, Found, Missing] }
 
+	## **A FILE'S SIZE AND ITS LAST CHANGE** under the chat root, the path
+	## checked as `read!`'s is (metal-vmm QUEUE 274): its size in bytes and
+	## its mtime in whole seconds since the epoch (`Found`), nothing there
+	## (`Missing`), or a stat that failed, a folder among them (`Failed`: the
+	## request has failed). Missing and failed are two answers, as `read!`'s.
+	stat! : List(U8) => { mtime : I64, size : U64, status : [Failed, Found, Missing] }
+
+	## **AT MOST `max` OF A FILE'S BYTES, FROM `offset`** under the chat
+	## root, the path checked as `read!`'s is: fewer where the file ends
+	## first (none past its end), `Missing` and `Failed` as `read!`'s.
+	read_at! : List(U8), U64, U64 => { bytes : List(U8), status : [Failed, Found, Missing] }
+
 	## Write the whole file as `bytes`, its folders made as needed; `Err(Failed)`
 	## when it failed.
 	write! : List(U8), List(U8) => Try({}, [Failed])

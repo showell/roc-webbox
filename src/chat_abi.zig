@@ -265,6 +265,10 @@ pub const Host = struct {
     /// `remove` of a file not there succeeds. `.failed` when it
     /// failed (the host has failed the request).
     read: *const fn (ctx: *anyopaque, path: []const u8) Read = noRead,
+    /// Host.stat!: a file's size and mtime, under the chat root.
+    stat: *const fn (ctx: *anyopaque, path: []const u8) Stat = noStat,
+    /// Host.read_at!: at most `max` bytes of a file from `offset`.
+    read_at: *const fn (ctx: *anyopaque, path: []const u8, offset: u64, max: u64) Read = noReadAt,
     write: *const fn (ctx: *anyopaque, path: []const u8, bytes: []const u8) route_mod.Done = noWrite,
     remove: *const fn (ctx: *anyopaque, path: []const u8) route_mod.Done = noRemove,
     /// Host.list!: a folder under the chat root, its entries in the disk's
@@ -347,6 +351,12 @@ fn noServeRendered(_: *anyopaque, _: []const u8) route_mod.Serving {
 }
 fn noServeFile(_: *anyopaque, _: []const u8) route_mod.Serving {
     @panic("serve_file asked of a host that does not answer it");
+}
+fn noStat(_: *anyopaque, _: []const u8) Stat {
+    @panic("stat asked of a host that does not answer it");
+}
+fn noReadAt(_: *anyopaque, _: []const u8, _: u64, _: u64) Read {
+    @panic("read_at asked of a host that does not answer it");
 }
 fn noRead(_: *anyopaque, _: []const u8) Read {
     @panic("read asked of a host that does not answer it");
@@ -567,6 +577,28 @@ export fn roc_chat_read(path: RocBytes) callconv(.c) ReadRec {
     if (!underRoot(h, path.slice())) return .{ .bytes = .from(""), .status = .failed };
     return switch (h.read(h.ctx, path.slice())) {
         .found => |b| .{ .bytes = .from(b), .status = .found },
+        .missing => .{ .bytes = .from(""), .status = .missing },
+        .failed => .{ .bytes = .from(""), .status = .failed },
+    };
+}
+
+export fn roc_chat_stat(path: RocBytes) callconv(.c) StatRec {
+    const h = current("stat");
+    if (!underRoot(h, path.slice())) return .{ .mtime = 0, .size = 0, .status = .failed };
+    return switch (h.stat(h.ctx, path.slice())) {
+        .found => |st| .{ .mtime = st.mtime, .size = st.size, .status = .found },
+        .missing => .{ .mtime = 0, .size = 0, .status = .missing },
+        .failed => .{ .mtime = 0, .size = 0, .status = .failed },
+    };
+}
+
+/// **NEVER MORE THAN `max`**: a host that hands back more is cut to it
+/// here, so the Roc's window is the window it asked for.
+export fn roc_chat_read_at(path: RocBytes, offset: u64, max: u64) callconv(.c) ReadRec {
+    const h = current("read_at");
+    if (!underRoot(h, path.slice())) return .{ .bytes = .from(""), .status = .failed };
+    return switch (h.read_at(h.ctx, path.slice(), offset, max)) {
+        .found => |b| .{ .bytes = .from(b[0..@min(b.len, max)]), .status = .found },
         .missing => .{ .bytes = .from(""), .status = .missing },
         .failed => .{ .bytes = .from(""), .status = .failed },
     };
