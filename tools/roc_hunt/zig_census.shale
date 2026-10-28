@@ -28,11 +28,11 @@
 --
 -- Run from roc-webbox, angry-gopher's zig-server given as a mount path (a
 -- script's path may hold no `..`):
---   shale tools/roc_hunt/zig_census.shale [gopher=build:roc-clean/angry-gopher/zig-server]
+--   shale tools/roc_hunt/zig_census.shale [gopher=repos:angry-gopher-chat/zig-server]
 -- budget: steps=400000000 arena_bytes=4000000000
 
 const roc_ast = real("tools:roc-ast/bin/roc-ast")
-const gopher = arg("gopher", "build:roc-clean/angry-gopher/zig-server")
+const gopher = arg("gopher", "repos:angry-gopher-chat/zig-server")
 const src = gopher .. "/src/"
 const feature_lines = 300
 const chat_set = " chat.zig presence.zig recent.zig recent_feed.zig reactions.zig images.zig images_store.zig code.zig code_store.zig docs.zig docs_store.zig search_index.zig search_tokens.zig "
