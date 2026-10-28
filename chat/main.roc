@@ -849,12 +849,17 @@ find_dm! = |me, members, topic, i|
 find_channel! : List(Str), List(U8), U64 => Try(List(U8), [NoSuchTopic])
 find_channel! = |names, topic, i|
 	match List.get(names, i) {
-		# Every name here passed channel_name_from_str already (load_rosters_from! keeps
-		# no other).
 		Ok(name) =>
 			match Paths.channel_name_from_str(name) {
-				Ok(valid) if List.contains(List.map(load_topics!(Channel(valid)), Str.to_utf8), topic) => Ok(name.to_utf8())
-				_ => find_channel!(names, topic, i + 1)
+				Ok(valid) =>
+					if List.contains(List.map(load_topics!(Channel(valid)), Str.to_utf8), topic) {
+						Ok(name.to_utf8())
+					} else {
+						find_channel!(names, topic, i + 1)
+					}
+				# Every name here passed channel_name_from_str already
+				# (load_rosters_from! keeps no other).
+				Err(Invalid) => crash "find_channel!: a roster's name that load_rosters_from! kept is no channel name"
 			}
 		Err(_) => Err(NoSuchTopic)
 	}

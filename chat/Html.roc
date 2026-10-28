@@ -60,8 +60,20 @@ Html :: List(U8).{
 	fill : Html, List(Html) -> Html
 	fill = |Html.(template), values| {
 		pieces = Bytes.split_seq(template, Str.to_utf8("{s}"))
-		(out, _) = List.fold(pieces, ([], 0), |(acc, i), piece|
-			if i == 0 (piece, 1) else (List.join([acc, bytes(List.get(values, i - 1) ?? Html.([])), piece]), i + 1))
+		(out, _) = List.fold(
+			pieces,
+			([], 0),
+			|(acc, i), piece|
+				if i == 0 {
+					(piece, 1)
+				} else {
+					match List.get(values, i - 1) {
+						Ok(value) => (List.join([acc, bytes(value), piece]), i + 1)
+						# Every template here is a literal, filled where it is written.
+						Err(_) => crash "Html.fill: a template has more {s} slots than values"
+					}
+				},
+		)
 		Html.(out)
 	}
 
@@ -104,7 +116,7 @@ expect Html.bytes(Html.join([])) == []
 expect Html.bytes(Html.host_markup(Str.to_utf8("<b>&"))) == Str.to_utf8("<b>&")
 
 # fill: each slot in turn; a slot with no value left empty.
-expect Html.bytes(Html.fill(Html.trusted("a{s}b{s}c"), [Html.trusted("1")])) == Str.to_utf8("a1bc")
+expect Html.bytes(Html.fill(Html.trusted("a{s}b{s}c"), [Html.trusted("1"), Html.trusted("2")])) == Str.to_utf8("a1b2c")
 
 # json_script: `</` cannot close the element early.
 expect Html.bytes(Html.json_script(Html.trusted("<script>"), Html.script_safe(Str.to_utf8("\"</script>\"")))) == Str.to_utf8("<script>\"\\u003c/script>\"</script>")

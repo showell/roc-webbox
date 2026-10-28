@@ -55,9 +55,8 @@ offset_of = |rest0| {
 	match rest {
 		Err(NotADate) => Err(NotADate)
 		Ok(['Z']) | Ok(['z']) => Ok(0)
-		Ok([sign, _, _, ':', _, _]) if sign == '+' or sign == '-' => {
-			r = rest ?? []
-			match (digits(r, 1, 2), digits(r, 4, 2)) {
+		Ok([sign, h1, h2, ':', m1, m2]) if sign == '+' or sign == '-' => {
+			match (digits([h1, h2], 0, 2), digits([m1, m2], 0, 2)) {
 				(Ok(oh), Ok(om)) =>
 					if oh > 23 or om > 59 {
 						Err(NotADate)

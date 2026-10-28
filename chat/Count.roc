@@ -42,14 +42,18 @@ Count := [].{
 		if List.last(raw) != Ok('\n') {
 			Err(Malformed)
 		} else {
-			lines = Bytes.split_byte(raw, '\n')
-			match tokens(List.first(lines) ?? []) {
-				[c, s] =>
-					match (ZigText.parse_u64(c), ZigText.parse_u64(s)) {
-						(Ok(count), Ok(size)) => Ok({ count, size, last: parse_last(List.get(lines, 1) ?? []) })
+			match Bytes.split_byte(raw, '\n') {
+				[first, second, ..] =>
+					match tokens(first) {
+						[c, s] =>
+							match (ZigText.parse_u64(c), ZigText.parse_u64(s)) {
+								(Ok(count), Ok(size)) => Ok({ count, size, last: parse_last(second) })
+								_ => Err(Malformed)
+							}
 						_ => Err(Malformed)
 					}
-				_ => Err(Malformed)
+				# Bytes that end in a newline split in two at least.
+				_ => crash "Count.parse: bytes ending in a newline split into fewer than two lines"
 			}
 		}
 
