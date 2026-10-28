@@ -47,6 +47,7 @@ import Time
 import Transcript
 import Fanout
 import Count
+import Last
 import Saved
 import JsonOut
 import Limits
@@ -249,17 +250,12 @@ count_messages! = |at| {
 }
 
 ## The sidecar's count when it was taken at `size` (readCount, then
-## believedCount): a sidecar missing, past readCount's 1 KiB, or that does
-## not parse (Count.parse) is a recount.
+## believedCount, Last.sidecar!): a sidecar missing, past readCount's 1 KiB,
+## or that does not parse is a recount.
 believed_count! : Paths.TopicAt, U64 => Try(U64, [Recount, Failed])
 believed_count! = |at, size|
-	match Files.read_at!(Paths.count_path(at), 0, 1025) {
-		Ok(raw) if List.len(raw) <= 1024 =>
-			match Count.parse(raw) {
-				Ok(counted) if counted.size == size => Ok(counted.count)
-				_ => Err(Recount)
-			}
-		Ok(_) | Err(Missing) => Err(Recount)
+	match Last.sidecar!(at) {
+		Ok(counted) => Count.believed(counted, size).map_err(|_| Recount)
 		Err(Failed) => Err(Failed)
 	}
 
