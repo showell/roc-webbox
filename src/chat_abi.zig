@@ -333,6 +333,9 @@ pub const Host = struct {
     /// Host.search_words!: the words beginning `key`, at most `most`; null
     /// when there is no index.
     search_words: *const fn (ctx: *anyopaque, key: []const u8, most: u64) ?Words = noWords,
+    /// Host.search_messages!: the messages holding `key`, at most `most`;
+    /// null when there is no index.
+    search_messages: *const fn (ctx: *anyopaque, key: []const u8, most: u64) ?Messages = noMessages,
     /// Host.srcs!: where a page names each script, by its name.
     srcs: *const fn (ctx: *anyopaque) []const Src = noSrcs,
     /// Host.me!: the member's id.
@@ -455,6 +458,9 @@ fn noQuery(_: *anyopaque, _: []const u8) []const []const u8 {
 fn noWords(_: *anyopaque, _: []const u8, _: u64) ?Words {
     @panic("search_words asked of a host that does not answer it");
 }
+fn noMessages(_: *anyopaque, _: []const u8, _: u64) ?Messages {
+    @panic("search_messages asked of a host that does not answer it");
+}
 fn noOnline(_: *anyopaque, _: []const u8) route_mod.Presence {
     @panic("check_online asked of a host that does not answer it");
 }
@@ -504,6 +510,7 @@ pub const Routing = struct {
         h.admit = admitted;
         h.read_query = noQueryField;
         h.search_words = noWordsHeld;
+        h.search_messages = noMessagesHeld;
         return h;
     }
     fn of(ctx: *anyopaque) *Routing {
@@ -539,6 +546,9 @@ pub const Routing = struct {
     }
     fn noWordsHeld(_: *anyopaque, _: []const u8, _: u64) ?Words {
         return .{ .words = &.{}, .unreadable = 0 };
+    }
+    fn noMessagesHeld(_: *anyopaque, _: []const u8, _: u64) ?Messages {
+        return .{ .hits = &.{}, .matched = 0, .unreadable = 0 };
     }
     fn noFolder(_: *anyopaque, _: []const u8) Listing {
         return .missing;
@@ -727,6 +737,12 @@ export fn roc_chat_search_words(key: RocBytes, most: u64) callconv(.c) WordsRec 
     const h = current("search_words");
     const found = h.search_words(h.ctx, key.slice(), most) orelse return .{ .unreadable = 0, .words = .from(&.{}), .status = .not_ready };
     return .{ .unreadable = found.unreadable, .words = .from(found.words), .status = .ready };
+}
+
+export fn roc_chat_search_messages(key: RocBytes, most: u64) callconv(.c) MessagesRec {
+    const h = current("search_messages");
+    const found = h.search_messages(h.ctx, key.slice(), most) orelse return .{ .matched = 0, .unreadable = 0, .hits = .from(&.{}), .status = .not_ready };
+    return .{ .matched = found.matched, .unreadable = found.unreadable, .hits = .from(found.hits), .status = .ready };
 }
 
 export fn roc_chat_check_online(ids: roc.RocBytesList) callconv(.c) PresenceList {

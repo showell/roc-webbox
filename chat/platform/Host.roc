@@ -143,6 +143,14 @@ Host := [].{
 	## index could not read. `NotReady` when there is no index to ask.
 	search_words! : List(U8), U64 => { status : [NotReady, Ready], unreadable : U64, words : List({ count : U64, word : List(U8) }) }
 
+	## **SEARCH'S INDEX, ASKED FOR MESSAGES** (angry-gopher search_index.zig
+	## `messagesFor`): the messages holding the word `key` the member can
+	## see, at most `most`, within the byte cap; how many hold it in all;
+	## the unreadable count. Each hit's excerpt window, not the message: its
+	## bytes from `start` through the one past the excerpt's end, of a
+	## message `length` long, the word `at` when `found`.
+	search_messages! : List(U8), U64 => { status : [NotReady, Ready], matched : U64, unreadable : U64, hits : List({ at : U64, length : U64, start : U64, base : List(U8), date : List(U8), from : List(U8), id : List(U8), sid : List(U8), window : List(U8), found : [Found, Missing], kind : [Channel, Dm] }) }
+
 	## Where a page names each script, by its name (a src's hash is of bytes
 	## the host holds).
 	srcs! : {} => List({ name : List(U8), src : List(U8) })

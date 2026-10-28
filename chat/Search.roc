@@ -24,6 +24,57 @@ Search := [].{
 		if List.len(t) > max_word [] else List.map(t, |c| if c >= 'A' and c <= 'Z' c + 32 else c)
 	}
 
+	## The most messages an answer lists (chat_search `most_messages`).
+	most_messages : U64
+	most_messages = 500
+
+	## The shortest word a search finds (search_tokens `min_len`).
+	min_len : U64
+	min_len = 2
+
+	## Bytes of a message either side of the word in its excerpt
+	## (chat_search `excerpt_pad`).
+	excerpt_pad : U64
+	excerpt_pad = 90
+
+	## A message the index found, as the host hands it: its excerpt's window
+	## (Host.search_messages!).
+	Hit : { at : U64, length : U64, start : U64, base : List(U8), date : List(U8), from : List(U8), id : List(U8), sid : List(U8), window : List(U8), found : [Found, Missing], kind : [Channel, Dm] }
+
+	## chat_search `excerptOf`: the word as written, where the index found
+	## it, and up to `excerpt_pad` bytes either side, cut on a character's
+	## edge, "…" where cut; **NEVER ACROSS THE WORD** (a word may begin or
+	## end in stray continuation bytes). A hit whose word was not found is
+	## its first bytes, unmarked.
+	excerpt : Hit, U64 -> { before : List(U8), mark : List(U8), after : List(U8) }
+	excerpt = |h, key_len| {
+		len = h.length
+		slice = |a, b| List.sublist(h.window, { start: a - h.start, len: b - a })
+		trail = |end| if end < len ellipsis else []
+		match h.found {
+			Found => {
+				at = h.at
+				start = lesser(edge_fwd(h, sub_floor(at, excerpt_pad)), at)
+				end = greater(edge_back(h, lesser(len, at + key_len + excerpt_pad)), at + key_len)
+				{ before: List.concat(if start > 0 ellipsis else [], slice(start, at)), mark: slice(at, at + key_len), after: List.concat(slice(at + key_len, end), trail(end)) }
+			}
+			Missing => {
+				end = edge_back(h, lesser(len, 2 * excerpt_pad))
+				{ before: [], mark: [], after: List.concat(slice(0, end), trail(end)) }
+			}
+		}
+	}
+
+	## The answer: `{"word":…,"matched":N,"unreadable":N,"messages":[{"conv":…,"kind":…,"sid":…,"id":…,"from":…,"date":…,"before":…,"mark":…,"after":…},…]}`.
+	messages_json : List(U8), U64, U64, List(Hit) -> List(U8)
+	messages_json = |word, matched, unreadable, hits|
+		JsonOut.object([
+			("word", JsonOut.lossy(word)),
+			("matched", JsonOut.number(matched)),
+			("unreadable", JsonOut.number(unreadable)),
+			("messages", JsonOut.array(List.map(hits, |h| hit_json(h, List.len(word))))),
+		]).bytes()
+
 	## The answer: `{"prefix":…,"most":20,"unreadable":N,"words":[{"word":…,"count":N},…]}`.
 	words_json : List(U8), U64, List({ count : U64, word : List(U8) }) -> List(U8)
 	words_json = |prefix, unreadable, words|
@@ -34,6 +85,56 @@ Search := [].{
 			("words", JsonOut.array(List.map(words, |w| JsonOut.object([("word", JsonOut.lossy(w.word)), ("count", JsonOut.number(w.count))])))),
 		]).bytes()
 }
+
+hit_json : Search.Hit, U64 -> JsonOut
+hit_json = |h, key_len| {
+	ex = Search.excerpt(h, key_len)
+	JsonOut.object([
+		("conv", JsonOut.lossy(h.base)),
+		("kind", JsonOut.string(if h.kind == Dm "dm" else "channel")),
+		("sid", JsonOut.lossy(h.sid)),
+		("id", JsonOut.lossy(h.id)),
+		("from", JsonOut.lossy(h.from)),
+		("date", JsonOut.lossy(h.date)),
+		("before", JsonOut.lossy(ex.before)),
+		("mark", JsonOut.lossy(ex.mark)),
+		("after", JsonOut.lossy(ex.after)),
+	])
+}
+
+ellipsis : List(U8)
+ellipsis = Str.to_utf8("\u(2026)")
+
+lesser : U64, U64 -> U64
+lesser = |a, b| if a < b a else b
+
+greater : U64, U64 -> U64
+greater = |a, b| if a > b a else b
+
+## `a - b`, or 0 (Zig's `-|`).
+sub_floor : U64, U64 -> U64
+sub_floor = |a, b| if a > b a - b else 0
+
+## Whether the message's byte at `p` continues a UTF-8 sequence (a byte past
+## the window answers no).
+is_continuation : Search.Hit, U64 -> Bool
+is_continuation = |h, p|
+	if p < h.start {
+		Bool.False
+	} else {
+		match List.get(h.window, p - h.start) {
+			Ok(b) => b >= 0x80 and b < 0xC0
+			Err(_) => Bool.False
+		}
+	}
+
+## charEdgeFwd: `i`, or the next character's start after it.
+edge_fwd : Search.Hit, U64 -> U64
+edge_fwd = |h, i| if i < h.length and is_continuation(h, i) edge_fwd(h, i + 1) else i
+
+## charEdgeBack: `i`, or the start of the character it falls inside.
+edge_back : Search.Hit, U64 -> U64
+edge_back = |h, i| if i > 0 and i < h.length and is_continuation(h, i) edge_back(h, i - 1) else i
 
 ## search_tokens `trim`: from both ends, until neither is ASCII punctuation
 ## or one of `trimmed`, each tried at the front, then the back, in order.

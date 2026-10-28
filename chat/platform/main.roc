@@ -36,6 +36,7 @@ platform ""
 		"roc_chat_remove": Host.remove!,
 		"roc_chat_render": Host.render!,
 		"roc_chat_report_fanout_failure": Host.report_fanout_failure!,
+		"roc_chat_search_messages": Host.search_messages!,
 		"roc_chat_search_words": Host.search_words!,
 		"roc_chat_serve_file": Host.serve_file!,
 		"roc_chat_serve_rendered": Host.serve_rendered!,

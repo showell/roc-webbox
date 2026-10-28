@@ -122,8 +122,9 @@ served_by = |r|
 		Dm | Channel => Roc
 		# A doc posted to chat (metal-vmm QUEUE 278); the rest of docs is Zig's.
 		Docs => if r.rest == "/post" Roc else Zig
-		# Search's words (metal-vmm QUEUE 281); its messages are Zig's.
-		Search => if r.rest == "/words" Roc else Zig
+		# Search's words and messages (metal-vmm QUEUE 281, 282), and the
+		# 404 for anything else under /chat/search.
+		Search => Roc
 		_ => Zig
 	}
 
@@ -142,7 +143,7 @@ act! = |req, route| {
 		Links => serve_links!(route.rest.to_utf8())
 		Recent => serve_recent!(route.rest.to_utf8())
 		Docs => post_doc!(req)
-		Search => search_words!(req)
+		Search => search!(req, route.rest)
 		Images => serve_feed!(Images, route.rest.to_utf8())
 		Code => serve_feed!(Code, route.rest.to_utf8())
 		_ => serve_conversation!(req, route)
@@ -1280,6 +1281,17 @@ store! = |at, conv, who, send, { markdown: md, cid }|
 		}
 	}
 
+## /chat/search/words or /messages; anything else under it the Zig's 404.
+search! : Chat.Request, Str => Chat.Answer
+search! = |req, rest|
+	if rest == "/words" {
+		search_words!(req)
+	} else if rest == "/messages" {
+		search_messages!(req)
+	} else {
+		Chat.not_found
+	}
+
 ## **SEARCH'S WORDS** (GET /chat/search/words, chat_search.zig `handle` as it
 ## was, metal-vmm QUEUE 281): the method, the rate limit (the host's), the
 ## typed `prefix` decoded (a bad escape is the site's 400) and made a key,
@@ -1299,6 +1311,30 @@ search_words! = |req|
 				got = Host.search_words!(key, if key == [] 0 else Search.most_words)
 				match got.status {
 					Ready => Chat.respond(200, json, Search.words_json(key, got.unreadable, got.words))
+					NotReady => Chat.respond(503, json, Str.to_utf8("{\"error\":\"search is not ready\"}"))
+				}
+			}
+		}
+	}
+
+## **SEARCH'S MESSAGES** (GET /chat/search/messages, chat_search.zig
+## `handle` as it was, metal-vmm QUEUE 282): as the words are asked, the
+## `word` field; a key shorter than a word finds nothing; each hit's
+## excerpt cut here (Search.excerpt) from the window the host hands.
+search_messages! : Chat.Request => Chat.Answer
+search_messages! = |req|
+	if req.method != Get {
+		Chat.not_allowed(Get)
+	} else if Host.admit!({}) == Refused {
+		Chat.respond(429, json, Str.to_utf8("{\"error\":\"too many searches; wait a second\"}"))
+	} else {
+		match Form.value(List.first(Host.read_query!(Str.to_utf8("word"))) ?? []) {
+			Err(BadEscape) => Chat.malformed
+			Ok(typed) => {
+				key = Search.key(typed)
+				got = Host.search_messages!(key, if List.len(key) < Search.min_len 0 else Search.most_messages)
+				match got.status {
+					Ready => Chat.respond(200, json, Search.messages_json(key, got.matched, got.unreadable, got.hits))
 					NotReady => Chat.respond(503, json, Str.to_utf8("{\"error\":\"search is not ready\"}"))
 				}
 			}

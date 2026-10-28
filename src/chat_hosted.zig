@@ -43,6 +43,8 @@ pub const Presence = route.Presence;
 pub const Admission = route.Admission;
 pub const Word = abi.Word;
 pub const Words = abi.Words;
+pub const Hit = abi.Hit;
+pub const Messages = abi.Messages;
 pub const Membership = route.Membership;
 pub const Done = route.Done;
 pub const Serving = route.Serving;
@@ -108,6 +110,9 @@ test "the router: a topic's tails, a channel, an asset before the gate, the gate
         .{ "/c/1_2/general/send/x", false, .not_found, true },
         .{ "/c/1_2/bad_id", false, .not_found, true },
         .{ "/ops/new", true, .respond, true },
+        // Search is the Roc's (metal-vmm QUEUE 281, 282): past its two
+        // routes, its 404.
+        .{ "/searchX", false, .not_found, true },
     }) |c| {
         var ar = std.heap.ArenaAllocator.init(testing.allocator);
         defer ar.deinit();
@@ -121,7 +126,6 @@ test "the router: a topic's tails, a channel, an asset before the gate, the gate
     try expectRoute("/9ops/x", true, .{ .family = .not_found }, true);
     try expectRoute("/docs/new", false, .{ .family = .docs, .rest = "/new" }, true);
     try expectRoute("/docsX", false, .{ .family = .not_found }, true);
-    try expectRoute("/searchX", false, .{ .family = .search, .rest = "X" }, true);
     try expectRoute("/chat.js", false, .{ .family = .asset, .rest = "chat.js" }, false);
     try expectRoute("/docs/caf\xc3\xa9/\xf0\x9f\x91\x8d", false, .{ .family = .docs, .rest = "/caf\xc3\xa9/\xf0\x9f\x91\x8d" }, true);
 

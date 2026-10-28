@@ -27,6 +27,7 @@ import JsonOut
 import Route
 import Limits
 import Saved
+import Search
 import BusKey
 import ChatUrl
 
@@ -423,6 +424,13 @@ call = |req| {
 		# Saved.refs (parseRefs): each ref's conversation, topic and id, in
 		# order.
 		74 => List.join(List.map(Saved.refs(arg(0)), |r| [r.conv, r.topic, r.id]))
+		# Search.excerpt over a hit's window: window, start, length, at,
+		# found ("1"), the key's length.
+		75 => {
+			hit = { at: u64(arg(3)), length: u64(arg(2)), start: u64(arg(1)), base: [], date: [], from: [], id: [], sid: [], window: arg(0), found: if arg(4) == [49] Found else Missing, kind: Dm }
+			ex = Search.excerpt(hit, u64(arg(5)))
+			[ex.before, ex.mark, ex.after]
+		}
 		_ => crash "twin: no function ${U8.to_str(req.which)}"
 	}
 }
