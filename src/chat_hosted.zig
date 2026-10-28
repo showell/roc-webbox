@@ -95,12 +95,27 @@ fn expectRoute(sub: []const u8, channel: bool, want: Route, presence: bool) !voi
 test "the router: a topic's tails, a channel, an asset before the gate, the gate" {
     use(testing.allocator);
     defer @import("roc_abi.zig").deinit();
-    try expectRoute("/c/1_2/general/send", false, .{ .family = .dm, .key = "1_2", .topic = "general", .part = .topic, .tail = .send }, true);
-    try expectRoute("/c/1_2/general/uploads/a.png", false, .{ .family = .dm, .key = "1_2", .topic = "general", .part = .topic, .tail = .uploads, .rest = "a.png" }, true);
-    try expectRoute("/c/1_2/general/stream", false, .{ .family = .dm, .key = "1_2", .topic = "general", .part = .topic, .tail = .stream }, false);
-    try expectRoute("/c/1_2/general/send/x", false, .{ .family = .dm, .key = "1_2", .topic = "general", .part = .topic, .tail = .invalid_send }, true);
-    try expectRoute("/c/1_2/bad_id", false, .{ .family = .dm, .key = "1_2", .part = .invalid }, true);
-    try expectRoute("/ops/new", true, .{ .family = .channel, .key = "ops", .part = .new }, true);
+    // **THE ROC DECIDES A CONVERSATION'S ROUTES** (metal-vmm QUEUE 271): to
+    // one who is in none, every tail is its 404, presence counted but for
+    // a stream's; a DM's is webbox's plain one, a channel's the page that
+    // says why.
+    for ([_]struct { []const u8, bool, std.meta.Tag(Decision), bool }{
+        .{ "/c/1_2/general/send", false, .not_found, true },
+        .{ "/c/1_2/general/uploads/a.png", false, .not_found, true },
+        .{ "/c/1_2/general/stream", false, .not_found, false },
+        .{ "/c/1_2/general/send/x", false, .not_found, true },
+        .{ "/c/1_2/bad_id", false, .not_found, true },
+        .{ "/ops/new", true, .respond, true },
+    }) |c| {
+        var ar = std.heap.ArenaAllocator.init(testing.allocator);
+        defer ar.deinit();
+        var routing: Routing = .{};
+        const d = try decide(ar.allocator(), c[0], c[1], .GET, routing.host());
+        if (d != c[2] or routing.marked != c[3] or (d == .respond and d.respond.status != 404)) {
+            std.debug.print("{s}: got {f} (presence {}), want {t} (presence {})\n", .{ c[0], d, routing.marked, c[2], c[3] });
+            return error.TestUnexpectedResult;
+        }
+    }
     try expectRoute("/9ops/x", true, .{ .family = .not_found }, true);
     try expectRoute("/docs/new", false, .{ .family = .docs, .rest = "/new" }, true);
     try expectRoute("/docsX", false, .{ .family = .not_found }, true);
@@ -324,6 +339,19 @@ const Scripted = struct {
 
 const steve: abi.Account = .{ .id = "1", .name = .{ .found = "Steve" }, .kind = .member };
 
+/// As expectAct, for an answer whose page is the test's only by its status.
+fn expectStatus(sub: []const u8, channel: bool, method: std.http.Method, script: Scripted, status: u16, asked: []const u8) !void {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    var s = script;
+    s.alloc = arena.allocator();
+    const got = try decide(arena.allocator(), sub, channel, method, s.host());
+    if (got != .respond or got.respond.status != status or !std.mem.eql(u8, s.asked.items, asked)) {
+        std.debug.print("{s}: got {f} asking \"{s}\", want {d} asking \"{s}\"\n", .{ sub, got, s.asked.items, status, asked });
+        return error.TestUnexpectedResult;
+    }
+}
+
 fn expectAct(sub: []const u8, channel: bool, method: std.http.Method, script: Scripted, want: Decision, asked: []const u8) !void {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
@@ -519,21 +547,25 @@ test "a topic's reactions, react, pin and unpin are the Roc's: presence, the con
     try expectAct("/c/1_2/Plans/pin", false, .PUT, a, .{ .not_allowed = .POST }, dm_topic);
     // A topic found without case.
     try expectAct("/c/1_2/plans/pin", false, .PUT, a, .{ .not_allowed = .POST }, dm_topic);
-    // A topic that is not there, or a conversation that is not the member's:
-    // Zig's to answer, presence already counted.
-    const gone: Decision = .{ .serve = .{ .route = .{ .family = .dm, .key = "1_2", .topic = "Gone", .part = .topic, .tail = .react }, .presence = false } };
-    try expectAct("/c/1_2/Gone/react", false, .POST, a, gone, dm_topic);
+    // A topic that is not there: the Roc's 404 that says so (metal-vmm
+    // QUEUE 271), the viewer's name and the scripts read for the page. A
+    // DM that is not the member's: webbox's plain 404.
+    try expectStatus("/c/1_2/Gone/react", false, .POST, a, 404, dm_topic ++ "srcs;");
     try expectAct("/c/1_2/Gone/react", false, .POST, blk: {
         var s = a;
         s.accounts = &.{steve};
         break :blk s;
-    }, gone, "member;presence;accounts;");
+    }, .not_found, "member;presence;accounts;");
+    // A tail the Zig serves, handed back once the Roc found the
+    // conversation and the topic the member's; a stream counts no presence.
+    try expectAct("/c/1_2/Plans/uploads/a.png", false, .GET, a, .{ .serve = .{ .route = .{ .family = .dm, .key = "1_2", .topic = "Plans", .part = .topic, .tail = .uploads, .rest = "a.png" }, .presence = false } }, dm_topic);
+    try expectAct("/c/1_2/Plans/stream", false, .GET, a, .{ .serve = .{ .route = .{ .family = .dm, .key = "1_2", .topic = "Plans", .part = .topic, .tail = .stream }, .presence = false } }, "member;accounts;list 1_2/sessions;");
+    try expectAct("/ops/Plans/download", true, .GET, a, .{ .serve = .{ .route = .{ .family = .channel, .key = "ops", .topic = "Plans", .part = .topic, .tail = .download }, .presence = false } }, ops_topic);
+    try expectAct("/ops/Plans/nope", true, .GET, a, .not_found, ops_topic);
     // Not one of the pair, a pair not canonical: no account asked.
-    try expectAct("/c/2_3/Plans/react", false, .POST, a, .{ .serve = .{ .route = .{ .family = .dm, .key = "2_3", .topic = "Plans", .part = .topic, .tail = .react }, .presence = false } }, "member;presence;");
-    try expectAct("/c/2_1/Plans/react", false, .POST, a, .{ .serve = .{ .route = .{ .family = .dm, .key = "2_1", .topic = "Plans", .part = .topic, .tail = .react }, .presence = false } }, "member;presence;");
-    try expectAct("/dev/Plans/pin", true, .POST, a, .{ .serve = .{ .route = .{ .family = .channel, .key = "dev", .topic = "Plans", .part = .topic, .tail = .pin }, .presence = false } }, "member;presence;read channels/dev.channel;");
-    // A route still Zig's goes there, asking nothing more.
-    try expectAct("/c/1_2/Plans/stream", false, .GET, a, .{ .serve = .{ .route = .{ .family = .dm, .key = "1_2", .topic = "Plans", .part = .topic, .tail = .stream }, .presence = false } }, "member;");
+    try expectAct("/c/2_3/Plans/react", false, .POST, a, .not_found, "member;presence;");
+    try expectAct("/c/2_1/Plans/react", false, .POST, a, .not_found, "member;presence;");
+    try expectStatus("/dev/Plans/pin", true, .POST, a, 404, "member;presence;read channels/dev.channel;accounts;srcs;");
 }
 
 /// What DM 1_2's page asks once its bookmark is recorded (its accounts known
@@ -868,12 +900,12 @@ test "a send is the Roc's: the conversation, the method, the header, the body, t
         s.body = "markdown=%FF";
         break :blk s;
     }, .malformed_form, asked);
-    // No conversation to send to: back to the Zig, which says why.
+    // No conversation to send to: the Roc's 404.
     try expectAct("/c/1_2/Plans/send", false, .POST, blk: {
         var s = a;
         s.accounts = &.{steve};
         break :blk s;
-    }, .{ .serve = .{ .route = .{ .family = .dm, .key = "1_2", .topic = "Plans", .part = .topic, .tail = .send }, .presence = false } }, "member;presence;accounts;");
+    }, .not_found, "member;presence;accounts;");
     try expectAct("/c/1_2/Plans/send", false, .GET, a, .{ .not_allowed = .POST }, found);
     // A new topic in a DM: the bookmark, the first message, the announcement
     // in its highest general<N>, each with the conversation.
@@ -1044,8 +1076,7 @@ test "a channel's member file is the Roc's: a malformed one fails its own route 
         _ = try decide(arena.allocator(), "/ops/Plans", true, .GET, s.host());
         try testing.expectEqualStrings("member;presence;read channels/ops.channel;fail MalformedChannel;", s.asked.items);
     }
-    const none: Decision = .{ .serve = .{ .route = .{ .family = .channel, .key = "dev", .part = .landing }, .presence = false } };
-    try expectAct("/dev", true, .GET, a, none, "member;presence;read channels/dev.channel;");
+    try expectStatus("/dev", true, .GET, a, 404, "member;presence;read channels/dev.channel;accounts;srcs;");
 }
 
 test "a conversation's topics are the Roc's: its sessions folder listed, a folder named x.md no topic, and sorted by bytes" {
@@ -1247,5 +1278,5 @@ test "the accounts are the Roc's to read: a guest's DM is opened, the roster is 
     const guest: Scripted = .{ .alloc = undefined, .accounts = &all, .body = "markdown=hi" };
     try expectAct("/c/1_4/Plans/send", false, .POST, guest, .{ .redirect = "/chat/c/1_4/Plans" }, "member;presence;accounts;header x-chat-async;body;hostile hi;read users/1/last-sessions/1_4;write users/1/last-sessions/1_4 Plans\n;read users/1/last-conv;write users/1/last-conv 1_4\n;" ++ comptime sentAll(sent("dm 1_4 /chat/c/1_4 [1,4]", "1_4", "Plans", "Steve", "hi", "")));
     // Not an account: the Zig's to answer.
-    try expectAct("/c/1_5/Plans/send", false, .POST, guest, .{ .serve = .{ .route = .{ .family = .dm, .key = "1_5", .topic = "Plans", .part = .topic, .tail = .send }, .presence = false } }, "member;presence;accounts;");
+    try expectAct("/c/1_5/Plans/send", false, .POST, guest, .not_found, "member;presence;accounts;");
 }

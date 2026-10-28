@@ -75,37 +75,53 @@ dispatch! = |req, sub|
 			}
 	}
 
+## **NOT THE VIEWER'S, OR NOT A CONVERSATION**: a DM's is webbox's plain 404,
+## a channel's the page that says why, naming no channel a viewer cannot
+## see (one not there and one not theirs read alike).
+not_yours! : Route.R => Chat.Answer
+not_yours! = |route|
+	if route.family == Channel {
+		not_found_page!(Unasked, "#${route.key} is not a channel you are a member of.", "/chat")
+	} else {
+		Chat.not_found
+	}
+
+## **A 404 THAT SAYS WHY** (metal-vmm QUEUE 156(j)): `what` is not there, and
+## `back` is where to go instead.
+not_found_page! : Who, Str, Str => Chat.Answer
+not_found_page! = |who, what, back|
+	match load_viewer!(who) {
+		Ok(viewer) => Chat.respond(404, html, Pages.not_found(Chrome.src_in(Host.srcs!({})), { viewer, what, back }).bytes())
+		Err(Failed) => Chat.answered
+	}
+
 ## The route handed back to the Zig, as the seam's bytes.
 zig : Route.R, Chat.Counting -> Chat.Answer
 zig = |route, counting| Chat.zig(Route.to_wire(route), counting)
 
 ## Which side serves a route. The Roc serves: /chat and /chat/default, the recent,
 ## images and code pages (not their streams), /chat/links,
-## /chat/conversations, /chat/msg/<id>; and in a DM or a channel its
-## landing, a new topic, and a topic's page, raw transcript, send,
-## reactions, react, pin and unpin. Every other route is Zig's.
+## /chat/conversations, /chat/msg/<id>; and every route of a DM or a
+## channel, handing back to the Zig only a topic's uploads, upload,
+## stream, download and saved, once it has found them the viewer's.
+## Every other route is Zig's.
 served_by : Route.R -> [Roc, Zig]
 served_by = |r|
 	match r.family {
 		Default | Links | Conversations | Msg => Roc
 		Recent | Images | Code => if r.rest == "/stream" Zig else Roc
-		Dm | Channel =>
-			match r.part {
-				Landing | New => Roc
-				Invalid => Zig
-				Topic =>
-					match r.tail {
-						Page | Raw | Send | InvalidSend | Reactions | React | Pin | Unpin => Roc
-						_ => Zig
-					}
-			}
+		# **THE ROC DECIDES EVERY CONVERSATION'S ROUTE** (metal-vmm QUEUE
+		# 271): whose it is, whether its topic is there, every 404. The Zig
+		# serves the tails handed back to it, authorized here.
+		Dm | Channel => Roc
 		_ => Zig
 	}
 
 ## The Roc's own routes: presence, then the route's own work.
 act! : Chat.Request, Route.R => Chat.Answer
 act! = |req, route| {
-	Host.count_presence!({})
+	# A stream is no presence (the Zig's streams were served uncounted).
+	if Route.is_stream(route) {} else Host.count_presence!({})
 	match route.family {
 		Default => resume!({})
 		Conversations => if req.method != Get Chat.not_allowed(Get) else serve_conversations!({})
@@ -125,9 +141,9 @@ act! = |req, route| {
 serve_conversation! : Chat.Request, Route.R => Chat.Answer
 serve_conversation! = |req, route|
 	match conv_key(route) {
-		# **A KEY THAT NAMES NO CONVERSATION IS THE ZIG'S 404**, as find!
-		# answered it: no pair (Paths.participant's rule), no valid name.
-		Err(Invalid) => zig(route, Uncounted)
+		# **A KEY THAT NAMES NO CONVERSATION IS A 404**: no pair
+		# (Paths.participant's rule), no valid name.
+		Err(Invalid) => not_yours!(route)
 		Ok(key) =>
 			if route.part == New {
 				create_topic!(req, route, key)
@@ -137,19 +153,25 @@ serve_conversation! = |req, route|
 				serve_landing!(route, key)
 			} else {
 				match find!(key) {
-					Err(NotYours) => zig(route, Uncounted)
+					Err(NotYours) => not_yours!(route)
 					Err(Failed) => Chat.answered
 					Ok((conv, who)) =>
-					# The title before the topics, as findTopic read them: a
-					# partner whose name will not read fails every topic route.
-						match load_title!(key, who) {
-							Err(Failed) => Chat.answered
-							Ok(t) => {
-								topics = load_topics!(key)
-								if Conversation.has_topic(topics, route.topic) {
-									serve_topic!(req, route, { key, conv, who, title: Conversation.topic_title(t, route.topic), topics })
-								} else {
-									zig(route, Uncounted)
+						if route.part == Invalid {
+							Chat.not_found
+						} else {
+							# The title before the topics, as findTopic read them: a
+							# partner whose name will not read fails every topic route.
+							match load_title!(key, who) {
+								Err(Failed) => Chat.answered
+								Ok(t) => {
+									topics = load_topics!(key)
+									if Conversation.has_topic(topics, route.topic) {
+										serve_topic!(req, route, { key, conv, who, title: Conversation.topic_title(t, route.topic), topics })
+									} else {
+										# **A TOPIC THAT IS NOT THERE IS A 404 THAT SAYS SO**
+										# (metal-vmm QUEUE 156(j)).
+										not_found_page!(who, "There is no topic \u(201C)${route.topic}\u(201D) in this conversation.", key.base())
+									}
 								}
 							}
 						}
@@ -173,23 +195,31 @@ conv_key = |route|
 ## its title, and the conversation's topics as they were listed to find it.
 AtTopic : { key : Paths.ConvKey, conv : Chat.Conv, who : Who, title : Str, topics : List(Str) }
 
+## A topic's page, or its raw transcript: a read, then the work.
+serve_page_or_raw! : Chat.Request, Route.R, AtTopic => Chat.Answer
+serve_page_or_raw! = |req, route, found|
+	if req.method != Get and req.method != Head {
+		Chat.not_allowed(Get)
+	} else if route.tail == Page {
+		serve_topic_page!(route, found)
+	} else {
+		match Files.serve_file!(Paths.transcript_path({ key: found.key, topic: route.topic })) {
+			Serving => Chat.served_plain
+			NotServing => Chat.not_found
+		}
+	}
+
 ## A topic that is there: the method, then the work.
 serve_topic! : Chat.Request, Route.R, AtTopic => Chat.Answer
 serve_topic! = |req, route, found| {
 	conv = found.conv
 	who = found.who
 	match route.tail {
-		Page | Raw =>
-			if req.method != Get and req.method != Head {
-				Chat.not_allowed(Get)
-			} else if route.tail == Page {
-				serve_topic_page!(route, found)
-			} else {
-				match Files.serve_file!(Paths.transcript_path({ key: found.key, topic: route.topic })) {
-					Serving => Chat.served_plain
-					NotServing => Chat.not_found
-				}
-			}
+		# The tails the Zig serves, the conversation and the topic found
+		# the viewer's here.
+		Uploads | Upload | Stream | Download | Saved => zig(route, Uncounted)
+		Invalid => Chat.not_found
+		Page | Raw => serve_page_or_raw!(req, route, found)
 		Reactions =>
 			if req.method != Get {
 				Chat.not_allowed(Get)
@@ -243,7 +273,7 @@ find! = |key| {
 				Err(NotAParticipant) => Err(NotYours)
 			}
 		Channel(name) => {
-			members = load_channel_members!(name)
+			members = load_channel_members!(name)?
 			if List.contains(members, me) {
 				Ok(({ family: Channel, key: bytes, base: Conversation.channel_base(bytes), members: List.map(members, |u| u.to_str().to_utf8()) }, Unasked))
 			} else {
@@ -341,18 +371,20 @@ fail_unreadable! = |why|
 ## REQUEST** on its own route (channelMembers's error.MalformedChannel), never
 ## the 404 of a channel that is not the member's; a read that failed has
 ## failed it already.
-load_channel_members! : Paths.ChannelName => List(Uid)
+load_channel_members! : Paths.ChannelName => Try(List(Uid), [Failed])
 load_channel_members! = |name|
 	match Files.read!(Paths.channel_path(name)) {
 		Ok(text) =>
 			match Paths.channel_members(text) {
-				Ok(members) => members
+				Ok(members) => Ok(members)
 				Err(Malformed) => {
 					Host.fail!(MalformedChannel, name.bytes())
-					[]
+					Err(Failed)
 				}
 			}
-		Err(Missing) | Err(Failed) => []
+		# No member file is no channel: nobody's.
+		Err(Missing) => Ok([])
+		Err(Failed) => Err(Failed)
 	}
 
 ## **EVERY CHANNEL'S ROSTER** (channelRosters): channels/ listed
@@ -634,7 +666,7 @@ serve_feed! = |which, rest|
 serve_landing! : Route.R, Paths.ConvKey => Chat.Answer
 serve_landing! = |route, key|
 	match find!(key) {
-		Err(NotYours) => zig(route, Uncounted)
+		Err(NotYours) => not_yours!(route)
 		Err(Failed) => Chat.answered
 		Ok((conv, who)) => {
 			first = Paths.first_of(load_topics!(key))
@@ -885,7 +917,7 @@ create_topic! = |req, route, key|
 					}
 				}
 			}
-		Err(NotYours) => zig(route, Uncounted)
+		Err(NotYours) => not_yours!(route)
 		Err(Failed) => Chat.answered
 	}
 
@@ -953,7 +985,7 @@ send! = |req, route, key|
 				Err(Failed) => Chat.answered
 				Ok(_) => receive_message!(req, route, { key, topic: route.topic }, conv, who)
 			}
-		Err(NotYours) => zig(route, Uncounted)
+		Err(NotYours) => not_yours!(route)
 	}
 
 ## A send in `conv`, found and titled: the tail, the method, the header,

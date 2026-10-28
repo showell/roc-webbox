@@ -24,6 +24,7 @@ import Accounts
 import Fanout
 import Uid
 import JsonOut
+import Route
 import BusKey
 import ChatUrl
 
@@ -389,6 +390,29 @@ call = |req| {
 						Ok(url) => [url.to_str().to_utf8()]
 						Err(NotOnSite) => []
 					}
+				Err(_) => []
+			}
+		# The Roc router's parse of `arg(0)` under /chat, or /channel when
+		# `arg(1)` is `c`, as what the pre-turn hooks must agree with: an
+		# upload, an upload's file, a stream, a doc, or other.
+		72 =>
+			match Str.from_utf8(arg(0)) {
+				Ok(sub) => {
+					r = if arg(1) == ['c'] Route.under_channel(sub) else Route.under_chat(sub)
+					kind =
+						if r.family == Docs {
+							"docs"
+						} else if Route.is_stream(r) {
+							"stream"
+						} else if (r.family == Dm or r.family == Channel) and r.part == Topic and r.tail == Upload {
+							"upload"
+						} else if (r.family == Dm or r.family == Channel) and r.part == Topic and r.tail == Uploads {
+							"uploads"
+						} else {
+							"other"
+						}
+					[kind.to_utf8()]
+				}
 				Err(_) => []
 			}
 		_ => crash "twin: no function ${U8.to_str(req.which)}"
