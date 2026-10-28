@@ -49,7 +49,10 @@ Accounts := [].{
 	## **WHO MAY USE THE CHAT** (angry-gopher users.zig `userIsAuthorized`):
 	## a member or the agent, never a guest. The door (`admits`) and the
 	## roster (`authorized`) both ask it. Which account is the agent is the
-	## host's to say, in its kind.
+	## host's to say, in its kind. **THE RULE HAS A SECOND HOME** until auth
+	## is all Roc: users.zig's `userIsAuthorized`, for login, admin and the
+	## key and guest-cookie checks; angry-gopher's chat_twin_test.zig ("who may
+	## use the chat, a rule with two homes held equal") holds the two equal.
 	can_use_chat : Kind -> Bool
 	can_use_chat = |kind| kind == Member or kind == Agent
 

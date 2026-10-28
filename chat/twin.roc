@@ -864,6 +864,19 @@ call = |req| {
 				),
 			)
 		}
+		# The door (Accounts.admits) for asker `arg(0)`, its bytes as the host
+		# hands them, over the accounts: `admitted`, `refused`, or the
+		# failure (`kind`, whose). Accounts that will not decode: no answer.
+		81 =>
+			match List.map_try(accounts(req.args, 1), Accounts.from_host) {
+				Ok(all) =>
+					match Accounts.admits(all, arg(0)) {
+						Ok(Admitted) => [Str.to_utf8("admitted")]
+						Ok(Refused) => [Str.to_utf8("refused")]
+						Err(why) => unreadable(why)
+					}
+				Err(_) => []
+			}
 		_ => crash "twin: no function ${U8.to_str(req.which)}"
 	}
 }
