@@ -403,7 +403,7 @@ serve_topic! = |
 				match pin!(
 					found.key,
 					route.topic,
-					if route.tail == Pin Pinned else Unpinned,
+					if route.tail == Pin Pin else Unpin,
 				) {
 					Ok({}) => Chat.respond(
 						204,
@@ -693,7 +693,7 @@ load_title! = |key, who|
 ## `topic` pinned or unpinned (ChatState.pinned), and the file written back or,
 ## emptied, removed. A read that failed stops here: the set is not empty, it
 ## is unknown, and writing it would drop every pin. `Failed` when a step failed.
-pin! : Paths.ConvKey, Str, ChatState.Pin => Try({}, [Failed])
+pin! : Paths.ConvKey, Str, ChatState.PinEdit => Try({}, [Failed])
 pin! = |
 	key,
 	topic,
@@ -719,7 +719,7 @@ pin! = |
 
 ## The pinned file at `path`, read as `stored`, with `topic` pinned or
 ## unpinned: written back, or, emptied, removed.
-write_pins! : Paths.ChatPath, Str, Str, ChatState.Pin => Try({}, [Failed])
+write_pins! : Paths.ChatPath, Str, Str, ChatState.PinEdit => Try({}, [Failed])
 write_pins! = |
 	path,
 	stored,
@@ -2417,7 +2417,7 @@ fan_out! = |at, steps|
 		[step, .. as rest] => {
 			match step {
 				Publish(on, bytes) => Host.publish!(on.bytes(), bytes)
-				Feed(f) => {
+				AppendFeed(f) => {
 					got = Files.append_entry!(
 						f.path,
 						Feeds.sep,

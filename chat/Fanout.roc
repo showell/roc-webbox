@@ -40,12 +40,12 @@ Fanout := [].{
 
 	## One step of the fan-out, in the order it is taken:
 	## - `Publish`: bytes on a member's key (it cannot fail);
-	## - `Feed`: an entry appended to a member's feed file, and only then
+	## - `AppendFeed`: an entry appended to a member's feed file, and only then
 	##   its event published; an append that failed is that surface's
 	##   failure, counted, and its event never sent.
 	Step : [
 		Publish(BusKey, List(U8)),
-		Feed(
+		AppendFeed(
 			{
 				surface : Surface,
 				member : List(U8),
@@ -123,7 +123,7 @@ Fanout := [].{
 						match parts.images {
 							[] => []
 							tags => [
-								Feed({
+								AppendFeed({
 									surface: Images,
 									member: uid.to_str().to_utf8(),
 									path: Paths.feed_path(uid, Images),
@@ -136,7 +136,7 @@ Fanout := [].{
 						match parts.code {
 							[] => []
 							blocks => [
-								Feed({
+								AppendFeed({
 									surface: Code,
 									member: uid.to_str().to_utf8(),
 									path: Paths.feed_path(uid, Code),

@@ -34,23 +34,23 @@ ChatState := [].{
 			}
 		}
 
-	## Whether the member wants a topic pinned or unpinned.
-	Pin : [Pinned, Unpinned]
+	## What the member asks of a topic: a command, so a verb.
+	PinEdit : [Pin, Unpin]
 
 	## setTopicPinned's set: the pinned file `stored` (a topic a line) with
 	## `topic` pinned or unpinned, sorted by bytes, a line each; `Remove` when
 	## no pin is left (the file goes). Only `topic` is de-duplicated: a pin it
 	## adds is not added twice, an unpin drops every copy, and a line the
 	## file already repeats stays repeated, as the Zig keeps it.
-	pinned : Str, Str, Pin -> [Write(List(U8)), Remove]
+	pinned : Str, Str, PinEdit -> [Write(List(U8)), Remove]
 	pinned = |
 		stored,
 		topic,
 		pin,
 	| {
 		cur = parse(stored)
-		kept = if pin == Pinned cur else List.drop_if(cur, |s| s == topic)
-		next = if pin == Pinned and !List.contains(cur, topic) List.append(kept, topic) else kept
+		kept = if pin == Pin cur else List.drop_if(cur, |s| s == topic)
+		next = if pin == Pin and !List.contains(cur, topic) List.append(kept, topic) else kept
 		if next == [] {
 			Remove
 		} else {
