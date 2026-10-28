@@ -57,15 +57,58 @@ import ChatUrl
 import Docs
 import Upload
 import Search
+import Retire
 
 handle! : Chat.Request => Chat.Answer
 handle! = |req|
-	# **A PATH IS TEXT AT THE DOOR**: one that is not UTF-8 is the site's 400
-	# for a malformed request, before anything else reads it.
-	match Str.from_utf8(req.sub) {
-		Ok(sub) => dispatch!(req, sub)
-		Err(_) => Chat.malformed
+	if req.area == Retire {
+		retire!({})
+	} else {
+		# **A PATH IS TEXT AT THE DOOR**: one that is not UTF-8 is the site's
+		# 400 for a malformed request, before anything else reads it.
+		match Str.from_utf8(req.sub) {
+			Ok(sub) => dispatch!(req, sub)
+			Err(_) => Chat.malformed
+		}
 	}
+
+## **THE ADMIN RETIRE** (metal-vmm QUEUE 293), asked in its own area by
+## the admin page behind its password, before any of the chat's prelude
+## (no member, no presence): the keep list checked against the accounts,
+## then the plan made and handed to the host a step at a time. A keep list
+## refused is a 400 in its own words; a plan carried out, an empty 200.
+retire! : {} => Chat.Answer
+retire! = |{}| {
+	asked = Retire.asked!({})
+	match load_accounts!(Unasked) {
+		Err(Failed) => Chat.answered
+		Ok(accounts) =>
+			match Retire.refused(accounts, asked.keep) {
+				Err(Unreadable(why)) => {
+					fail_unreadable!(why)
+					Chat.answered
+				}
+				Err(Refused(why)) => Chat.respond(
+					400,
+					[],
+					why.to_utf8(),
+				)
+				Ok({}) =>
+					match Retire.plan!(accounts, asked) {
+						Err(Failed) => Chat.answered
+						Ok(steps) =>
+							match Retire.carry_out!(steps) {
+								Ok({}) => Chat.respond(
+									200,
+									[],
+									[],
+								)
+								Err(Failed) => Chat.answered
+							}
+					}
+			}
+	}
+}
 
 ## The request, its path (`sub`) the text handle! checked.
 dispatch! : Chat.Request, Str => Chat.Answer

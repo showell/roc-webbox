@@ -136,10 +136,23 @@ Host := [].{
 	## **THE ADMIN RETIRE** (metal-vmm QUEUE 293), asked through the `Retire`
 	## area: how old is old (`days`), the names kept, one to a line, and now
 	## in unix seconds.
-	retire_asked! : {} => { days : U64, keep : List(U8), now : I64 }
+	retire_asked! : {} => {
+		days : U64,
+		keep : List(U8),
+		now : I64,
+	}
 
 	## A step of the plan, said for the report: its kind and its name.
-	retire_note! : [ChannelMember, Dm, RefLastConv, RefLastSession, RefPinned, Topic, User], List(U8) => {}
+	retire_note! : [
+		ChannelMember,
+		Dm,
+		RefLastConv,
+		RefLastSession,
+		RefPinned,
+		Topic,
+		User,
+	],
+	List(U8) => {}
 
 	## The file, or the folder and all in it, removed when the retire is
 	## confirmed (one not there is gone already); a dry run removes nothing.

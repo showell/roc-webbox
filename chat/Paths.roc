@@ -218,6 +218,12 @@ Paths := [].{
 		),
 	)
 
+	## **A PATH OF NAMES A LISTING GAVE** (the admin retire's walk, metal-vmm
+	## QUEUE 293): `parts` joined, or the chat root itself (`.`) for none.
+	## The seam holds each to the chat root, as every path.
+	listed : List(Str) -> ChatPath
+	listed = |parts| if parts == [] ChatPath.(".") else ChatPath.(Str.join_with(parts, "/"))
+
 	## Texts sorted by their bytes, as the Zig's sorts compare.
 	sort_by_bytes : List(Str) -> List(Str)
 	sort_by_bytes = |texts| List.sort_with(texts, |a, b| Bytes.compare(a.to_utf8(), b.to_utf8()))
