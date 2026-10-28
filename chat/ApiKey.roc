@@ -105,8 +105,18 @@ ApiKey := [].{
 				}
 		}
 
+	## **A KEY'S WHOLE RECORD**, as the store keeps it (KeyCodec).
+	Record(id) : {
+		id : Principal.KeyId,
+		acts_as : Principal.Id,
+		scope : ApiKey.Scope(id),
+		expires : ApiKey.Expiry,
+		revocation : [Active, Revoked],
+	}
+
 	## **A KEY, AS A STATE MACHINE**: opaque, so `issue` (which asks
-	## `may_grant`) is the one way in and `revoke` the one transition.
+	## `may_grant`) is the one way in, `load` the way back from the store,
+	## and `revoke` the one transition.
 	Key(id) :: {
 		id : Principal.KeyId,
 		acts_as : Principal.Id,
@@ -154,6 +164,19 @@ ApiKey := [].{
 						),
 					)
 			}
+
+		## **A KEY AS ITS STORED RECORD HOLDS IT** (KeyCodec.decode): the
+		## record's principal, scope, expiry and revocation exactly, nothing
+		## added and nothing widened. No grant is asked again: the record
+		## was written from a key `issue` granted, and every use is still
+		## held to its principal as the accounts say then (`decide`), so a
+		## record claiming more than its principal may do does no more.
+		load : ApiKey.Record(id) -> ApiKey.Key(id)
+		load = |record| ApiKey.Key.(record)
+
+		## The key's whole record, to store.
+		record : ApiKey.Key(id) -> ApiKey.Record(id)
+		record = |ApiKey.Key.(k)| k
 
 		## The only transition: revoked, for good.
 		revoke : ApiKey.Key(id) -> ApiKey.Key(id)
@@ -610,6 +633,25 @@ expect administers_among(boss_all, [boss_demoted]) == Refused(BeyondPrincipal)
 # their scope and principal would allow; an expiry at 100 is live at 99.
 boss_until_100 : ApiKey.Key(Str)
 boss_until_100 = issued({ acts_as: boss, scope: with_admin }, At(100))
+
+# ── LOADING A STORED KEY
+# A key's record loads back to the same record, revoked or not.
+expect List.all(
+	[ann_forever, boss_until_100, ann_agent_reads_c, boss_agent_admin.revoke()],
+	|key| ApiKey.Key.load(key.record()).record() == key.record(),
+)
+
+# A record claiming admin for ann, a member, loads as it says, and the key
+# still administers nothing: its use is held to ann.
+ann_claims_admin : ApiKey.Key(Str)
+ann_claims_admin = ApiKey.Key.load({ ..ann_forever.record(), scope: with_admin })
+
+expect ann_claims_admin.record().scope == with_admin
+expect decided(ann_claims_admin, Administer) == Refused(BeyondPrincipal)
+expect decided(ann_claims_admin, Read(res_b)) == Refused(BeyondPrincipal)
+
+# A narrowed record loads narrowed.
+expect decided(ApiKey.Key.load(ann_agent_reads_c.record()), Read(res_a)) == Refused(OutOfScope)
 
 expect decided(boss_all.revoke(), Read(res_c)) == Refused(Revoked)
 expect decided_at(boss_until_100, { action: Read(res_c), now: 99 }) == Permitted

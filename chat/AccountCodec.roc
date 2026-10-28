@@ -62,6 +62,30 @@ AccountCodec := [].{
 			Bot => decode_owned(kind.rest).map_ok(|b| Principal.Bot(b))
 		}
 	}
+
+	## **A PRINCIPAL'S ID AS EVERY STORED RECORD SPELLS IT**: its kind, a
+	## colon, its number (`human:583231`, `agent:7`, `bot:9`); what a key's
+	## `acts` and an audit entry's `who` hold.
+	id_text : Principal.Id -> Str
+	id_text = |id|
+		match id {
+			Human(g) => "${spell_kind(Human)}:${g.to_u64().to_str()}"
+			Agent(a) => "${spell_kind(Agent)}:${a.to_u64().to_str()}"
+			Bot(b) => "${spell_kind(Bot)}:${b.to_u64().to_str()}"
+		}
+
+	## The principal's id the value `id_text` spelled, in the field `name`.
+	id_from : List(U8), Str -> Try(Principal.Id, Stored.Problem)
+	id_from = |value, name|
+		match List.split_first(value, ':') {
+			Err(NotFound) => Err(BadValue(name))
+			Ok({ before, after }) =>
+				match Stored.word(before, { name, all: all_kinds, spell: spell_kind })? {
+					Human => Stored.id(after, { name, make: Principal.GitHubId.from_u64 }).map_ok(|g| Principal.Id.Human(g))
+					Agent => Stored.id(after, { name, make: Principal.AgentId.from_u64 }).map_ok(|a| Principal.Id.Agent(a))
+					Bot => Stored.id(after, { name, make: Principal.AgentId.from_u64 }).map_ok(|b| Principal.Id.Bot(b))
+				}
+		}
 }
 
 Kind : [Human, Agent, Bot]
@@ -330,6 +354,26 @@ expect decoded("account v1 kind=agent id=7 name=CC\n") == Err(MissingField("owne
 expect decoded("account v1 kind=agent github=1 login=a role=member name=b\n") == Err(MissingField("id"))
 expect decoded("account v1 kind=bot id=18446744073709551616 owner=5 name=b\n") == Err(BadNumber("id"))
 expect AccountCodec.decode([0x61, 0xff, '\n']).map_ok(|_| {}) == Err(NotUtf8)
+
+# A principal's id: each kind round-trips; each malformed spelling, its
+# problem.
+expect
+	List.all(
+		[Principal.Id.Human(gid(583231)), Principal.Id.Agent(aid(7)), Principal.Id.Bot(aid(7))],
+		|id| AccountCodec.id_from(Str.to_utf8(AccountCodec.id_text(id)), "who") == Ok(id),
+	)
+expect AccountCodec.id_text(Principal.Id.Bot(aid(9))) == "bot:9"
+id_read : Str -> Try(Principal.Id, Stored.Problem)
+id_read = |text| AccountCodec.id_from(Str.to_utf8(text), "who")
+
+expect id_read("human:0") == Err(BadValue("who"))
+expect id_read("human") == Err(BadValue("who"))
+expect id_read("") == Err(BadValue("who"))
+expect id_read("robot:1") == Err(UnknownWord("who"))
+expect id_read(":1") == Err(UnknownWord("who"))
+expect id_read("agent:") == Err(BadNumber("who"))
+expect id_read("agent:07") == Err(BadNumber("who"))
+expect id_read("agent:7:8") == Err(BadNumber("who"))
 
 # What will not encode: a name the rule refuses, one untrimmed, a login
 # GitHub would not give.
