@@ -9,8 +9,10 @@
 ## **A DRY RUN THAT LISTS, AND A CONFIRM THAT ACTS**: both plan the same
 ## steps, the removals projected (a pointer into a DM that would go reads
 ## as dangling), so a second confirm finds nothing.
+import pf.Chat
 import pf.Host
 import Accounts
+import Members
 import Bytes
 import Files
 import Paths
@@ -128,6 +130,37 @@ Retire := [].{
 				pointers,
 			]),
 		)
+	}
+
+	## **THE ADMIN RETIRE'S ANSWER** (metal-vmm QUEUE 293), asked in its own
+	## area by the admin page behind its password, before any of the chat's
+	## prelude (no member, no presence): the keep list checked against the
+	## accounts, then the plan made and handed to the host a step at a time.
+	## A keep list refused is a 400 in its own words; a plan carried out, an
+	## empty 200.
+	answer! : {} => Chat.Answer
+	answer! = |{}| {
+		got = asked!({})
+		match Members.load_accounts!(Unasked) {
+			Err(Failed) => Chat.answered
+			Ok(accounts) =>
+				match refused(accounts, got.keep) {
+					Err(Unreadable(why)) => {
+						Members.fail_unreadable!(why)
+						Chat.answered
+					}
+					Err(Refused(why)) => Chat.respond(400, [], why.to_utf8())
+					Ok({}) =>
+						match plan!(accounts, got) {
+							Err(Failed) => Chat.answered
+							Ok(steps) =>
+								match carry_out!(steps) {
+									Ok({}) => Chat.respond(200, [], [])
+									Err(Failed) => Chat.answered
+								}
+						}
+				}
+		}
 	}
 
 	## Each step handed to the host, in order; the first that failed ends

@@ -228,6 +228,17 @@ Chat := [].{
 		location,
 	}
 
+	## The content types the chat answers in.
+	html : List(U8)
+	html = Str.to_utf8("text/html; charset=utf-8")
+
+	json : List(U8)
+	json = Str.to_utf8("application/json; charset=utf-8")
+
+	## The site's 400, in `why`'s words.
+	refuse : Str -> Answer
+	refuse = |why| respond(400, [], Str.to_utf8(why))
+
 	## `status` with `body`, typed `content_type` when it is not empty.
 	respond : U16, List(U8), List(U8) -> Answer
 	respond = |
@@ -261,7 +272,7 @@ Chat := [].{
 	served_html = |before, after| {
 		..respond(
 			200,
-			Str.to_utf8("text/html; charset=utf-8"),
+			html,
 			before,
 		),
 		kind: Held,

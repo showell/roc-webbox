@@ -1,8 +1,12 @@
 ## **AN UPLOAD, AS IT IS SERVED** (angry-gopher chat_upload.zig, metal-vmm
 ## QUEUE 291): the type its stored name says, and which of its bytes a
-## `Range` asks for. The host carries the answer out (Host.serve_upload!).
-## Pure.
+## `Range` asks for, and the route itself (metal-vmm QUEUE 300): an
+## upload's POST and GET, the host reading the form and serving the bytes.
+import pf.Chat
+import pf.Host
 import Bytes
+import Files
+import Paths
 import JsonOut
 import Limits
 import ZigText
@@ -119,7 +123,124 @@ Upload := [].{
 	## player asks again for the rest.
 	window : U64
 	window = 8 * 1024 * 1024
+
+	## **AN UPLOAD'S POST** (chat_upload `handleUpload`, metal-vmm QUEUE 292):
+	## the form read and its file's type sniffed by the host, which holds the
+	## bytes; then here, in the Zig's order, a type the chat does not take, a
+	## file past its kind's cap, the member's allowance, the file stored, and
+	## the answer the compose box reads.
+	post! : Chat.Request, Paths.TopicAt => Chat.Answer
+	post! = |req, at|
+		if req.method != Post {
+			Chat.not_allowed(Post)
+		} else {
+			form = Host.read_upload!({})
+			match form.status {
+				Answered => Chat.answered
+				NoFile => {
+					Host.refuse_upload!(Malformed, "no file\n".to_utf8())
+					Chat.answered
+				}
+				Unsupported => Chat.respond(
+					415,
+					[],
+					unsupported.to_utf8(),
+				)
+				Read =>
+					match kind_of(form.ext) {
+						Err(NotTaken) => crash "Upload.post!: the host sniffed a type not taken"
+						Ok(kind) =>
+							if form.size > kind.cap {
+								Host.refuse_upload!(
+									TooLarge,
+									too_large({ noun: kind.noun, cap: kind.cap }).to_utf8(),
+								)
+								Chat.answered
+							} else {
+								keep!(form, { kind: kind.name, at })
+							}
+					}
+			}
+		}
+
+	## **AN UPLOAD SERVED** (chat_upload `serveUpload`, metal-vmm QUEUE 291):
+	## a GET's or a HEAD's, of a name an upload has (`file`), typed by it;
+	## whole, or the range asked for, or the 416 for one that cannot be. The
+	## host serves the bytes (Host.serve_upload!).
+	serve! : Chat.Request, { at : Paths.TopicAt, file : Str } => Chat.Answer
+	serve! = |req, { at, file }|
+		if req.method != Get and req.method != Head {
+			Chat.not_allowed(Get)
+		} else {
+			match content_type(file) {
+				Err(NotAnUpload) => Chat.not_found
+				Ok(typed) => {
+					path = Paths.upload_path(at, file)
+					match Files.stat!(path) {
+						Err(Missing) => Chat.not_found
+						Err(Failed) => Chat.answered
+						Ok(st) => {
+							part = match Host.read_header!("range".to_utf8()) {
+								[] => Whole({ first: 0, last: 0 })
+								[asked, ..] =>
+									match range(asked, st.size) {
+										Ok(r) => Range(r)
+										Err(Unsatisfiable) => Unsatisfiable({ first: 0, last: 0 })
+									}
+							}
+							(kind, r) = match part {
+								Whole(span) => (Whole, span)
+								Range(span) => (Range, span)
+								Unsatisfiable(span) => (Unsatisfiable, span)
+							}
+							served = Host.serve_upload!({
+								first: r.first,
+								last: r.last,
+								size: st.size,
+								content_type: typed.to_utf8(),
+								path: path.bytes(),
+								part: kind,
+							})
+							match served {
+								Served => Chat.answered
+								# Gone since its stat: nothing was answered.
+								Gone => Chat.not_found
+							}
+						}
+					}
+				}
+			}
+		}
+
 }
+
+## The allowance spent on the file, then the file stored and its answer.
+keep! : { size : U64, ext : List(U8), filename : List(U8), status : _ }, { kind : Str, at : Paths.TopicAt } => Chat.Answer
+keep! = |form, { kind, at }|
+	match Host.reserve_upload!(form.size) {
+		Failed => Chat.answered
+		Refused => Chat.respond(
+			403,
+			[],
+			Upload.allowance_spent.to_utf8(),
+		)
+		Reserved => {
+			stored = Host.store_upload!(Paths.uploads_folder(at).bytes(), form.ext)
+			name = Str.from_utf8_lossy(stored.name)
+			match stored.status {
+				Failed => Chat.answered
+				Stored => Chat.respond(
+					200,
+					Chat.json,
+					Upload.stored_answer({
+						url: "${Paths.ConvKey.base(at.key)}/${at.topic}/uploads/${name}",
+						filename: form.filename,
+						kind,
+					}),
+				)
+			}
+		}
+	}
 
 ## The range `left-right` of `size` bytes, cut to the window.
 from_to : List(U8), List(U8), U64 -> Try({ first : U64, last : U64 }, [Unsatisfiable])

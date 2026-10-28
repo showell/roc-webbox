@@ -166,22 +166,6 @@ Recent := [].{
 		y.key.to_utf8(),
 	)
 
-	## docs_store `titleFromSlug`: hyphens to spaces, the first letter
-	## upper-cased (a slug is ASCII: text in, text out).
-	doc_title : Str -> Str
-	doc_title = |slug| {
-		spaced = List.map(slug.to_utf8(), |c| if c == '-' ' ' else c)
-		titled = List.update(
-			spaced,
-			0,
-			|c| if c >= 'a' and c <= 'z' c - 32 else c,
-		) ?? spaced
-		match Str.from_utf8(titled) {
-			Ok(title) => title
-			Err(_) => crash "Recent.doc_title: an ASCII edit split a codepoint"
-		}
-	}
-
 	## recent_feed `recentExcerpt`: a quote fence becomes "[quoted text]",
 	## an image "[image]", whitespace one space, cut at 350 codepoints.
 	## **TEXT IN, TEXT OUT**: every edit below works on ASCII bytes alone
@@ -500,5 +484,3 @@ expect {
 	])
 	List.map(got.rows, |r| r.key) == ["/a", "/c"] and got.damaged == [Str.to_utf8("/b")]
 }
-# doc_title: hyphens to spaces, the first letter up; a digit first stays.
-expect Recent.doc_title("reading-list") == "Reading list" and Recent.doc_title("2026-plans") == "2026 plans" and Recent.doc_title("") == ""

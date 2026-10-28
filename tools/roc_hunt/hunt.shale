@@ -690,6 +690,79 @@ function bool_returns(tree)
   return found
 end
 
+-- **A MODULE A READER MUST OPEN FOR ONE CALLER** (metal-vmm QUEUE 300;
+-- Steve: "We don't want to force folks to read 5 different modules to
+-- understand a code flow"): a module whose production references (a
+-- qualified `Module.name`, outside an `expect`) all come from one other
+-- module, `twin` counting as a caller, belongs with that caller, unless
+-- `kept_alone` names it with its reason. `trees` are the production trees
+-- and twin's.
+const kept_alone = {
+  -- The platform: the app's boundary, whoever calls it.
+  Chat = "the platform's types, the app's boundary",
+  Host = "the platform's hosted functions, the app's boundary",
+  -- The plants' own (tools/roc_hunt/plants/single_caller/).
+  QuietKept = "a plant: allowlisted, so quiet",
+}
+
+-- `chat/platform/Host.roc` is `Host`.
+function module_of(path)
+  local parts = split(path, "/")
+  local base = parts[#parts]
+  return sub(base, 1, #base - #".roc")
+end
+
+-- The first `needle` in `s`, 1-based, or nil.
+function find_in_text(s, needle)
+  local i = 1
+  while i + #needle - 1 <= #s do
+    if sub(s, i, i + #needle - 1) == needle then return i end
+    i = i + 1
+  end
+  return nil
+end
+
+function single_caller(trees)
+  local callers = {}
+  local counts = {}
+  local first = {}
+  for tree in trees do
+    local expect_at = -1
+    local i = 1
+    while i <= #tree.text do
+      local d = tree.depth[i]
+      if expect_at >= 0 and d <= expect_at then expect_at = -1 end
+      local t = head(tree, i)
+      if expect_at < 0 and starts_with(t, "(s-expect ") then expect_at = d end
+      if expect_at < 0 and starts_with(t, "(e-ident ") then
+        local raw = between(t, "(raw \"", "\")") or ""
+        local dot = find_in_text(raw, ".")
+        if dot ~= nil and dot > 1 then
+          local callee = sub(raw, 1, dot - 1)
+          local caller = module_of(tree.file[i])
+          if callee ~= caller and lower(sub(callee, 1, 1)) ~= sub(callee, 1, 1) then
+            if get(callers, callee) == nil then
+              callers[callee] = {}
+              counts[callee] = 0
+            end
+            callers[callee][caller] = true
+            counts[callee] = counts[callee] + 1
+          end
+        end
+      end
+      i = i + 1
+    end
+  end
+  local found = {}
+  for callee in sort(keys(callers)) do
+    local from = sort(keys(callers[callee]))
+    if #from == 1 and get(kept_alone, callee) == nil then
+      push(found, callee .. ": single_caller: all " .. tostring(counts[callee]) .. " production references come from " .. from[1])
+    end
+  end
+  return found
+end
+
 const hunts = {"same_typed_args", "magic_numbers", "bools", "bool_returns", "positional_lists", "if_chains", "long_definitions", "fs_bypass", "html_trusted_nonliteral"}
 
 -- The hunt named `name`, over `tree`.
@@ -769,6 +842,16 @@ if arg("self_test", "") ~= "" then
     end
     if #wrong == before then print(name .. ": its " .. tostring(fires) .. " plants fire, and the quiet ones stay quiet") end
   end
+  -- single_caller's plants are a folder of modules, main and twin among them.
+  local folder = sort(glob("tools/roc_hunt/plants/single_caller/*.roc"))
+  local production = {}
+  for p in folder do if not ends_with(p, "/twin.roc") then push(production, p) end end
+  local said = join(single_caller({read_trees(production), read_trees({"tools/roc_hunt/plants/single_caller/twin.roc"})}), "\n")
+  if not contains(said, "FiresSolo: single_caller") then push(wrong, "single_caller: a plant did not fire: FiresSolo") end
+  for quiet in {"QuietShared", "QuietKept", "QuietTested"} do
+    if contains(said, quiet .. ":") then push(wrong, "single_caller: a quiet plant fired: " .. quiet) end
+  end
+  if contains(said, "FiresSolo") and not contains(said, "Quiet") then print("single_caller: its plant fires, and the quiet ones stay quiet") end
   for w in wrong do print("FAIL " .. w) end
   if #wrong > 0 then fail(tostring(#wrong) .. " plants wrong") end
   local r = run({"shale", "cookbook:roc/stack.shale", "self_test=1"}, {timeout_ms = 300000, tail = 40})
@@ -787,5 +870,8 @@ else
     print("== " .. name .. ": " .. tostring(#found))
     for f in found do print("  " .. f) end
   end
+  local lone = single_caller({tree, read_trees({"chat/twin.roc"})})
+  print("== single_caller: " .. tostring(#lone))
+  for f in lone do print("  " .. f) end
   stack_hunt("glob=chat/**/*.roc")
 end

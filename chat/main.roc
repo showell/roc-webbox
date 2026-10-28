@@ -58,11 +58,12 @@ import Docs
 import Upload
 import Search
 import Retire
+import Members
 
 handle! : Chat.Request => Chat.Answer
 handle! = |req|
 	if req.area == Retire {
-		retire!({})
+		Retire.answer!({})
 	} else {
 		# **A PATH IS TEXT AT THE DOOR**: one that is not UTF-8 is the site's
 		# 400 for a malformed request, before anything else reads it.
@@ -71,44 +72,6 @@ handle! = |req|
 			Err(_) => Chat.malformed
 		}
 	}
-
-## **THE ADMIN RETIRE** (metal-vmm QUEUE 293), asked in its own area by
-## the admin page behind its password, before any of the chat's prelude
-## (no member, no presence): the keep list checked against the accounts,
-## then the plan made and handed to the host a step at a time. A keep list
-## refused is a 400 in its own words; a plan carried out, an empty 200.
-retire! : {} => Chat.Answer
-retire! = |{}| {
-	asked = Retire.asked!({})
-	match load_accounts!(Unasked) {
-		Err(Failed) => Chat.answered
-		Ok(accounts) =>
-			match Retire.refused(accounts, asked.keep) {
-				Err(Unreadable(why)) => {
-					fail_unreadable!(why)
-					Chat.answered
-				}
-				Err(Refused(why)) => Chat.respond(
-					400,
-					[],
-					why.to_utf8(),
-				)
-				Ok({}) =>
-					match Retire.plan!(accounts, asked) {
-						Err(Failed) => Chat.answered
-						Ok(steps) =>
-							match Retire.carry_out!(steps) {
-								Ok({}) => Chat.respond(
-									200,
-									[],
-									[],
-								)
-								Err(Failed) => Chat.answered
-							}
-					}
-			}
-	}
-}
 
 ## The request, its path (`sub`) the text handle! checked.
 dispatch! : Chat.Request, Str => Chat.Answer
@@ -155,7 +118,7 @@ not_found_page! = |
 	what,
 	back,
 |
-	match load_viewer!(who) {
+	match Members.load_viewer!(who) {
 		Ok(viewer) => Chat.respond(
 			404,
 			html,
@@ -267,10 +230,10 @@ presence! = |who|
 ## a link to its DM with the member.
 came_online! : Who => Try({}, [Failed])
 came_online! = |who| {
-	me = load_uid!({})?
-	all = load_accounts!(who)?
-	name = fail_if_unreadable!(Accounts.name(all, me))?
-	roster = fail_if_unreadable!(Accounts.authorized(all))?
+	me = Members.load_uid!({})?
+	all = Members.load_accounts!(who)?
+	name = Members.fail_if_unreadable!(Accounts.name(all, me))?
+	roster = Members.fail_if_unreadable!(Accounts.authorized(all))?
 	online = JsonOut.object([
 		("kind", JsonOut.string("user-online")),
 		("user_id", JsonOut.string(me.to_str())),
@@ -295,535 +258,7 @@ came_online! = |who| {
 ## posting one to chat, the writes (a new doc, a save, a message saved to
 ## the reading list), the live preview, then the read pages.
 docs! : Chat.Request, Str => Chat.Answer
-docs! = |req, rest|
-	if rest == "/post" {
-		post_doc!(req)
-	} else if rest == "/new" {
-		new_doc!(req)
-	} else if rest == "/save" {
-		save_doc!(req)
-	} else if rest == "/render" {
-		preview_doc!(req)
-	} else if rest == "/save_to_reading_list" {
-		save_to_reading_list!(req)
-	} else {
-		docs_read!(req, rest)
-	}
-
-## docsNew: a doc of the posted title, made empty, then its editor (303);
-## a GET, or no title, back to the docs.
-new_doc! : Chat.Request => Chat.Answer
-new_doc! = |req|
-	if req.method != Post {
-		Chat.redirect("/chat/docs".to_utf8())
-	} else {
-		body = Host.read_body!(Doc)
-		if body.status == Answered {
-			Chat.answered
-		} else {
-			match Form.field(body.bytes, "title") {
-				Malformed => Chat.malformed
-				Found(title) => create_doc!(ZigText.trim_str(title))
-				Missing => create_doc!("")
-			}
-		}
-	}
-
-## createUserDoc: the title's slug, one no doc has yet, made empty.
-create_doc! : Str => Chat.Answer
-create_doc! = |title|
-	if title == "" {
-		Chat.redirect("/chat/docs".to_utf8())
-	} else {
-		match load_uid!({}) {
-			Err(Failed) => Chat.answered
-			Ok(me) =>
-				match unused_slug!(me, Docs.slug_of_title(title)) {
-					Err(Failed) => Chat.answered
-					Ok(slug) =>
-						match Paths.doc_path(me, slug) {
-							# A slug of 80 suffixed past 80 (docPath's InvalidDocSlug).
-							Err(NotASlug) => Chat.respond(
-								500,
-								[],
-								"The doc cannot be made: InvalidDocSlug.\n".to_utf8(),
-							)
-							Ok(path) =>
-								match Files.write!(path, []) {
-									Err(Failed) => Chat.answered
-									Ok({}) => {
-										doc_touched!(me, slug)
-										Chat.redirect("/chat/docs/${slug}".to_utf8())
-									}
-								}
-						}
-				}
-		}
-	}
-
-## uniqueDocSlug: `base` unless a doc has it or a docs route does, else
-## the first of `base-2` to `base-999` no doc has; past those, `base`.
-unused_slug! : Uid, Str => Try(Str, [Failed])
-unused_slug! = |me, base|
-	if [
-		"list",
-		"new",
-		"save",
-		"render",
-		"post",
-	].contains(base) {
-		suffixed_slug!(
-			me,
-			base,
-			2,
-		)
-	} else {
-		match doc_there!(me, base) {
-			Err(Failed) => Err(Failed)
-			Ok(Free) => Ok(base)
-			Ok(Taken) => suffixed_slug!(
-				me,
-				base,
-				2,
-			)
-		}
-	}
-
-## `base-n`, or the next, up to 999.
-suffixed_slug! : Uid, Str, U64 => Try(Str, [Failed])
-suffixed_slug! = |
-	me,
-	base,
-	n,
-|
-	if n >= 1000 {
-		Ok(base)
-	} else {
-		candidate = "${base}-${n.to_str()}"
-		match doc_there!(me, candidate) {
-			Err(Failed) => Err(Failed)
-			Ok(Free) => Ok(candidate)
-			Ok(Taken) => suffixed_slug!(
-				me,
-				base,
-				n + 1,
-			)
-		}
-	}
-
-## docFileExists: whether the member has a doc `slug` (a name no slug
-## names none).
-doc_there! : Uid, Str => Try([Taken, Free], [Failed])
-doc_there! = |me, slug|
-	match Paths.doc_path(me, slug) {
-		Err(NotASlug) => Ok(Free)
-		Ok(path) =>
-			match Files.stat!(path) {
-				Ok(_) => Ok(Taken)
-				Err(Missing) => Ok(Free)
-				Err(Failed) => Err(Failed)
-			}
-	}
-
-## docsSave: a doc's body replaced (the editor's autosave), then 204.
-## **A SAVE SAYS WHAT IT SAVES** (metal-vmm QUEUE 172): no body field is
-## refused, never an emptied doc; a doc not there is a 404, never made.
-save_doc! : Chat.Request => Chat.Answer
-save_doc! = |req|
-	if req.method != Post {
-		Chat.not_allowed(Post)
-	} else {
-		body = Host.read_body!(Doc)
-		if body.status == Answered {
-			Chat.answered
-		} else {
-			match Form.field(body.bytes, "slug") {
-				Malformed => Chat.malformed
-				Found(slug) => save_slug!(body.bytes, ZigText.trim_str(slug))
-				Missing => save_slug!(body.bytes, "")
-			}
-		}
-	}
-
-## The save of doc `slug`, its text the form's `body`.
-save_slug! : List(U8), Str => Chat.Answer
-save_slug! = |form, slug|
-	match load_uid!({}) {
-		Err(Failed) => Chat.answered
-		Ok(me) =>
-			match Paths.doc_path(me, slug) {
-				Err(NotASlug) => refuse("bad slug\n")
-				Ok(path) =>
-					match Form.field(form, "body") {
-						Malformed => Chat.malformed
-						Missing => refuse("not saved: no body\n")
-						Found(text) =>
-							match Files.stat!(path) {
-								Err(Missing) => Chat.respond(
-									404,
-									[],
-									"no such doc\n".to_utf8(),
-								)
-								Err(Failed) => Chat.answered
-								Ok(_) =>
-									match Files.write!(path, text.to_utf8()) {
-										Err(Failed) => Chat.answered
-										Ok({}) => {
-											doc_touched!(me, slug)
-											Chat.respond(
-												204,
-												[],
-												[],
-											)
-										}
-									}
-							}
-					}
-			}
-	}
-
-## docsRender: posted markdown as the live preview renders it, the same
-## processor a message's; hostile markdown is its placeholder, counted.
-preview_doc! : Chat.Request => Chat.Answer
-preview_doc! = |req|
-	if req.method != Post {
-		Chat.not_allowed(Post)
-	} else {
-		body = Host.read_body!(Doc)
-		if body.status == Answered {
-			Chat.answered
-		} else {
-			match Form.field(body.bytes, "body") {
-				Malformed => Chat.malformed
-				Found(md) => preview!(md)
-				Missing => preview!("")
-			}
-		}
-	}
-
-## `md` rendered for the preview.
-preview! : Str => Chat.Answer
-preview! = |md| {
-	rendered = Host.render_preview!(md.to_utf8())
-	match rendered.status {
-		Failed => Chat.answered
-		Rendered => Chat.respond(
-			200,
-			html,
-			rendered.html,
-		)
-	}
-}
-
-## docsSaveToReadingList: a chat message, as its saver saw it, appended to
-## their reading list with the way back to it, then 204; a list at its
-## cap is the client's 413.
-save_to_reading_list! : Chat.Request => Chat.Answer
-save_to_reading_list! = |req|
-	if req.method != Post {
-		Chat.not_allowed(Post)
-	} else {
-		body = Host.read_body!(Doc)
-		if body.status == Answered {
-			Chat.answered
-		} else {
-			fields = List.map(
-				[
-					"conv",
-					"sid",
-					"id",
-					"from",
-					"at",
-					"body",
-					"note",
-				],
-				|name| Form.field(body.bytes, name),
-			)
-			if fields.contains(Malformed) {
-				Chat.malformed
-			} else {
-				texts = List.map(
-					fields,
-					|f|
-						match f {
-							Found(t) => t
-							_ => ""
-						},
-				)
-				match texts {
-					[
-						conv,
-						sid,
-						id,
-						from,
-						at,
-						md,
-						note,
-					] => saved_message!({
-						conv: ZigText.trim_str(conv),
-						sid: ZigText.trim_str(sid),
-						id: ZigText.trim_str(id),
-						from,
-						at,
-						md,
-						note,
-					})
-					_ => crash "save_to_reading_list!: seven fields asked, not seven answered"
-				}
-			}
-		}
-	}
-
-## The saved message appended; one missing a place or a body refused.
-saved_message! : {
-	conv : Str,
-	sid : Str,
-	id : Str,
-	from : Str,
-	at : Str,
-	md : Str,
-	note : Str,
-} => Chat.Answer
-saved_message! = |m|
-	if m.conv == "" or m.sid == "" or m.id == "" or m.md == "" {
-		refuse("missing field\n")
-	} else {
-		match load_uid!({}) {
-			Err(Failed) => Chat.answered
-			Ok(me) => {
-				url = "${ChatUrl.feed_conv(m.conv).to_str()}/${m.sid}#msg-${m.id}"
-				entry = Docs.reading_entry({
-					note: m.note,
-					from: m.from,
-					at: m.at,
-					url,
-					body: m.md,
-				}).to_utf8()
-				path = Paths.reading_list_path(me)
-				# **A DOCUMENT THAT WILL NOT READ IS NOT AN EMPTY DOCUMENT**:
-				# the write replaces it with what was read and the entry.
-				stored = match Files.read_bytes!(path) {
-					Ok(bytes) => Ok(bytes)
-					Err(Missing) => Ok([])
-					Err(Failed) => Err(Failed)
-				}
-				match stored {
-					Err(Failed) => Chat.answered
-					Ok(before) =>
-						if List.len(before) + List.len(entry) > Limits.reading_list_bytes {
-							Chat.respond(
-								413,
-								[],
-								"not saved: the reading list is full\n".to_utf8(),
-							)
-						} else {
-							match Files.write!(path, List.concat(before, entry)) {
-								Err(Failed) => Chat.answered
-								Ok({}) => {
-									doc_touched!(me, "reading-list")
-									Chat.respond(
-										204,
-										[],
-										[],
-									)
-								}
-							}
-						}
-				}
-			}
-		}
-	}
-
-## publishDocRecent: the member's own recent feed told of doc `slug`,
-## made or saved now.
-doc_touched! : Uid, Str => {}
-doc_touched! = |me, slug|
-	Host.publish!(
-		BusKey.recent(me).bytes(),
-		Docs.recent_frame(Time.rfc3339(Host.now!({})), slug),
-	)
-
-## **THE DOCS' READ PAGES** (docs.zig `handle`, metal-vmm QUEUE 289), each
-## the member's own, never another's: the landing, the list's JSON, a doc's
-## raw markdown, its editor. One segment after /docs: a nested one is a 404.
-docs_read! : Chat.Request, Str => Chat.Answer
-docs_read! = |req, rest|
-	match load_uid!({}) {
-		Err(Failed) => Chat.answered
-		Ok(me) =>
-			if rest == "" or rest == "/" {
-				docs_landing!(me)
-			} else {
-				seg = rest.drop_prefix("/")
-				if seg == "list" {
-					if req.method != Get Chat.not_allowed(Get) else docs_list!(me)
-				} else if seg.contains("/") {
-					Chat.not_found
-				} else if seg.ends_with(".md") {
-					raw_doc!(me, seg.drop_suffix(".md"))
-				} else {
-					docs_editor!(me, ZigText.trim_str(seg))
-				}
-			}
-	}
-
-## The member's docs, sorted by slug (a folder not there holds none).
-## `Failed` when it would not list.
-load_docs! : Uid => Try(List({ slug : Str, path : Paths.ChatPath }), [Failed])
-load_docs! = |me|
-	match Files.list!(Paths.docs_folder(me)) {
-		Ok(listed) => Ok(Paths.docs(me, listed.entries))
-		Err(Missing) => Ok([])
-		Err(Failed) => Err(Failed)
-	}
-
-## **THE DOC TOUCHED LAST** (mostRecentDocSlug), the landing's 303, a
-## reading list just saved among them; with none, the editor with nothing
-## open.
-docs_landing! : Uid => Chat.Answer
-docs_landing! = |me|
-	match load_docs!(me) {
-		Err(Failed) => Chat.answered
-		Ok(docs) =>
-			match last_touched!(docs, Err(None)) {
-				Err(Failed) => Chat.answered
-				Ok(Ok(last)) => Chat.redirect("/chat/docs/${last.slug}".to_utf8())
-				Ok(Err(None)) => docs_page!(sorted_slugs(docs), Nothing)
-			}
-	}
-
-## Of `docs`, sorted by slug, the one changed last, the first by name of
-## a tie (a folder's order differs by machine), against `best` so far; one
-## gone since the listing is passed over.
-last_touched! : List({ slug : Str, path : Paths.ChatPath }),
-Try({ slug : Str, mtime : I64 }, [None]) => Try(
-	Try({ slug : Str, mtime : I64 }, [None]),
-	[Failed],
-)
-last_touched! = |docs, best|
-	match docs {
-		[] => Ok(best)
-		[doc, .. as more] =>
-			match Files.stat!(doc.path) {
-				Err(Failed) => Err(Failed)
-				Err(Missing) => last_touched!(more, best)
-				Ok(st) =>
-					match best {
-						Ok(b) if b.mtime >= st.mtime => last_touched!(more, best)
-						_ => last_touched!(more, Ok({ slug: doc.slug, mtime: st.mtime }))
-					}
-			}
-	}
-
-## The slugs of `docs`, sorted as load_docs! sorts them (listUserDocs' order).
-sorted_slugs : List({ slug : Str, path : Paths.ChatPath }) -> List(Str)
-sorted_slugs = |docs| List.map(docs, |d| d.slug)
-
-## docsList: the member's docs as JSON, for an API client.
-docs_list! : Uid => Chat.Answer
-docs_list! = |me|
-	match load_docs!(me) {
-		Err(Failed) => Chat.answered
-		Ok(docs) => Chat.respond(
-			200,
-			json,
-			Docs.list_json(me.to_str(), sorted_slugs(docs)),
-		)
-	}
-
-## serveRawDoc: a doc's markdown as stored. **AN ERROR IS NOT "NO SUCH
-## DOC"** (metal-vmm QUEUE 114): a name no slug is the Zig's 500, saying so.
-raw_doc! : Uid, Str => Chat.Answer
-raw_doc! = |me, slug|
-	match Paths.doc_path(me, slug) {
-		Err(NotASlug) => Chat.respond(
-			500,
-			[],
-			"The doc cannot be read: InvalidDocSlug.\n".to_utf8(),
-		)
-		Ok(path) =>
-			match Files.read_bytes!(path) {
-				Ok(bytes) => Chat.respond(
-					200,
-					"text/markdown; charset=utf-8".to_utf8(),
-					bytes,
-				)
-				Err(Missing) => Chat.not_found
-				Err(Failed) => Chat.answered
-			}
-	}
-
-## renderDocsEditor: the editor with `slug` open; one no slug, or not
-## among the member's docs, is back to the bare editor (303).
-docs_editor! : Uid, Str => Chat.Answer
-docs_editor! = |me, slug|
-	match load_docs!(me) {
-		Err(Failed) => Chat.answered
-		Ok(docs) => {
-			slugs = sorted_slugs(docs)
-			if slug == "" {
-				docs_page!(slugs, Nothing)
-			} else {
-				match (Paths.doc_path(me, slug), slugs.contains(slug)) {
-					(Ok(path), Bool.True) => open_doc!(
-						slugs,
-						slug,
-						path,
-					)
-					_ => Chat.redirect("/chat/docs".to_utf8())
-				}
-			}
-		}
-	}
-
-## The editor with the doc at `path` open: its markdown (a doc gone since
-## the listing is empty) and that rendered, the preview's first paint.
-open_doc! : List(Str), Str, Paths.ChatPath => Chat.Answer
-open_doc! = |
-	slugs,
-	slug,
-	path,
-| {
-	stored = match Files.read_bytes!(path) {
-		Ok(bytes) => Ok(bytes)
-		Err(Missing) => Ok([])
-		Err(Failed) => Err(Failed)
-	}
-	match stored {
-		Err(Failed) => Chat.answered
-		Ok(markdown) => {
-			rendered = Host.render!(markdown)
-			match rendered.status {
-				Failed => Chat.answered
-				Rendered => docs_page!(
-					slugs,
-					Doc({
-						slug,
-						markdown,
-						rendered: Chrome.rendered(rendered.html),
-					}),
-				)
-			}
-		}
-	}
-}
-
-## The docs page for the member, `open` among their `slugs`.
-docs_page! : List(Str), Docs.Open => Chat.Answer
-docs_page! = |slugs, open|
-	match load_viewer!(Unasked) {
-		Err(Failed) => Chat.answered
-		Ok(viewer) => Chat.respond(
-			200,
-			html,
-			Docs.editor({
-				src: Chrome.src_in(Host.srcs!({})),
-				viewer,
-				slugs,
-				open,
-			}).bytes(),
-		)
-	}
+docs! = |req, rest| if rest == "/post" post_doc!(req) else Docs.docs!(req, rest)
 
 ## **A MEMBER'S OWN STREAM** (metal-vmm QUEUE 286): their feed, their
 ## notifications or their sidebar, on the bus key `key` makes of their uid,
@@ -833,7 +268,7 @@ member_stream! = |req, key|
 	if req.method != Get {
 		Chat.not_allowed(Get)
 	} else {
-		match load_uid!({}) {
+		match Members.load_uid!({}) {
 			Ok(me) => Chat.stream(key(me).bytes())
 			Err(Failed) => Chat.answered
 		}
@@ -934,7 +369,7 @@ AtTopic : {
 ## is nothing saved. Read whole each time: no cache.
 serve_saved! : Route.R => Chat.Answer
 serve_saved! = |route|
-	match load_uid!({}) {
+	match Members.load_uid!({}) {
 		Err(Failed) => Chat.answered
 		Ok(me) =>
 			match Files.read_bytes!(Paths.reading_list_path(me)) {
@@ -1017,145 +452,6 @@ serve_page_or_raw! = |
 		match Files.serve_file!(Paths.transcript_path({ key: found.key, topic: route.topic })) {
 			Serving => Chat.served_plain
 			NotServing => Chat.not_found
-		}
-	}
-
-## **AN UPLOAD'S POST** (chat_upload `handleUpload`, metal-vmm QUEUE 292):
-## the form read and its file's type sniffed by the host, which holds the
-## bytes; then here, in the Zig's order, a type the chat takes not, a file
-## past its kind's cap, the member's allowance, the file stored, and the
-## answer the compose box reads.
-post_upload! : Chat.Request, Route.R, AtTopic => Chat.Answer
-post_upload! = |
-	req,
-	route,
-	found,
-|
-	if req.method != Post {
-		Chat.not_allowed(Post)
-	} else {
-		form = Host.read_upload!({})
-		match form.status {
-			Answered => Chat.answered
-			NoFile => {
-				Host.refuse_upload!(Malformed, "no file\n".to_utf8())
-				Chat.answered
-			}
-			Unsupported => Chat.respond(
-				415,
-				[],
-				Upload.unsupported.to_utf8(),
-			)
-			Read =>
-				match Upload.kind_of(form.ext) {
-					Err(NotTaken) => crash "post_upload!: the host sniffed a type not taken"
-					Ok(kind) =>
-						if form.size > kind.cap {
-							Host.refuse_upload!(
-								TooLarge,
-								Upload.too_large({ noun: kind.noun, cap: kind.cap }).to_utf8(),
-							)
-							Chat.answered
-						} else {
-							keep_upload!(
-								form,
-								kind.name,
-								{ key: found.key, topic: route.topic },
-							)
-						}
-				}
-		}
-	}
-
-## The allowance spent on the file, then the file stored and its answer.
-keep_upload! : {
-	size : U64,
-	ext : List(U8),
-	filename : List(U8),
-	status : _,
-},
-Str,
-Paths.TopicAt => Chat.Answer
-keep_upload! = |
-	form,
-	kind,
-	at,
-|
-	match Host.reserve_upload!(form.size) {
-		Failed => Chat.answered
-		Refused => Chat.respond(
-			403,
-			[],
-			Upload.allowance_spent.to_utf8(),
-		)
-		Reserved => {
-			stored = Host.store_upload!(Paths.uploads_folder(at).bytes(), form.ext)
-			name = Str.from_utf8_lossy(stored.name)
-			match stored.status {
-				Failed => Chat.answered
-				Stored => Chat.respond(
-					200,
-					json,
-					Upload.stored_answer({
-						url: "${Paths.ConvKey.base(at.key)}/${at.topic}/uploads/${name}",
-						filename: form.filename,
-						kind,
-					}),
-				)
-			}
-		}
-	}
-
-## **AN UPLOAD SERVED** (chat_upload `serveUpload`, metal-vmm QUEUE 291):
-## a GET's or a HEAD's, of a name an upload has, typed by it; whole, or the
-## range asked for, or the 416 for one that cannot be. The host serves the
-## bytes (Host.serve_upload!).
-serve_upload! : Chat.Request, Route.R, AtTopic => Chat.Answer
-serve_upload! = |
-	req,
-	route,
-	found,
-|
-	if req.method != Get and req.method != Head {
-		Chat.not_allowed(Get)
-	} else {
-		match Upload.content_type(route.rest) {
-			Err(NotAnUpload) => Chat.not_found
-			Ok(content_type) => {
-				path = Paths.upload_path({ key: found.key, topic: route.topic }, route.rest)
-				match Files.stat!(path) {
-					Err(Missing) => Chat.not_found
-					Err(Failed) => Chat.answered
-					Ok(st) => {
-						part = match Host.read_header!("range".to_utf8()) {
-							[] => Whole({ first: 0, last: 0 })
-							[asked, ..] =>
-								match Upload.range(asked, st.size) {
-									Ok(r) => Range(r)
-									Err(Unsatisfiable) => Unsatisfiable({ first: 0, last: 0 })
-								}
-						}
-						(kind, r) = match part {
-							Whole(at) => (Whole, at)
-							Range(at) => (Range, at)
-							Unsatisfiable(at) => (Unsatisfiable, at)
-						}
-						served = Host.serve_upload!({
-							first: r.first,
-							last: r.last,
-							size: st.size,
-							content_type: content_type.to_utf8(),
-							path: path.bytes(),
-							part: kind,
-						})
-						match served {
-							Served => Chat.answered
-							# Gone since its stat: nothing was answered.
-							Gone => Chat.not_found
-						}
-					}
-				}
-			}
 		}
 	}
 
@@ -1266,21 +562,13 @@ serve_topic! = |
 	match route.tail {
 		# An upload and the bundle (metal-vmm QUEUE 291): the Roc decides,
 		# the host serves the bytes.
-		Uploads => serve_upload!(
-			req,
-			route,
-			found,
-		)
+		Uploads => Upload.serve!(req, { at: { key: found.key, topic: route.topic }, file: route.rest })
 		Download => serve_download!(
 			req,
 			route,
 			found,
 		)
-		Upload => post_upload!(
-			req,
-			route,
-			found,
-		)
+		Upload => Upload.post!(req, { key: found.key, topic: route.topic })
 		# The topic's stream (metal-vmm QUEUE 286): its key and transcript
 		# the Roc's, the backlog's replay and the live stream the host's.
 		Stream =>
@@ -1363,12 +651,12 @@ serve_topic! = |
 find! : Paths.ConvKey => Try((Chat.Conv, Who), [NotYours, Failed])
 find! = |key| {
 	bytes = key.bytes()
-	me = load_uid!({})?
+	me = Members.load_uid!({})?
 	match key {
 		Dm(pair) =>
 			match Conversation.dm_other(pair, me) {
 				Ok(other) =>
-					match load_accounts!(Unasked) {
+					match Members.load_accounts!(Unasked) {
 						Ok(all) =>
 							if Accounts.has_account(all, other) {
 								Ok((
@@ -1406,88 +694,8 @@ find! = |key| {
 	}
 }
 
-## **THE ACCOUNTS ARE ASKED OF THE HOST AT MOST ONCE A REQUEST**
-## (Host.list_accounts! lists every one, two reads each): `Known` once asked,
-## handed down to whatever looks one up next; `Unasked` until a route first
-## needs them.
-Who : [Known(List(Accounts.Account)), Unasked]
-
-## The accounts: those already asked, or the host's now. `Failed` when they
-## could not be listed: the request has failed, and no lookup is made on
-## nothing. An account that would not read is among them, and fails the
-## request only when a lookup needs it (`fail_if_unreadable!`): never "no such account".
-load_accounts! : Who => Try(List(Accounts.Account), [Failed])
-load_accounts! = |who|
-	match who {
-		Known(all) => Ok(all)
-		Unasked => {
-			got = Host.list_accounts!({})
-			match got.status {
-				# **EACH ID AND NAME DECODED HERE, AT THE DOOR**
-				# (Accounts.from_host): one that is no uid fails the request
-				# (NotAUid, about the account); a name that is not UTF-8 is
-				# that account's alone, listed as unreadable.
-				Found =>
-					match List.map_try(got.accounts, Accounts.from_host) {
-						Ok(all) => Ok(all)
-						Err(NotAUid(bad)) => {
-							Host.fail!(NotAUid, bad)
-							Err(Failed)
-						}
-					}
-				Failed => Err(Failed)
-			}
-		}
-	}
-
-## The member's name (getUserName of their own id), from the accounts.
-## `Failed` when it would not read (the request has failed with its error).
-load_viewer! : Who => Try(Str, [Failed])
-load_viewer! = |who| {
-	me = load_uid!({})?
-	match load_accounts!(who) {
-		Ok(all) => fail_if_unreadable!(Accounts.name(all, me))
-		Err(Failed) => Err(Failed)
-	}
-}
-
-## **THE MEMBER'S ID, DECODED WHERE THE HOST HANDS IT** (Host.me!): a
-## session is signed only for an id a counter made, so one that is no
-## canonical uid fails the request (NotAUid, about the id), and `Failed`.
-load_uid! : {} => Try(Uid, [Failed])
-load_uid! = |{}| {
-	bytes = Host.me!({})
-	match Uid.from_utf8(bytes) {
-		Ok(uid) => Ok(uid)
-		Err(NotAUid) => {
-			Host.fail!(NotAUid, bytes)
-			Err(Failed)
-		}
-	}
-}
-
-## A lookup's answer, or, when it needed an account's read that failed, the
-## request failed with that read's error (`fail_unreadable!`) and `Failed`.
-fail_if_unreadable! : Try(a, Accounts.Unreadable) => Try(a, [Failed])
-fail_if_unreadable! = |looked|
-	match looked {
-		Ok(answer) => Ok(answer)
-		Err(why) => {
-			fail_unreadable!(why)
-			Err(Failed)
-		}
-	}
-
-## **THE REQUEST FAILS WITH THE ACCOUNT'S OWN ERROR**: a lookup needed
-## account `id`'s kind or name, which `load_accounts!` listed as unreadable, so
-## the host fails the request with the error that read failed with, as the
-## Zig's own read of it did.
-fail_unreadable! : Accounts.Unreadable => {}
-fail_unreadable! = |why|
-	match why {
-		KindUnreadable(id) => Host.fail!(KindUnreadable, id.to_str().to_utf8())
-		NameUnreadable(id) => Host.fail!(NameUnreadable, id.to_str().to_utf8())
-	}
+## Who is asking, and the accounts once asked (Members.roc).
+Who : Members.Who
 
 ## Channel `name`'s members, as its member file lists them (Paths's
 ## parse); none when there is no such channel. **A MALFORMED ONE FAILS THE
@@ -1613,10 +821,10 @@ load_title! : Paths.ConvKey, Who => Try(Str, [Failed])
 load_title! = |key, who|
 	match key {
 		Dm(pair) =>
-			match load_accounts!(who) {
+			match Members.load_accounts!(who) {
 				Ok(all) => {
-					other = pair.partner(load_uid!({})?)
-					match fail_if_unreadable!(Accounts.name(all, other)) {
+					other = pair.partner(Members.load_uid!({})?)
+					match Members.fail_if_unreadable!(Accounts.name(all, other)) {
 						Ok(name) => Ok(Conversation.dm_title(name, other))
 						Err(Failed) => Err(Failed)
 					}
@@ -1636,7 +844,7 @@ pin! = |
 	topic,
 	pin,
 | {
-	path = Paths.pinned_path(load_uid!({})?, key)
+	path = Paths.pinned_path(Members.load_uid!({})?, key)
 	match Files.read!(path) {
 		Ok(stored) => write_pins!(
 			path,
@@ -1678,7 +886,7 @@ write_pins! = |
 ## and nothing after it is written. A topic with no name records nothing.
 bookmark! : Paths.ConvKey, Str => Try({}, [Failed])
 bookmark! = |key, topic| {
-	me = load_uid!({})?
+	me = Members.load_uid!({})?
 	if topic.is_empty() {
 		Ok({})
 	} else {
@@ -1755,7 +963,7 @@ store_reaction! = |
 	topic_at,
 	r,
 |
-	match (load_viewer!(who), load_uid!({})) {
+	match (Members.load_viewer!(who), Members.load_uid!({})) {
 		(Ok(name), Ok(uid)) => {
 			match count_messages!(topic_at) {
 				Err(Failed) => Failed
@@ -1793,7 +1001,7 @@ store_reaction! = |
 	}
 
 html : List(U8)
-html = Str.to_utf8("text/html; charset=utf-8")
+html = Chat.html
 
 ## /chat/links, by any method, as the Zig had it: the member's own, or the
 ## stub; nothing below it.
@@ -1802,7 +1010,7 @@ serve_links! = |rest|
 	if rest != [] {
 		Chat.not_found
 	} else {
-		match (load_viewer!(Unasked), load_uid!({})) {
+		match (Members.load_viewer!(Unasked), Members.load_uid!({})) {
 			(Err(Failed), _) | (Ok(_), Err(Failed)) => Chat.answered
 			(Ok(viewer), Ok(me)) => {
 				src = Chrome.src_in(Host.srcs!({}))
@@ -1874,10 +1082,10 @@ load_recent! : {} => Try(
 	[Failed],
 )
 load_recent! = |{}| {
-	me = load_uid!({})?
-	accounts = load_accounts!(Unasked)?
-	viewer = fail_if_unreadable!(Accounts.name(accounts, me))?
-	roster = fail_if_unreadable!(Accounts.roster_named(accounts))?
+	me = Members.load_uid!({})?
+	accounts = Members.load_accounts!(Unasked)?
+	viewer = Members.fail_if_unreadable!(Accounts.name(accounts, me))?
+	roster = Members.fail_if_unreadable!(Accounts.roster_named(accounts))?
 	dms = List.keep_if(roster, |u| u.id != me)
 		|> List.map(
 			|u| {
@@ -2061,7 +1269,7 @@ gather_docs! = |
 				kind: Doc,
 				uid: me.to_str().to_utf8(),
 				key: doc.slug.to_utf8(),
-				label: Recent.doc_title(doc.slug).to_utf8(),
+				label: Docs.title(doc.slug).to_utf8(),
 			}
 			rows = by_file_time!(doc.path, row)?
 			gather_docs!(
@@ -2122,7 +1330,7 @@ serve_feed! = |which, rest|
 	if rest != [] {
 		Chat.not_found
 	} else {
-		match (load_viewer!(Unasked), load_uid!({})) {
+		match (Members.load_viewer!(Unasked), Members.load_uid!({})) {
 			(Err(Failed), _) | (Ok(_), Err(Failed)) => Chat.answered
 			(Ok(viewer), Ok(me)) => {
 				# A feed that failed is the request's failure; the page made
@@ -2182,7 +1390,7 @@ serve_landing! = |route, key|
 				match load_title!(key, who) {
 					Err(Failed) => Chat.answered
 					Ok(title) =>
-						match load_viewer!(who) {
+						match Members.load_viewer!(who) {
 							Ok(viewer) => Chat.respond(
 								200,
 								html,
@@ -2247,14 +1455,14 @@ serve_topic_page! = |route, at|
 ## THAT WILL NOT READ IS NEVER NO PINS.**
 load_sidebar! : Str, AtTopic => Try((Str, Pages.Sidebar), [Failed])
 load_sidebar! = |topic, at| {
-	uid = load_uid!({})?
-	match load_accounts!(at.who) {
+	uid = Members.load_uid!({})?
+	match Members.load_accounts!(at.who) {
 		Err(Failed) => Err(Failed)
 		Ok(all) =>
-			match fail_if_unreadable!(Accounts.name(all, uid)) {
+			match Members.fail_if_unreadable!(Accounts.name(all, uid)) {
 				Err(Failed) => Err(Failed)
 				Ok(viewer) =>
-					match fail_if_unreadable!(Accounts.authorized(all)) {
+					match Members.fail_if_unreadable!(Accounts.authorized(all)) {
 						Err(Failed) => Err(Failed)
 						Ok(roster) => {
 							others = List.drop_if(roster, |u| u.id == uid)
@@ -2353,7 +1561,7 @@ sidebar_of = |
 	}
 
 json : List(U8)
-json = Str.to_utf8("application/json; charset=utf-8")
+json = Chat.json
 
 ## **THE HOST'S WELCOME** (login.zig `sendHostWelcome` as it was, metal-vmm
 ## QUEUE 279), **FOR A MEMBER MADE FROM NOW ON** (QUEUE 283): signup marks
@@ -2386,7 +1594,7 @@ hello! = |
 	host,
 	key,
 | {
-	name = fail_if_unreadable!(Accounts.name(accounts, host))?
+	name = Members.fail_if_unreadable!(Accounts.name(accounts, host))?
 	bytes = key.bytes()
 	conv = {
 		family: Dm,
@@ -2411,12 +1619,12 @@ hello! = |
 
 seed_welcome! : {} => Try(Who, [Failed])
 seed_welcome! = |{}| {
-	me = load_uid!({})?
+	me = Members.load_uid!({})?
 	match Host.welcome_pending!({}) {
 		Failed => Err(Failed)
 		None => Ok(Unasked)
 		Pending => {
-			accounts = load_accounts!(Unasked)?
+			accounts = Members.load_accounts!(Unasked)?
 			match List.keep_if(accounts, |a| a.id.to_str() == "1") {
 				[host, ..] if host.id != me => {
 					pair = Paths.pair_key(host.id, me)
@@ -2445,7 +1653,7 @@ seed_welcome! = |{}| {
 ## when it has no topic yet; with none, the empty /chat.
 resume! : Who => Chat.Answer
 resume! = |who|
-	match load_uid!({}) {
+	match Members.load_uid!({}) {
 		Err(Failed) => Chat.answered
 		Ok(me) => {
 			conv = ChatState.bookmark(Files.read!(Paths.last_conv_path(me)))
@@ -2459,7 +1667,7 @@ resume! = |who|
 					}
 				}
 				_ =>
-					match load_viewer!(who) {
+					match Members.load_viewer!(who) {
 						Ok(viewer) => Chat.respond(
 							200,
 							html,
@@ -2491,7 +1699,7 @@ resume_at! = |
 ## resumes it, and its topics.
 serve_conversations! : {} => Chat.Answer
 serve_conversations! = |{}|
-	match (load_roster!({}), load_uid!({})) {
+	match (load_roster!({}), Members.load_uid!({})) {
 		(Ok(members), Ok(me)) => Chat.respond(
 			200,
 			json,
@@ -2513,8 +1721,8 @@ serve_conversations! = |{}|
 ## (the request has failed with its error).
 load_roster! : {} => Try(List({ id : Uid, name : Str }), [Failed])
 load_roster! = |{}|
-	match load_accounts!(Unasked) {
-		Ok(all) => fail_if_unreadable!(Accounts.authorized(all))
+	match Members.load_accounts!(Unasked) {
+		Ok(all) => Members.fail_if_unreadable!(Accounts.authorized(all))
 		Err(Failed) => Err(Failed)
 	}
 
@@ -2601,7 +1809,7 @@ redirect_to_msg! = |id|
 			Str.to_utf8("#msg-"),
 			id,
 		])
-		match (load_uid!({}), load_roster!({})) {
+		match (Members.load_uid!({}), load_roster!({})) {
 			(Err(Failed), _) | (Ok(_), Err(Failed)) => Chat.answered
 			(Ok(me), Ok(members)) =>
 				match find_dm!(
@@ -2749,7 +1957,7 @@ make_topic! = |
 			Str.to_utf8("That topic already exists.\n"),
 		)
 	} else {
-		match load_viewer!(who) {
+		match Members.load_viewer!(who) {
 			Err(Failed) => Chat.answered
 			Ok(name) => {
 				dm = conv.family == Dm
@@ -2874,7 +2082,7 @@ receive_message! = |
 		} else {
 			match Form.field(body.bytes, "markdown") {
 				Malformed => Chat.malformed
-				Missing => refuse("not sent: no message (the form has no markdown field)\n")
+				Missing => Chat.refuse("not sent: no message (the form has no markdown field)\n")
 				Found(md) =>
 					match Form.field(body.bytes, "cid") {
 						Malformed => Chat.malformed
@@ -2897,13 +2105,6 @@ receive_message! = |
 		}
 	}
 
-refuse : Str -> Chat.Answer
-refuse = |why| Chat.respond(
-	400,
-	[],
-	Str.to_utf8(why),
-)
-
 ## What the send form carried: the message's `markdown` and the sender's
 ## client id `cid`. Named fields because both are text. It becomes
 ## a Draft once the message is judged and its author's name read.
@@ -2922,14 +2123,14 @@ store! = |
 	{ markdown: md, cid },
 |
 	if ZigText.trim(md.to_utf8()) == [] {
-		refuse("not sent: the message is empty\n")
+		Chat.refuse("not sent: the message is empty\n")
 	} else if Host.check_hostile!(
 		md.to_utf8(),
 		Str.to_utf8("not sent: malformed markdown — too much formatting; break it into smaller messages\n"),
 	) != Fine {
 		Chat.answered
 	} else {
-		match load_viewer!(who) {
+		match Members.load_viewer!(who) {
 			Err(Failed) => Chat.answered
 			Ok(name) =>
 				if conv.family == Dm and bookmark!(at.key, at.topic).is_err() {
@@ -3083,11 +2284,11 @@ post_doc! = |req|
 
 post_slug! : Str => Chat.Answer
 post_slug! = |slug|
-	match load_uid!({}) {
+	match Members.load_uid!({}) {
 		Err(Failed) => Chat.answered
 		Ok(me) =>
 			match Paths.doc_path(me, slug) {
-				Err(NotASlug) => refuse("bad slug\n")
+				Err(NotASlug) => Chat.refuse("bad slug\n")
 				Ok(path) =>
 					match Files.read_text!(path) {
 						Ok(text) => post_text!(me, text)
@@ -3106,24 +2307,24 @@ post_slug! = |slug|
 post_text! : Uid, Str => Chat.Answer
 post_text! = |me, md|
 	if ZigText.trim(md.to_utf8()) == [] {
-		refuse("doc is empty\n")
+		Chat.refuse("doc is empty\n")
 	} else if Host.check_hostile!(
 		md.to_utf8(),
 		Str.to_utf8("not posted: too much markdown formatting; break the doc up\n"),
 	) != Fine {
 		Chat.answered
 	} else {
-		match load_accounts!(Unasked) {
+		match Members.load_accounts!(Unasked) {
 			Err(Failed) => Chat.answered
 			Ok(accounts) =>
-				match fail_if_unreadable!(Accounts.authorized(accounts)) {
+				match Members.fail_if_unreadable!(Accounts.authorized(accounts)) {
 					Err(Failed) => Chat.answered
 					Ok(roster) =>
 						match List.keep_if(
 							roster,
 							|u| u.id != me and u.id.to_str() == default_partner(me),
 						) {
-							[] => refuse("no default chat partner available\n")
+							[] => Chat.refuse("no default chat partner available\n")
 							[partner, ..] => post_to!(
 								me,
 								Known(accounts),
@@ -3162,7 +2363,7 @@ post_to! = |
 		base: Conversation.dm_base(bytes),
 		members: Conversation.dm_members(bytes),
 	}
-	match load_viewer!(who) {
+	match Members.load_viewer!(who) {
 		Err(Failed) => Chat.answered
 		Ok(name) =>
 			match append_message!(
@@ -3220,7 +2421,7 @@ append_message! = |
 | append_message_by!(
 	conv,
 	who,
-	load_uid!({})?,
+	Members.load_uid!({})?,
 	draft,
 )
 
@@ -3294,7 +2495,7 @@ append_message_by! = |
 						# the store only sends and appends. A DM's accounts are
 						# the request's already (`find!`); asked here only were
 						# they not, before anything is stored.
-						named = if topic_at.key.kind() == Dm load_accounts!(who) else Ok([])
+						named = if topic_at.key.kind() == Dm Members.load_accounts!(who) else Ok([])
 						match (named, decode_members!(conv.members)) {
 							(Ok(all), Ok(members)) => {
 								frame = Frame.message({
