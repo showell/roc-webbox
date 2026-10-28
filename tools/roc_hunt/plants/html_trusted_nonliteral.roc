@@ -18,6 +18,12 @@ Plants := [].{
 	fires_passed : List(Str) -> List(Html)
 	fires_passed = |names| List.map(names, Html.trusted)
 
+	fires_open_attribute : Str -> Html
+	fires_open_attribute = |href| Html.join([Html.trusted("<a href=\""), Html.text(href), Html.trusted("\">")])
+
+	quiet_tag : Str -> Html
+	quiet_tag = |href| Html.tag({ name: "a", attrs: [Attr("href", href)], inner: Html.empty })
+
 	quiet_literal : Html
 	quiet_literal = Html.trusted("<p>")
 

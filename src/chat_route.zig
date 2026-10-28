@@ -93,7 +93,7 @@ pub const Method = enum(u8) {
 };
 
 /// Chat.roc's `Request`'s `area`: the path is under /channel or /chat.
-pub const Area = enum(u8) { channel, chat };
+pub const Area = enum(u8) { channel, chat, retire };
 
 /// Chat.roc's `Sniff`: `forbid` when the answer says `nosniff`.
 pub const Sniff = enum(u8) { allow, forbid };
@@ -239,6 +239,21 @@ pub const Membership = enum(u8) { member, outsider };
 /// `failed` means the host has failed the request.
 pub const Done = enum(u8) { failed, ok };
 
+/// Host.roc's `retire_note!` kind (metal-vmm QUEUE 293): what a step of the
+/// admin retire's plan removes, as the report counts it.
+pub const RetireKind = enum(u8) {
+    channel_member,
+    dm,
+    ref_last_conv,
+    ref_last_session,
+    ref_pinned,
+    topic,
+    user,
+};
+
+/// Host.roc's `retire_remove!` what: one file, or a folder and all in it.
+pub const RetireRemoval = enum(u8) { file, tree };
+
 /// Host.roc's `welcome_pending!` answer (metal-vmm QUEUE 283): the member's
 /// welcome is pending, is not, or the look failed (the host has failed the
 /// request, or the aside).
@@ -260,6 +275,18 @@ pub const UploadPart = enum(u8) { range, unsatisfiable, whole };
 /// Host.roc's `serve_upload!` answer: the file gone since the Roc's look
 /// (nothing answered), or served.
 pub const UploadServed = enum(u8) { gone, served };
+
+/// Host.roc's `read_upload!` answer's `status` (metal-vmm QUEUE 292).
+pub const UploadRead = enum(u8) { answered, no_file, read, unsupported };
+
+/// Host.roc's `refuse_upload!` argument: which edge counter refuses it.
+pub const UploadRefusal = enum(u8) { malformed, too_large };
+
+/// Host.roc's `reserve_upload!` answer.
+pub const Reservation = enum(u8) { failed, refused, reserved };
+
+/// Host.roc's `store_upload!` answer's `status`.
+pub const UploadStored = enum(u8) { failed, stored };
 
 /// Host.roc's `count_dropped!`: what the chat dropped, counted, rather than
 /// fail the request for (metal-vmm QUEUE 267): a DM's new-topic announcement
@@ -314,6 +341,12 @@ comptime {
         Serving,
         UploadPart,
         UploadServed,
+        UploadRead,
+        UploadRefusal,
+        Reservation,
+        UploadStored,
+        RetireKind,
+        RetireRemoval,
         Dropped,
         Aside,
         AsideEnd,

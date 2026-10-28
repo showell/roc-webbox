@@ -631,7 +631,10 @@ end
 -- opaque) is made from bytes only by `escape`, or by `trusted`, which takes
 -- markup as written: so a call to `Html.trusted` whose argument is not a
 -- string literal with no interpolation (or `Html.trusted` passed as a
--- value, its argument unseen). `Html.host_markup` (the host's script srcs)
+-- value, its argument unseen), or a literal holding an odd number of `"`,
+-- which leaves an attribute's quotes open for a value to be spliced into: an
+-- element with attributes is `Html.tag`'s, its values always escaped.
+-- `Html.host_markup` (the host's rendered markdown)
 -- is called in chat/Chrome.roc alone (and Html.roc's expects), and `Html.twin_script_json` by the
 -- twins alone (chat/twin.roc is never in the tree).
 function html_trusted_nonliteral(tree)
@@ -649,9 +652,18 @@ function html_trusted_nonliteral(tree)
           local at = head(tree, a)
           if a <= #tree.text and tree.depth[a] == tree.depth[i] and (starts_with(at, "(e-string ") or starts_with(at, "(e-multiline-string ")) then
             literal = true
+            local quotes = 0
             for c in children(tree, a) do
-              if not starts_with(head(tree, c), "(e-string-part ") then literal = false end
+              local part = head(tree, c)
+              if not starts_with(part, "(e-string-part ") then literal = false end
+              local raw = between(part, "(raw \"", "\")") or ""
+              local k = find(raw, "\"")
+              while k ~= nil do
+                quotes = quotes + 1
+                k = find(raw, "\"", k + 1)
+              end
             end
+            if literal and quotes % 2 == 1 then push(found, where(tree, i) .. ": Html.trusted leaves an attribute open: build the element with Html.tag") end
           end
         end
         if not literal then push(found, where(tree, i) .. ": Html.trusted of no string literal") end
@@ -685,6 +697,91 @@ function bool_returns(tree)
     local name = between(head(tree, f.at), "(name \"", "\")") or ""
     if #kids > 0 and holds_bool(tree, kids[#kids]) and re_find(name, "^is_|_is_|^has_|_has_|^can_|_can_") == nil then
       push(found, where(tree, f.at) .. ": returns a Bool, and `" .. name .. "` is not a question's name")
+    end
+  end
+  return found
+end
+
+-- **A MODULE A READER MUST OPEN FOR ONE CALLER** (metal-vmm QUEUE 300;
+-- Steve: "We don't want to force folks to read 5 different modules to
+-- understand a code flow"): a module whose production references (a
+-- qualified `Module.name`, outside an `expect`) all come from one other
+-- module, `twin` counting as a caller, belongs with that caller, unless
+-- `kept_alone` names it with its reason. Only the trees' own modules are
+-- callees: a builtin (`Iter`, `List`) one module alone uses is no module to
+-- move. `trees` are the production trees and twin's.
+const kept_alone = {
+  -- The platform: the app's boundary, whoever calls it.
+  Chat = "the platform's types, the app's boundary",
+  Host = "the platform's hosted functions, the app's boundary",
+  -- A route whole: main's dispatch is its one caller, and the route's
+  -- flow is read in one module, not main's thousands of lines.
+  Docs = "the docs feature whole (/chat/docs): main only dispatches to it",
+  Upload = "an upload's route whole (POST and GET): main only dispatches to it",
+  Retire = "the admin retire whole (its own area): main only dispatches to it",
+  -- An effect kept apart from what it reads.
+  Last = "a topic's count and last message from its sidecar, effectful; main reads both through it, and Count (pure, the twin's) holds the rules",
+  -- A rule to audit alone.
+  SafeImg = "a security rule (which <img> a page may hold), auditable alone; its one caller is Feeds",
+  -- The plants' own (tools/roc_hunt/plants/single_caller/).
+  QuietKept = "a plant: allowlisted, so quiet",
+}
+
+-- `chat/platform/Host.roc` is `Host`.
+function module_of(path)
+  local parts = split(path, "/")
+  local base = parts[#parts]
+  return sub(base, 1, #base - #".roc")
+end
+
+-- The first `needle` in `s`, 1-based, or nil.
+function find_in_text(s, needle)
+  local i = 1
+  while i + #needle - 1 <= #s do
+    if sub(s, i, i + #needle - 1) == needle then return i end
+    i = i + 1
+  end
+  return nil
+end
+
+function single_caller(trees)
+  local callers = {}
+  local counts = {}
+  local first = {}
+  local own = {}
+  for tree in trees do
+    local expect_at = -1
+    local i = 1
+    while i <= #tree.text do
+      local d = tree.depth[i]
+      if expect_at >= 0 and d <= expect_at then expect_at = -1 end
+      own[module_of(tree.file[i])] = true
+      local t = head(tree, i)
+      if expect_at < 0 and starts_with(t, "(s-expect ") then expect_at = d end
+      if expect_at < 0 and starts_with(t, "(e-ident ") then
+        local raw = between(t, "(raw \"", "\")") or ""
+        local dot = find_in_text(raw, ".")
+        if dot ~= nil and dot > 1 then
+          local callee = sub(raw, 1, dot - 1)
+          local caller = module_of(tree.file[i])
+          if callee ~= caller and lower(sub(callee, 1, 1)) ~= sub(callee, 1, 1) then
+            if get(callers, callee) == nil then
+              callers[callee] = {}
+              counts[callee] = 0
+            end
+            callers[callee][caller] = true
+            counts[callee] = counts[callee] + 1
+          end
+        end
+      end
+      i = i + 1
+    end
+  end
+  local found = {}
+  for callee in sort(keys(callers)) do
+    local from = sort(keys(callers[callee]))
+    if #from == 1 and get(own, callee) ~= nil and get(kept_alone, callee) == nil then
+      push(found, callee .. ": single_caller: all " .. tostring(counts[callee]) .. " production references come from " .. from[1])
     end
   end
   return found
@@ -769,6 +866,16 @@ if arg("self_test", "") ~= "" then
     end
     if #wrong == before then print(name .. ": its " .. tostring(fires) .. " plants fire, and the quiet ones stay quiet") end
   end
+  -- single_caller's plants are a folder of modules, main and twin among them.
+  local folder = sort(glob("tools/roc_hunt/plants/single_caller/*.roc"))
+  local production = {}
+  for p in folder do if not ends_with(p, "/twin.roc") then push(production, p) end end
+  local said = join(single_caller({read_trees(production), read_trees({"tools/roc_hunt/plants/single_caller/twin.roc"})}), "\n")
+  if not contains(said, "FiresSolo: single_caller") then push(wrong, "single_caller: a plant did not fire: FiresSolo") end
+  for quiet in {"QuietShared", "QuietKept", "QuietTested", "Iter"} do
+    if contains(said, quiet .. ":") then push(wrong, "single_caller: a quiet plant fired: " .. quiet) end
+  end
+  if contains(said, "FiresSolo") and not contains(said, "Quiet") then print("single_caller: its plant fires, and the quiet ones stay quiet") end
   for w in wrong do print("FAIL " .. w) end
   if #wrong > 0 then fail(tostring(#wrong) .. " plants wrong") end
   local r = run({"shale", "cookbook:roc/stack.shale", "self_test=1"}, {timeout_ms = 300000, tail = 40})
@@ -787,5 +894,8 @@ else
     print("== " .. name .. ": " .. tostring(#found))
     for f in found do print("  " .. f) end
   end
+  local lone = single_caller({tree, read_trees({"chat/twin.roc"})})
+  print("== single_caller: " .. tostring(#lone))
+  for f in lone do print("  " .. f) end
   stack_hunt("glob=chat/**/*.roc")
 end

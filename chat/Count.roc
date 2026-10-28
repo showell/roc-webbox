@@ -1,7 +1,8 @@
 ## A TOPIC'S `.count` SIDECAR, AND WHEN IT IS BELIEVED (angry-gopher
 ## chat_count.zig): "<count> <size>\n", then "<offset> <uid>\n" where the
 ## last message begins and who sent it. The sidecar is a cache and the
-## transcript the truth: each rule here says when the cache may answer.
+## transcript the truth: each rule here says when the cache may answer (the
+## flow that asks them is Last.roc's `messages!`).
 import ZigText
 import Bytes
 import Transcript
@@ -21,8 +22,8 @@ Count := [].{
 	## that no number is given twice.
 	count_blocks : List(U8) -> U64
 	count_blocks = |raw| List.count_if(
-		Bytes.split_seq(raw, Transcript.sep),
-		|p| ZigText.trim(p) != [],
+		List.split_on_list(raw, Transcript.sep),
+		|p| Bytes.trim(p, Bytes.zig_spaces) != [],
 	)
 
 	## numberIn: the N of a `<topic>_<N>` id, or none when the id is not this
@@ -57,7 +58,7 @@ Count := [].{
 		if List.last(raw) != Ok('\n') {
 			Err(Malformed)
 		} else {
-			match Bytes.split_byte(raw, '\n') {
+			match List.split_on(raw, '\n') {
 				[
 					first,
 					second,
@@ -81,12 +82,8 @@ Count := [].{
 		}
 
 	## countText: what a send writes, nobody as `-`.
-	text : U64, U64, Last -> List(U8)
-	text = |
-		count,
-		size,
-		last,
-	| {
+	text : U64, { size : U64, last : Last } -> List(U8)
+	text = |count, { size, last }| {
 		head = Str.to_utf8("${U64.to_str(count)} ${U64.to_str(size)}\n")
 		match last {
 			Known(l) => List.join([
@@ -110,12 +107,12 @@ Count := [].{
 
 	## recordedAuthor: the record's author, nobody included, when it counted
 	## exactly this transcript, in blocks and in bytes.
-	recorded_author : Try(Counted, [Malformed]), U64, U64 -> Try(List(U8), [NotRecorded])
-	recorded_author = |
-		counted,
-		blocks,
-		size,
-	| match counted {
+	recorded_author : Try(Counted, [Malformed]),
+	{
+		blocks : U64,
+		size : U64,
+	} -> Try(List(U8), [NotRecorded])
+	recorded_author = |counted, { blocks, size }| match counted {
 		Ok(
 			{
 				count,
@@ -170,6 +167,7 @@ Count := [].{
 				Err(_) => Err(NotBelieved)
 			}
 		}
+
 }
 
 parse_last : List(U8) -> Last
@@ -184,7 +182,7 @@ parse_last = |line| match tokens(line) {
 
 ## std.mem.tokenizeScalar on a space: the runs between, none empty.
 tokens : List(U8) -> List(List(U8))
-tokens = |line| List.keep_if(Bytes.split_byte(line, ' '), |t| t != [])
+tokens = |line| List.keep_if(List.split_on(line, ' '), |t| t != [])
 
 no_uid : List(U8)
 no_uid = Str.to_utf8("-")

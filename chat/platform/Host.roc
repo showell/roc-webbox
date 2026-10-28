@@ -99,7 +99,7 @@ Host := [].{
 	## its mtime in whole seconds since the epoch (`Found`), nothing there
 	## (`Missing`), or a stat that failed, a folder among them (`Failed`: the
 	## request has failed). Missing and failed are two answers, as `read!`'s.
-	stat! : List(U8) => {
+	read_stat! : List(U8) => {
 		mtime : I64,
 		size : U64,
 		status : [
@@ -132,6 +132,39 @@ Host := [].{
 	## Remove the file (one not there is gone already); `Err(Failed)` when
 	## it failed.
 	remove! : List(U8) => Try({}, [Failed])
+
+	## **THE ADMIN RETIRE** (metal-vmm QUEUE 293), asked through the `Retire`
+	## area: how old is old (`days`), the names kept, one to a line, and now
+	## in unix seconds.
+	retire_asked! : {} => {
+		days : U64,
+		keep : List(U8),
+		now : I64,
+	}
+
+	## A step of the plan, said for the report: its kind and its name.
+	retire_note! : [
+		ChannelMember,
+		Dm,
+		RefLastConv,
+		RefLastSession,
+		RefPinned,
+		Topic,
+		User,
+	],
+	List(U8) => {}
+
+	## The file, or the folder and all in it, removed when the retire is
+	## confirmed (one not there is gone already); a dry run removes nothing.
+	## `Err(Failed)` when it failed: the confirm ends there.
+	retire_remove! : List(U8), [File, Tree] => Try({}, [Failed])
+
+	## The file written whole as `bytes` when the retire is confirmed.
+	retire_replace! : List(U8), List(U8) => Try({}, [Failed])
+
+	## The member `uid` retired when confirmed: everything of theirs the host
+	## keeps outside the chat now, their account once every step has gone.
+	retire_user! : List(U8) => Try({}, [Failed])
 
 	## The folder at `path` (checked as a file's is), each entry's name and
 	## kind in the order the disk gives them (`Found`); nothing there
@@ -200,7 +233,7 @@ Host := [].{
 	## request's do. `End` answers `Failed` when anything in it failed, and
 	## the request goes on. `Begin` answers `Failed` only for a request that
 	## has failed already.
-	aside! : [Begin, End] => [Done, Failed]
+	mark_aside! : [Begin, End] => [Done, Failed]
 
 	## **WHO IS ONLINE, AT THE REQUEST'S TIME** (angry-gopher presence.zig
 	## `isOnline`): for each of `ids`, in their order, whether it was seen
@@ -261,7 +294,7 @@ Host := [].{
 	## metal-vmm QUEUE 283): whether the member's welcome is pending, a fact
 	## signup wrote in the gopher's own users folder. `Failed` when the look
 	## failed (the host has failed the request).
-	welcome_pending! : {} => [
+	check_welcome! : {} => [
 		Failed,
 		None,
 		Pending,
@@ -269,11 +302,11 @@ Host := [].{
 
 	## The member's welcome given: the pending mark goes (one gone already
 	## is done). `Err(Failed)` when it failed.
-	welcome_done! : {} => Try({}, [Failed])
+	clear_welcome! : {} => Try({}, [Failed])
 
 	## Where a page names each script, by its name (a src's hash is of bytes
 	## the host holds).
-	srcs! : {} => List({ name : List(U8), src : List(U8) })
+	list_srcs! : {} => List({ name : List(U8), src : List(U8) })
 
 	## **AFTER A FAILURE THE HOST DOES NOTHING MORE** for the call: a hosted
 	## function the Roc calls once one has failed answers empty,
@@ -281,11 +314,11 @@ Host := [].{
 	## returns the failure.
 
 	## The member's own id.
-	me! : {} => List(U8)
+	read_uid! : {} => List(U8)
 
 	## The request's time, in Unix seconds: the one time everything it
 	## stamps carries (a new conversation's topic is named for its date).
-	now! : {} => I64
+	read_time! : {} => I64
 
 	## **THE ONE MARKDOWN PROCESSOR** (angry-gopher markdown.zig `render`):
 	## a message's markdown as the HTML its frame carries. `Failed` when it
@@ -303,12 +336,16 @@ Host := [].{
 	## (the request has failed, and nothing was stored). The count and the
 	## search index are the Roc's to tell after (`write_cache!`,
 	## `index_message!`).
-	append_message! : Chat.Conv, List(U8), List(U8) => { size : U64, status : [Appended, Failed] }
+	append_message! : Chat.Conv,
+	{ sid : List(U8), block : List(U8) } => {
+		size : U64,
+		status : [Appended, Failed],
+	}
 
 	## **THE SEARCH INDEX TOLD OF A MESSAGE AS IT LANDS** (search_index
 	## `noteAppend`): process-lifetime state, so a primitive. It never fails:
 	## an index that cannot take the message drops itself, to be rebuilt.
-	index_message! : Chat.Conv, List(U8), Chat.Message => {}
+	index_message! : Chat.Conv, { sid : List(U8), message : Chat.Message } => {}
 
 	## **A CACHE WRITTEN** (a topic's `.count`): the whole file as `bytes`,
 	## under the chat root. **NEVER THE REQUEST'S FAILURE**: a cache not
@@ -326,14 +363,24 @@ Host := [].{
 	## failure, never the request's), its folders made: `separator` and
 	## `entry` when the file holds anything, else `entry` alone. `Failed`,
 	## with its fault, when it could not be.
-	append_entry! : List(U8), List(U8), List(U8) => { fault : U16, status : [Appended, Failed] }
+	append_entry! : List(U8),
+	{ separator : List(U8), entry : List(U8) } => {
+		fault : U16,
+		status : [Appended, Failed],
+	}
 
 	## **A SURFACE THAT FAILED FOR ONE MEMBER, COUNTED AND SAID** (angry-gopher
 	## chat_fanout `fanoutFailed`): `surface` for `member`, with `fault` (as a
 	## primitive answered it), on topic `sid` of the conversation keyed `key`.
 	## The operator's count and last failure, kept by the host for
 	## /admin/host.
-	report_fanout_failure! : [Code, Images], List(U8), List(U8), List(U8), U16 => {}
+	report_fanout_failure! : [Code, Images],
+	{
+		member : List(U8),
+		key : List(U8),
+		sid : List(U8),
+		fault : U16,
+	} => {}
 
 	## A request header's value, or none (read before the body).
 	read_header! : List(U8) => List(List(U8))
@@ -368,6 +415,46 @@ Host := [].{
 			Whole,
 		],
 	} => [Gone, Served]
+
+	## **AN UPLOAD'S FORM READ** (metal-vmm QUEUE 292): the request's
+	## multipart body read to the largest upload's limit, its `file` part
+	## found and its type sniffed from its first bytes; the host holds the
+	## bytes, never handed to Roc. `Read`: the file's `size`, the extension
+	## its bytes say (`ext`) and the name the client gave it (`filename`, as
+	## sent); `NoFile`: no multipart form, or none with a file;
+	## `Unsupported`: a file of a type the chat takes not; `Answered`: the
+	## host answered (a body too big) or failed.
+	read_upload! : {} => {
+		size : U64,
+		ext : List(U8),
+		filename : List(U8),
+		status : [
+			Answered,
+			NoFile,
+			Read,
+			Unsupported,
+		],
+	}
+
+	## **AN UPLOAD REFUSED** as the client's mistake, counted on webbox's
+	## edge counter (`Malformed`: malformed_multipart, a 400; `TooLarge`:
+	## body_too_large, a 413) and answered `message`.
+	refuse_upload! : [Malformed, TooLarge], List(U8) => {}
+
+	## **THE MEMBER'S ALLOWANCE SPENT** by `size` bytes, if it holds them
+	## (`Reserved`), else nothing spent (`Refused`); `Failed` when the
+	## allowance would not read (the request has failed).
+	reserve_upload! : U64 => [
+		Failed,
+		Refused,
+		Reserved,
+	]
+
+	## **THE UPLOAD STORED** in the folder `folder` under the chat root
+	## (checked as `read!`'s is), by a fresh name of 32 hex digits and the
+	## extension `ext`: that name. `Failed` when it could not be stored (the
+	## request has failed, and the bytes reserved are given back).
+	store_upload! : List(U8), List(U8) => { name : List(U8), status : [Failed, Stored] }
 
 	## **A TOPIC'S BUNDLE, A FILE AT A TIME** (metal-vmm QUEUE 291): the file
 	## at `path` under the chat root (checked as `read!`'s is) added to the

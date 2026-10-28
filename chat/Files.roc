@@ -53,10 +53,10 @@ Files := [].{
 		decoded(answer(got.status, got.bytes))
 	}
 
-	## Host.stat!: the file's size and its mtime in seconds.
-	stat! : Paths.ChatPath => Try({ size : U64, mtime : I64 }, [Missing, Failed])
-	stat! = |path| {
-		got = Host.stat!(path.bytes())
+	## Host.read_stat!: the file's size and its mtime in seconds.
+	read_stat! : Paths.ChatPath => Try({ size : U64, mtime : I64 }, [Missing, Failed])
+	read_stat! = |path| {
+		got = Host.read_stat!(path.bytes())
 		match got.status {
 			Found => Ok({ size: got.size, mtime: got.mtime })
 			Missing => Err(Missing)
@@ -70,12 +70,8 @@ Files := [].{
 	## caller recounts or reads the truth, as for any miss. The chat's
 	## caches are the .count sidecar and the last message's window; every
 	## other read is the truth's, and its failure fails the request.
-	read_cache! : Paths.ChatPath, U64, U64 => Try(List(U8), [Miss])
-	read_cache! = |
-		path,
-		offset,
-		max,
-	| {
+	read_cache! : Paths.ChatPath, { offset : U64, max : U64 } => Try(List(U8), [Miss])
+	read_cache! = |path, { offset, max }| {
 		got = Host.read_at!(
 			path.bytes(),
 			offset,
@@ -120,11 +116,7 @@ Files := [].{
 		path,
 		separator,
 		entry,
-	| Host.append_entry!(
-		path.bytes(),
-		separator,
-		entry,
-	)
+	| Host.append_entry!(path.bytes(), { separator, entry })
 
 	## Host.serve_file!: the host loads the file and serves its bytes as the answer
 	## (Chat.served_plain), so Roc never copies a large transcript. `Serving`

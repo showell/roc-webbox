@@ -3,12 +3,13 @@
 ## read as the Zig reads them, and the JSON their pages boot with, byte for
 ## byte. Text in and out; the scanning is over its bytes, cut only at ASCII
 ## ones. Pure; angry-gopher's chat_twin_test.zig holds each to its Zig.
-import JsonText
+import JsonOut
 import Bytes
-import ZigText
+import Fence
 import ChatUrl
 import SafeImg
 import Transcript
+import Ascii
 
 Feeds := [].{
 
@@ -53,11 +54,7 @@ Feeds := [].{
 			blocks_of(text.to_utf8()),
 			[],
 			|out, block| {
-				(line, body) = match find_byte(
-					block,
-					'\n',
-					0,
-				) {
+				(line, body) = match Bytes.find_byte(block, { byte: '\n', at: 0 }) {
 					Ok(nl) => (List.take_first(block, nl), List.drop_first(block, nl + 1))
 					Err(NotFound) => (block, [])
 				}
@@ -90,61 +87,6 @@ Feeds := [].{
 	img_tags : Str -> List(Str)
 	img_tags = |s| tags_in(s.to_utf8())
 
-	## **A BYTE'S NEXT PLACE, REMEMBERED** (metal-vmm QUEUE 268): what one
-	## search found (`At`), or that there is none (`Never`), answers every
-	## later search from a place at or before it, so a scan that searches
-	## from each of many openers (`<img ` after `<img `, `![` after `![`)
-	## costs one pass of a message, not one per opener. `from` must not go
-	## back between calls that share one.
-	Seen : [
-		Unknown,
-		At(U64),
-		Never,
-	]
-
-	find_seen : List(U8), U8, U64, Seen -> (Try(U64, [NotFound]), Seen)
-	find_seen = |
-		s,
-		b,
-		from,
-		seen,
-	|
-		match seen {
-			At(k) if k >= from => (Ok(k), seen)
-			Never => (Err(NotFound), Never)
-			_ =>
-				match find_byte(
-					s,
-					b,
-					from,
-				) {
-					Ok(k) => (Ok(k), At(k))
-					Err(NotFound) => (Err(NotFound), Never)
-				}
-		}
-
-	find_byte : List(U8), U8, U64 -> Try(U64, [NotFound])
-	find_byte = |
-		s,
-		b,
-		i,
-	| match List.get(s, i) {
-		Ok(c) => if c == b Ok(i) else find_byte(
-			s,
-			b,
-			i + 1,
-		)
-		Err(_) => Err(NotFound)
-	}
-
-	lower : List(U8) -> List(U8)
-	lower = |s| List.map(s, |c| if c >= 'A' and c <= 'Z' c - 'A' + 'a' else c)
-
-	## A space, tab, newline, CR, form feed (12) or vertical tab (11): Roc's
-	## character literals have no escape for the last two.
-	is_space : U8 -> Bool
-	is_space = |c| c == ' ' or c == '\t' or c == '\n' or c == '\r' or c == 12 or c == 11
-
 	## code_store `parseCodeFile`: every block with a header line and a body
 	## holding at least one fence that is not a quote.
 	code : Str -> List((Header, List(Block)))
@@ -153,11 +95,7 @@ Feeds := [].{
 			blocks_of(text.to_utf8()),
 			[],
 			|out, block|
-				match find_byte(
-					block,
-					'\n',
-					0,
-				) {
+				match Bytes.find_byte(block, { byte: '\n', at: 0 }) {
 					Err(NotFound) => out
 					Ok(nl) =>
 						match header(text_of(List.take_first(block, nl))) {
@@ -182,126 +120,18 @@ Feeds := [].{
 	code_blocks : Str -> List(Block)
 	code_blocks = |body| blocks_in(body.to_utf8())
 
-	close_at : List(List(U8)), U8, U64, U64 -> U64
-	close_at = |
-		ls,
-		char,
-		count,
-		j,
-	| match List.get(ls, j) {
-		Err(_) => j
-		Ok(line) => if is_close(
-			line,
-			char,
-			count,
-		) j else close_at(
-			ls,
-			char,
-			count,
-			j + 1,
-		)
-	}
-
-	## markdown_fence `parseOpen`: up to three spaces, 3 to 10 of '`' or '~',
-	## and an info string whose first word is the language (no '`' in a
-	## backtick fence's).
-	fence_open : List(U8) -> Try(
-		{
-			char : U8,
-			count : U64,
-			lang : List(U8),
-		},
-		[NotAFence],
-	)
-	fence_open = |line| {
-		indent = smaller(
-			Bytes.leading(
-				line,
-				' ',
-				0,
-			),
-			4,
-		)
-		match List.get(line, indent) {
-			Err(_) => Err(NotAFence)
-			Ok(f) =>
-				if indent >= 4 or (f != '`' and f != '~') {
-					Err(NotAFence)
-				} else {
-					count = Bytes.leading(
-						List.drop_first(line, indent),
-						f,
-						0,
-					)
-					info = trim_info(List.drop_first(line, indent + count))
-					if count < 3 or count > 10 or (f == '`' and List.contains(info, '`')) {
-						Err(NotAFence)
-					} else {
-						lang = List.take_first(
-							info,
-							count_while(
-								info,
-								|c| c != ' ' and c != '\t',
-								0,
-							),
-						)
-						Ok({
-							char: f,
-							count,
-							lang,
-						})
-					}
-				}
-		}
-	}
-
-	## How many bytes from `i` on keep `keep`.
-	count_while : List(U8), (U8 -> Bool), U64 -> U64
-	count_while = |
-		s,
-		keep,
-		i,
-	| match List.get(s, i) {
-		Ok(c) if keep(c) => count_while(
-			s,
-			keep,
-			i + 1,
-		)
-		_ => i
-	}
-
-	## How many bytes from the end keep `keep`.
-	count_back : List(U8), (U8 -> Bool), U64 -> U64
-	count_back = |
-		s,
-		keep,
-		n,
-	|
-		if n >= List.len(s) {
-			n
-		} else {
-			match List.get(s, List.len(s) - 1 - n) {
-				Ok(c) if keep(c) => count_back(
-					s,
-					keep,
-					n + 1,
-				)
-				_ => n
-			}
-		}
-
 	## The Images page's JSON: the newest `most` entries, each as
 	## images_store `encodeImagesEvent` writes it.
 	images_json : List((Header, List(Str))), U64 -> List(U8)
 	images_json = |entries, most| {
-		tail = List.drop_first(entries, List.len(entries) - smaller(most, List.len(entries)))
-		JsonText.arr(List.map(tail, |(h, tags)| images_event(h, tags)))
+		tail = List.drop_first(entries, List.len(entries) - U64.min(most, List.len(entries)))
+		JsonOut.array(List.map(tail, |(h, tags)| images_event(h, tags))).bytes()
 	}
 
 	## The Code page's JSON: every entry, as code_store `encodeCodeEvent`
 	## writes it.
 	code_json : List((Header, List(Block))) -> List(U8)
-	code_json = |entries| JsonText.arr(List.map(entries, |(h, bs)| code_event(h, bs)))
+	code_json = |entries| JsonOut.array(List.map(entries, |(h, bs)| code_event(h, bs))).bytes()
 
 	## images_store `encodeImagesEvent`: one entry as its page and its live
 	## stream (`img:<uid>`) send it, fields in its order, none left out.
@@ -311,15 +141,15 @@ Feeds := [].{
 	## rule (SafeImg) and one it refuses is dropped. Here, where the page's
 	## backlog and the live event both pass, so the entries already on disk
 	## are rebuilt too.
-	images_event : Header, List(Str) -> List(U8)
+	images_event : Header, List(Str) -> JsonOut
 	images_event = |h, tags| {
 		safe = List.keep_oks(tags, SafeImg.rebuild)
-		JsonText.obj(
+		JsonOut.object(
 			List.concat(
 				head_fields(h),
 				[
-					("images", JsonText.arr(List.map(safe, JsonText.str))),
-					("source_url", JsonText.str(ChatUrl.source(h.conv, h.source_id).to_str())),
+					("images", JsonOut.array(List.map(safe, JsonOut.string))),
+					("source_url", JsonOut.string(ChatUrl.source(h.conv, h.source_id).to_str())),
 				],
 			),
 		)
@@ -327,20 +157,23 @@ Feeds := [].{
 
 	## code_store `encodeCodeEvent`: one entry as its page and its live
 	## stream (`code:<uid>`) send it.
-	code_event : Header, List(Block) -> List(U8)
+	code_event : Header, List(Block) -> JsonOut
 	code_event = |h, bs| {
-		blocks = JsonText.arr(
+		blocks = JsonOut.array(
 			List.map(
 				bs,
-				|b| JsonText.obj([("lang", JsonText.str(b.lang)), ("body", JsonText.str(b.body))]),
+				|b| JsonOut.object([
+					("lang", JsonOut.string(b.lang)),
+					("body", JsonOut.string(b.body)),
+				]),
 			),
 		)
-		JsonText.obj(
+		JsonOut.object(
 			List.concat(
 				head_fields(h),
 				[
 					("blocks", blocks),
-					("source_url", JsonText.str(ChatUrl.source(h.conv, h.source_id).to_str())),
+					("source_url", JsonOut.string(ChatUrl.source(h.conv, h.source_id).to_str())),
 				],
 			),
 		)
@@ -400,29 +233,41 @@ text_blocks = |bytes| {
 ## The file's blocks between separators, trimmed, the empty ones gone.
 blocks_of : List(U8) -> List(List(U8))
 blocks_of = |text|
-	if ZigText.trim(text) == [] {
+	if Bytes.trim(text, Bytes.zig_spaces) == [] {
 		[]
 	} else {
-		List.keep_if(List.map(Bytes.split_seq(text, Feeds.sep), ZigText.trim), |b| b != [])
+		List.keep_if(
+			List.map(List.split_on_list(text, Feeds.sep), |b| Bytes.trim(b, Bytes.zig_spaces)),
+			|b| b != [],
+		)
 	}
 
 tags_in : List(U8) -> List(Str)
 tags_in = |s| List.map(
 	img_tags_from(
 		s,
-		0,
-		[],
-		Unknown,
+		{
+			at: 0,
+			out: [],
+			gt_seen: Unknown,
+		},
 	),
 	text_of,
 )
 
-img_tags_from : List(U8), U64, List(List(U8)), Feeds.Seen -> List(List(U8))
+img_tags_from : List(U8),
+{
+	at : U64,
+	out : List(List(U8)),
+	gt_seen : Bytes.Seen,
+} -> List(List(U8))
 img_tags_from = |
 	s,
-	i,
-	out,
-	gt_seen,
+	{
+		at: i,
+		out,
+		gt_seen,
+	},
 |
 	if i >= List.len(s) {
 		out
@@ -434,142 +279,92 @@ img_tags_from = |
 				c,
 				d,
 				e,
-			] if Feeds.lower([
-				a,
-				b,
-				c,
-				d,
-			]) == Str.to_utf8("<img") and Feeds.is_space(e) =>
-				match Feeds.find_seen(
+			] if List.map(
+				[
+					a,
+					b,
+					c,
+					d,
+				],
+				Ascii.to_lower,
+			) == Str.to_utf8("<img") and Ascii.is_whitespace(e) =>
+				match Bytes.find_seen(
 					s,
-					'>',
-					i + 4,
-					gt_seen,
+					{
+						byte: '>',
+						from: i + 4,
+						seen: gt_seen,
+					},
 				) {
 					(Ok(gt), seen) => img_tags_from(
 						s,
-						gt + 1,
-						List.append(out, List.sublist(s, { start: i, len: gt + 1 - i })),
-						seen,
+						{
+							at: gt + 1,
+							out: List.append(out, List.sublist(s, { start: i, len: gt + 1 - i })),
+							gt_seen: seen,
+						},
 					)
 					(Err(NotFound), seen) => img_tags_from(
 						s,
-						i + 1,
-						out,
-						seen,
+						{
+							at: i + 1,
+							out,
+							gt_seen: seen,
+						},
 					)
 				}
 			_ => img_tags_from(
 				s,
-				i + 1,
-				out,
-				gt_seen,
+				{
+					at: i + 1,
+					out,
+					gt_seen,
+				},
 			)
 		}
 	}
 
-smaller : U64, U64 -> U64
-smaller = |a, b| if a < b a else b
-
 blocks_in : List(U8) -> List(Block)
-blocks_in = |body| blocks_from(
-	Bytes.split_byte(body, '\n'),
-	0,
-	[],
-)
+blocks_in = |body| blocks_from(List.split_on(body, '\n'), { at: 0, out: [] })
 
-blocks_from : List(List(U8)), U64, List(Block) -> List(Block)
-blocks_from = |
-	ls,
-	i,
-	out,
-|
+blocks_from : List(List(U8)), { at : U64, out : List(Block) } -> List(Block)
+blocks_from = |ls, { at: i, out }|
 	match List.get(ls, i) {
 		Err(_) => out
 		Ok(line) =>
-			match Feeds.fence_open(line) {
-				Err(NotAFence) => blocks_from(
-					ls,
-					i + 1,
-					out,
-				)
+			match Fence.fence_open(line) {
+				Err(NotAFence) => blocks_from(ls, { at: i + 1, out })
 				Ok(fo) => {
-					j = Feeds.close_at(
+					j = Fence.close_at(
 						ls,
-						fo.char,
-						fo.count,
-						i + 1,
+						{
+							char: fo.char,
+							count: fo.count,
+							at: i + 1,
+						},
 					)
 					body = Bytes.join_lines(List.sublist(ls, { start: i + 1, len: j - (i + 1) }))
 					blocks_from(
 						ls,
-						j + 1,
-						if fo.lang == Str.to_utf8("quote") out else List.append(
-							out,
-							{ lang: text_of(fo.lang), body: text_of(body) },
-						),
+						{
+							at: j + 1,
+							out: if fo.lang == Str.to_utf8("quote") out else List.append(
+								out,
+								{ lang: text_of(fo.lang), body: text_of(body) },
+							),
+						},
 					)
 				}
 			}
 	}
 
-## markdown_fence `isClose`: up to three spaces, at least `count` of
-## `char`, then only whitespace.
-is_close : List(U8), U8, U64 -> Bool
-is_close = |
-	line,
-	char,
-	count,
-| {
-	indent = smaller(
-		Bytes.leading(
-			line,
-			' ',
-			0,
-		),
-		4,
-	)
-	if indent >= 4 {
-		Bool.False
-	} else {
-		n = Bytes.leading(
-			List.drop_first(line, indent),
-			char,
-			0,
-		)
-		n >= count and trim_info(List.drop_first(line, indent + n)) == []
-	}
-}
-
-## `std.mem.trim(u8, s, " \t\r")`.
-trim_info : List(U8) -> List(U8)
-trim_info = |s| {
-	ws = |c| c == ' ' or c == '\t' or c == '\r'
-	front = List.drop_first(
-		s,
-		Feeds.count_while(
-			s,
-			ws,
-			0,
-		),
-	)
-	List.drop_last(
-		front,
-		Feeds.count_back(
-			front,
-			ws,
-			0,
-		),
-	)
-}
-
 ## The fields every feed entry starts with, from its header.
-head_fields : Header -> List((Str, List(U8)))
+head_fields : Header -> List((Str, JsonOut))
 head_fields = |h| [
-	("source_id", JsonText.str(h.source_id)),
-	("from", JsonText.str(h.from)),
-	("conv", JsonText.str(h.conv)),
-	("at", JsonText.str(h.at)),
+	("source_id", JsonOut.string(h.source_id)),
+	("from", JsonOut.string(h.from)),
+	("conv", JsonOut.string(h.conv)),
+	("at", JsonOut.string(h.at)),
 ]
 
 ## The header line every entry starts with, as `header` reads it back.
@@ -662,7 +457,7 @@ expect {
 				"<img src=\"/up/a.png\" width=\"40\" onload=\"alert(2)\">",
 				"<img src=\"https://evil.example/t.png\">",
 			],
-		),
+		).bytes(),
 	)
 	json == Ok("{\"source_id\":\"t_1\",\"from\":\"ann\",\"conv\":\"1_2\",\"at\":\"2026-10-27T00:00:00Z\",\"images\":[\"<img src=\\\"/up/a.png\\\" width=\\\"40\\\">\"],\"source_url\":\"/chat/c/1_2/t#msg-t_1\"}")
 }

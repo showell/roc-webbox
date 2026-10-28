@@ -5,6 +5,7 @@
 import Bytes
 import Uid
 import ZigText
+import Ascii
 
 Paths := [].{
 
@@ -146,7 +147,7 @@ Paths := [].{
 					} else if c == '-' {
 						(!prev_hyphen, Bool.True)
 					} else {
-						(is_alnum(c), Bool.False)
+						(Ascii.is_alphanumeric(c), Bool.False)
 					},
 			)
 			ok
@@ -158,9 +159,9 @@ Paths := [].{
 	is_channel_name : Str -> Bool
 	is_channel_name = |text| match text.to_utf8() {
 		[first, .. as more] =>
-			text.count_utf8_bytes() <= 40 and is_alpha(first) and List.all(
+			text.count_utf8_bytes() <= 40 and Ascii.is_alphabetic(first) and List.all(
 				more,
-				|c| is_alnum(c) or c == '-',
+				|c| Ascii.is_alphanumeric(c) or c == '-',
 			)
 		[] => Bool.False
 	}
@@ -189,13 +190,13 @@ Paths := [].{
 	## message's decimal number, cut at the last `_`.
 	is_valid_msg_ref_id : List(U8) -> Bool
 	is_valid_msg_ref_id = |id|
-		match cut_last(id, '_') {
-			Err(NoSeparator) => Bool.False
-			Ok((left, right)) =>
+		match List.split_last(id, '_') {
+			Err(NotFound) => Bool.False
+			Ok({ before: left, after: right }) =>
 				left != [] and right != [] and List.all(
 					left,
-					|c| is_alnum(c) or c == '-',
-				) and List.all(right, |c| c >= '0' and c <= '9')
+					|c| Ascii.is_alphanumeric(c) or c == '-',
+				) and List.all(right, Ascii.is_digit)
 		}
 
 	## firstOf: "ChitChat" when there, else the first (the list is sorted),
@@ -217,6 +218,12 @@ Paths := [].{
 			|r| r.name,
 		),
 	)
+
+	## **A PATH OF NAMES A LISTING GAVE** (the admin retire's walk, metal-vmm
+	## QUEUE 293): `parts` joined, or the chat root itself (`.`) for none.
+	## The seam holds each to the chat root, as every path.
+	listed : List(Str) -> ChatPath
+	listed = |parts| if parts == [] ChatPath.(".") else ChatPath.(Str.join_with(parts, "/"))
 
 	## Texts sorted by their bytes, as the Zig's sorts compare.
 	sort_by_bytes : List(Str) -> List(Str)
@@ -314,13 +321,20 @@ Paths := [].{
 	channel_members : Str -> Try(List(Uid), [Malformed])
 	channel_members = |file|
 		List.fold(
-			Bytes.split_byte(file.to_utf8(), '\n'),
+			List.split_on(file.to_utf8(), '\n'),
 			Ok([]),
 			|acc, raw|
 				match acc {
 					Err(Malformed) => acc
 					Ok(out) => {
-						line = trim_line(raw)
+						line = Bytes.trim(
+							raw,
+							[
+								' ',
+								'\t',
+								'\r',
+							],
+						)
 						if line == [] or List.first(line) == Ok('#') {
 							acc
 						} else {
@@ -417,13 +431,6 @@ Paths := [].{
 		sort_by_bytes(doc_slugs(entries))
 			|> List.map(|slug| { slug, path: ChatPath.("users/${uid.to_str()}/docs/${slug}.md") })
 
-	## The same docs in the folder's order (mostRecentDocSlug's walk, whose
-	## first of a tie wins).
-	docs_in_order : Uid, List(Entry) -> List({ slug : Str, path : ChatPath })
-	docs_in_order = |uid, entries|
-		doc_slugs(entries)
-			|> List.map(|slug| { slug, path: ChatPath.("users/${uid.to_str()}/docs/${slug}.md") })
-
 	## The member's doc `slug` (docs_store `docPath`), or `NotASlug` for a
 	## slug no slugifyTitle made (validDocSlug, its path-traversal check).
 	doc_path : Uid, Str -> Try(ChatPath, [NotASlug])
@@ -441,42 +448,6 @@ Paths := [].{
 	links_path : Uid -> ChatPath
 	links_path = |uid| ChatPath.("users/${uid.to_str()}/links.md")
 
-	## The bytes before and after the first `sep`.
-	cut_first : List(U8), U8 -> Try((List(U8), List(U8)), [NoSeparator])
-	cut_first = |s, sep| {
-		i = index_of(
-			s,
-			sep,
-			0,
-		)?
-		Ok((List.take_first(s, i), List.drop_first(s, i + 1)))
-	}
-
-	## The bytes before and after the last `sep`.
-	cut_last : List(U8), U8 -> Try((List(U8), List(U8)), [NoSeparator])
-	cut_last = |s, sep| {
-		(last, _) = List.fold(
-			s,
-			(Err(NoSeparator), 0),
-			|(found, i), c| (if c == sep Ok(i) else found, i + 1),
-		)
-		i = last?
-		Ok((List.take_first(s, i), List.drop_first(s, i + 1)))
-	}
-
-	index_of : List(U8), U8, U64 -> Try(U64, [NoSeparator])
-	index_of = |
-		s,
-		sep,
-		i,
-	| match List.get(s, i) {
-		Ok(c) => if c == sep Ok(i) else index_of(
-			s,
-			sep,
-			i + 1,
-		)
-		Err(_) => Err(NoSeparator)
-	}
 }
 
 ## A DM's or a channel's folder under the chat root: a DM's pair key
@@ -510,36 +481,13 @@ is_doc_slug : Str -> Bool
 is_doc_slug = |slug| {
 	b = slug.to_utf8()
 	n = List.len(b)
-	in_set = List.all(b, |c| c == '-' or (c >= 'a' and c <= 'z') or (c >= '0' and c <= '9'))
+	in_set = List.all(b, |c| c == '-' or (c >= 'a' and c <= 'z') or Ascii.is_digit(c))
 	doubled = List.fold(
 		b,
 		{ found: Bool.False, prev: 0 },
 		|s, c| { found: s.found or (c == '-' and s.prev == '-'), prev: c },
 	).found
 	n > 0 and n <= 80 and in_set and !doubled and List.first(b) != Ok('-') and List.last(b) != Ok('-')
-}
-
-## channelMembers's trim: spaces, tabs and CRs (a line split on newlines
-## has none of those).
-trim_line : List(U8) -> List(U8)
-trim_line = |s| {
-	ws = |c| c == ' ' or c == '\t' or c == '\r'
-	front = List.drop_first(
-		s,
-		ZigText.count_while(
-			s,
-			ws,
-			0,
-		),
-	)
-	List.drop_last(
-		front,
-		ZigText.count_back_while(
-			front,
-			ws,
-			0,
-		),
-	)
 }
 
 rosters_from : List(Str),
@@ -591,12 +539,6 @@ cut_suffix = |name, suffix| {
 		n - k,
 	) == suffix Ok(List.take_first(name, n - k)) else Err(NoSuffix)
 }
-
-is_alpha : U8 -> Bool
-is_alpha = |c| (c >= 'A' and c <= 'Z') or (c >= 'a' and c <= 'z')
-
-is_alnum : U8 -> Bool
-is_alnum = |c| is_alpha(c) or (c >= '0' and c <= '9')
 
 # The builders' exact bytes, for a DM (`3_7`) and a channel (`general`).
 expect match (Paths.pair_key_from_str("3_7"), Paths.channel_name_from_str("general")) {

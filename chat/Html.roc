@@ -10,7 +10,7 @@
 ## out is `bytes`, where a page becomes a response body. The host's markdown
 ## (`render!`) never reaches a page here: it rides a JSON frame (Frame.roc),
 ## and the curated links the host splices in itself (Pages.links_around).
-import Bytes
+import Ascii
 
 Html :: List(U8).{
 
@@ -46,20 +46,54 @@ Html :: List(U8).{
 	trusted : Str -> Html
 	trusted = |markup| Html.(Str.to_utf8(markup))
 
-	## **MARKUP THE HOST VOUCHES FOR**: bytes it built as HTML (a script's
-	## src, which the host hashes and names). Called only where the host's
+	## **MARKUP THE HOST VOUCHES FOR**: bytes it built as HTML (the markdown it
+	## rendered). Called only where the host's
 	## answer arrives (the hunt `html_trusted_nonliteral` names the place).
 	host_markup : List(U8) -> Html
 	host_markup = |markup| Html.(markup)
 
+	## An attribute: a name and its value, or a name alone (`defer`).
+	Attr : [Attr(Str, Str), Bare(Str)]
+
+	## **AN ELEMENT, ITS ATTRIBUTE VALUES ALWAYS ESCAPED** (zulip-flet's
+	## `build_tag`): `<name a="v" ...>inner</name>`, every value through
+	## `escape`, so no caller can place one raw. Its names (the element's and
+	## the attributes') are code, not data: lowercase ASCII letters, digits
+	## and `-`, anything else a crash. Never `<name/>`: in HTML5 that does not
+	## close the element.
+	tag : {
+		name : Str,
+		attrs : List(Attr),
+		inner : Html,
+	} -> Html
+	tag = |t| {
+		name = code_name(t.name)
+		Html.(
+			List.join([
+				['<'],
+				name,
+				List.join_map(t.attrs, attr_bytes),
+				['>'],
+				bytes(t.inner),
+				['<', '/'],
+				name,
+				['>'],
+			]),
+		)
+	}
+
+	## No markup: an element with nothing in it.
+	empty : Html
+	empty = Html.([])
+
 	## The parts, one after another.
 	join : List(Html) -> Html
-	join = |parts| Html.(List.join(List.map(parts, |Html.(b)| b)))
+	join = |parts| Html.(List.join_map(parts, |Html.(b)| b))
 
 	## A template with each `{s}` slot filled in turn.
 	fill : Html, List(Html) -> Html
 	fill = |Html.(template), values| {
-		pieces = Bytes.split_seq(template, Str.to_utf8("{s}"))
+		pieces = List.split_on_list(template, Str.to_utf8("{s}"))
 		(out, _) = List.fold(
 			pieces,
 			([], 0),
@@ -97,22 +131,19 @@ Html :: List(U8).{
 	script_safe = |s| ScriptJson.(
 		List.join(
 			List.intersperse(
-				Bytes.split_seq(s, ['<']),
+				List.split_on_list(s, ['<']),
 				Str.to_utf8("\\u003c"),
 			),
 		),
 	)
 
-	## The script element `open` (a trusted `<script ...>`), `json` in it,
-	## and its close.
-	json_script : Html, ScriptJson -> Html
-	json_script = |Html.(open), ScriptJson.(json)| Html.(
-		List.join([
-			open,
-			json,
-			Str.to_utf8("</script>"),
-		]),
-	)
+	## A `<script>` with `attrs`, the script-safe `json` in it.
+	json_script : List(Attr), ScriptJson -> Html
+	json_script = |attrs, ScriptJson.(json)| tag({
+		name: "script",
+		attrs,
+		inner: Html.(json),
+	})
 
 	## **BYTES THE TWINS SAY ARE SCRIPT-SAFE ALREADY**: never called by the
 	## chat (the hunt `html_trusted_nonliteral`).
@@ -122,6 +153,31 @@ Html :: List(U8).{
 	## The script-safe bytes, for the twins.
 	script_json_bytes : ScriptJson -> List(U8)
 	script_json_bytes = |ScriptJson.(b)| b
+}
+
+attr_bytes : Html.Attr -> List(U8)
+attr_bytes = |a|
+	match a {
+		Attr(name, value) => List.join([
+			[' '],
+			code_name(name),
+			['=', '"'],
+			Html.bytes(Html.text(value)),
+			['"'],
+		])
+		Bare(name) => List.concat([' '], code_name(name))
+	}
+
+## A name the code wrote, an element's or an attribute's: lowercase ASCII
+## letters, digits and `-`. Anything else is a bug, so a crash.
+code_name : Str -> List(U8)
+code_name = |name| {
+	b = name.to_utf8()
+	if b != [] and List.all(b, |c| (c >= 'a' and c <= 'z') or Ascii.is_digit(c) or c == '-') {
+		b
+	} else {
+		crash "Html.tag: a name that is not lowercase ASCII letters, digits and -"
+	}
 }
 
 # escape: each of the five as its entity, everything else as it was.
@@ -152,14 +208,55 @@ expect Html.bytes(
 # json_script: `</` cannot close the element early.
 expect Html.bytes(
 	Html.json_script(
-		Html.trusted("<script>"),
+		[],
 		Html.script_safe(Str.to_utf8("\"</script>\"")),
 	),
 ) == Str.to_utf8("<script>\"\\u003c/script>\"</script>")
 # The double-escaped state's way in: no `<` is left, so neither starts.
 expect Html.bytes(
 	Html.json_script(
-		Html.trusted("<script>"),
+		[],
 		Html.script_safe(Str.to_utf8("\"<!--<script>\"")),
 	),
 ) == Str.to_utf8("<script>\"\\u003c!--\\u003cscript>\"</script>")
+
+# tag: each value escaped, whatever it holds; names as written.
+expect Html.bytes(
+	Html.tag({
+		name: "a",
+		attrs: [Attr("title", "&<>\"'")],
+		inner: Html.text("x"),
+	}),
+) == Str.to_utf8("<a title=\"&amp;&lt;&gt;&#34;&#39;\">x</a>")
+expect Html.bytes(
+	Html.tag({
+		name: "p",
+		attrs: [],
+		inner: Html.text("hi"),
+	}),
+) == Str.to_utf8("<p>hi</p>")
+expect Html.bytes(
+	Html.tag({
+		name: "div",
+		attrs: [Attr("id", "a")],
+		inner: Html.tag({
+			name: "span",
+			attrs: [Attr("class", "b")],
+			inner: Html.text("<c>"),
+		}),
+	}),
+) == Str.to_utf8("<div id=\"a\"><span class=\"b\">&lt;c&gt;</span></div>")
+expect Html.bytes(
+	Html.tag({
+		name: "div",
+		attrs: [Attr("data-x", "")],
+		inner: Html.empty,
+	}),
+) == Str.to_utf8("<div data-x=\"\"></div>")
+expect Html.bytes(
+	Html.tag({
+		name: "script",
+		attrs: [Bare("defer"), Attr("src", "/a.js?v=1")],
+		inner: Html.empty,
+	}),
+) == Str.to_utf8("<script defer src=\"/a.js?v=1\"></script>")

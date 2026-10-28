@@ -9,7 +9,7 @@
 import Feeds
 import Recent
 import Accounts
-import JsonText
+import JsonOut
 import Paths
 import Uid
 import BusKey
@@ -50,6 +50,7 @@ Fanout := [].{
 				surface : Surface,
 				member : List(U8),
 				path : Paths.ChatPath,
+				sep : List(U8),
 				entry : List(U8),
 				key : BusKey,
 				event : List(U8),
@@ -115,7 +116,7 @@ Fanout := [].{
 										topic: m.topic,
 										excerpt: parts.excerpt,
 										dm: m.key.kind(),
-									}),
+									}).bytes(),
 								),
 							]
 						},
@@ -127,9 +128,10 @@ Fanout := [].{
 									surface: Images,
 									member: uid.to_str().to_utf8(),
 									path: Paths.feed_path(uid, Images),
+									sep: Feeds.sep,
 									entry: Feeds.images_entry(head, tags),
 									key: BusKey.images(uid),
-									event: Feeds.images_event(head, tags),
+									event: Feeds.images_event(head, tags).bytes(),
 								}),
 							]
 						},
@@ -140,9 +142,10 @@ Fanout := [].{
 									surface: Code,
 									member: uid.to_str().to_utf8(),
 									path: Paths.feed_path(uid, Code),
+									sep: Feeds.sep,
 									entry: Feeds.code_entry(head, blocks),
 									key: BusKey.code(uid),
-									event: Feeds.code_event(head, blocks),
+									event: Feeds.code_event(head, blocks).bytes(),
 								}),
 							]
 						},
@@ -162,21 +165,21 @@ Fanout := [].{
 
 	## The notify stream's event: conv, session, text, link_url (ChatUrl.topic).
 	notify_event : Paths.TopicAt, Str -> List(U8)
-	notify_event = |at, text| JsonText.obj([
-		("conv", JsonText.str(at.key.to_str())),
-		("session", JsonText.str(at.topic)),
-		("text", JsonText.str(text)),
-		("link_url", JsonText.str(ChatUrl.topic(at).to_str())),
-	])
+	notify_event = |at, text| JsonOut.object([
+		("conv", JsonOut.string(at.key.to_str())),
+		("session", JsonOut.string(at.topic)),
+		("text", JsonOut.string(text)),
+		("link_url", JsonOut.string(ChatUrl.topic(at).to_str())),
+	]).bytes()
 
 	## The sidebar stream's topic-added: kind, conv, sid, url (ChatUrl.topic).
 	topic_added : Paths.TopicAt -> List(U8)
-	topic_added = |at| JsonText.obj([
-		("kind", JsonText.str("topic-added")),
-		("conv", JsonText.str(at.key.to_str())),
-		("sid", JsonText.str(at.topic)),
-		("url", JsonText.str(ChatUrl.topic(at).to_str())),
-	])
+	topic_added = |at| JsonOut.object([
+		("kind", JsonOut.string("topic-added")),
+		("conv", JsonOut.string(at.key.to_str())),
+		("sid", JsonOut.string(at.topic)),
+		("url", JsonOut.string(ChatUrl.topic(at).to_str())),
+	]).bytes()
 
 	## chat_fanout `recentWhere`, for `viewer`: a channel names itself ("in
 	## <key>"); a DM names the other member ("to <name>"; the DM with

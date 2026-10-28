@@ -20,30 +20,44 @@ import pf.Host
 
 handle! : Chat.Request => Chat.Answer
 handle! = |req|
-	if starts(req.sub, "/read/") {
+	if req.area == Retire {
+		# The admin retire's area (metal-vmm QUEUE 293): every field of its
+		# ask said, then each step's call, so a record laid out wrong shows.
+		asked = Host.retire_asked!({})
+		Host.retire_note!(ChannelMember, Str.to_utf8("ops (1 dropped)"))
+		Host.retire_note!(User, Str.to_utf8("Spammer (uid 9)"))
+		removed = Host.retire_remove!(Str.to_utf8("1_9"), Tree)
+		file = Host.retire_remove!(Str.to_utf8("users/1/last-conv"), File)
+		replaced = Host.retire_replace!(Str.to_utf8("channels/ops.channel"), Str.to_utf8("1\n"))
+		user = Host.retire_user!(Str.to_utf8("9"))
+		said = |r| if r == Ok({}) " done" else " failed"
+		Chat.respond(
+			200,
+			{
+				content_type: [],
+				body: List.join([
+					Str.to_utf8("days ${U64.to_str(asked.days)} now ${I64.to_str(asked.now)} keep "),
+					asked.keep,
+					Str.to_utf8("${said(removed)}${said(file)}${said(replaced)}${said(user)}"),
+				]),
+			},
+		)
+	} else if starts(req.sub, "/read/") {
 		got = Host.read!(List.drop_first(req.sub, 6))
 		said = match got.status {
 			Found => "found "
 			Missing => "missing"
 			Failed => "failed"
 		}
-		Chat.respond(
-			200,
-			[],
-			List.concat(Str.to_utf8(said), got.bytes),
-		)
+		Chat.respond(200, { content_type: [], body: List.concat(Str.to_utf8(said), got.bytes) })
 	} else if starts(req.sub, "/stat/") {
-		got = Host.stat!(List.drop_first(req.sub, 6))
+		got = Host.read_stat!(List.drop_first(req.sub, 6))
 		said = match got.status {
 			Found => "found size=${U64.to_str(got.size)} mtime=${I64.to_str(got.mtime)}"
 			Missing => "missing size=${U64.to_str(got.size)} mtime=${I64.to_str(got.mtime)}"
 			Failed => "failed"
 		}
-		Chat.respond(
-			200,
-			[],
-			Str.to_utf8(said),
-		)
+		Chat.respond(200, { content_type: [], body: Str.to_utf8(said) })
 	} else if starts(req.sub, "/read_at/") {
 		# /read_at/<offset>/<max>/<path>: one digit each.
 		rest = List.drop_first(req.sub, 9)
@@ -59,69 +73,53 @@ handle! = |req|
 			Missing => "missing"
 			Failed => "failed"
 		}
-		Chat.respond(
-			200,
-			[],
-			List.concat(Str.to_utf8(said), got.bytes),
-		)
+		Chat.respond(200, { content_type: [], body: List.concat(Str.to_utf8(said), got.bytes) })
 	} else if starts(req.sub, "/write/") {
 		Chat.respond(
 			200,
-			[],
-			done(Host.write!(List.drop_first(req.sub, 7), Str.to_utf8("bytes"))),
+			{
+				content_type: [],
+				body: done(Host.write!(List.drop_first(req.sub, 7), Str.to_utf8("bytes"))),
+			},
 		)
 	} else if starts(req.sub, "/append/") {
 		Chat.respond(
 			200,
-			[],
-			done(Host.append_line!(List.drop_first(req.sub, 8), Str.to_utf8("{\"a\":1}"))),
+			{
+				content_type: [],
+				body: done(
+					Host.append_line!(
+						List.drop_first(req.sub, 8),
+						Str.to_utf8("{\"a\":1}"),
+					),
+				),
+			},
 		)
 	} else if starts(req.sub, "/publish/") {
 		Host.publish!(List.drop_first(req.sub, 9), Str.to_utf8("event: reaction\ndata: x\n\n"))
-		Chat.respond(
-			200,
-			[],
-			Str.to_utf8("published"),
-		)
+		Chat.respond(200, { content_type: [], body: Str.to_utf8("published") })
 	} else if starts(req.sub, "/render/") {
 		got = Host.render!(List.drop_first(req.sub, 8))
 		said = match got.status {
 			Rendered => "rendered "
 			Failed => "failed"
 		}
-		Chat.respond(
-			200,
-			[],
-			List.concat(Str.to_utf8(said), got.html),
-		)
+		Chat.respond(200, { content_type: [], body: List.concat(Str.to_utf8(said), got.html) })
 	} else if starts(req.sub, "/store/") {
 		# A block appended to DM 1_2's topic `<topic>`, and the transcript's
 		# size after; then message 9 told to the index, every field of the
 		# message a different string, so a record laid out wrong shows.
 		topic = List.drop_first(req.sub, 7)
-		got = Host.append_message!(
-			dm12,
-			topic,
-			Str.to_utf8("the block"),
-		)
+		got = Host.append_message!(dm12, { sid: topic, block: Str.to_utf8("the block") })
 		match got.status {
 			Appended => {
-				Host.index_message!(
-					dm12,
-					topic,
-					probe_message,
-				)
+				Host.index_message!(dm12, { sid: topic, message: probe_message })
 				Chat.respond(
 					200,
-					[],
-					Str.to_utf8("appended ${U64.to_str(got.size)}"),
+					{ content_type: [], body: Str.to_utf8("appended ${U64.to_str(got.size)}") },
 				)
 			}
-			Failed => Chat.respond(
-				200,
-				[],
-				Str.to_utf8("failed"),
-			)
+			Failed => Chat.respond(200, { content_type: [], body: Str.to_utf8("failed") })
 		}
 	} else if starts(req.sub, "/upload/") {
 		# An upload served as part `<part>`, every field of the record a
@@ -141,8 +139,42 @@ handle! = |req|
 		})
 		Chat.respond(
 			200,
-			[],
-			Str.to_utf8(if got == Served "served" else "gone"),
+			{ content_type: [], body: Str.to_utf8(if got == Served "served" else "gone") },
+		)
+	} else if starts(req.sub, "/upload-form") {
+		# An upload's form read, every field of its answer said; then the
+		# allowance and the store asked, so each record laid out wrong shows
+		# (metal-vmm QUEUE 292).
+		got = Host.read_upload!({})
+		said = match got.status {
+			Read => "read"
+			NoFile => "nofile"
+			Unsupported => "unsupported"
+			Answered => "answered"
+		}
+		reserved = match Host.reserve_upload!(got.size) {
+			Reserved => "reserved"
+			Refused => "refused"
+			Failed => "failed"
+		}
+		stored = Host.store_upload!(
+			Str.to_utf8("1_2/sessions/Plans.uploads"),
+			got.ext,
+		)
+		Host.refuse_upload!(TooLarge, Str.to_utf8("too big"))
+		Chat.respond(
+			200,
+			{
+				content_type: [],
+				body: List.join([
+					Str.to_utf8("${said} ${U64.to_str(got.size)} "),
+					got.ext,
+					[' '],
+					got.filename,
+					Str.to_utf8(" ${reserved} "),
+					if stored.status == Stored stored.name else Str.to_utf8("not stored"),
+				]),
+			},
 		)
 	} else if starts(req.sub, "/bundle/") {
 		# Two files added to a bundle, then the bundle served as `<name>`.
@@ -154,72 +186,50 @@ handle! = |req|
 		match added {
 			Ok({}) => {
 				Host.serve_bundle!(name)
-				Chat.respond(
-					200,
-					[],
-					Str.to_utf8("bundled"),
-				)
+				Chat.respond(200, { content_type: [], body: Str.to_utf8("bundled") })
 			}
-			Err(Failed) => Chat.respond(
-				200,
-				[],
-				Str.to_utf8("failed"),
-			)
+			Err(Failed) => Chat.respond(200, { content_type: [], body: Str.to_utf8("failed") })
 		}
 	} else if starts(req.sub, "/cache/") {
 		# A cache written at `<path>`: never the request's failure.
 		Host.write_cache!(List.drop_first(req.sub, 7), Str.to_utf8("7 99\n"))
-		Chat.respond(
-			200,
-			[],
-			Str.to_utf8("written"),
-		)
+		Chat.respond(200, { content_type: [], body: Str.to_utf8("written") })
 	} else if starts(req.sub, "/entry/") {
 		# An entry appended to `<path>`; one that failed is said for member 2
 		# on 1_2/Plans with the fault it answered, the request never failed.
 		got = Host.append_entry!(
 			List.drop_first(req.sub, 7),
-			Str.to_utf8("--"),
-			Str.to_utf8("the entry"),
+			{ separator: Str.to_utf8("--"), entry: Str.to_utf8("the entry") },
 		)
 		match got.status {
-			Appended => Chat.respond(
-				200,
-				[],
-				Str.to_utf8("appended"),
-			)
+			Appended => Chat.respond(200, { content_type: [], body: Str.to_utf8("appended") })
 			Failed => {
 				Host.report_fanout_failure!(
 					Images,
-					Str.to_utf8("2"),
-					Str.to_utf8("1_2"),
-					Str.to_utf8("Plans"),
-					got.fault,
+					{
+						member: Str.to_utf8("2"),
+						key: Str.to_utf8("1_2"),
+						sid: Str.to_utf8("Plans"),
+						fault: got.fault,
+					},
 				)
-				Chat.respond(
-					200,
-					[],
-					Str.to_utf8("said"),
-				)
+				Chat.respond(200, { content_type: [], body: Str.to_utf8("said") })
 			}
 		}
 	} else if starts(req.sub, "/raw/") {
 		Chat.respond(
 			200,
-			[],
-			served(Host.serve_file!(List.drop_first(req.sub, 5))),
+			{ content_type: [], body: served(Host.serve_file!(List.drop_first(req.sub, 5))) },
 		)
 	} else if starts(req.sub, "/links/") {
 		Chat.respond(
 			200,
-			[],
-			served(Host.serve_rendered!(List.drop_first(req.sub, 7))),
+			{ content_type: [], body: served(Host.serve_rendered!(List.drop_first(req.sub, 7))) },
 		)
 	} else if starts(req.sub, "/remove/") {
 		Chat.respond(
 			200,
-			[],
-			done(Host.remove!(List.drop_first(req.sub, 8))),
+			{ content_type: [], body: done(Host.remove!(List.drop_first(req.sub, 8))) },
 		)
 	} else if starts(req.sub, "/list/") {
 		got = Host.list!(List.drop_first(req.sub, 6))
@@ -244,11 +254,7 @@ handle! = |req|
 				),
 			),
 		)
-		Chat.respond(
-			200,
-			[],
-			List.concat(Str.to_utf8(said), each),
-		)
+		Chat.respond(200, { content_type: [], body: List.concat(Str.to_utf8(said), each) })
 	} else if req.sub == Str.to_utf8("/accounts") {
 		got = Host.list_accounts!({})
 		said = match got.status {
@@ -280,11 +286,7 @@ handle! = |req|
 				]),
 			),
 		)
-		Chat.respond(
-			200,
-			[],
-			List.concat(Str.to_utf8(said), each),
-		)
+		Chat.respond(200, { content_type: [], body: List.concat(Str.to_utf8(said), each) })
 	} else if starts(req.sub, "/fail/") {
 		# `/fail/<reason>/<whose>`, the reason `malformed`, `kind` or `name`.
 		rest = List.drop_first(req.sub, 6)
@@ -299,11 +301,7 @@ handle! = |req|
 		} else {
 			crash "crash.roc: /fail/ with no reason"
 		}
-		Chat.respond(
-			200,
-			[],
-			Str.to_utf8("failed"),
-		)
+		Chat.respond(200, { content_type: [], body: Str.to_utf8("failed") })
 	} else if starts(req.sub, "/online/") {
 		# `/online/<id>,<id>,...`: each id's flag in its place, ` <id>:on` or
 		# ` <id>:off`, so a list that crossed short, long or shifted shows.
@@ -324,16 +322,17 @@ handle! = |req|
 		)
 		Chat.respond(
 			200,
-			[],
-			List.concat(Str.to_utf8("flags ${U64.to_str(List.len(flags))}"), List.join(said)),
+			{
+				content_type: [],
+				body: List.concat(
+					Str.to_utf8("flags ${U64.to_str(List.len(flags))}"),
+					List.join(said),
+				),
+			},
 		)
 	} else if starts(req.sub, "/malformed/") {
 		Host.count_malformed_channel!(List.drop_first(req.sub, 11))
-		Chat.respond(
-			200,
-			[],
-			Str.to_utf8("counted"),
-		)
+		Chat.respond(200, { content_type: [], body: Str.to_utf8("counted") })
 	} else if req.sub == Str.to_utf8("/crash") {
 		crash "a planted crash"
 	} else if req.sub == Str.to_utf8("/crash-after-asking") {

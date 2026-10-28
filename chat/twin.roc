@@ -30,6 +30,7 @@ import Saved
 import Search
 import BusKey
 import ChatUrl
+import Bytes
 
 call : { which : U8, args : List(List(U8)) } -> List(List(U8))
 call = |req| {
@@ -50,10 +51,10 @@ call = |req| {
 		5 =>
 		# Text only: bytes that are not UTF-8 are refused, no answer.
 			match Str.from_utf8(arg(0)) {
-				Ok(t) => [ZigText.json_string(t)]
+				Ok(t) => [Json.to_str(t).to_utf8()]
 				Err(_) => []
 			}
-		6 => [ZigText.trim(arg(0))]
+		6 => [Bytes.trim(arg(0), Bytes.zig_spaces)]
 		# A key that is no canonical pair is no PairKey, so no participant.
 		7 =>
 			match pair_of(arg(0)) {
@@ -149,19 +150,14 @@ call = |req| {
 				uid: arg(3),
 			}) else Unknown
 			[
-				Count.text(
-					u64(arg(0)),
-					u64(arg(1)),
-					last,
-				),
+				Count.text(u64(arg(0)), { size: u64(arg(1)), last }),
 			]
 		}
 		22 => maybe(Count.believed(Count.parse(arg(0)), u64(arg(1))))
 		23 =>
 			match Count.recorded_author(
 				Count.parse(arg(0)),
-				u64(arg(1)),
-				u64(arg(2)),
+				{ blocks: u64(arg(1)), size: u64(arg(2)) },
 			) {
 				Ok(uid) => [uid]
 				Err(NotRecorded) => []
@@ -339,7 +335,7 @@ call = |req| {
 			limits = {
 				image_max: u64(arg(7)),
 				video_max: u64(arg(8)),
-				accept: arg(9),
+				accept: Str.from_utf8(arg(9)) ?? "",
 				search_min: u64(arg(10)),
 			}
 			match (
@@ -375,11 +371,7 @@ call = |req| {
 					}
 					[
 						Html.bytes(
-							Pages.conversation(
-								srcs(req.args, 11),
-								limits,
-								view,
-							),
+							Pages.conversation(srcs(req.args, 11), { limits, v: view }),
 						),
 					]
 				}
@@ -408,11 +400,7 @@ call = |req| {
 			match (
 				Uid.from_utf8(arg(0)),
 				Recent.rows(
-					written(
-						req.args,
-						1,
-						[],
-					),
+					written(req.args, 1),
 				),
 			) {
 				(Ok(me), Ok(rows)) => [Recent.json(me, rows)]
@@ -422,15 +410,13 @@ call = |req| {
 		42 => [
 			ChatState.resume_topic(
 				List.keep_oks(List.drop_first(req.args, 2), Str.from_utf8),
-				valid_text(arg(0)),
-				int(arg(1)),
+				{ last: valid_text(arg(0)), now_secs: int(arg(1)) },
 			).to_utf8(),
 		]
 		43 =>
 			match ChatState.pinned(
 				valid_text(arg(0)),
-				valid_text(arg(1)),
-				if arg(2) == [49] Pin else Unpin,
+				{ topic: valid_text(arg(1)), pin: if arg(2) == [49] Pin else Unpin },
 			) {
 				Write(bytes) => [bytes]
 				Remove => []
@@ -482,11 +468,7 @@ call = |req| {
 			match Uid.from_utf8(arg(0)) {
 				Ok(uid) => List.map(
 					Paths.member_channels(
-						flat_rosters(
-							req.args,
-							1,
-							[],
-						),
+						flat_rosters(req.args, { at: 1, out: [] }),
 						uid,
 					),
 					Str.to_utf8,
@@ -515,11 +497,7 @@ call = |req| {
 			}
 		55 => List.map(
 			Paths.topics(
-				entries(
-					req.args,
-					0,
-					[],
-				),
+				entries(req.args, 0),
 			),
 			Str.to_utf8,
 		)
@@ -530,11 +508,7 @@ call = |req| {
 			}
 		57 => List.map(
 			Paths.channel_names(
-				entries(
-					req.args,
-					0,
-					[],
-				),
+				entries(req.args, 0),
 			),
 			Str.to_utf8,
 		)
@@ -546,11 +520,7 @@ call = |req| {
 			names = List.keep_oks(List.sublist(req.args, { start: 1, len: n }), Str.from_utf8)
 			got = Paths.rosters(
 				names,
-				reads(
-					req.args,
-					1 + n,
-					[],
-				),
+				reads(req.args, 1 + n),
 			)
 			List.join([
 				[num(List.len(got.malformed))],
@@ -593,11 +563,7 @@ call = |req| {
 			# whole, as main's load_accounts! door fails the request; a name
 			# that is not UTF-8 is that account's, listed as unreadable.
 			match List.map_try(
-				accounts(
-					req.args,
-					1 + n,
-					[],
-				),
+				accounts(req.args, 1 + n),
 				Accounts.from_host,
 			) {
 				Ok(all) => account_answers(ids, all)
@@ -683,7 +649,7 @@ call = |req| {
 						topic,
 						excerpt,
 						dm: if arg(6) == [49] Dm else Channel,
-					}),
+					}).bytes(),
 				]
 				_ => []
 			}
@@ -706,7 +672,7 @@ call = |req| {
 						conv,
 						at,
 					}
-					[Feeds.images_entry(h, tags), Feeds.images_event(h, tags)]
+					[Feeds.images_entry(h, tags), Feeds.images_event(h, tags).bytes()]
 				}
 				_ => []
 			}
@@ -729,12 +695,8 @@ call = |req| {
 						conv,
 						at,
 					}
-					blocks = pairs(
-						rest,
-						0,
-						[],
-					)
-					[Feeds.code_entry(h, blocks), Feeds.code_event(h, blocks)]
+					blocks = pairs(rest, 0)
+					[Feeds.code_entry(h, blocks), Feeds.code_event(h, blocks).bytes()]
 				}
 				_ => []
 			}
@@ -746,11 +708,7 @@ call = |req| {
 			given = List.sublist(req.args, { start: 4, len: n })
 			members = List.keep_oks(given, Uid.from_utf8)
 			decoded = List.map_try(
-				accounts(
-					req.args,
-					4 + n,
-					[],
-				),
+				accounts(req.args, 4 + n),
 				Accounts.from_host,
 			)
 			key = if arg(0) == [100] Dm(valid_pair(arg(2))) else Channel(valid_channel(arg(2)))
@@ -947,34 +905,23 @@ file = |how, bytes| match how {
 ## A folder's entries as the test wrote them: `kind, name` pairs from
 ## argument `i`, the kind `d`, `f` or `o`. A name that is not UTF-8 is left
 ## out, as Files.list!'s door leaves it out.
-entries : List(List(U8)), U64, List(Paths.Entry) -> List(Paths.Entry)
-entries = |
-	args,
-	i,
-	out,
-|
-	match (List.get(args, i), List.get(args, i + 1)) {
-		(Ok(k), Ok(raw)) => {
-			kind = match k {
-				[100] => Dir
-				[102] => File
-				_ => Other
-			}
-			match Str.from_utf8(raw) {
-				Ok(name) => entries(
-					args,
-					i + 2,
-					List.append(out, { kind, name }),
-				)
-				Err(_) => entries(
-					args,
-					i + 2,
-					out,
-				)
-			}
-		}
-		_ => out
-	}
+entries : List(List(U8)), U64 -> List(Paths.Entry)
+entries = |args, i|
+	List.keep_oks(
+		List.chunks_of(List.drop_first(args, i), 2),
+		|record|
+			match record {
+				[k, raw] => {
+					kind = match k {
+						[100] => Dir
+						[102] => File
+						_ => Other
+					}
+					Str.from_utf8(raw).map_ok(|name| { kind, name })
+				}
+				_ => Err(Short)
+			},
+	)
 
 ## Accounts as the test wrote them: `id, kind, name_read, name` from
 ## argument `i`, the kind `a` (the agent), `m` (a member), `u` (its
@@ -993,47 +940,35 @@ HostAccount : {
 	name_read : [Found, Unreadable],
 }
 
-accounts : List(List(U8)), U64, List(HostAccount) -> List(HostAccount)
-accounts = |
-	args,
-	i,
-	out,
-|
-	match (
-		List.get(args, i),
-		List.get(args, i + 1),
-		List.get(args, i + 2),
-		List.get(args, i + 3),
-	) {
-		(
-			Ok(id),
-			Ok(k),
-			Ok(r),
-			Ok(name),
-		) => {
-			kind = match k {
-				[97] => Agent
-				[109] => Member
-				[117] => Unreadable
-				_ => Guest
-			}
-			name_read = if r == [117] Unreadable else Found
-			accounts(
-				args,
-				i + 4,
-				List.append(
-					out,
-					{
+accounts : List(List(U8)), U64 -> List(HostAccount)
+accounts = |args, i|
+	List.keep_oks(
+		List.chunks_of(List.drop_first(args, i), 4),
+		|record|
+			match record {
+				[
+					id,
+					k,
+					r,
+					name,
+				] => {
+					kind = match k {
+						[97] => Agent
+						[109] => Member
+						[117] => Unreadable
+						_ => Guest
+					}
+					name_read = if r == [117] Unreadable else Found
+					Ok({
 						id,
 						kind,
 						name,
 						name_read,
-					},
-				),
-			)
-		}
-		_ => out
-	}
+					})
+				}
+				_ => Err(Short)
+			},
+	)
 
 ## A lookup's failure, as the test reads it: `kind` or `name`, then whose.
 unreadable : Accounts.Unreadable -> List(List(U8))
@@ -1044,44 +979,32 @@ unreadable = |why|
 	}
 
 ## Code blocks as the test wrote them, `lang, body` pairs from `i`.
-pairs : List(Str), U64, List(Feeds.Block) -> List(Feeds.Block)
-pairs = |
-	args,
-	i,
-	out,
-|
-	match (List.get(args, i), List.get(args, i + 1)) {
-		(Ok(lang), Ok(body)) => pairs(
-			args,
-			i + 2,
-			List.append(out, { lang, body }),
-		)
-		_ => out
-	}
+pairs : List(Str), U64 -> List(Feeds.Block)
+pairs = |args, i|
+	List.keep_oks(
+		List.chunks_of(List.drop_first(args, i), 2),
+		|record|
+			match record {
+				[lang, body] => Ok({ lang, body })
+				_ => Err(Short)
+			},
+	)
 
 ## Reads as the test says they went (`file`), `how, bytes` pairs from `i`.
-reads : List(List(U8)), U64, List(Try(Str, [Missing, Failed])) -> List(Try(Str, [Missing, Failed]))
-reads = |
-	args,
-	i,
-	out,
-|
-	match (List.get(args, i), List.get(args, i + 1)) {
-		(Ok(how), Ok(bytes)) => reads(
-			args,
-			i + 2,
-			List.append(out, file(how, bytes)),
-		)
-		_ => out
-	}
+reads : List(List(U8)), U64 -> List(Try(Str, [Missing, Failed]))
+reads = |args, i|
+	List.keep_oks(
+		List.chunks_of(List.drop_first(args, i), 2),
+		|record|
+			match record {
+				[how, bytes] => Ok(file(how, bytes))
+				_ => Err(Short)
+			},
+	)
 
 ## Rosters flat, `name, count, member...` each, from argument `i`.
-flat_rosters : List(List(U8)), U64, List(Paths.Roster) -> List(Paths.Roster)
-flat_rosters = |
-	args,
-	i,
-	out,
-|
+flat_rosters : List(List(U8)), { at : U64, out : List(Paths.Roster) } -> List(Paths.Roster)
+flat_rosters = |args, { at: i, out }|
 	match List.get(args, i) {
 		Err(_) => out
 		Ok(name) => {
@@ -1093,11 +1016,7 @@ flat_rosters = |
 					members: List.map(List.sublist(args, { start: i + 2, len: n }), valid_uid),
 				},
 			)
-			flat_rosters(
-				args,
-				i + 2 + n,
-				List.concat(out, List.keep_oks([roster], |r| r)),
-			)
+			flat_rosters(args, { at: i + 2 + n, out: List.append_if_ok(out, roster) })
 		}
 	}
 
@@ -1133,69 +1052,55 @@ maybe = |t| match t {
 }
 
 ## The scripts' srcs, as `name, src` pairs from argument `from` on.
-srcs : List(List(U8)), U64 -> (List(U8) -> Html)
+srcs : List(List(U8)), U64 -> (List(U8) -> Str)
 srcs = |args, from| Chrome.src_in(
-	scripts(
-		args,
-		from,
-		[],
-	),
+	scripts(args, from),
 )
 
-scripts : List(List(U8)),
-U64,
-List(
-	{
-		name : List(U8),
-		src : List(U8),
-	},
-) -> List({ name : List(U8), src : List(U8) })
-scripts = |
-	args,
-	i,
-	out,
-|
-	match (List.get(args, i), List.get(args, i + 1)) {
-		(Ok(name), Ok(src)) => scripts(
-			args,
-			i + 2,
-			List.append(out, { name, src }),
-		)
-		_ => out
-	}
+scripts : List(List(U8)), U64 -> List({ name : List(U8), src : List(U8) })
+scripts = |args, i|
+	List.keep_oks(
+		List.chunks_of(List.drop_first(args, i), 2),
+		|record|
+			match record {
+				[name, src] => Ok({ name, src })
+				_ => Err(Short)
+			},
+	)
 
 ## The recent rows as the host writes them, nine arguments each from `i` on:
 ## doc, secs, uid, name, key, label, topic, markdown, dm (doc and dm "1"
 ## or "0").
-written : List(List(U8)), U64, List(Recent.Written) -> List(Recent.Written)
-written = |
-	args,
-	i,
-	out,
-|
-	if i + 9 > List.len(args) {
-		out
-	} else {
-		at = |k| List.get(args, i + k) ?? []
-		written(
-			args,
-			i + 9,
-			List.append(
-				out,
-				{
-					kind: if at(0) == ['1'] Doc else Message,
-					secs: at(1),
-					uid: at(2),
-					name: at(3),
-					key: at(4),
-					label: at(5),
-					topic: at(6),
-					markdown: at(7),
-					dm: if at(8) == ['1'] Dm else Channel,
-				},
-			),
-		)
-	}
+written : List(List(U8)), U64 -> List(Recent.Written)
+written = |args, i|
+	List.keep_oks(
+		List.chunks_of(List.drop_first(args, i), 9),
+		|record|
+			match record {
+				[
+					doc,
+					secs,
+					uid,
+					name,
+					key,
+					label,
+					topic,
+					markdown,
+					dm,
+				] => Ok({
+					kind: if doc == ['1'] Doc else Message,
+					secs,
+					uid,
+					name,
+					key,
+					label,
+					topic,
+					markdown,
+					dm: if dm == ['1'] Dm else Channel,
+				})
+				_ => Err(Short)
+			},
+	)
 
 ## Account answers for case 60: each id's exists and name, then the
 ## authorized roster.
@@ -1218,7 +1123,7 @@ account_answers = |ids, all| {
 	roster = match Accounts.authorized(all) {
 		Ok(members) => List.concat(
 			[Str.to_utf8("ok")],
-			List.join(List.map(members, |a| [a.id.to_str().to_utf8(), a.name.to_utf8()])),
+			List.join_map(members, |a| [a.id.to_str().to_utf8(), a.name.to_utf8()]),
 		)
 		Err(why) => unreadable(why)
 	}

@@ -1,26 +1,24 @@
 ## **JSON BUILT, NOT SPLICED** (metal-vmm QUEUE 269): a value is made only
 ## by this module's builders (string, number, bool, array, object), so a
 ## JSON field's bytes are always a whole value, escaped as Zig's std.json
-## writes them (ZigText.json_string): no spaces, fields and items in the
+## writes them (the builtin `Json.to_str` of a Str, byte for byte; its
+## records' fields come out sorted, so a record goes through `object`, never
+## `Json.to_str`): no spaces, fields and items in the
 ## order given. Opaque (`::`); `bytes` is the only way out. Pure.
-import ZigText
 
 JsonOut :: List(U8).{
 
 	## A string, escaped.
 	string : Str -> JsonOut
-	string = |s| JsonOut.(ZigText.json_string(s))
+	string = |s| JsonOut.(Json.to_str(s).to_utf8())
 
 	## Bytes as a string, as chat_search.zig's `str` writes them: each byte
 	## that does not begin a whole UTF-8 sequence is U+FFFD (a word the
-	## index read from a transcript, a key typed as `%FF`).
+	## index read from a transcript, a key typed as `%FF`). **Kept on purpose:**
+	## `Str.from_utf8_lossy` gives one U+FFFD per bad sequence, not per byte.
 	lossy : List(U8) -> JsonOut
 	lossy = |b| string(
-		whole_or_replaced(
-			b,
-			0,
-			"",
-		),
+		whole_or_replaced(b, { at: 0, out: "" }),
 	)
 
 	## A whole number, in decimal.
@@ -55,7 +53,7 @@ JsonOut :: List(U8).{
 				List.map(
 					fields,
 					|(name, value)| List.join([
-						ZigText.json_string(name),
+						Json.to_str(name).to_utf8(),
 						[':'],
 						bytes(value),
 					]),
@@ -65,17 +63,18 @@ JsonOut :: List(U8).{
 		]),
 	)
 
+	## A string field, or none when `s` is empty (an encoder that leaves an
+	## empty field out): for `object(List.join([..., optional("url", key), ...]))`.
+	optional : Str, Str -> List((Str, JsonOut))
+	optional = |name, s| if s == "" [] else [(name, string(s))]
+
 	## The value's bytes.
 	bytes : JsonOut -> List(U8)
 	bytes = |JsonOut.(b)| b
 }
 
-whole_or_replaced : List(U8), U64, Str -> Str
-whole_or_replaced = |
-	b,
-	i,
-	out,
-|
+whole_or_replaced : List(U8), { at : U64, out : Str } -> Str
+whole_or_replaced = |b, { at: i, out }|
 	match List.get(b, i) {
 		Err(_) => out
 		Ok(c) => {
@@ -87,16 +86,8 @@ whole_or_replaced = |
 				),
 			) else Err(Short)
 			match whole {
-				Ok(text) => whole_or_replaced(
-					b,
-					i + n,
-					Str.concat(out, text),
-				)
-				Err(_) => whole_or_replaced(
-					b,
-					i + 1,
-					Str.concat(out, "\u(fffd)"),
-				)
+				Ok(text) => whole_or_replaced(b, { at: i + n, out: Str.concat(out, text) })
+				Err(_) => whole_or_replaced(b, { at: i + 1, out: Str.concat(out, "\u(fffd)") })
 			}
 		}
 	}

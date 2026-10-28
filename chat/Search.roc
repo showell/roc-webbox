@@ -3,8 +3,9 @@
 ## typed made a key as the index holds words, and the answer's JSON. The
 ## index and the rate limit are the host's (Host.search_words!,
 ## Host.admit!). Pure.
-import ZigText
 import JsonOut
+import Ascii
+import Bytes
 
 Search := [].{
 
@@ -20,7 +21,7 @@ Search := [].{
 	## edge punctuation, then ASCII-lowercased; empty past `max_word`.
 	key : List(U8) -> List(U8)
 	key = |typed| {
-		t = trim_word(ZigText.trim(typed))
+		t = trim_word(Bytes.trim(typed, Bytes.zig_spaces))
 		if List.len(t) > max_word [] else List.map(t, |c| if c >= 'A' and c <= 'Z' c + 32 else c)
 	}
 
@@ -71,8 +72,8 @@ Search := [].{
 		match h.found {
 			Found => {
 				at = h.at
-				start = lesser(edge_fwd(h, sub_floor(at, excerpt_pad)), at)
-				end = greater(edge_back(h, lesser(len, at + key_len + excerpt_pad)), at + key_len)
+				start = U64.min(edge_fwd(h, U64.minus_saturated(at, excerpt_pad)), at)
+				end = U64.max(edge_back(h, U64.min(len, at + key_len + excerpt_pad)), at + key_len)
 				{
 					before: List.concat(if start > 0 ellipsis else [], slice(start, at)),
 					mark: slice(at, at + key_len),
@@ -80,7 +81,7 @@ Search := [].{
 				}
 			}
 			Missing => {
-				end = edge_back(h, lesser(len, 2 * excerpt_pad))
+				end = edge_back(h, U64.min(len, 2 * excerpt_pad))
 				{
 					before: [],
 					mark: [],
@@ -91,12 +92,19 @@ Search := [].{
 	}
 
 	## The answer: `{"word":…,"matched":N,"unreadable":N,"messages":[{"conv":…,"kind":…,"sid":…,"id":…,"from":…,"date":…,"before":…,"mark":…,"after":…},…]}`.
-	messages_json : List(U8), U64, U64, List(Hit) -> List(U8)
+	messages_json : List(U8),
+	{
+		matched : U64,
+		unreadable : U64,
+		hits : List(Hit),
+	} -> List(U8)
 	messages_json = |
 		word,
-		matched,
-		unreadable,
-		hits,
+		{
+			matched,
+			unreadable,
+			hits,
+		},
 	|
 		JsonOut.object([
 			("word", JsonOut.lossy(word)),
@@ -106,12 +114,12 @@ Search := [].{
 		]).bytes()
 
 	## The answer: `{"prefix":…,"most":20,"unreadable":N,"words":[{"word":…,"count":N},…]}`.
-	words_json : List(U8), U64, List({ count : U64, word : List(U8) }) -> List(U8)
-	words_json = |
-		prefix,
-		unreadable,
-		words,
-	|
+	words_json : List(U8),
+	{
+		unreadable : U64,
+		words : List({ count : U64, word : List(U8) }),
+	} -> List(U8)
+	words_json = |prefix, { unreadable, words }|
 		JsonOut.object([
 			("prefix", JsonOut.lossy(prefix)),
 			("most", JsonOut.number(most_words)),
@@ -150,16 +158,6 @@ hit_json = |h, key_len| {
 ellipsis : List(U8)
 ellipsis = Str.to_utf8("\u(2026)")
 
-lesser : U64, U64 -> U64
-lesser = |a, b| if a < b a else b
-
-greater : U64, U64 -> U64
-greater = |a, b| if a > b a else b
-
-## `a - b`, or 0 (Zig's `-|`).
-sub_floor : U64, U64 -> U64
-sub_floor = |a, b| if a > b a - b else 0
-
 ## Whether the message's byte at `p` continues a UTF-8 sequence (a byte past
 ## the window answers no).
 is_continuation : Search.Hit, U64 -> Bool
@@ -186,12 +184,12 @@ edge_back = |h, i| if i > 0 and i < h.length and is_continuation(h, i) edge_back
 trim_word : List(U8) -> List(U8)
 trim_word = |w|
 	match (List.first(w), List.last(w)) {
-		(Ok(c), _) if is_ascii_punct(c) => trim_word(List.drop_first(w, 1))
-		(_, Ok(c)) if is_ascii_punct(c) => trim_word(List.drop_last(w, 1))
+		(Ok(c), _) if Ascii.is_punctuation(c) => trim_word(List.drop_first(w, 1))
+		(_, Ok(c)) if Ascii.is_punctuation(c) => trim_word(List.drop_last(w, 1))
 		_ =>
-			match List.find_first(trimmed, |t| has_prefix(w, t) or has_suffix(w, t)) {
+			match List.find_first(trimmed, |t| List.starts_with(w, t) or List.ends_with(w, t)) {
 				Ok(t) => trim_word(
-					if has_prefix(w, t) List.drop_first(
+					if List.starts_with(w, t) List.drop_first(
 						w,
 						List.len(t),
 					) else List.drop_last(w, List.len(t)),
@@ -199,15 +197,6 @@ trim_word = |w|
 				Err(_) => w
 			}
 	}
-
-is_ascii_punct : U8 -> Bool
-is_ascii_punct = |c| (c >= '!' and c <= '/') or (c >= ':' and c <= '@') or (c >= '[' and c <= '`') or (c >= '{' and c <= '~')
-
-has_prefix : List(U8), List(U8) -> Bool
-has_prefix = |w, t| List.take_first(w, List.len(t)) == t
-
-has_suffix : List(U8), List(U8) -> Bool
-has_suffix = |w, t| List.len(w) >= List.len(t) and List.take_last(w, List.len(t)) == t
 
 ## search_tokens `trimmed`: quotes, guillemets, the ellipsis and dashes, the
 ## inverted marks, the primes, the no-break space.

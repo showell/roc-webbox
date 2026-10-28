@@ -4,7 +4,6 @@
 ## with a body line that would read as the separator escaped by one
 ## backslash. Pure, on bytes.
 import Bytes
-import ZigText
 import Uid
 
 Transcript := [].{
@@ -40,10 +39,10 @@ Transcript := [].{
 	decode_file : List(U8) -> Try({ messages : List(Msg), refused : U64 }, [CorruptUid(List(U8))])
 	decode_file = |data|
 		List.fold_try(
-			Bytes.split_seq(data, sep),
+			List.split_on_list(data, sep),
 			{ messages: [], refused: 0 },
 			|acc, piece|
-				if ZigText.trim(piece) == [] {
+				if Bytes.trim(piece, Bytes.zig_spaces) == [] {
 					Ok(acc)
 				} else {
 					b = decode_block(piece)
@@ -70,11 +69,10 @@ Transcript := [].{
 	escape_body : List(U8) -> List(U8)
 	escape_body = |body| if Bytes.find(
 		body,
-		dashes,
-		0,
+		{ needle: dashes, at: 0 },
 	) == Err(NotFound) body else Bytes.join_lines(
 		List.map(
-			Bytes.split_byte(body, '\n'),
+			List.split_on(body, '\n'),
 			escape_line,
 		),
 	)
@@ -113,13 +111,15 @@ decode_block = |piece| {
 	}
 	headers(
 		piece,
-		start,
 		{
-			id,
-			from: [],
-			at: [],
-			uid: [],
-			markdown: [],
+			at: start,
+			block: {
+				id,
+				from: [],
+				at: [],
+				uid: [],
+				markdown: [],
+			},
 		},
 	)
 }
@@ -133,36 +133,14 @@ line_at = |piece, at| List.sublist(
 	piece,
 	{
 		start: at,
-		len: line_len(
-			piece,
-			at,
-			0,
-		),
+		len: Bytes.count_while(piece, { keep: |c| c != '\n', at: at + 0 }) - at,
 	},
 )
 
-line_len : List(U8), U64, U64 -> U64
-line_len = |
-	piece,
-	at,
-	n,
-| match List.get(piece, at + n) {
-	Ok(c) if c != '\n' => line_len(
-		piece,
-		at,
-		n + 1,
-	)
-	_ => n
-}
-
 ## The header lines from offset `at` to the blank one, then the body:
 ## everything after the blank line (none when there is no blank line).
-headers : List(U8), U64, Block -> Block
-headers = |
-	piece,
-	at,
-	m,
-|
+headers : List(U8), { at : U64, block : Block } -> Block
+headers = |piece, { at, block: m }|
 	if at > List.len(piece) {
 		m
 	} else {
@@ -194,11 +172,7 @@ headers = |
 					}
 				Err(NotFound) => m
 			}
-			headers(
-				piece,
-				at + List.len(l) + 1,
-				next,
-			)
+			headers(piece, { at: at + List.len(l) + 1, block: next })
 		}
 	}
 
@@ -208,11 +182,10 @@ unescape_lines : List(U8) -> List(U8)
 unescape_lines = |body|
 	if Bytes.find(
 		body,
-		escaped_dashes,
-		0,
+		{ needle: escaped_dashes, at: 0 },
 	) == Err(NotFound) body else Bytes.join_lines(
 		List.map(
-			Bytes.split_byte(body, '\n'),
+			List.split_on(body, '\n'),
 			unescape_line,
 		),
 	)
@@ -251,22 +224,14 @@ dashes = Str.to_utf8("-------------")
 ## A line of one or more backslashes then exactly the dashes loses one.
 unescape_line : List(U8) -> List(U8)
 unescape_line = |line| {
-	k = Bytes.leading(
-		line,
-		'\\',
-		0,
-	)
+	k = Bytes.count_while(line, { keep: |x| x == '\\', at: 0 })
 	if k >= 1 and List.drop_first(line, k) == dashes List.drop_first(line, 1) else line
 }
 
 ## A line of any backslashes then exactly the dashes gains one.
 escape_line : List(U8) -> List(U8)
 escape_line = |line| {
-	k = Bytes.leading(
-		line,
-		'\\',
-		0,
-	)
+	k = Bytes.count_while(line, { keep: |x| x == '\\', at: 0 })
 	if List.drop_first(line, k) == dashes List.prepend(line, '\\') else line
 }
 

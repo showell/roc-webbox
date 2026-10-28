@@ -5,7 +5,6 @@
 ## and chat_page.zig, and angry-gopher's chat_twin_test.zig holds every page
 ## built here to the one the Zig builds, byte for byte, until the Zig's go.
 ## The scripts' srcs are the host's (`src`): their hash is of bytes it holds.
-import Bytes
 import Html
 
 Chrome := [].{
@@ -19,7 +18,7 @@ Chrome := [].{
 		title : Str,
 		viewer : Str,
 		active : Str,
-		src : List(U8) -> Html,
+		src : List(U8) -> Str,
 	}
 
 	## page() then Html.bytes(): the shell, `body`, and the shell closed.
@@ -31,15 +30,19 @@ Chrome := [].{
 			head_b1,
 			top_bar_css,
 			head_b2,
-			Html.fill(
-				head_scripts,
-				[
-					(s.src)(Str.to_utf8("colors.js")),
-					(s.src)(Str.to_utf8("viewport.js")),
-					(s.src)(Str.to_utf8("chat_theme.js")),
-					(s.src)(Str.to_utf8("chrome_drawer.js")),
-				],
-			),
+			script(s, "colors.js"),
+			Html.trusted("<script>ChatColors.install();</script>"),
+			script(s, "viewport.js"),
+			Html.tag({
+				name: "script",
+				attrs: [Bare("defer"), Attr("src", (s.src)(Str.to_utf8("chat_theme.js")))],
+				inner: Html.empty,
+			}),
+			Html.tag({
+				name: "script",
+				attrs: [Bare("defer"), Attr("src", (s.src)(Str.to_utf8("chrome_drawer.js")))],
+				inner: Html.empty,
+			}),
 			Html.fill(top_a, [Html.text(s.title)]),
 			nav(s.active),
 			Html.fill(top_b, [Html.text(s.viewer)]),
@@ -50,19 +53,24 @@ Chrome := [].{
 
 	## `<script src="..."></script>` for `name`.
 	script : Shell, Str -> Html
-	script = |s, name| Html.join([
-		Html.trusted("<script src=\""),
-		(s.src)(Str.to_utf8(name)),
-		Html.trusted("\"></script>"),
-	])
+	script = |s, name| Html.tag({
+		name: "script",
+		attrs: [Attr("src", (s.src)(Str.to_utf8(name)))],
+		inner: Html.empty,
+	})
 
 	## A script's src from the host's `srcs!`. **AN UNKNOWN NAME IS A CRASH**
 	## (a 500), never an empty src: a page would link a script that is not there.
-	## **A SRC IS THE HOST'S MARKUP** (Html.host_markup): the host names and
-	## hashes the bytes it serves, and the Zig placed the src unescaped.
-	src_in : List({ name : List(U8), src : List(U8) }) -> (List(U8) -> Html)
+	## **A SRC IS THE HOST'S TEXT, ESCAPED AS EVERY ATTRIBUTE IS** (Html.tag):
+	## the host names and hashes the bytes it serves, a path and a hex `?v=`,
+	## which escaping leaves as they are (the Zig placed it unescaped).
+	src_in : List({ name : List(U8), src : List(U8) }) -> (List(U8) -> Str)
 	src_in = |scripts| |name| match List.find_first(scripts, |s| s.name == name) {
-		Ok(s) => Html.host_markup(s.src)
+		Ok(s) =>
+			match Str.from_utf8(s.src) {
+				Ok(src) => src
+				Err(_) => crash "Chrome: a script's src that is not UTF-8"
+			}
 		Err(_) => crash "Chrome: no script named <name>"
 	}
 
@@ -139,13 +147,11 @@ nav = |active| {
 					Html.trusted("</strong>"),
 				])
 			else
-				Html.join([
-					Html.trusted("<a href=\""),
-					Html.escape(Str.to_utf8(href)),
-					Html.trusted("\">"),
-					text,
-					Html.trusted("</a>"),
-				])
+				Html.tag({
+					name: "a",
+					attrs: [Attr("href", href)],
+					inner: text,
+				})
 		},
 	)
 	Html.join(List.intersperse(links, Html.trusted(" · ")))
@@ -210,13 +216,6 @@ head_b2 = Html.trusted(
 	\\</style>
 	\\</head><body>
 	\\
-	,
-)
-
-## `head_scripts`, its `{s}` slots cut at "{s}" (`fill`).
-head_scripts : Html
-head_scripts = Html.trusted(
-	\\<script src="{s}"></script><script>ChatColors.install();</script><script src="{s}"></script><script defer src="{s}"></script><script defer src="{s}"></script>
 	,
 )
 

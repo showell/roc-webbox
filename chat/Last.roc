@@ -1,4 +1,7 @@
-## **A TOPIC'S LAST MESSAGE WITHOUT READING ITS TRANSCRIPT** (angry-gopher
+## **A TOPIC'S COUNT AND ITS LAST MESSAGE, FROM ITS SIDECAR** (metal-vmm
+## QUEUE 300): how many messages it holds (`messages!`, chat_count
+## messageCount), and its last message without reading its transcript
+## (angry-gopher
 ## chat_count.zig `lastMessage`, metal-vmm QUEUE 276): the words, when they
 ## were sent, who sent them and which message it is, for a listing
 ## (/chat/recent). The `.count` sidecar's second line says where the last
@@ -28,9 +31,9 @@ Last := [].{
 	## The topic's last message, `None` for a topic with none (no
 	## transcript, or no message in it). `Failed` when the transcript's read
 	## failed (the request has, with its error); a cache's never does.
-	of! : Paths.TopicAt, List(Accounts.Account) => Try([Some(Message), None], [Failed])
-	of! = |at, accounts| {
-		counted = sidecar!(at)
+	read_message! : Paths.TopicAt, List(Accounts.Account) => Try([Some(Message), None], [Failed])
+	read_message! = |at, accounts| {
+		counted = read_sidecar!(at)
 		match counted {
 			Ok(
 				{
@@ -41,8 +44,7 @@ Last := [].{
 			) if count > 0 =>
 				match Files.read_cache!(
 					Paths.transcript_path(at),
-					l.offset,
-					tail_window,
+					{ offset: l.offset, max: tail_window },
 				) {
 					Ok(window) => {
 						fill = if List.len(window) == tail_window Full else Partial
@@ -90,19 +92,49 @@ Last := [].{
 		}
 	}
 
+	## **HOW MANY MESSAGES A TOPIC HOLDS** (chat_count.messageCount, metal-vmm
+	## QUEUE 275, 300): the N that numbers the next one. **THE SIDECAR IS A
+	## CACHE; THE TRANSCRIPT IS THE TRUTH**: the `.count` is believed only
+	## when the transcript is still the size it was taken at (one stat), else
+	## the transcript is read and its blocks counted (Count.count_blocks): a
+	## sidecar whose read failed among them, a miss (metal-vmm QUEUE 284). No
+	## transcript is no messages; one that will not be looked at or read
+	## fails the request, never 0, which would number the next message onto
+	## the last. The Roc only reads the sidecar; the host writes it with
+	## every message.
+	messages! : Paths.TopicAt => Try(U64, [Failed])
+	messages! = |at| {
+		transcript = Paths.transcript_path(at)
+		match Files.read_stat!(transcript) {
+			Err(Missing) => Ok(0)
+			Err(Failed) => Err(Failed)
+			Ok({ size, mtime: _ }) =>
+			# readCount, then believedCount: a sidecar missing, past 1 KiB,
+			# that does not parse, or whose read failed is a recount.
+				match Count.believed(read_sidecar!(at), size) {
+					Ok(n) => Ok(n)
+					Err(NotBelieved) =>
+						match Files.read_bytes!(transcript) {
+							Ok(raw) => Ok(Count.count_blocks(raw))
+							# Gone since the stat: no messages.
+							Err(Missing) => Ok(0)
+							Err(Failed) => Err(Failed)
+						}
+				}
+		}
+	}
+
 	## **THE SIDECAR AS readCount READS IT**: parsed, or `Malformed` for
 	## one missing, past 1 KiB, that does not parse, or whose read failed
-	## (a recount, never the request's failure: Files.read_cache!).
-	sidecar! : Paths.TopicAt => Try(Count.Counted, [Malformed])
-	sidecar! = |at|
-		match Files.read_cache!(
-			Paths.count_path(at),
-			0,
-			1025,
-		) {
+	## (a recount, never the request's failure: Files.read_cache!): the
+	## count's (`messages!`) and the last message's (`read_message!`).
+	read_sidecar! : Paths.TopicAt => Try(Count.Counted, [Malformed])
+	read_sidecar! = |at|
+		match Files.read_cache!(Paths.count_path(at), { offset: 0, max: 1025 }) {
 			Ok(raw) if List.len(raw) <= 1024 => Count.parse(raw)
 			_ => Err(Malformed)
 		}
+
 }
 
 ## chat_store `tail_window`: 64 KiB.
@@ -136,8 +168,7 @@ whole! = |
 							uid =
 								match Count.recorded_author(
 									counted,
-									blocks,
-									List.len(raw),
+									{ blocks, size: List.len(raw) },
 								) {
 									Ok(recorded) => recorded
 									Err(NotRecorded) => author(msg, accounts)

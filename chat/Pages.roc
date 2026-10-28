@@ -4,7 +4,7 @@
 import Bytes
 import Chrome
 import Html
-import JsonText
+import JsonOut
 import Paths
 import Uid
 import ZigText
@@ -16,7 +16,7 @@ Pages := [].{
 	Limits : {
 		image_max : U64,
 		video_max : U64,
-		accept : List(U8),
+		accept : Str,
 		search_min : U64,
 	}
 
@@ -71,7 +71,7 @@ Pages := [].{
 
 	## noTopicsHtml: an addressable conversation with no topics, its
 	## first-topic widget mounted on `base`.
-	no_topics : (List(U8) -> Html), Topicless -> Html
+	no_topics : (List(U8) -> Str), Topicless -> Html
 	no_topics = |
 		src,
 		{
@@ -91,9 +91,11 @@ Pages := [].{
 		Chrome.page(
 			s,
 			Html.join([
-				Html.trusted("<div id=\"chat-first-topic\" data-conv-base=\""),
-				Html.text(base),
-				Html.trusted("\"></div>"),
+				Html.tag({
+					name: "div",
+					attrs: [Attr("id", "chat-first-topic"), Attr("data-conv-base", base)],
+					inner: Html.empty,
+				}),
 				Chrome.script(s, "chat_add_topic.js"),
 				Chrome.script(s, "chat_first_topic.js"),
 			]),
@@ -109,7 +111,7 @@ Pages := [].{
 	}
 
 	## notFoundHtml: `what` is not here, and `back` is where to go.
-	not_found : (List(U8) -> Html), NotHere -> Html
+	not_found : (List(U8) -> Str), NotHere -> Html
 	not_found = |
 		src,
 		{
@@ -130,21 +132,24 @@ Pages := [].{
 			Html.join([
 				Html.trusted("<p>"),
 				Html.text(what),
-				Html.trusted("</p><p><a href=\""),
-				Html.text(back),
-				Html.trusted("\">Go back</a></p>"),
+				Html.trusted("</p>"),
+				Html.tag({
+					name: "p",
+					attrs: [],
+					inner: Html.tag({
+						name: "a",
+						attrs: [Attr("href", back)],
+						inner: Html.trusted("Go back"),
+					}),
+				}),
 			]),
 		)
 
 	## chat_links.zig's /chat/links: the member's curated links where the
 	## host holds them (`Held`, a mark the host fills), or the stub that says
 	## who curates them, in a readable column of its own.
-	links : (List(U8) -> Html), Str, [Held, NoLinks] -> Html
-	links = |
-		src,
-		viewer,
-		rendered,
-	|
+	links : (List(U8) -> Str), { viewer : Str, rendered : [Held, NoLinks] } -> Html
+	links = |src, { viewer, rendered }|
 		Chrome.page(
 			{
 				tab: Html.trusted("Links"),
@@ -166,14 +171,10 @@ Pages := [].{
 
 	## The links page cut where the rendered links go: the host holds them
 	## (a curated page can be long), and answers before, them, after.
-	links_around : (List(U8) -> Html), Str -> (List(U8), List(U8))
+	links_around : (List(U8) -> Str), Str -> (List(U8), List(U8))
 	links_around = |src, viewer|
 		match Bytes.cut_seq(
-			links(
-				src,
-				viewer,
-				Held,
-			).bytes(),
+			links(src, { viewer, rendered: Held }).bytes(),
 			[0],
 		) {
 			Ok(parts) => parts
@@ -185,7 +186,7 @@ Pages := [].{
 
 	## recent.zig's /chat/recent: the attention strip, the feed's mount, its
 	## JSON (script-safe) and its two scripts.
-	recent : (List(U8) -> Html), FeedView -> Html
+	recent : (List(U8) -> Str), FeedView -> Html
 	recent = |src, { viewer, json }| {
 		s = {
 			tab: Html.trusted("Recent"),
@@ -199,7 +200,7 @@ Pages := [].{
 			Html.join([
 				Html.trusted("<div class=\"chat-notify\" id=\"chat-notify\"></div><div id=\"recent-mount\"></div>"),
 				Html.json_script(
-					Html.trusted("<script id=\"recent-data\" type=\"application/json\">"),
+					[Attr("id", "recent-data"), Attr("type", "application/json")],
 					Html.script_safe(json),
 				),
 				Chrome.script(s, "recent.js"),
@@ -209,37 +210,41 @@ Pages := [].{
 	}
 
 	## /chat/images: the newest entries of the member's images.md.
-	images : (List(U8) -> Html), FeedView -> Html
+	images : (List(U8) -> Str), FeedView -> Html
 	images = |src, { viewer, json }| feed(
 		src,
-		viewer,
-		Images,
-		json,
-		[
-			"styles.js",
-			"chat_image_popup.js",
-			"images.js",
-			"notify.js",
-		],
+		{
+			viewer,
+			which: Images,
+			json,
+			scripts: [
+				"styles.js",
+				"chat_image_popup.js",
+				"images.js",
+				"notify.js",
+			],
+		},
 	)
 
 	## /chat/code: every entry of the member's code.md.
-	code : (List(U8) -> Html), FeedView -> Html
+	code : (List(U8) -> Str), FeedView -> Html
 	code = |src, { viewer, json }| feed(
 		src,
-		viewer,
-		Code,
-		json,
-		[
-			"styles.js",
-			"chat_code_popup.js",
-			"code.js",
-			"notify.js",
-		],
+		{
+			viewer,
+			which: Code,
+			json,
+			scripts: [
+				"styles.js",
+				"chat_code_popup.js",
+				"code.js",
+				"notify.js",
+			],
+		},
 	)
 
 	## noConversationsHtml: /chat for a viewer with nothing to resume.
-	no_conversations : (List(U8) -> Html), Str -> Html
+	no_conversations : (List(U8) -> Str), Str -> Html
 	no_conversations = |src, viewer|
 		Chrome.page(
 			shell(
@@ -254,12 +259,8 @@ Pages := [].{
 		)
 
 	## conversationHtml: the page that boots the chat's client.
-	conversation : (List(U8) -> Html), Limits, View -> Html
-	conversation = |
-		src,
-		limits,
-		v,
-	| {
+	conversation : (List(U8) -> Str), { limits : Limits, v : View } -> Html
+	conversation = |src, { limits, v }| {
 		s = shell(
 			src,
 			{
@@ -268,34 +269,33 @@ Pages := [].{
 				active: "",
 			},
 		)
-		attr = |name, value| Html.join([
-			Html.trusted(" "),
-			Html.escape(Str.to_utf8(name)),
-			Html.trusted("=\""),
-			value,
-			Html.trusted("\""),
-		])
-		num = |n| Html.escape(Str.to_utf8(U64.to_str(n)))
 		Chrome.page(
 			s,
 			Html.join([
 				Chrome.chat_css,
-				Html.trusted("<div id=\"chat-root\""),
-				attr("data-conv", Html.text(v.key)),
-				attr("data-conv-base", Html.text(v.base)),
-				attr("data-session", Html.text(v.topic)),
-				attr("data-me", Html.text(v.uid.to_str())),
-				attr("data-me-name", Html.text(v.viewer)),
-				attr("data-upload-image-max", num(limits.image_max)),
-				attr("data-upload-video-max", num(limits.video_max)),
-				attr("data-upload-accept", Html.escape(limits.accept)),
-				attr("data-search-min", num(limits.search_min)),
-				Html.trusted("><div class=\"chat-notify\" id=\"chat-notify\"></div><div class=\"chat-layout\"><div id=\"chat-left-sidebar\"></div>"),
-				Html.json_script(
-					Html.trusted("<script type=\"application/json\" id=\"chat-sidebar-data\">"),
-					v.sidebar_json,
-				),
-				Html.trusted("<div id=\"chat-feed\"></div><div id=\"chat-right-sidebar\"></div></div></div>"),
+				Html.tag({
+					name: "div",
+					attrs: [
+						Attr("id", "chat-root"),
+						Attr("data-conv", v.key),
+						Attr("data-conv-base", v.base),
+						Attr("data-session", v.topic),
+						Attr("data-me", v.uid.to_str()),
+						Attr("data-me-name", v.viewer),
+						Attr("data-upload-image-max", U64.to_str(limits.image_max)),
+						Attr("data-upload-video-max", U64.to_str(limits.video_max)),
+						Attr("data-upload-accept", limits.accept),
+						Attr("data-search-min", U64.to_str(limits.search_min)),
+					],
+					inner: Html.join([
+						Html.trusted("<div class=\"chat-notify\" id=\"chat-notify\"></div><div class=\"chat-layout\"><div id=\"chat-left-sidebar\"></div>"),
+						Html.json_script(
+							[Attr("type", "application/json"), Attr("id", "chat-sidebar-data")],
+							v.sidebar_json,
+						),
+						Html.trusted("<div id=\"chat-feed\"></div><div id=\"chat-right-sidebar\"></div></div>"),
+					]),
+				}),
 				Html.join(List.map(page_scripts, |name| Chrome.script(s, name))),
 			]),
 		)
@@ -308,49 +308,49 @@ Pages := [].{
 	sidebar_json = |sb| {
 		person = |u| {
 			pk = Paths.pair_key(sb.uid, u.id).to_str()
-			online = if u.presence == Online [("online", JsonText.bool(Bool.True))] else []
-			JsonText.obj(
+			online = if u.presence == Online [("online", JsonOut.bool(Bool.True))] else []
+			JsonOut.object(
 				List.concat(
 					[
-						("id", JsonText.str("uid:${u.id.to_str()}")),
-						("label", JsonText.str(u.name)),
-						("url", JsonText.str("/chat/c/${pk}")),
-						("active", JsonText.bool(sb.kind == Dm and pk == sb.key)),
+						("id", JsonOut.string("uid:${u.id.to_str()}")),
+						("label", JsonOut.string(u.name)),
+						("url", JsonOut.string("/chat/c/${pk}")),
+						("active", JsonOut.bool(sb.kind == Dm and pk == sb.key)),
 					],
 					online,
 				),
 			)
 		}
 		room = |name|
-			JsonText.obj([
-				("id", JsonText.str("ch:${name}")),
-				("label", JsonText.str("# ${name}")),
-				("url", JsonText.str("/channel/${name}")),
-				("active", JsonText.bool(sb.kind == Channel and name == sb.key)),
+			JsonOut.object([
+				("id", JsonOut.string("ch:${name}")),
+				("label", JsonOut.string("# ${name}")),
+				("url", JsonOut.string("/channel/${name}")),
+				("active", JsonOut.bool(sb.kind == Channel and name == sb.key)),
 			])
 		topic = |s|
-			JsonText.obj([
-				("id", JsonText.str(s)),
-				("label", JsonText.str(s)),
-				("url", JsonText.str("${sb.base}/${s}")),
-				("active", JsonText.bool(s == sb.topic)),
+			JsonOut.object([
+				("id", JsonOut.string(s)),
+				("label", JsonOut.string(s)),
+				("url", JsonOut.string("${sb.base}/${s}")),
+				("active", JsonOut.bool(s == sb.topic)),
 			])
 		pinned = List.keep_if(sb.topics, |s| List.contains(sb.pins, s))
 		rest = List.drop_if(sb.topics, |s| List.contains(sb.pins, s))
 		Html.script_safe(
-			JsonText.obj([
+			JsonOut.object([
 				(
 					"conversations",
-					JsonText.arr(
+					JsonOut.array(
 						List.concat(
 							List.map(sb.others, person),
 							List.map(sb.channels, room),
 						),
 					),
 				),
-				("pinned_sessions", JsonText.arr(List.map(pinned, topic))),
-				("topics", JsonText.arr(List.map(rest, topic))),
-			]),
+				("pinned_sessions", JsonOut.array(List.map(pinned, topic))),
+				("topics", JsonOut.array(List.map(rest, topic))),
+			]).bytes(),
 		)
 	}
 
@@ -399,7 +399,7 @@ Pages := [].{
 	}
 }
 
-shell : (List(U8) -> Html), Heading -> Chrome.Shell
+shell : (List(U8) -> Str), Heading -> Chrome.Shell
 shell = |
 	src,
 	{
@@ -427,13 +427,21 @@ links_css = Html.trusted(
 
 ## images.zig's and code.zig's pages: the attention strip, the feed's
 ## mount, its JSON (`json`, script-safe) and its scripts.
-feed : (List(U8) -> Html), Str, [Images, Code], List(U8), List(Str) -> Html
+feed : (List(U8) -> Str),
+{
+	viewer : Str,
+	which : [Images, Code],
+	json : List(U8),
+	scripts : List(Str),
+} -> Html
 feed = |
 	src,
-	viewer,
-	which,
-	json,
-	scripts,
+	{
+		viewer,
+		which,
+		json,
+		scripts,
+	},
 | {
 	(name, title) = match which {
 		Images => ("images", "Images")
@@ -446,19 +454,17 @@ feed = |
 		active: name,
 		src,
 	}
-	id = Html.escape(Str.to_utf8(name))
 	Chrome.page(
 		s,
 		Html.join([
-			Html.trusted("<div class=\"chat-notify\" id=\"chat-notify\"></div><div id=\""),
-			id,
-			Html.trusted("-mount\"></div>"),
+			Html.trusted("<div class=\"chat-notify\" id=\"chat-notify\"></div>"),
+			Html.tag({
+				name: "div",
+				attrs: [Attr("id", "${name}-mount")],
+				inner: Html.empty,
+			}),
 			Html.json_script(
-				Html.join([
-					Html.trusted("<script id=\""),
-					id,
-					Html.trusted("-data\" type=\"application/json\">"),
-				]),
+				[Attr("id", "${name}-data"), Attr("type", "application/json")],
 				Html.script_safe(json),
 			),
 			Html.join(List.map(scripts, |js| Chrome.script(s, js))),
@@ -497,6 +503,33 @@ counted : List(List(U8)), U64 -> Try((List(Str), U64), [NotUtf8, NotACount])
 counted = |fields, i| {
 	n = ZigText.parse_u64(List.get(fields, i) ?? []).map_err(|_| NotACount)?
 	items = List.sublist(fields, { start: i + 1, len: n })
-	texts = List.keep_oks(items, Str.from_utf8)
-	if List.len(texts) == List.len(items) Ok((texts, i + 1 + n)) else Err(NotUtf8)
+	texts = List.map_try(items, Str.from_utf8).map_err(|_| NotUtf8)?
+	Ok((texts, i + 1 + n))
+}
+
+# A feed page: the app's mount and its data, named for it.
+expect {
+	page = feed(
+		|_| "/x.js",
+		{
+			viewer: "v",
+			which: Images,
+			json: Str.to_utf8("{}"),
+			scripts: [],
+		},
+	)
+	(Str.from_utf8(Html.bytes(page)) ?? "").contains("<div class=\"chat-notify\" id=\"chat-notify\"></div><div id=\"images-mount\"></div><script id=\"images-data\" type=\"application/json\">{}</script>")
+}
+
+# The first-topic shell: the base in its data attribute, escaped.
+expect {
+	page = Pages.no_topics(
+		|_| "/x.js",
+		{
+			title: "t",
+			viewer: "v",
+			base: "/b?a=1&c=\"2\"",
+		},
+	)
+	(Str.from_utf8(Html.bytes(page)) ?? "").contains("<div id=\"chat-first-topic\" data-conv-base=\"/b?a=1&amp;c=&#34;2&#34;\"></div>")
 }

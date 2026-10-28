@@ -9,6 +9,7 @@ const abi = @import("chat_abi.zig");
 const route = @import("chat_route.zig");
 
 pub const decide = abi.decide;
+pub const retire = abi.retire;
 pub const Host = abi.Host;
 pub const askingOnly = abi.askingOnly;
 pub const Routing = abi.Routing;
@@ -50,6 +51,13 @@ pub const Messages = abi.Messages;
 pub const Membership = route.Membership;
 pub const Done = route.Done;
 pub const Upload = abi.Upload;
+pub const UploadRead = abi.UploadRead;
+pub const Stored = abi.Stored;
+pub const UploadRefusal = route.UploadRefusal;
+pub const Reservation = route.Reservation;
+pub const RetireAsked = abi.RetireAsked;
+pub const RetireKind = route.RetireKind;
+pub const RetireRemoval = route.RetireRemoval;
 pub const UploadServed = route.UploadServed;
 pub const Welcome = route.Welcome;
 pub const Serving = route.Serving;
@@ -279,6 +287,9 @@ const Scripted = struct {
     /// The conversation's topics: every `.../sessions` folder lists each as
     /// `<topic>.md`, a file.
     topics: []const []const u8 = &.{"Plans"},
+    /// The member's docs, in the folder's order: `.../docs` lists each as
+    /// `<slug>.md`, a file, each changed at the one time stat answers.
+    docs: []const []const u8 = &.{},
     body: ?[]const u8 = "",
     /// A topic's message count, or a count that failed.
     count: abi.Count = .{ .counted = 3 },
@@ -313,6 +324,10 @@ const Scripted = struct {
     entry_fails: ?struct { path: []const u8, e: anyerror } = null,
     transcript: bool = true,
     linked: bool = false,
+    /// What Host.read_upload! reads of the form, and what reserving its
+    /// bytes against the member's allowance says (metal-vmm QUEUE 292).
+    upload: abi.UploadRead = .no_file,
+    reservation: route.Reservation = .reserved,
     asked: std.ArrayList(u8) = .empty,
     alloc: std.mem.Allocator,
 
@@ -358,7 +373,26 @@ const Scripted = struct {
             .srcs = srcs,
             .welcome_pending = welcomeOf,
             .welcome_done = welcomeDone,
+            .read_upload = readUpload,
+            .refuse_upload = refuseUpload,
+            .reserve_upload = reserveUpload,
+            .store_upload = storeUpload,
         };
+    }
+    fn readUpload(ctx: *anyopaque) abi.UploadRead {
+        say(ctx, "read_upload", .{});
+        return me(ctx).upload;
+    }
+    fn refuseUpload(ctx: *anyopaque, why: route.UploadRefusal, message: []const u8) void {
+        say(ctx, "refuse_upload {t} {s}", .{ why, message });
+    }
+    fn reserveUpload(ctx: *anyopaque, size: u64) route.Reservation {
+        say(ctx, "reserve_upload {d}", .{size});
+        return me(ctx).reservation;
+    }
+    fn storeUpload(ctx: *anyopaque, folder: []const u8, ext: []const u8) abi.Stored {
+        say(ctx, "store_upload {s} {s}", .{ folder, ext });
+        return .{ .stored = "0123.png" };
     }
     fn welcomeOf(ctx: *anyopaque) route.Welcome {
         say(
@@ -583,6 +617,16 @@ const Scripted = struct {
                 s.alloc,
                 "{s}.md",
                 .{t},
+            ) catch @panic("oom"), .kind = .file }) catch @panic("oom");
+        } else if (std.mem.endsWith(
+            u8,
+            path,
+            "/docs",
+        )) {
+            for (s.docs) |d| out.append(s.alloc, .{ .name = std.fmt.allocPrint(
+                s.alloc,
+                "{s}.md",
+                .{d},
             ) catch @panic("oom"), .kind = .file }) catch @panic("oom");
         } else return .missing;
         return .{ .found = out.items };
@@ -1237,24 +1281,41 @@ test "a topic's reactions, react, pin and unpin are the Roc's: presence, the con
         s.accounts = &.{steve};
         break :blk s;
     }, .not_found, "member;presence;accounts;");
-    // A tail the Zig serves (an upload's POST), handed back once the Roc
-    // found the conversation and the topic the member's; a name no upload
-    // has is the Roc's own 404 (metal-vmm QUEUE 291); a stream counts no
-    // presence.
+    // An upload's POST (metal-vmm QUEUE 292): the form read, then the
+    // Roc's every decision; a name no upload has is the Roc's own 404
+    // (QUEUE 291); a stream counts no presence.
     try expectAct(
         "/c/1_2/Plans/upload",
         false,
         .POST,
         a,
-        .{ .serve = .{ .route = .{
-            .family = .dm,
-            .key = "1_2",
-            .topic = "Plans",
-            .part = .topic,
-            .tail = .upload,
-        } } },
-        dm_topic,
+        .answered,
+        dm_topic ++ "read_upload;refuse_upload malformed no file\n;",
     );
+    try expectAct("/c/1_2/Plans/upload", false, .GET, a, .{ .not_allowed = .POST }, dm_topic);
+    try expectAct("/c/1_2/Plans/upload", false, .POST, blk: {
+        var s = a;
+        s.upload = .unsupported;
+        break :blk s;
+    }, .{ .respond = .{
+        .status = 415,
+        .body = "unsupported file type (images: png, jpeg, gif, webp; video: mp4, webm, mov)\n",
+    } }, dm_topic ++ "read_upload;");
+    const png: abi.UploadRead = .{ .read = .{ .size = 62, .ext = "png", .filename = "a.png" } };
+    try expectAct("/c/1_2/Plans/upload", false, .POST, blk: {
+        var s = a;
+        s.upload = .{ .read = .{ .size = 10 * 1024 * 1024 + 1, .ext = "png", .filename = "a.png" } };
+        break :blk s;
+    }, .answered, dm_topic ++ "read_upload;refuse_upload too_large Image too large — the limit is 10 MB.\n;");
+    try expectAct("/c/1_2/Plans/upload", false, .POST, blk: {
+        var s = a;
+        s.upload = png;
+        s.reservation = .refused;
+        break :blk s;
+    }, .{ .respond = .{
+        .status = 403,
+        .body = "Upload limit reached — you've used your 1 GB upload allowance.\n",
+    } }, dm_topic ++ "read_upload;reserve_upload 62;");
     try expectAct(
         "/c/1_2/Plans/uploads/a.png",
         false,
@@ -1275,20 +1336,15 @@ test "a topic's reactions, react, pin and unpin are the Roc's: presence, the con
         } },
         "member;accounts;list 1_2/sessions;",
     );
-    try expectAct(
-        "/ops/Plans/upload",
-        true,
-        .POST,
-        a,
-        .{ .serve = .{ .route = .{
-            .family = .channel,
-            .key = "ops",
-            .topic = "Plans",
-            .part = .topic,
-            .tail = .upload,
-        } } },
-        ops_topic,
-    );
+    try expectAct("/ops/Plans/upload", true, .POST, blk: {
+        var s = a;
+        s.upload = .{ .read = .{ .size = 62, .ext = "png", .filename = "a.png" } };
+        break :blk s;
+    }, .{ .respond = .{
+        .status = 200,
+        .content_type = "application/json; charset=utf-8",
+        .body = "{\"url\":\"/channel/ops/Plans/uploads/0123.png\",\"name\":\"a.png\",\"kind\":\"image\",\"width\":0,\"height\":0}",
+    } }, ops_topic ++ "read_upload;reserve_upload 62;store_upload channels/ops/sessions/Plans.uploads png;");
     try expectAct(
         "/ops/Plans/nope",
         true,
@@ -3109,4 +3165,10 @@ test "a doc too formatted to post is refused in the docs' own words, and nothing
         "not posted: too much markdown formatting; break the doc up\n",
         s.refusal,
     );
+}
+test "the docs landing's tie in mtime goes to the first doc by name, whatever the folder's order (the box, 2026-10-28)" {
+    use(testing.allocator);
+    var s: Scripted = .{ .alloc = undefined };
+    s.docs = &.{ "zeta", "alpha", "mid" };
+    try expectAct("/docs", false, .GET, s, .{ .redirect = "/chat/docs/alpha" }, "member;presence;list users/1/docs;stat users/1/docs/alpha.md;stat users/1/docs/mid.md;stat users/1/docs/zeta.md;");
 }
