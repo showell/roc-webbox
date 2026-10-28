@@ -23,7 +23,6 @@ platform ""
 		"roc_chat_count_presence": Host.count_presence!,
 		"roc_chat_fail": Host.fail!,
 		"roc_chat_gather_recent": Host.gather_recent!,
-		"roc_chat_limits": Host.limits!,
 		"roc_chat_list": Host.list!,
 		"roc_chat_list_accounts": Host.list_accounts!,
 		"roc_chat_me": Host.me!,

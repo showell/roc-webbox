@@ -46,6 +46,7 @@ import Frame
 import Time
 import Transcript
 import Fanout
+import Limits
 import BusKey
 
 handle! : Chat.Request => Chat.Answer
@@ -688,7 +689,7 @@ serve_landing! = |route, key|
 ## A topic's page (angry-gopher chat_page.zig `conversationPage`): a DM's
 ## topic recorded as where the member resumes it first (a bookmark that
 ## fails serves no page), then the viewer and the sidebar (`load_sidebar!`), and
-## the limits the server enforces (Host.limits!).
+## the limits the server enforces (Limits).
 serve_topic_page! : Route.R, AtTopic => Chat.Answer
 serve_topic_page! = |route, at|
 	if at.conv.family == Dm and bookmark!(at.key, route.topic).is_err() {
@@ -698,7 +699,7 @@ serve_topic_page! = |route, at|
 			Err(Failed) => Chat.answered
 			Ok((viewer, sb)) => {
 				view = { key: route.key, base: at.key.base(), topic: route.topic, title: at.title, uid: sb.uid, viewer, sidebar_json: Pages.sidebar_json(sb) }
-				Chat.respond(200, html, Pages.conversation(Chrome.src_in(Host.srcs!({})), Host.limits!({}), view).bytes())
+				Chat.respond(200, html, Pages.conversation(Chrome.src_in(Host.srcs!({})), Limits.page, view).bytes())
 			}
 		}
 	}

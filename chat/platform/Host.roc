@@ -122,13 +122,6 @@ Host := [].{
 	## fail; an id never seen is `Offline`.
 	check_online! : List(List(U8)) => List([Offline, Online])
 
-	## **THE LIMITS THE SERVER ENFORCES**, as the page tells its client: the
-	## largest image and video an upload takes, the types it accepts, the
-	## shortest word a search looks for. **SINGLE-SOURCED IN THE HOST**: the
-	## upload and search code enforce these values, so the Roc never copies
-	## them.
-	limits! : {} => { image_max : U64, video_max : U64, accept : List(U8), search_min : U64 }
-
 	## Where a page names each script, by its name (a src's hash is of bytes
 	## the host holds).
 	srcs! : {} => List({ name : List(U8), src : List(U8) })

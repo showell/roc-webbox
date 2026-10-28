@@ -10,7 +10,7 @@
 ## stores a message (`/store/<topic>`), appends a feed's entry and says one that failed (`/entry/<path>`), and asks
 ## `fail!` (`/fail/<reason>/<whose>`),
 ## `count_malformed_channel!` (`/malformed/<name>`), `list_accounts!` (`/accounts`),
-## `check_online!` (`/online/<id>,<id>`) and `limits!` (`/limits`). Never linked
+## and `check_online!` (`/online/<id>,<id>`). Never linked
 ## into a server.
 app [handle!] { pf: platform "../platform/main.roc" }
 
@@ -160,10 +160,6 @@ handle! = |req|
 			]),
 		)
 		Chat.respond(200, [], List.concat(Str.to_utf8("flags ${U64.to_str(List.len(flags))}"), List.join(said)))
-	} else if req.sub == Str.to_utf8("/limits") {
-		# Every field its own, so a record laid out wrong shows.
-		l = Host.limits!({})
-		Chat.respond(200, [], List.concat(Str.to_utf8("image=${U64.to_str(l.image_max)} video=${U64.to_str(l.video_max)} search=${U64.to_str(l.search_min)} accept="), l.accept))
 	} else if starts(req.sub, "/malformed/") {
 		Host.count_malformed_channel!(List.drop_first(req.sub, 11))
 		Chat.respond(200, [], Str.to_utf8("counted"))

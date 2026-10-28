@@ -39,7 +39,6 @@ pub const Account = abi.Account;
 pub const Accounts = abi.Accounts;
 pub const AccountKind = route.AccountKind;
 pub const AccountRead = abi.AccountRead;
-pub const Limits = abi.Limits;
 pub const Presence = route.Presence;
 pub const Membership = route.Membership;
 pub const Done = route.Done;
@@ -182,7 +181,7 @@ const Scripted = struct {
     const Channel = struct { name: []const u8, read: abi.Read };
 
     fn host(self: *Scripted) Host {
-        return .{ .ctx = self, .check_member = member, .count_presence = presence, .list_accounts = accountsOf, .me = meId, .now = nowOf, .read_body = bodyOf, .publish = publish, .append_line = appendLine, .message_count = messageCount, .read = readOf, .write = writeOf, .remove = removeOf, .list = listOf, .fail = failOf, .fail_text = failTextOf, .fail_account = failAccountOf, .count_malformed_channel = malformed, .count_dropped = dropped, .aside = asideOf, .check_online = onlineOf, .limits = limitsOf, .read_header = header, .check_hostile = hostile, .render = render, .store_message = storeMessage, .append_entry = appendEntry, .report_fanout_failure = fanoutFailed, .serve_file = raw, .serve_rendered = links, .srcs = srcs };
+        return .{ .ctx = self, .check_member = member, .count_presence = presence, .list_accounts = accountsOf, .me = meId, .now = nowOf, .read_body = bodyOf, .publish = publish, .append_line = appendLine, .message_count = messageCount, .read = readOf, .write = writeOf, .remove = removeOf, .list = listOf, .fail = failOf, .fail_text = failTextOf, .fail_account = failAccountOf, .count_malformed_channel = malformed, .count_dropped = dropped, .aside = asideOf, .check_online = onlineOf, .read_header = header, .check_hostile = hostile, .render = render, .store_message = storeMessage, .append_entry = appendEntry, .report_fanout_failure = fanoutFailed, .serve_file = raw, .serve_rendered = links, .srcs = srcs };
     }
     fn me(ctx: *anyopaque) *Scripted {
         return @ptrCast(@alignCast(ctx));
@@ -286,10 +285,6 @@ const Scripted = struct {
         say(ctx, "online {s}", .{id});
         for (me(ctx).online_ids) |o| if (std.mem.eql(u8, o, id)) return .online;
         return .offline;
-    }
-    fn limitsOf(ctx: *anyopaque) abi.Limits {
-        say(ctx, "limits", .{});
-        return .{ .image_max = 11, .video_max = 22, .accept = "image/*,video/*", .search_min = 3 };
     }
     fn header(ctx: *anyopaque, header_name: []const u8) []const []const u8 {
         say(ctx, "header {s}", .{header_name});
@@ -570,9 +565,8 @@ test "a topic's reactions, react, pin and unpin are the Roc's: presence, the con
 
 /// What DM 1_2's page asks once its bookmark is recorded (its accounts known
 /// since the DM was found), Debbie the only other member: the roster's
-/// presence, the member's channels, their pins there, the scripts, the
-/// limits.
-const dm_page = "online 2;list channels;read channels/ops.channel;read users/1/pinned-sessions/1_2;srcs;limits;";
+/// presence, the member's channels, their pins there, the scripts.
+const dm_page = "online 2;list channels;read channels/ops.channel;read users/1/pinned-sessions/1_2;srcs;";
 
 /// The page `sub` served from `script`: what it asked, and its body. One
 /// not served (a 200) fails the test.
@@ -602,7 +596,7 @@ test "a DM's page and landing, and the DM with yourself: the title the Roc's, a 
     }, .answered, dm_topic ++ "read users/1/last-sessions/1_2;write users/1/last-sessions/1_2 Plans\n;");
     // A channel's page moves no bookmark; its accounts are asked for the
     // viewer and the roster.
-    try testing.expectEqualStrings(ops_topic ++ "accounts;online 2;list channels;read channels/ops.channel;read users/1/pinned-sessions/ops;srcs;limits;", (try served(arena.allocator(), "/ops/Plans", true, a)).asked);
+    try testing.expectEqualStrings(ops_topic ++ "accounts;online 2;list channels;read channels/ops.channel;read users/1/pinned-sessions/ops;srcs;", (try served(arena.allocator(), "/ops/Plans", true, a)).asked);
     // The landing: the first topic, or the page offering one, titled by the
     // partner's id when the account has no name.
     try expectAct("/c/1_2", false, .GET, a, .{ .redirect = "/chat/c/1_2/Plans" }, "member;presence;accounts;list 1_2/sessions;");
@@ -614,7 +608,7 @@ test "a DM's page and landing, and the DM with yourself: the title the Roc's, a 
     try expectAct("/c/1_1/Plans/reactions", false, .GET, a, .{ .respond = .{ .status = 200, .content_type = "application/x-ndjson; charset=utf-8", .body = "" } }, "member;presence;accounts;list 1_1/sessions;read 1_1/sessions/Plans.reactions.jsonl;");
 }
 
-test "a page's sidebar is the Roc's (sidebarOf): the roster but the viewer, each beside its own presence; the channels; the pins, stale ones dropped; the limits the host's; and a read that fails serves no page" {
+test "a page's sidebar is the Roc's (sidebarOf): the roster but the viewer, each beside its own presence; the channels; the pins, stale ones dropped; the limits the Roc's; and a read that fails serves no page" {
     use(testing.allocator);
     defer @import("roc_abi.zig").deinit();
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
@@ -626,7 +620,7 @@ test "a page's sidebar is the Roc's (sidebarOf): the roster but the viewer, each
     const a: Scripted = .{ .alloc = undefined, .accounts = &all, .online_ids = &.{"3"}, .topics = &.{ "Plans", "Other" }, .files = &.{.{ .path = pins, .read = .{ .found = "Stale\nPlans\n" } }} };
     const p = try served(arena.allocator(), "/c/1_2/Plans", false, a);
     // **ONE ASKING FOR THE WHOLE ROSTER**, its ids in the roster's order.
-    try testing.expectEqualStrings(dm_topic ++ bookmarked("Plans") ++ "online 2;online 3;online 5;list channels;read channels/ops.channel;read " ++ pins ++ ";srcs;limits;", p.asked);
+    try testing.expectEqualStrings(dm_topic ++ bookmarked("Plans") ++ "online 2;online 3;online 5;list channels;read channels/ops.channel;read " ++ pins ++ ";srcs;", p.asked);
     const conversations =
         "{\"conversations\":[{\"id\":\"uid:2\",\"label\":\"Debbie\",\"url\":\"/chat/c/1_2\",\"active\":true}," ++
         "{\"id\":\"uid:3\",\"label\":\"Ann\",\"url\":\"/chat/c/1_3\",\"active\":false,\"online\":true}," ++
@@ -634,7 +628,7 @@ test "a page's sidebar is the Roc's (sidebarOf): the roster but the viewer, each
         "{\"id\":\"ch:ops\",\"label\":\"# ops\",\"url\":\"/channel/ops\",\"active\":false}]," ++
         "\"pinned_sessions\":[{\"id\":\"Plans\",\"label\":\"Plans\",\"url\":\"/chat/c/1_2/Plans\",\"active\":true}]," ++
         "\"topics\":[{\"id\":\"Other\",\"label\":\"Other\",\"url\":\"/chat/c/1_2/Other\",\"active\":false}]}";
-    for ([_][]const u8{ conversations, "data-upload-image-max=\"11\" data-upload-video-max=\"22\" data-upload-accept=\"image/*,video/*\" data-search-min=\"3\"" }) |want| if (std.mem.indexOf(u8, p.body, want) == null) {
+    for ([_][]const u8{ conversations, "data-upload-image-max=\"10485760\" data-upload-video-max=\"104857600\" data-upload-accept=\"image/png,image/jpeg,image/gif,image/webp,video/mp4,video/webm,video/quicktime\" data-search-min=\"2\"" }) |want| if (std.mem.indexOf(u8, p.body, want) == null) {
         std.debug.print("not in the page: {s}\nin: {s}\n", .{ want, p.body });
         return error.TestUnexpectedResult;
     };

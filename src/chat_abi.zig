@@ -60,11 +60,6 @@ pub const RenderRec = extern struct { html: RocBytes, status: route_mod.RenderSt
 pub const MessageRec = extern struct { at: RocBytes, from: RocBytes, id: RocBytes, markdown: RocBytes, uid: RocBytes };
 /// Host.roc's `append_entry!` answer: `{ fault : U16, status : [Appended, Failed] }`.
 pub const AppendRec = extern struct { fault: u16, status: route_mod.AppendStatus };
-/// Host.roc's `limits!` answer: `{ image_max : U64, video_max : U64,
-/// accept : List(U8), search_min : U64 }`. **THE U64S COME FIRST, BY NAME,
-/// THEN THE LIST**, though all are 8-aligned: the pinned Roc lays it out so,
-/// and the seam's probe (`/limits`, every field its own number) holds it.
-pub const LimitsRec = extern struct { image_max: u64, search_min: u64, video_max: u64, accept: RocBytes };
 /// Host.roc's `check_online!` answer, `List([Offline, Online])`: its elements one
 /// byte each, so laid out as a `List(U8)` is.
 pub const PresenceList = RocBytes;
@@ -122,7 +117,7 @@ comptime {
     const w = @sizeOf(usize);
     std.debug.assert(@sizeOf(RocBytes) == 3 * w and @sizeOf(Request) == 4 * w and @sizeOf(RouteRec) == 10 * w and @sizeOf(Answer) == 20 * w and @sizeOf(Got) == 4 * w and @sizeOf(ConvRec) == 10 * w and @sizeOf(ReadRec) == 4 * w and @sizeOf(EntryRec) == 4 * w and @sizeOf(SrcRec) == 6 * w and @sizeOf(RecentRec) == 22 * w and @sizeOf(ListRec) == 4 * w and @sizeOf(AccountRec) == 7 * w and @sizeOf(AccountsRec) == 4 * w and @sizeOf(CountRec) == 16 and @sizeOf(RenderRec) == 4 * w and @sizeOf(MessageRec) == 15 * w);
     std.debug.assert(@sizeOf(AppendRec) == 4);
-    std.debug.assert(@sizeOf(LimitsRec) == 3 * w + 24 and @sizeOf(route_mod.Presence) == 1);
+    std.debug.assert(@sizeOf(route_mod.Presence) == 1);
     // **A FAULT IS THE HOST'S ERROR, CARRIED BY THE ROC AS A NUMBER** it
     // never reads (`@intFromError`), handed back to say it: it fits a U16.
     std.debug.assert(@bitSizeOf(anyerror) <= 16);
@@ -191,12 +186,6 @@ pub const Message = struct {
 /// A feed's entry appended (Host.append_entry!), or why not: the
 /// fan-out's failure, never the request's.
 pub const Appended = union(route_mod.AppendStatus) { appended, failed: anyerror };
-
-/// **THE LIMITS THE SERVER ENFORCES** (Host.limits!), as the conversation
-/// page tells its client: the largest image and video an upload takes, the
-/// types it accepts, the shortest word a search looks for. The host's own
-/// constants, never copied into the Roc.
-pub const Limits = struct { image_max: u64, video_max: u64, accept: []const u8, search_min: u64 };
 
 /// Which of an account's reads a lookup needed, and failed on: its kind
 /// (the password's stat) or its name.
@@ -297,8 +286,6 @@ pub const Host = struct {
     /// whether `id` was seen within the presence window of the request's
     /// time. A read of process-lifetime state; it cannot fail.
     check_online: *const fn (ctx: *anyopaque, id: []const u8) route_mod.Presence = noOnline,
-    /// Host.limits!: the limits the upload and search code enforce.
-    limits: *const fn (ctx: *anyopaque) Limits = noLimits,
     /// Host.srcs!: where a page names each script, by its name.
     srcs: *const fn (ctx: *anyopaque) []const Src = noSrcs,
     /// Host.me!: the member's id.
@@ -413,9 +400,6 @@ fn noFanoutFailed(_: *anyopaque, _: route_mod.Surface, _: []const u8, _: []const
 
 fn noOnline(_: *anyopaque, _: []const u8) route_mod.Presence {
     @panic("check_online asked of a host that does not answer it");
-}
-fn noLimits(_: *anyopaque) Limits {
-    @panic("limits asked of a host that does not answer it");
 }
 fn noRecent(_: *anyopaque) []const RecentRow {
     @panic("gather_recent asked of a host that does not answer it");
@@ -657,12 +641,6 @@ export fn roc_chat_check_online(ids: roc.RocBytesList) callconv(.c) PresenceList
     const flags = roc.alloc().alloc(u8, items.len) catch @panic("roc_chat: out of memory for the presence flags");
     for (items, flags) |*id, *f| f.* = @backingInt(h.check_online(h.ctx, id.slice()));
     return .from(flags);
-}
-
-export fn roc_chat_limits() callconv(.c) LimitsRec {
-    const h = current("limits");
-    const l = h.limits(h.ctx);
-    return .{ .accept = .from(l.accept), .image_max = l.image_max, .search_min = l.search_min, .video_max = l.video_max };
 }
 
 export fn roc_chat_me() callconv(.c) RocBytes {
