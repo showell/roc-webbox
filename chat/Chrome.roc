@@ -62,7 +62,7 @@ Chrome := [].{
 	## A script's src from the host's `srcs!`. **AN UNKNOWN NAME IS A CRASH**
 	## (a 500), never an empty src: a page would link a script that is not there.
 	## **A SRC IS THE HOST'S TEXT, ESCAPED AS EVERY ATTRIBUTE IS** (Html.tag):
-	## the host names and hashes the bytes it serves, a path and a hex `?v=`,
+	## the host names and hashes the bytes it serves, a path and a hex `?h=`,
 	## which escaping leaves as they are (the Zig placed it unescaped).
 	src_in : List({ name : List(U8), src : List(U8) }) -> (List(U8) -> Str)
 	src_in = |scripts| |name| match List.find_first(scripts, |s| s.name == name) {
