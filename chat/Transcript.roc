@@ -80,7 +80,7 @@ Transcript := [].{
 	escape_body : List(U8) -> List(U8)
 	escape_body = |body| if Bytes.find(
 		body,
-		{ needle: dashes, at: 0 },
+		{ needle: dashes },
 	) == Err(NotFound) body else Bytes.join_lines(
 		List.map(
 			List.split_on(body, '\n'),
@@ -94,7 +94,7 @@ Transcript := [].{
 	unescape_body : List(U8) -> List(U8)
 	unescape_body = |body| if Bytes.find(
 		body,
-		{ needle: escaped_dashes, at: 0 },
+		{ needle: escaped_dashes },
 	) == Err(NotFound) body else Bytes.join_lines(
 		List.map(
 			List.split_on(body, '\n'),

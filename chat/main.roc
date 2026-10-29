@@ -123,6 +123,11 @@ not_yours! = |route, accounts|
 		Chat.not_found
 	}
 
+## Where a page names each script, as the host serves them (Chrome.src_in:
+## Chrome stays pure, so the twin builds every page too).
+srcs! : {} => (List(U8) -> Str)
+srcs! = |{}| Chrome.src_in(Host.list_srcs!({}))
+
 ## **A 404 THAT SAYS WHY** (metal-vmm QUEUE 156(j)): `what` is not there, and
 ## `back` is where to go instead.
 not_found_page! : List(Accounts.Account), { what : Str, back : Str } => Chat.Answer
@@ -133,7 +138,7 @@ not_found_page! = |accounts, { what, back }|
 			{
 				content_type: html,
 				body: Pages.not_found(
-					Chrome.src_in(Host.list_srcs!({})),
+					srcs!({}),
 					{
 						viewer,
 						what,
@@ -902,7 +907,7 @@ serve_links! = |rest, accounts|
 		match (Members.load_viewer!(accounts), Members.load_uid!({})) {
 			(Err(Failed), _) | (Ok(_), Err(Failed)) => Chat.answered
 			(Ok(viewer), Ok(me)) => {
-				src = Chrome.src_in(Host.list_srcs!({}))
+				src = srcs!({})
 				match Files.serve_rendered!(Paths.links_path(me)) {
 					Serving => {
 						(before, after) = Pages.links_around(src, viewer)
@@ -945,7 +950,7 @@ serve_recent! = |rest, accounts|
 					{
 						content_type: html,
 						body: Pages.recent(
-							Chrome.src_in(Host.list_srcs!({})),
+							srcs!({}),
 							{ viewer, json: Recent.json(me, got.rows) },
 						).bytes(),
 					},
@@ -1223,7 +1228,7 @@ serve_feed! = |which, { rest, accounts }|
 					Ok(bytes) => bytes
 					Err(Missing) | Err(Failed) => []
 				}
-				src = Chrome.src_in(Host.list_srcs!({}))
+				src = srcs!({})
 				(page, damaged) = match which {
 					Images => {
 						got = Feeds.images_of(file)
@@ -1273,7 +1278,7 @@ serve_landing! = |route, { key, accounts }|
 								{
 									content_type: html,
 									body: Pages.no_topics(
-										Chrome.src_in(Host.list_srcs!({})),
+										srcs!({}),
 										{
 											viewer,
 											base: key.base(),
@@ -1315,7 +1320,7 @@ serve_topic_page! = |route, at|
 					{
 						content_type: html,
 						body: Pages.conversation(
-							Chrome.src_in(Host.list_srcs!({})),
+							srcs!({}),
 							{ limits: Limits.page, v: view },
 						).bytes(),
 					},
@@ -1533,7 +1538,7 @@ resume! = |accounts|
 							{
 								content_type: html,
 								body: Pages.no_conversations(
-									Chrome.src_in(Host.list_srcs!({})),
+									srcs!({}),
 									viewer,
 								).bytes(),
 							},

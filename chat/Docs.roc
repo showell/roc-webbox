@@ -305,18 +305,22 @@ unused_slug! = |me, base|
 		"render",
 		"post",
 	].contains(base) {
-		suffixed_slug!(me, { base, kept: 2 })
+		suffixed_slug!(me, base)
 	} else {
 		match doc_there!(me, base) {
 			Err(Failed) => Err(Failed)
 			Ok(Free) => Ok(base)
-			Ok(Taken) => suffixed_slug!(me, { base, kept: 2 })
+			Ok(Taken) => suffixed_slug!(me, base)
 		}
 	}
 
+## The first of `base-2` to `base-999` no doc has; past those, `base`.
+suffixed_slug! : Uid, Str => Try(Str, [Failed])
+suffixed_slug! = |me, base| suffixed_from!(me, { base, suffix: 2 })
+
 ## `base-n`, or the next, up to 999.
-suffixed_slug! : Uid, { base : Str, kept : U64 } => Try(Str, [Failed])
-suffixed_slug! = |me, { base, kept: n }|
+suffixed_from! : Uid, { base : Str, suffix : U64 } => Try(Str, [Failed])
+suffixed_from! = |me, { base, suffix: n }|
 	if n >= 1000 {
 		Ok(base)
 	} else {
@@ -324,7 +328,7 @@ suffixed_slug! = |me, { base, kept: n }|
 		match doc_there!(me, candidate) {
 			Err(Failed) => Err(Failed)
 			Ok(Free) => Ok(candidate)
-			Ok(Taken) => suffixed_slug!(me, { base, kept: n + 1 })
+			Ok(Taken) => suffixed_from!(me, { base, suffix: n + 1 })
 		}
 	}
 

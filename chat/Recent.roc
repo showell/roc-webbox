@@ -457,7 +457,7 @@ cap_from = |
 			List.concat(
 				List.drop_last(
 					head,
-					Bytes.count_back(head, { keep: |c| c == ' ', kept: 0 }),
+					Bytes.count_back(head, |c| c == ' '),
 				),
 				Str.to_utf8("…"),
 			)
