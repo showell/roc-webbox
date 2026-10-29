@@ -28,10 +28,14 @@ Last := [].{
 		number : U64,
 	}
 
-	## The topic's last message, `None` for a topic with none (no
+	## The topic's last message, `NoMessage` for a topic with none (no
 	## transcript, or no message in it). `Failed` when the transcript's read
 	## failed (the request has, with its error); a cache's never does.
-	read_message! : Paths.TopicAt, List(Accounts.Account) => Try([Some(Message), None], [Failed])
+	read_message! : Paths.TopicAt,
+	List(Accounts.Account) => Try(
+		[Latest(Message), NoMessage],
+		[Failed],
+	)
 	read_message! = |at, accounts| {
 		counted = read_sidecar!(at)
 		match counted {
@@ -56,7 +60,7 @@ Last := [].{
 						) {
 							Ok(w) =>
 								Ok(
-									Some({
+									Latest({
 										markdown: w.msg.markdown,
 										at: w.msg.at,
 										# A current record's answer stands, nobody included;
@@ -146,7 +150,7 @@ tail_window = 64 * 1024
 whole! : Paths.TopicAt,
 Try(Count.Counted, [Malformed]),
 List(Accounts.Account) => Try(
-	[Some(Last.Message), None],
+	[Latest(Last.Message), NoMessage],
 	[Failed],
 )
 whole! = |
@@ -155,14 +159,14 @@ whole! = |
 	accounts,
 |
 	match Files.read_bytes!(Paths.transcript_path(at)) {
-		Err(Missing) => Ok(None)
+		Err(Missing) => Ok(NoMessage)
 		Err(Failed) => Err(Failed)
 		Ok(raw) =>
 			match Transcript.decode_file(raw) {
 				Err(CorruptUid(bytes)) => corrupt!(bytes)
 				Ok(file) =>
 					match List.last(file.messages) {
-						Err(_) => Ok(None)
+						Err(_) => Ok(NoMessage)
 						Ok(msg) => {
 							blocks = Count.count_blocks(raw)
 							uid =
@@ -174,7 +178,7 @@ whole! = |
 									Err(NotRecorded) => author(msg, accounts)
 								}
 							Ok(
-								Some({
+								Latest({
 									markdown: msg.markdown,
 									at: msg.at,
 									uid,
@@ -187,7 +191,7 @@ whole! = |
 	}
 
 ## A block whose uid is no uid: damaged data, the request's failure.
-corrupt! : List(U8) => Try([Some(Last.Message), None], [Failed])
+corrupt! : List(U8) => Try([Latest(Last.Message), NoMessage], [Failed])
 corrupt! = |bytes| {
 	Host.fail!(NotAUid, bytes)
 	Err(Failed)

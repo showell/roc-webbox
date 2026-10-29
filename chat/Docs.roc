@@ -23,10 +23,10 @@ import Ascii
 
 Docs := [].{
 
-	## What the editor has open: nothing, or the doc `slug`, its markdown
+	## What the editor has open: no doc chosen yet, or the doc `slug`, its markdown
 	## as stored and that markdown rendered (Chrome.rendered, the host's).
 	Open : [
-		Nothing,
+		NoneChosen,
 		Doc(
 			{
 				slug : Str,
@@ -53,7 +53,7 @@ Docs := [].{
 			src: page.src,
 		}
 		selected = match page.open {
-			Nothing => ""
+			NoneChosen => ""
 			Doc(d) => d.slug
 		}
 		Chrome.page(
@@ -65,7 +65,7 @@ Docs := [].{
 				doc_list(page.slugs, selected),
 				Html.trusted("<section class=\"docs-edit\">"),
 				match page.open {
-					Nothing =>
+					NoneChosen =>
 						if page.slugs.is_empty() {
 							Html.join([
 								Html.trusted("<p class=\"muted docs-hint\">"),
@@ -101,12 +101,12 @@ Docs := [].{
 				},
 				Html.trusted("</section><section class=\"docs-preview\" id=\"docs-preview\">"),
 				match page.open {
-					Nothing => Html.trusted("")
+					NoneChosen => Html.trusted("")
 					Doc(d) => d.rendered
 				},
 				Html.trusted("</section></div>"),
 				match page.open {
-					Nothing => Html.trusted("")
+					NoneChosen => Html.trusted("")
 					Doc(_) => Html.join([
 						Html.trusted("<dialog id=\"docs-posted-dialog\""),
 						Html.trusted(" class=\"docs-alert-dialog\">"),
@@ -590,10 +590,10 @@ docs_landing! = |me, accounts|
 	match load_docs!(me) {
 		Err(Failed) => Chat.answered
 		Ok(docs) =>
-			match last_touched!(docs, Err(None)) {
+			match last_touched!(docs, NoDocs) {
 				Err(Failed) => Chat.answered
-				Ok(Ok(last)) => Chat.redirect("/chat/docs/${last.slug}".to_utf8())
-				Ok(Err(None)) => docs_page!(sorted_slugs(docs), { open: Nothing, accounts })
+				Ok(Newest(last)) => Chat.redirect("/chat/docs/${last.slug}".to_utf8())
+				Ok(NoDocs) => docs_page!(sorted_slugs(docs), { open: NoneChosen, accounts })
 			}
 	}
 
@@ -601,8 +601,8 @@ docs_landing! = |me, accounts|
 ## a tie (a folder's order differs by machine), against `best` so far; one
 ## gone since the listing is passed over.
 last_touched! : List({ slug : Str, path : Paths.ChatPath }),
-Try({ slug : Str, mtime : I64 }, [None]) => Try(
-	Try({ slug : Str, mtime : I64 }, [None]),
+[Newest({ slug : Str, mtime : I64 }), NoDocs] => Try(
+	[Newest({ slug : Str, mtime : I64 }), NoDocs],
 	[Failed],
 )
 last_touched! = |docs, best|
@@ -614,8 +614,8 @@ last_touched! = |docs, best|
 				Err(Missing) => last_touched!(more, best)
 				Ok(st) =>
 					match best {
-						Ok(b) if b.mtime >= st.mtime => last_touched!(more, best)
-						_ => last_touched!(more, Ok({ slug: doc.slug, mtime: st.mtime }))
+						Newest(b) if b.mtime >= st.mtime => last_touched!(more, best)
+						_ => last_touched!(more, Newest({ slug: doc.slug, mtime: st.mtime }))
 					}
 			}
 	}
@@ -664,7 +664,7 @@ docs_editor! = |me, { slug, accounts }|
 		Ok(docs) => {
 			slugs = sorted_slugs(docs)
 			if slug == "" {
-				docs_page!(slugs, { open: Nothing, accounts })
+				docs_page!(slugs, { open: NoneChosen, accounts })
 			} else {
 				match (Paths.doc_path(me, slug), slugs.contains(slug)) {
 					(Ok(path), Bool.True) => open_doc!(

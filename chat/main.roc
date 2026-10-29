@@ -1101,7 +1101,7 @@ gather_topics! = |
 			}
 			rows =
 				match Last.read_message!(at, accounts)? {
-					Some(last) =>
+					Latest(last) =>
 						match (
 							Time.unix_from_rfc3339(last.at),
 							author_name(me, { accounts, uid: last.uid }),
@@ -1121,7 +1121,7 @@ gather_topics! = |
 							}
 							(Err(NotADate), _) => by_file_time!(Paths.transcript_path(at), row)
 						}
-					None => by_file_time!(Paths.transcript_path(at), row)
+					NoMessage => by_file_time!(Paths.transcript_path(at), row)
 				}?
 			gather_topics!(
 				me,
