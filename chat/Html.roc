@@ -206,19 +206,15 @@ expect Html.bytes(
 ) == Str.to_utf8("a1b2c")
 
 # json_script: `</` cannot close the element early.
-expect Html.bytes(
-	Html.json_script(
-		[],
-		Html.script_safe(Str.to_utf8("\"</script>\"")),
-	),
-) == Str.to_utf8("<script>\"\\u003c/script>\"</script>")
+expect Html.json_script(
+	[],
+	Html.script_safe(Str.to_utf8("\"</script>\"")),
+).bytes() == Str.to_utf8("<script>\"\\u003c/script>\"</script>")
 # The double-escaped state's way in: no `<` is left, so neither starts.
-expect Html.bytes(
-	Html.json_script(
-		[],
-		Html.script_safe(Str.to_utf8("\"<!--<script>\"")),
-	),
-) == Str.to_utf8("<script>\"\\u003c!--\\u003cscript>\"</script>")
+expect Html.json_script(
+	[],
+	Html.script_safe(Str.to_utf8("\"<!--<script>\"")),
+).bytes() == Str.to_utf8("<script>\"\\u003c!--\\u003cscript>\"</script>")
 
 # tag: each value escaped, whatever it holds; names as written.
 expect Html.bytes(

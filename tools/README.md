@@ -49,6 +49,13 @@
     a value; `Html.host_markup` outside `chat/Chrome.roc` (the host's script
     srcs); `Html.twin_script_json` anywhere (the twins' alone). `Html` is
     opaque, so these and `Html.escape` are the only ways bytes become a page.
+  - Shale's cookbook recipes, run over every chat/ module and kept for the
+    production ones (each `self_test=1` among the plants): `stack.shale`
+    (three or more on a line, a line over 100 columns); `name_hunt.shale`'s
+    `command_tense`, `mixed_tense` and `container`; `boundaries.shale`'s
+    `fixed` (a parameter every call fills with one literal);
+    `errors.shale`'s `error_alias` and `optional_tag`; and
+    `nest_depth.shale`'s `nested` at `min=4` (a call four deep).
 
 - **`roc_hunt/zig_census.shale`** — how much of the chat is still Zig,
   from angry-gopher's zig-server (`gopher=`, a mount path): each route

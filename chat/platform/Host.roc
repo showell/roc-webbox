@@ -179,8 +179,8 @@ Host := [].{
 	## keeps outside the chat now, their account once every step has gone.
 	retire_user! : List(U8) => Try({}, [Failed])
 
-	## The folder at `path` (checked as a file's is), each entry's name and
-	## kind in the order the disk gives them (`Found`); nothing there
+	## The folder at `path` (checked as a file's is): the folder's entries,
+	## each one's name and kind, in the order the disk gives them (`Found`); nothing there
 	## (`Missing`: webbox's store.list holds it empty); or a listing that
 	## failed (`Failed`: the request has failed; a path that is a file is
 	## one, as store.list fails it).

@@ -68,7 +68,7 @@ Fanout := [].{
 
 	## One step of the fan-out, in the order it is taken:
 	## - `Publish`: bytes on a member's key (it cannot fail);
-	## - `AppendFeed`: an entry appended to a member's feed file, and only then
+	## - `AppendFeed`: a feed's entry appended to a member's feed file, and only then
 	##   its event published; an append that failed is that surface's
 	##   failure, counted, and its event never sent.
 	Step : [

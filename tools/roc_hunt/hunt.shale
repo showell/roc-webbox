@@ -824,6 +824,62 @@ function stack_hunt(what)
   for f in found do print("  " .. f) end
 end
 
+-- **THE COOKBOOK'S ROC CHECKS THAT GATE** (metal-vmm QUEUE 303): Shale's
+-- recipes from the style review, each over every chat/ module (a twin's
+-- reference is what keeps a function quiet, and a type declared anywhere
+-- is read), their findings kept for the production modules alone, as this
+-- hunt's are. Each is a rule of roc-apps docs/roc-style.md that main keeps:
+--   - name_hunt `command_tense` and `mixed_tense`: the tags an effect is
+--     handed (a `List(T)` as `T`) named as events, or as commands and
+--     events at once; `container`: a type or record field named only by
+--     container words (`Entry`, `items`), unless its doc says whose
+--     (`## A folder's entry`). name_hunt's other checks are questions for a
+--     reader, its noun effects many: they do not gate.
+--   - boundaries `fixed`: a parameter every production call fills with the
+--     same literal (a recursion's `at: 0`); context passed down (`me`) is
+--     none. Its `single` (a one-caller wrapper) is the guide's rule of
+--     thumb, not a gate.
+--   - errors `error_alias`: a result's `Try` naming a shared error alias;
+--     `optional_tag`: a tag named as an optional (`None`).
+--   - nest_depth `nested` at `min=4`: a call four deep. Three deep is the
+--     guide's rule, which main keeps where a reader meets it, but a call of
+--     three still stands in some routes and in the twin's dispatch: four
+--     is what holds.
+-- Their own plants are their `self_test=1`.
+const gated = {
+  {recipe = "name_hunt", args = {}, checks = {"command_tense", "mixed_tense", "container"}},
+  {recipe = "boundaries", args = {}, checks = {"fixed"}},
+  {recipe = "errors", args = {}, checks = {"error_alias", "optional_tag"}},
+  {recipe = "nest_depth", args = {"min=4"}, checks = {"nested"}},
+}
+
+-- Whether `path` is one of the production modules this hunt reads:
+-- chat/*.roc but twin.roc, and chat/platform/*.roc.
+function is_production(path)
+  if path == "chat/twin.roc" or not starts_with(path, "chat/") then return false end
+  local rest = sub(path, #"chat/" + 1)
+  if not contains(rest, "/") then return true end
+  return starts_with(rest, "platform/") and not contains(sub(rest, #"platform/" + 1), "/")
+end
+
+function cookbook_hunt(g)
+  local argv = {"shale", "cookbook:roc/" .. g.recipe .. ".shale", "glob=chat/**/*.roc"}
+  for a in g.args do push(argv, a) end
+  local r = run(argv, {timeout_ms = 300000, whole = 4000000})
+  if r.code ~= 0 then
+    print(r.out)
+    fail("cookbook:roc/" .. g.recipe .. ".shale failed")
+  end
+  for c in g.checks do
+    local found = {}
+    for line in lines(r.out) do
+      if contains(line, ": " .. c .. ": ") and is_production(split(line, ":")[1]) then push(found, line) end
+    end
+    print("== " .. g.recipe .. " " .. c .. ": " .. tostring(#found))
+    for f in found do print("  " .. f) end
+  end
+end
+
 -- ── the plants, or the tree ──────────────────────────────────────────────
 
 if arg("self_test", "") ~= "" then
@@ -886,6 +942,15 @@ if arg("self_test", "") ~= "" then
     fail("stack: cookbook:roc/stack.shale's plants failed")
   end
   print("stack: cookbook:roc/stack.shale's plants pass")
+  for g in gated do
+    local recipe = "cookbook:roc/" .. g.recipe .. ".shale"
+    local s = run({"shale", recipe, "self_test=1"}, {timeout_ms = 300000, tail = 40})
+    if s.code ~= 0 then
+      print(s.out)
+      fail(g.recipe .. ": " .. recipe .. "'s plants failed")
+    end
+    print(g.recipe .. ": " .. recipe .. "'s plants pass")
+  end
 else
   local files = {}
   for p in glob("chat/*.roc") do if p ~= "chat/twin.roc" then push(files, p) end end
@@ -900,4 +965,5 @@ else
   print("== single_caller: " .. tostring(#lone))
   for f in lone do print("  " .. f) end
   stack_hunt("glob=chat/**/*.roc")
+  for g in gated do cookbook_hunt(g) end
 end

@@ -66,7 +66,7 @@ Feeds := [].{
 		)
 
 	## `images`, from the file's bytes as stored: **ONE DAMAGED ENTRY IS ITS
-	## OWN** (metal-vmm QUEUE 267). An entry whose bytes are not UTF-8 (one
+	## OWN** (metal-vmm QUEUE 267). A feed's entry whose bytes are not UTF-8 (one
 	## torn mid-character) is skipped and counted in `damaged`, and the rest
 	## read as `images` reads them, so the member's page is served.
 	images_of : List(U8) -> { entries : List((Header, List(Str))), damaged : U64 }
@@ -75,7 +75,8 @@ Feeds := [].{
 		{ entries: images(text), damaged }
 	}
 
-	## `code`, from the file's bytes as stored, as `images_of` reads them.
+	## `code`, from the file's bytes as stored, as `images_of` reads them:
+	## the feed's entries, and how many were damaged.
 	code_of : List(U8) -> { entries : List((Header, List(Block))), damaged : U64 }
 	code_of = |bytes| {
 		(text, damaged) = text_blocks(bytes)
