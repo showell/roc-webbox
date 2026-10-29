@@ -10,7 +10,15 @@
 ## session comes back from the store through this decoder or not at all,
 ## never from a record a handler built. A record seen before it was created
 ## is refused (`SeenBeforeCreated`) as every other malformed line is, by
-## name. Pure.
+## name.
+##
+## **A LINE PROVES THE PATH, NOT THE SOURCE**: `decode`, like every codec's
+## decoder here (AccountCodec, KeyCodec, AuditCodec), accepts any bytes,
+## so a Line proves that its value came through this decoder's checks, not
+## that its bytes came from the store. A handler that decodes bytes it made
+## up gets a session of its making. Real provenance needs an opaque read
+## value from the platform (bytes only the store's read can hand over),
+## which is a host task. Pure.
 import Principal
 import Stored
 

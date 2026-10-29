@@ -21,7 +21,7 @@
 ## of the decision. Elections take a session's viewer alone.
 ## Pure; the table of every viewer against every conversation is below,
 ## a cell a line, which is why the module runs past a thousand lines: the
-## code is the first 260.
+## code is the first 285.
 import Access
 import ApiKey
 import Principal

@@ -35,6 +35,11 @@
 ## admin (the account the settings' `first_admin` names) is never demoted or
 ## retired by another admin. Generic over the resource only because a key
 ## is (ApiKey.Key). Pure.
+##
+## **THE ONLY RETIREMENT**: the interop branch's `chat/Retire.roc` (the
+## Zig-era retire) must not run beside this core in the new deployment. It
+## knows nothing of generations, bars, agents' keys or votes, so a
+## retirement it made would leave this core's plan half done.
 import ApiKey
 import GitHubSignIn
 import Principal
@@ -115,14 +120,17 @@ Admin := [].{
 
 	## **THE AUDIT RECORD**: who (the principal the credential names), by
 	## which session or key (its public id, never a secret), what, when,
-	## and the verdict. Made for every attempt, so a surprising refusal is
-	## on the record too.
+	## the verdict, and the whole plan the action made: a retirement's every
+	## step, the agents and bots retired with the human and their votes
+	## withdrawn among them (empty for a refusal or a read). Made for every
+	## attempt, so a surprising refusal is on the record too.
 	Audit : {
 		who : Principal.Id,
 		via : [Session(Principal.SessionId), Key(Principal.KeyId)],
 		action : Admin.Action,
 		at : I64,
 		verdict : [Permitted, Refused(Admin.Refusal)],
+		plan : List(Admin.Step),
 	}
 
 	## **ONE STEP OF A PLAN**, for the host to apply.
@@ -267,6 +275,7 @@ decided_now = |{ credential, action, accounts, settings, now }| {
 			action,
 			at: now,
 			verdict,
+			plan,
 		},
 		plan,
 	}
@@ -1054,3 +1063,11 @@ expect role_audit.who == Principal.id(boss)
 expect role_audit.via == Session(sid(1))
 expect role_audit.action == promote_ann
 expect role_audit.verdict == Permitted
+expect role_audit.plan == [SetRole({ human: gid(2), role: Admin })]
+
+# **THE WHOLE PLAN IS AUDITED** (round three's design point): a
+# retirement's audit holds every step, the agent and bot retired with ann
+# and her votes withdrawn among them; a refusal's holds none.
+expect audited({ credential: boss_session, action: Retire(Principal.id(ann)) }, usually).plan == ann_retired
+expect List.contains(ann_retired, RemoveAccount(Principal.id(ann_bot))) and List.contains(ann_retired, WithdrawVotes(gid(2)))
+expect refused_audit.plan == []

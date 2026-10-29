@@ -25,7 +25,12 @@
 ## (`only:9,3,3`, `only:`): two lines with one meaning are never both
 ## valid. A key acting as a bot with admin on is refused (`AdminForBot`):
 ## no grant makes one (a bot is never an admin), so the record is not one
-## the chat wrote. Pure.
+## the chat wrote.
+##
+## **A LINE PROVES THE PATH, NOT THE SOURCE** (as SessionCodec says): the
+## decoder accepts any bytes, so a Line proves its checks ran, not that its
+## bytes came from the store; provenance needs an opaque read value from
+## the platform, a host task. Pure.
 import AccountCodec
 import Bytes
 import Principal
