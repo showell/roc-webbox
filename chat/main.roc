@@ -1565,7 +1565,7 @@ serve_conversations! = |accounts|
 				content_type: json,
 				body: Conversation.conversations_json(
 					me,
-					load_dm_entries!(
+					load_dm_summaries!(
 						me,
 						members,
 						0,
@@ -1583,7 +1583,7 @@ serve_conversations! = |accounts|
 load_roster! : List(Accounts.Account) => Try(List({ id : Uid, name : Str }), [Failed])
 load_roster! = |accounts| Members.fail_if_unreadable!(Accounts.authorized(accounts))
 
-load_dm_entries! : Uid,
+load_dm_summaries! : Uid,
 List(
 	{
 		id : Uid,
@@ -1591,8 +1591,8 @@ List(
 	},
 ),
 U64,
-List(Conversation.Entry) => List(Conversation.Entry)
-load_dm_entries! = |
+List(Conversation.DmSummary) => List(Conversation.DmSummary)
+load_dm_summaries! = |
 	me,
 	members,
 	i,
@@ -1601,7 +1601,7 @@ load_dm_entries! = |
 	match List.get(members, i) {
 		Ok({ id, name }) =>
 			if id == me {
-				load_dm_entries!(
+				load_dm_summaries!(
 					me,
 					members,
 					i + 1,
@@ -1611,7 +1611,7 @@ load_dm_entries! = |
 				pair = Paths.pair_key(me, id)
 				listed = load_topics!(Dm(pair))
 				default = resume_at!(me, { pair, topics: listed })
-				load_dm_entries!(
+				load_dm_summaries!(
 					me,
 					members,
 					i + 1,

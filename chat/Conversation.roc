@@ -81,7 +81,7 @@ Conversation := [].{
 
 	## One DM in /chat/conversations: its pair, the partner, where the member
 	## resumes it, and its topics.
-	Entry : {
+	DmSummary : {
 		conv : Paths.PairKey,
 		id : Uid,
 		name : Str,
@@ -90,8 +90,8 @@ Conversation := [].{
 	}
 
 	## chatConversations' JSON: the member, then a DM with every other.
-	conversations_json : Uid, List(Entry) -> List(U8)
-	conversations_json = |me, entries| {
+	conversations_json : Uid, List(DmSummary) -> List(U8)
+	conversations_json = |me, dms| {
 		one = |e|
 			JsonOut.object([
 				("conv", JsonOut.string(e.conv.to_str())),
@@ -107,7 +107,7 @@ Conversation := [].{
 			])
 		JsonOut.object([
 			("me", JsonOut.string(me.to_str())),
-			("conversations", JsonOut.array(List.map(entries, one))),
+			("conversations", JsonOut.array(List.map(dms, one))),
 		]).bytes()
 	}
 
