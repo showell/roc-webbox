@@ -88,9 +88,19 @@ Transcript := [].{
 		),
 	)
 
-	## `escape_body` undone (chat_codec unescapeBodyLine).
+	## `escape_body` undone (chat_codec unescapeBodyLine). A body with no
+	## backslash before the dashes has no escaped line, and is the bytes it
+	## was.
 	unescape_body : List(U8) -> List(U8)
-	unescape_body = |body| unescape_lines(body)
+	unescape_body = |body| if Bytes.find(
+		body,
+		{ needle: escaped_dashes, at: 0 },
+	) == Err(NotFound) body else Bytes.join_lines(
+		List.map(
+			List.split_on(body, '\n'),
+			unescape_line,
+		),
+	)
 }
 
 ## A message block with its author decoded: an empty `uid:` is nobody.
@@ -157,7 +167,7 @@ headers = |piece, { at, block: m }|
 	} else {
 		l = line_at(piece, at)
 		if l == [] {
-			{ ..m, markdown: unescape_lines(List.drop_first(piece, at + 1)) }
+			{ ..m, markdown: Transcript.unescape_body(List.drop_first(piece, at + 1)) }
 		} else {
 			next = match Bytes.cut_seq(l, Str.to_utf8(": ")) {
 				Ok((k, v)) =>
@@ -186,20 +196,6 @@ headers = |piece, { at, block: m }|
 			headers(piece, { at: at + List.len(l) + 1, block: next })
 		}
 	}
-
-## A body with no backslash before the dashes has no escaped line, and
-## is the bytes it was.
-unescape_lines : List(U8) -> List(U8)
-unescape_lines = |body|
-	if Bytes.find(
-		body,
-		{ needle: escaped_dashes, at: 0 },
-	) == Err(NotFound) body else Bytes.join_lines(
-		List.map(
-			List.split_on(body, '\n'),
-			unescape_line,
-		),
-	)
 
 escaped_dashes : List(U8)
 escaped_dashes = List.prepend(dashes, '\\')

@@ -174,7 +174,12 @@ act! = |req, { route, accounts }| {
 			} else {
 				serve_recent!(route.rest.to_utf8(), accounts)
 			}
-		Docs => docs!(req, { rest: route.rest, accounts })
+		Docs =>
+			if route.rest == "/post" {
+				post_doc!(req, accounts)
+			} else {
+				Docs.docs!(req, { rest: route.rest, accounts })
+			}
 		Search => search!(req, { rest: route.rest, accounts })
 		Images =>
 			if route.rest == "/stream" {
@@ -244,13 +249,6 @@ came_online! = |all| {
 	)
 	Ok({})
 }
-
-## **THE MEMBER'S DOCS** (docs.zig `handle`, metal-vmm QUEUE 289, 290):
-## posting one to chat, the writes (a new doc, a save, a message saved to
-## the reading list), the live preview, then the read pages.
-docs! : Chat.Request, { rest : Str, accounts : List(Accounts.Account) } => Chat.Answer
-docs! = |req, { rest, accounts }|
-	if rest == "/post" post_doc!(req, accounts) else Docs.docs!(req, { rest, accounts })
 
 ## **A MEMBER'S OWN STREAM** (metal-vmm QUEUE 286): their feed, their
 ## notifications or their sidebar, on the bus key `key` makes of their uid,

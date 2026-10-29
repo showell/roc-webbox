@@ -78,13 +78,20 @@ Retire := [].{
 			Ok(a) => Err(Unreadable(NameUnreadable(a.id)))
 			Err(_) =>
 				match List.find_first(accounts, |a| a.name == "") {
-					Ok(a) => Err(Refused(nameless(a.id)))
+					Ok(a) => {
+						uid = a.id.to_str()
+						Err(Refused("Account ${uid} has no name; give it one before retiring."))
+					}
 					Err(_) =>
 						match List.find_first(
 							keep,
 							|k| !List.any(accounts, |a| a.name.to_utf8() == k),
 						) {
-							Ok(k) => Err(Refused(no_such(k)))
+							Ok(k) => {
+								name = Str.from_utf8_lossy(k)
+								why = "The keep list names \"${name}\", which is no account's name."
+								Err(Refused(why))
+							}
 							Err(_) => Ok({})
 						}
 				}
@@ -183,20 +190,6 @@ Retire := [].{
 				}
 			}
 		}
-}
-
-## The refusal of an account with no name, which no keep list can name.
-nameless : Uid -> Str
-nameless = |id| {
-	uid = id.to_str()
-	"Account ${uid} has no name; give it one before retiring."
-}
-
-## The refusal of a keep name no account has.
-no_such : List(U8) -> Str
-no_such = |keep| {
-	name = Str.from_utf8_lossy(keep)
-	"The keep list names \"${name}\", which is no account's name."
 }
 
 ## A conversation as the walk finds it: its folder under the chat root, and
