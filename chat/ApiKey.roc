@@ -1,9 +1,9 @@
 ## **API KEYS, FIRST-CLASS AND SCOPED** (the Roc chat's auth design,
 ## sections 3, 9 and 11): a key acts as one principal, with a scope of read,
 ## post and admin, each on or off, read and post narrowable to listed
-## resources. It never exceeds its principal: a read is Access's `can_see`
-## of the principal, a post its `can_post`, an admin action the principal's
-## authority as the accounts say now.
+## resources. It never exceeds its principal: a read or a post is Access's
+## decision (Access.decide, on the viewer the key mints), an admin action
+## the principal's authority as the accounts say now (`administers`).
 ##
 ## **ONLY TWO WAYS IN:** `issue`, which asks `may_grant` (a live browser
 ## session, never a key, for the granter's own principals), and `load`,
@@ -22,11 +22,10 @@
 ## ConvAccess.Conv) and `id` its id (the chat's ConvId). `r` is fixed when
 ## the key is issued or loaded, so a key decides only on its own layer's
 ## resources: a chat key never takes a resource some other type made up
-## (`decide` on anything but a Conv does not compile), and a database or a
-## file system keys its own. The chat's entry is ConvKey.roc, which fixes
+## (Access.decide on anything but a Conv does not compile), and a database
+## or a file system keys its own. The chat's entry is ConvKey.roc, which fixes
 ## `r` and `id`. The key's secret and its hash are the host's; this is the
 ## record the Roc decides on. Pure.
-import Access
 import KeyCodec
 import Principal
 import Session
@@ -46,14 +45,6 @@ ApiKey := [].{
 	## When a key stops: never, or at a unix time (seconds), from which on
 	## it is expired.
 	Expiry : KeyCodec.Expiry
-
-	## What a key is asked to do with a resource: read it, or post to it
-	## (an admin action is `administers`). The resource is its layer's own
-	## value (the chat's opaque ConvAccess.Conv), which makes the
-	## Access.Resource itself, from the accounts (its `resource` method):
-	## never a record the caller built, which a handler could have made
-	## public with `{ ..res, visibility: Public }`.
-	Action(r) : [Read(r), Post(r)]
 
 	## **WHO ASKS FOR A KEY**: the credential the request came with. Only a
 	## browser's session mints keys; a key asking is refused, whatever its
@@ -204,64 +195,8 @@ ApiKey := [].{
 				(Active, At(t)) => if now < t Live else Expired
 			}
 
-		## **MAY THIS KEY READ OR POST HERE, NOW?** In order: the key live;
-		## its principal among the accounts once, and the account of the
-		## human it answers to too, the one it was granted for (an owner
-		## retired takes their agents' keys with them); the scope reaching
-		## the resource; the principal itself allowed it (Access, on the
-		## resource as its layer makes it from the accounts).
-		decide : ApiKey.Key(r, id),
-		{
-			accounts : List(Principal),
-			action : ApiKey.Action(r),
-			now : I64,
-		} -> ApiKey.Verdict
-			where [
-				id.is_eq : id, id -> Bool,
-				r.resource : r, List(Principal) -> Access.Resource(id),
-			]
-		decide = |
-			key,
-			{
-				accounts,
-				action,
-				now,
-			},
-		| {
-			ApiKey.Key.(k) = key
-			match standing(key, { accounts, now }) {
-				Refused(why) => Refused(why)
-				Standing(_) => {
-					viewer = SignedIn(k.acts_as)
-					match action {
-						Read(held) => {
-							resource = held.resource(accounts)
-							if !is_reached(k.scope.read, resource.id) {
-								Refused(OutOfScope)
-							} else if Access.can_see(viewer, resource) {
-								Permitted
-							} else {
-								Refused(BeyondPrincipal)
-							}
-						}
-
-						Post(held) => {
-							resource = held.resource(accounts)
-							if !is_reached(k.scope.post, resource.id) {
-								Refused(OutOfScope)
-							} else if Access.can_post(viewer, resource) {
-								Permitted
-							} else {
-								Refused(BeyondPrincipal)
-							}
-						}
-					}
-				}
-			}
-		}
-
 		## **MAY THIS KEY PERFORM AN ADMIN ACTION, NOW?** The key live and
-		## its principal standing, as for `decide`; an admin scope; and the
+		## its principal standing (as for a read or a post); an admin scope; and the
 		## principal's authority Admin as the accounts say now. Which action
 		## is Admin.roc's to decide.
 		administers : ApiKey.Key(r, id), ApiKey.AsOf -> ApiKey.Verdict
@@ -345,15 +280,6 @@ standing = |key, { accounts, now }| {
 			}
 	}
 }
-
-## A read's or a post's part of a scope reaches the resource `id`.
-is_reached : [Off, On(ApiKey.Reach(id))], id -> Bool where [id.is_eq : id, id -> Bool]
-is_reached = |part, id|
-	match part {
-		Off => Bool.False
-		On(Everywhere) => Bool.True
-		On(Only(ids)) => List.contains(ids, id)
-	}
 
 # The cast:
 #   boss        an admin human
@@ -706,73 +632,21 @@ expect
 	).map_ok(ApiKey.Key.id)
 		== Err(Refused(AdminBeyondPrincipal))
 
-# ── THE DECISION TABLE
-## **A TEST'S RESOURCE**: a fixed Access.Resource, the accounts not asked.
-## The chat's is ConvAccess.Conv, which makes its resource from the
-## accounts; this one stands in for it here, where the core is tested
-## without the chat. The keys here are `Key(Held, U64)`, so they decide on
-## a Held and nothing else; a chat key (`Key(ConvAccess.Conv, ConvId)`)
-## never takes a Held, nor anything but a Conv (ConvKey.roc).
-Held :: Access.Resource(U64).{
-	resource : Held, List(Principal) -> Access.Resource(U64)
-	resource = |Held.(r), _accounts| r
-}
+# ── STANDING, AND ADMINISTERING
+## **A TEST'S RESOURCE TYPE**: a key is bound to its layer's resource (a
+## chat key to ConvAccess.Conv); Access.roc decides its reads and posts.
+## Here no resource is asked, so the layer is a placeholder.
+Held :: {}
 
-# Three resources: 1 (`a`), private to ann_agent (and so to ann, its
-# owner); 2 (`b`), private to boss; 3 (`c`), boss's and public.
-res_a : Held
-res_a = Held.(
-	{
-		id: 1,
-		participants: [Principal.id(ann_agent)],
-		involved: [gid(2)],
-		visibility: Private,
-	},
-)
+## The principal a key stands as at `now` among `among`, by id.
+standing_at : ApiKey.Key(Held, U64), { among : List(Principal), now : I64 } -> Try(Principal.Id, [Refused(ApiKey.Refusal)])
+standing_at = |key, { among, now }| key.principal({ accounts: among, now }).map_ok(Principal.id)
 
-res_b : Held
-res_b = Held.(
-	{
-		id: 2,
-		participants: [Principal.id(boss)],
-		involved: [gid(1)],
-		visibility: Private,
-	},
-)
-
-res_c : Held
-res_c = Held.(
-	{
-		id: 3,
-		participants: [Principal.id(boss)],
-		involved: [gid(1)],
-		visibility: Public,
-	},
-)
+## The principal a key stands as at 50 among `among`.
+standing_among : ApiKey.Key(Held, U64), List(Principal) -> Try(Principal.Id, [Refused(ApiKey.Refusal)])
+standing_among = |key, among| standing_at(key, { among, now: 50 })
 
 Answer : [Permitted, Refused(ApiKey.Refusal)]
-
-## The key's answer to `action` at `now`, among `accounts`.
-decided_at : ApiKey.Key(Held, U64), { action : ApiKey.Action(Held), now : I64 } -> Answer
-decided_at = |key, { action, now }|
-	key.decide({
-		accounts,
-		action,
-		now,
-	})
-
-## The key's answer to `action` at time 50, among `accounts`.
-decided : ApiKey.Key(Held, U64), ApiKey.Action(Held) -> Answer
-decided = |key, action| decided_at(key, { action, now: 50 })
-
-## The key's answer to `action` at time 50, once ann has retired.
-decided_after_ann : ApiKey.Key(Held, U64), ApiKey.Action(Held) -> Answer
-decided_after_ann = |key, action|
-	key.decide({
-		accounts: without_ann,
-		action,
-		now: 50,
-	})
 
 ## The key's answer to an admin action at time 50, among `accounts`.
 administered : ApiKey.Key(Held, U64) -> Answer
@@ -782,83 +656,35 @@ administered = |key| key.administers({ accounts, now: 50 })
 administers_among : ApiKey.Key(Held, U64), List(Principal) -> Answer
 administers_among = |key, among| key.administers({ accounts: among, now: 50 })
 
-# ann_agent, reading and posting everywhere: as far as ann_agent may.
 ann_agent_plain : ApiKey.Key(Held, U64)
 ann_agent_plain = issued({ acts_as: ann_agent, scope: plain }, Never)
 
-expect decided(ann_agent_plain, Read(res_a)) == Permitted
-expect decided(ann_agent_plain, Read(res_b)) == Refused(BeyondPrincipal)
-expect decided(ann_agent_plain, Read(res_c)) == Permitted
-expect decided(ann_agent_plain, Post(res_a)) == Permitted
-expect decided(ann_agent_plain, Post(res_b)) == Refused(BeyondPrincipal)
-expect decided(ann_agent_plain, Post(res_c)) == Refused(BeyondPrincipal)
-expect administered(ann_agent_plain) == Refused(OutOfScope)
-
-# ann_agent, reading `c` alone.
 ann_agent_reads_c : ApiKey.Key(Held, U64)
 ann_agent_reads_c = issued({ acts_as: ann_agent, scope: reads_c }, Never)
 
-expect decided(ann_agent_reads_c, Read(res_a)) == Refused(OutOfScope)
-expect decided(ann_agent_reads_c, Read(res_b)) == Refused(OutOfScope)
-expect decided(ann_agent_reads_c, Read(res_c)) == Permitted
-expect decided(ann_agent_reads_c, Post(res_a)) == Refused(OutOfScope)
-expect decided(ann_agent_reads_c, Post(res_b)) == Refused(OutOfScope)
-expect decided(ann_agent_reads_c, Post(res_c)) == Refused(OutOfScope)
-expect administered(ann_agent_reads_c) == Refused(OutOfScope)
-
-# ann_agent, posting to `a` alone.
 ann_agent_posts_a : ApiKey.Key(Held, U64)
 ann_agent_posts_a = issued({ acts_as: ann_agent, scope: posts_a }, Never)
 
-expect decided(ann_agent_posts_a, Read(res_a)) == Refused(OutOfScope)
-expect decided(ann_agent_posts_a, Read(res_b)) == Refused(OutOfScope)
-expect decided(ann_agent_posts_a, Read(res_c)) == Refused(OutOfScope)
-expect decided(ann_agent_posts_a, Post(res_a)) == Permitted
-expect decided(ann_agent_posts_a, Post(res_b)) == Refused(OutOfScope)
-expect decided(ann_agent_posts_a, Post(res_c)) == Refused(OutOfScope)
-expect administered(ann_agent_posts_a) == Refused(OutOfScope)
-
-# ann herself, reading and posting everywhere: her agent's `a` too, as its
-# owner (decision 1).
-expect decided(ann_forever, Read(res_a)) == Permitted
-expect decided(ann_forever, Read(res_b)) == Refused(BeyondPrincipal)
-expect decided(ann_forever, Read(res_c)) == Permitted
-expect decided(ann_forever, Post(res_a)) == Permitted
-expect decided(ann_forever, Post(res_b)) == Refused(BeyondPrincipal)
-expect decided(ann_forever, Post(res_c)) == Refused(BeyondPrincipal)
-expect administered(ann_forever) == Refused(OutOfScope)
-
-# boss, everything and admin: an admin still reads no private resource it
-# is not in (`a`).
 boss_all : ApiKey.Key(Held, U64)
 boss_all = issued({ acts_as: boss, scope: with_admin }, Never)
 
-expect decided(boss_all, Read(res_a)) == Refused(BeyondPrincipal)
-expect decided(boss_all, Read(res_b)) == Permitted
-expect decided(boss_all, Read(res_c)) == Permitted
-expect decided(boss_all, Post(res_a)) == Refused(BeyondPrincipal)
-expect decided(boss_all, Post(res_b)) == Permitted
-expect decided(boss_all, Post(res_c)) == Permitted
-expect administered(boss_all) == Permitted
-
-# boss_agent, admin alone: reads and posts nothing.
 boss_agent_admin : ApiKey.Key(Held, U64)
 boss_agent_admin = issued({ acts_as: boss_agent, scope: admin_only }, Never)
 
-expect decided(boss_agent_admin, Read(res_a)) == Refused(OutOfScope)
-expect decided(boss_agent_admin, Read(res_b)) == Refused(OutOfScope)
-expect decided(boss_agent_admin, Read(res_c)) == Refused(OutOfScope)
-expect decided(boss_agent_admin, Post(res_a)) == Refused(OutOfScope)
-expect decided(boss_agent_admin, Post(res_b)) == Refused(OutOfScope)
-expect decided(boss_agent_admin, Post(res_c)) == Refused(OutOfScope)
+boss_until_100 : ApiKey.Key(Held, U64)
+boss_until_100 = issued({ acts_as: boss, scope: with_admin }, At(100))
+
+# A standing key stands as its principal.
+expect standing_among(ann_agent_plain, accounts) == Ok(Principal.id(ann_agent))
+expect standing_among(boss_all, accounts) == Ok(Principal.id(boss))
+
+# Admin: only an admin scope, on an admin's or an admin's agent's key.
+expect administered(ann_agent_plain) == Refused(OutOfScope)
+expect administered(ann_agent_reads_c) == Refused(OutOfScope)
+expect administered(ann_agent_posts_a) == Refused(OutOfScope)
+expect administered(ann_forever) == Refused(OutOfScope)
+expect administered(boss_all) == Permitted
 expect administered(boss_agent_admin) == Permitted
-
-# boss_bot, reading everywhere: a bot reads a public resource only when it
-# is in it (decision 3).
-boss_bot_plain : ApiKey.Key(Held, U64)
-boss_bot_plain = issued({ acts_as: boss_bot, scope: plain }, Never)
-
-expect decided(boss_bot_plain, Read(res_c)) == Refused(BeyondPrincipal)
 
 # The key never exceeds its principal as the accounts say NOW: boss demoted,
 # boss retired, or the agent itself retired.
@@ -867,20 +693,14 @@ expect administers_among(boss_agent_admin, [boss_agent]) == Refused(NoSuchPrinci
 expect administers_among(boss_agent_admin, [boss]) == Refused(NoSuchPrincipal)
 expect administers_among(boss_all, [boss_demoted]) == Refused(BeyondPrincipal)
 
-# Bug 1: ann retired, her agent's key reads and posts nothing, even what
-# its scope and the resource would allow.
-expect decided_after_ann(ann_agent_plain, Read(res_a)) == Refused(NoSuchPrincipal)
-expect decided_after_ann(ann_agent_plain, Read(res_c)) == Refused(NoSuchPrincipal)
-expect decided_after_ann(ann_agent_plain, Post(res_a)) == Refused(NoSuchPrincipal)
+# Bug 1: ann retired, her agent's key stands as nobody.
+expect standing_among(ann_agent_plain, without_ann) == Err(Refused(NoSuchPrincipal))
 
-# Liveness comes first: revoked and expired keys do nothing, even what
-# their scope and principal would allow; an expiry at 100 is live at 99.
-boss_until_100 : ApiKey.Key(Held, U64)
-boss_until_100 = issued({ acts_as: boss, scope: with_admin }, At(100))
-
-expect decided(boss_all.revoke(), Read(res_c)) == Refused(Revoked)
-expect decided_at(boss_until_100, { action: Read(res_c), now: 99 }) == Permitted
-expect decided_at(boss_until_100, { action: Read(res_c), now: 100 }) == Refused(Expired)
+# Liveness comes first: revoked and expired keys stand as nobody; an expiry
+# at 100 is live at 99.
+expect standing_among(boss_all.revoke(), accounts) == Err(Refused(Revoked))
+expect standing_at(boss_until_100, { among: accounts, now: 99 }) == Ok(Principal.id(boss))
+expect standing_at(boss_until_100, { among: accounts, now: 100 }) == Err(Refused(Expired))
 expect boss_until_100.revoke().administers({ accounts, now: 99 }) == Refused(Revoked)
 
 # ── LOADING A STORED KEY
@@ -911,10 +731,9 @@ ann_claims_admin = from_store({ ..ann_forever.record(), scope: with_admin })
 
 expect ann_claims_admin.record().scope == with_admin
 expect administered(ann_claims_admin) == Refused(BeyondPrincipal)
-expect decided(ann_claims_admin, Read(res_b)) == Refused(BeyondPrincipal)
 
 # A narrowed line loads narrowed.
-expect decided(from_store(ann_agent_reads_c.record()), Read(res_a)) == Refused(OutOfScope)
+expect from_store(ann_agent_reads_c.record()).record().scope == reads_c
 
 # **NO KEY FROM A RECORD** (the round-two attacker's third): a key is
 # issued from a live session's grant, or loaded from a KeyCodec.Line, an
@@ -934,7 +753,7 @@ forged_first = List.prepend(accounts, forged_ann_agent)
 
 expect grant_at(by_boss, { acts_as: ann_agent, scope: plain, among: forged_first, now: 50 }) == Refused(NoSuchPrincipal)
 expect grant_at(by_ann, { acts_as: ann_agent, scope: plain, among: forged_first, now: 50 }) == Refused(NoSuchPrincipal)
-expect ann_agent_plain.decide({ accounts: forged_first, action: Read(res_a), now: 50 }) == Refused(NoSuchPrincipal)
+expect standing_among(ann_agent_plain, forged_first) == Err(Refused(NoSuchPrincipal))
 
 # A duplicate of ann claiming admin, first: ann's session grants nothing
 # (it admits no copy), and her keys stand no more.
@@ -944,7 +763,7 @@ ann_admin_first = List.prepend(accounts, person(2, Admin))
 expect grant_at(by_ann, { acts_as: ann, scope: with_admin, among: ann_admin_first, now: 50 }) == Refused(NoSuchGranter)
 expect grant_at(by_ann, { acts_as: ann, scope: plain, among: ann_admin_first, now: 50 }) == Refused(NoSuchGranter)
 expect ann_claims_admin.administers({ accounts: ann_admin_first, now: 50 }) == Refused(NoSuchPrincipal)
-expect ann_agent_plain.decide({ accounts: ann_admin_first, action: Read(res_a), now: 50 }) == Refused(NoSuchPrincipal)
+expect standing_among(ann_agent_plain, ann_admin_first) == Err(Refused(NoSuchPrincipal))
 
 # ── RE-CREATION AFTER RETIREMENT (the round-two attacker's fifth)
 # Ann retired, then made again with her GitHub id at 60: her old keys,
@@ -956,8 +775,8 @@ ann_again = Principal.Human({ id: gid(2), login: "h2", name: "H2", role: Member,
 again : List(Principal)
 again = [boss, ann_again, boss_agent, boss_bot, ann_agent]
 
-expect ann_forever.decide({ accounts: again, action: Read(res_c), now: 70 }) == Refused(NoSuchPrincipal)
-expect ann_agent_plain.decide({ accounts: again, action: Read(res_a), now: 70 }) == Refused(NoSuchPrincipal)
+expect standing_at(ann_forever, { among: again, now: 70 }) == Err(Refused(NoSuchPrincipal))
+expect standing_at(ann_agent_plain, { among: again, now: 70 }) == Err(Refused(NoSuchPrincipal))
 expect grant_at(by_ann, { acts_as: ann, scope: plain, among: again, now: 70 }) == Refused(NoSuchGranter)
 new_ann_session : ApiKey.Granter(Held, U64)
 new_ann_session = stored_session("session v1 id=8 human=2 generation=2 token=${Str.repeat("07", 32)} created=60 seen=60\n")
@@ -975,4 +794,4 @@ expect
 agent_again : List(Principal)
 agent_again = [boss, ann, boss_agent, boss_bot, Principal.Agent({ id: aid(3), name: "a3", owner: gid(2), generation: gen(5) })]
 
-expect ann_agent_plain.decide({ accounts: agent_again, action: Read(res_a), now: 50 }) == Refused(NoSuchPrincipal)
+expect standing_among(ann_agent_plain, agent_again) == Err(Refused(NoSuchPrincipal))

@@ -6,6 +6,7 @@
 ## handler cannot hand a chat key a resource it made public itself, or any
 ## other type with a `resource` method (it does not compile). The chat
 ## issues, loads, stores and decides its keys here, and nowhere else. Pure.
+import Access
 import ApiKey
 import ConvAccess
 import KeyCodec
@@ -50,7 +51,7 @@ ConvKey := [].{
 	}
 
 	## **MAY THIS CHAT KEY READ OR POST IN THIS CONVERSATION, NOW?**
-	## ApiKey's decision, on the conversation as ConvAccess makes it from
+	## Access's decision, on the conversation as ConvAccess makes it from
 	## the accounts.
 	decide : ConvKey.Key,
 	{
@@ -58,7 +59,7 @@ ConvKey := [].{
 		action : [Read(ConvAccess.Conv), Post(ConvAccess.Conv)],
 		now : I64,
 	} -> ApiKey.Verdict
-	decide = |key, request| key.decide(request)
+	decide = |key, request| Access.decide(key, request)
 }
 
 # ── tests
@@ -140,10 +141,14 @@ forged = List.prepend(accounts, Principal.Agent({ id: aid(2), name: "BeaAgent", 
 ## Human `who`'s session to their account of generation `g`, signed in at
 ## 0, from its stored line.
 session_of : U64, U64 -> ApiKey.Granter(ConvAccess.Conv, ConvAccess.ConvId)
-session_of = |who, g|
+session_of = |who, g| Session(session_line(who, g))
+
+## Human `who`'s session to their account of generation `g`.
+session_line : U64, U64 -> Session
+session_line = |who, g|
 	match SessionCodec.decode(Str.to_utf8("session v1 id=${who.to_str()} human=${who.to_str()} generation=${g.to_str()} token=${Str.repeat("01", 32)} created=0 seen=0\n")) {
-		Ok(line) => Session(Session.load(line))
-		Err(_) => crash "session_of: a test's session line decodes"
+		Ok(line) => Session.load(line)
+		Err(_) => crash "session_line: a test's session line decodes"
 	}
 
 ## A conversation among `who`, numbered `n`.
@@ -157,9 +162,13 @@ conv = |n, who|
 ## `by` elects public, where that is allowed.
 public_by : ConvAccess.Conv, Principal -> ConvAccess.Conv
 public_by = |c, by|
-	match c.elect({ by, visibility: Public, accounts }) {
-		Ok(next) => next
-		Err(_) => crash "public_by: a test's election is allowed"
+	match Access.Viewer.from_session(session_line(Principal.answers_to(by).to_u64(), 1), { accounts, now: 10 }) {
+		Err(_) => crash "public_by: a test's session is admitted"
+		Ok({ viewer, write: _ }) =>
+			match c.elect({ by: viewer, visibility: Public, accounts }) {
+				Ok(next) => next
+				Err(_) => crash "public_by: a test's election is allowed"
+			}
 	}
 
 ## BeaAgent's private conversation with DeeAgent.
@@ -201,7 +210,11 @@ verdict = |key, { accounts: among, action }| ConvKey.decide(key, { accounts: amo
 # as BeaAgent, and a key of BeaAgent's own (granted by Bea) reads nothing
 # while the copy is there.
 expect key_by(1, { acts_as: bea_agent, among: forged }).map_ok(|_| {}) == Err(Refused(NoSuchPrincipal))
-expect !ConvAccess.can_see(SignedIn(Principal.id(ann)), { conv: private_conv, accounts: forged })
+expect
+	match Access.Viewer.from_session(session_line(1, 1), { accounts: forged, now: 10 }) {
+		Ok({ viewer, write: _ }) => !ConvAccess.can_see(viewer, { conv: private_conv, accounts: forged })
+		Err(_) => Bool.False
+	}
 
 bea_agent_key : ConvKey.Key
 bea_agent_key = granted(key_by(2, { acts_as: bea_agent, among: accounts }))

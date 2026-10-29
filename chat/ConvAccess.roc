@@ -14,14 +14,19 @@
 ## an account made again with a retired participant's id, a human's or an
 ## agent's, never sees, posts in or answers for the old conversations. An
 ## election is held by the voter's account (its generation), so an account
-## made again never inherits a public vote either. Who
-## sees and who posts is then Access's, on the resource made here, for a
-## viewer exactly one account holds.
+## made again never inherits a public vote either. Who sees and who posts
+## is then Access's, on the resource made here, for an Access.Viewer: an
+## opaque value minted only from a live session or a standing key, so no
+## handler claims an identity, and checked again here against the accounts
+## of the decision. Elections take a session's viewer alone.
 ## Pure; the table of every viewer against every conversation is below,
 ## a cell a line, which is why the module runs past a thousand lines: the
 ## code is the first 260.
 import Access
+import ApiKey
 import Principal
+import Session
+import SessionCodec
 
 ConvAccess := [].{
 
@@ -37,24 +42,29 @@ ConvAccess := [].{
 		is_eq : _
 	}
 
-	## One principal's election: who is voting (the principal the request
-	## acts as, which must be a human: an agent or a bot never votes, not
-	## even for its owner), the visibility they want, and the accounts now.
+	## One human's election: who is voting (a viewer from their own live
+	## session: an agent or a bot never votes, not even for its owner, and a
+	## key, even a human's, never elects), the visibility they want, and the
+	## accounts now.
 	Election : {
-		by : Principal,
+		by : Access.Viewer(ConvAccess.ConvId),
 		visibility : [Private, Public],
 		accounts : List(Principal),
 	}
 
 	## Why an election is refused.
 	ElectionRefusal : [
-		## An agent or a bot asked: only a human elects, for themselves.
-		NotHuman,
+		## Nobody signed in asked.
+		SignedOut,
+
+		## A key asked: only a human's own session elects, so a key, an
+		## agent's or a human's own, never makes a conversation public.
+		NeedsSession,
 
 		## A conversation of humans alone has no election.
 		AlwaysPrivate,
 
-		## The voter has no account now (never made, or retired).
+		## The voter's session is not of an account now (retired, or made again).
 		NoSuchPrincipal,
 
 		## The voter is neither in it nor owns an agent or a bot in it.
@@ -149,8 +159,8 @@ ConvAccess := [].{
 					},
 			)
 
-		## **AN ELECTION**: the human `by` elects a visibility for
-		## themselves. Electing private withdraws a public election, and
+		## **AN ELECTION**: the human signed in as `by` elects a visibility
+		## for themselves. Electing private withdraws a public election, and
 		## makes the conversation private at once.
 		elect : ConvAccess.Conv,
 		ConvAccess.Election -> Try(
@@ -166,19 +176,21 @@ ConvAccess := [].{
 			},
 		| {
 			ConvAccess.Conv.(c) = conv
-			match (by, conv.kind()) {
-				(Agent(_), _) | (Bot(_), _) => Err(NotHuman)
-				(Human(_), HumansOnly) => Err(AlwaysPrivate)
-				(Human(h), WithAgents) =>
-					match Principal.human_account(accounts, h.id) {
+			match (by.who(), conv.kind()) {
+				(SignedOut, _) => Err(SignedOut)
+				(Key(_), _) => Err(NeedsSession)
+				(Session(_), HumansOnly) => Err(AlwaysPrivate)
+				(Session(b), WithAgents) =>
+					match Principal.holds(accounts, b) {
 						Err(_) => Err(NoSuchPrincipal)
-						Ok(account) =>
+						Ok(Agent(_)) | Ok(Bot(_)) => crash "ConvAccess.elect: a session's viewer is a human"
+						Ok(Human(h)) =>
 							if !List.contains(conv.involved(accounts), h.id) {
 								Err(NotInvolved)
 							} else {
 								others = List.keep_if(c.public_by, |vote| vote.human != h.id)
 								match visibility {
-									Public => Ok(ConvAccess.Conv.({ ..c, public_by: others.append({ human: h.id, generation: account.generation }) }))
+									Public => Ok(ConvAccess.Conv.({ ..c, public_by: others.append({ human: h.id, generation: h.generation }) }))
 									Private => Ok(ConvAccess.Conv.({ ..c, public_by: others }))
 								}
 							}
@@ -220,14 +232,15 @@ ConvAccess := [].{
 		}
 
 		## The conversation as Access decides on it, with the accounts now:
-		## its participants those whose binding holds.
+		## its participants those whose binding holds, and the humans
+		## involved bound to their accounts now.
 		resource : ConvAccess.Conv, List(Principal) -> Access.Resource(ConvAccess.ConvId)
 		resource = |conv, accounts| {
 			ConvAccess.Conv.(c) = conv
 			{
 				id: c.id,
-				participants: List.keep_if(c.participants, |b| Principal.holds(accounts, b).is_ok()).map(|b| b.id),
-				involved: conv.involved(accounts),
+				participants: List.keep_if(c.participants, |b| Principal.holds(accounts, b).is_ok()),
+				involved: List.keep_oks(conv.involved(accounts), |h| Principal.bind(accounts, Principal.Id.Human(h))),
 				visibility: conv.visibility(accounts),
 			}
 		}
@@ -236,26 +249,27 @@ ConvAccess := [].{
 	## **CAN THIS VIEWER SEE THIS CONVERSATION?** Access's rule on the
 	## conversation's resource: a participant, or the human it answers to,
 	## always; any human or agent signed in while it is public, never a bot
-	## not in it; nobody signed out, and nobody whose id no account, or more
-	## than one, holds (a retired participant sees nothing). An admin is no
-	## exception.
-	can_see : Access.Viewer, { conv : ConvAccess.Conv, accounts : List(Principal) } -> Bool
+	## not in it; nobody signed out, and no viewer whose account is not the
+	## one it was minted for (a retired participant sees nothing); a key,
+	## where its read reaches. An admin is no exception.
+	can_see : Access.Viewer(ConvAccess.ConvId), { conv : ConvAccess.Conv, accounts : List(Principal) } -> Bool
 	can_see = |viewer, { conv, accounts }|
 		is_held(viewer, accounts) and Access.can_see(viewer, conv.resource(accounts))
 
 	## **CAN THIS VIEWER POST TO THIS CONVERSATION?** A participant, or the
-	## human it answers to, public or not; held by exactly one account.
-	can_post : Access.Viewer, { conv : ConvAccess.Conv, accounts : List(Principal) } -> Bool
+	## human it answers to, public or not, of the accounts it was minted
+	## for; a key, where its post reaches.
+	can_post : Access.Viewer(ConvAccess.ConvId), { conv : ConvAccess.Conv, accounts : List(Principal) } -> Bool
 	can_post = |viewer, { conv, accounts }|
 		is_held(viewer, accounts) and Access.can_post(viewer, conv.resource(accounts))
 }
 
-## A viewer signed in as an id exactly one account holds; nobody signed out.
-is_held : Access.Viewer, List(Principal) -> Bool
+## A viewer whose binding holds among `accounts`; nobody signed out.
+is_held : Access.Viewer(ConvAccess.ConvId), List(Principal) -> Bool
 is_held = |viewer, accounts|
-	match viewer {
+	match viewer.who() {
 		SignedOut => Bool.True
-		SignedIn(who) => Principal.find(accounts, who).is_ok()
+		Session(b) | Key(b) => Principal.holds(accounts, b).is_ok()
 	}
 
 ## **THE HUMAN A PARTICIPANT ANSWERS TO, AS THE ACCOUNTS SAY**: a human,
@@ -374,11 +388,77 @@ accounts = List.map(
 without : Who -> List(Principal)
 without = |gone| List.keep_if(accounts, |p| Principal.id(p) != Principal.id(principal(gone)))
 
-viewer : Who -> Access.Viewer
-viewer = |who|
+## Human `who`'s session to their account of generation `g`, from its
+## stored line, signed in at 0.
+session_of : U64, U64 -> Session
+session_of = |who, g|
+	match SessionCodec.decode(Str.to_utf8("session v1 id=${who.to_str()} human=${who.to_str()} generation=${g.to_str()} token=${Str.repeat("01", 32)} created=0 seen=0\n")) {
+		Ok(line) => Session.load(line)
+		Err(_) => crash "session_of: a test's session line decodes"
+	}
+
+kid : U64 -> Principal.KeyId
+kid = |n|
+	match Principal.KeyId.from_u64(n) {
+		Ok(id) => id
+		Err(NotAnId) => crash "kid: a test's key id is not 0"
+	}
+
+## **A VIEWER, AS A HANDLER GETS ONE**, minted among `among` at 10: `Out`
+## signed out; a human by a session to their account in `among`; an agent
+## or a bot by a key reaching everywhere, granted by its owner among the
+## whole cast. `NoViewer` when no credential mints one (its account, or its
+## owner's, gone or made again).
+viewer_among : Who, List(Principal) -> [Viewer(Access.Viewer(ConvAccess.ConvId)), NoViewer]
+viewer_among = |who, among|
+	match (who, principal_or_out(who)) {
+		(_, Nobody) => Viewer(Access.Viewer.signed_out({}))
+		(_, Someone(Human(h))) => {
+			g =
+				match Principal.human_account(among, h.id) {
+					Ok(now) => now.generation.to_u64()
+					Err(_) => 1
+				}
+			match Access.Viewer.from_session(session_of(h.id.to_u64(), g), { accounts: among, now: 10 }) {
+				Ok({ viewer: v, write: _ }) => Viewer(v)
+				Err(_) => NoViewer
+			}
+		}
+		(_, Someone(p)) => {
+			owner = Principal.answers_to(p)
+			key = ApiKey.Key.issue(
+				{ granter: Session(session_of(owner.to_u64(), 1)), acts_as: Principal.id(p), scope: { read: On(Everywhere), post: On(Everywhere), admin: Off }, accounts, now: 10 },
+				{ key: kid(1), expires: Never },
+			)
+			match key {
+				Err(_) => NoViewer
+				Ok(k) =>
+					match Access.Viewer.from_key(k, { accounts: among, now: 10 }) {
+						Ok(v) => Viewer(v)
+						Err(_) => NoViewer
+					}
+			}
+		}
+	}
+
+## The cast member, or nobody for `Out`.
+principal_or_out : Who -> [Someone(Principal), Nobody]
+principal_or_out = |who|
 	match who {
-		Out => SignedOut
-		_ => SignedIn(Principal.id(principal(who)))
+		Out => Nobody
+		_ => Someone(principal(who))
+	}
+
+## The viewer `who` mints among the whole cast.
+viewer : Who -> Access.Viewer(ConvAccess.ConvId)
+viewer = |who| viewer_in(who, accounts)
+
+## The viewer `who` mints among `among`, in a test where one is minted.
+viewer_in : Who, List(Principal) -> Access.Viewer(ConvAccess.ConvId)
+viewer_in = |who, among|
+	match viewer_among(who, among) {
+		Viewer(v) => v
+		NoViewer => crash "viewer_in: a test's viewer is minted"
 	}
 
 gen : U64 -> Principal.Generation
@@ -411,7 +491,7 @@ id_of = |who| Principal.id(principal(who))
 elected : ConvAccess.Conv, { human : Who, visibility : [Private, Public] } -> ConvAccess.Conv
 elected = |conv, { human, visibility }|
 	match conv.elect({
-		by: principal(human),
+		by: viewer(human),
 		visibility,
 		accounts,
 	}) {
@@ -425,15 +505,26 @@ shown = |conv| conv.visibility(accounts)
 
 ## The answers said as words, so each cell reads plainly.
 sees : Who, ConvAccess.Conv -> [Visible, Hidden]
-sees = |who, conv| if ConvAccess.can_see(viewer(who), { conv, accounts }) Visible else Hidden
+sees = |who, conv| sees_among(who, { conv, among: accounts })
 
 posts : Who, ConvAccess.Conv -> [Writable, ReadOnly]
-posts = |who, conv| if ConvAccess.can_post(viewer(who), { conv, accounts }) Writable else ReadOnly
+posts = |who, conv| posts_among(who, { conv, among: accounts })
 
-## `sees`, among other accounts.
+## `sees`, among other accounts: `who`'s viewer minted among them too.
 sees_among : Who, { conv : ConvAccess.Conv, among : List(Principal) } -> [Visible, Hidden]
 sees_among = |who, { conv, among: others }|
-	if ConvAccess.can_see(viewer(who), { conv, accounts: others }) Visible else Hidden
+	match viewer_among(who, others) {
+		Viewer(v) => if ConvAccess.can_see(v, { conv, accounts: others }) Visible else Hidden
+		NoViewer => Hidden
+	}
+
+## `posts`, among other accounts.
+posts_among : Who, { conv : ConvAccess.Conv, among : List(Principal) } -> [Writable, ReadOnly]
+posts_among = |who, { conv, among: others }|
+	match viewer_among(who, others) {
+		Viewer(v) => if ConvAccess.can_post(v, { conv, accounts: others }) Writable else ReadOnly
+		NoViewer => ReadOnly
+	}
 
 # ── the conversations, in each election state
 # hh        Ann and Bea: humans alone, always private, no election.
@@ -557,7 +648,7 @@ three_dee_withdrawn = elected(three_all, { human: Dee, visibility: Private })
 refused : ConvAccess.Conv, Who -> Try(ConvAccess.ConvId, ConvAccess.ElectionRefusal)
 refused = |conv, who|
 	conv.elect({
-		by: principal(who),
+		by: viewer(who),
 		visibility: Public,
 		accounts,
 	})
@@ -578,13 +669,20 @@ expect ConvAccess.Conv.start({ id: cid(1), participants: [id_of(Ann), Principal.
 expect ConvAccess.Conv.start({ id: cid(1), participants: [id_of(AnnAgent)], accounts: without(Ann) }).map_ok(ConvAccess.Conv.id) == Err(NoSuchParticipant(id_of(AnnAgent)))
 # Only a human elects, for themselves: an agent or a bot never, even one
 # whose owner may.
-expect refused(ha_own_none, AnnAgent) == Err(NotHuman)
-expect refused(own_bot_none, BeaBot) == Err(NotHuman)
-expect refused(hh, AnnAgent) == Err(NotHuman)
+expect refused(ha_own_none, AnnAgent) == Err(NeedsSession)
+expect refused(own_bot_none, BeaBot) == Err(NeedsSession)
+expect refused(hh, AnnAgent) == Err(NeedsSession)
+# Nobody signed in elects nothing; nor does a human's own key: elections
+# take the human's session.
+expect refused(ha_own_none, Out) == Err(SignedOut)
+ann_key_viewer : Access.Viewer(ConvAccess.ConvId)
+ann_key_viewer = own_key_viewer(Ann)
+
+expect ha_own_none.elect({ by: ann_key_viewer, visibility: Public, accounts }).map_ok(ConvAccess.Conv.id) == Err(NeedsSession)
 # A human without an account elects nothing.
 expect
 	ha_own_none.elect({
-		by: principal(Ann),
+		by: viewer(Ann),
 		visibility: Public,
 		accounts: without(Ann),
 	}).is_err()
@@ -597,7 +695,7 @@ expect three_none.involved(accounts) == [
 	gid(2),
 	gid(4),
 ]
-expect among([Ann, Ann]).resource(accounts).participants == [Principal.Id.Human(gid(1))]
+expect among([Ann, Ann]).resource(accounts).participants.map(|b| b.id) == [Principal.Id.Human(gid(1))]
 # Electing public twice is one election; one withdrawal undoes it.
 expect shown(elected(ha_own_ann, { human: Ann, visibility: Public })) == Public
 ha_own_twice : ConvAccess.Conv
@@ -1356,14 +1454,14 @@ expect ha_own_ann.visibility(List.append(without(Ann), principal(Ann))) == Publi
 # The new account is in none of the old one's conversations: it has no
 # election there, and its agent (bound to the old account) answers to it
 # no more.
-expect ha_own_ann.elect({ by: ann_again, visibility: Public, accounts: again }).map_ok(ConvAccess.Conv.id) == Err(NotInvolved)
+expect ha_own_ann.elect({ by: viewer_in(Ann, again), visibility: Public, accounts: again }).map_ok(ConvAccess.Conv.id) == Err(NotInvolved)
 expect ha_own_ann.involved(again) == []
 # ATTACK (round three's first): the re-created Ann sees and posts nothing of
 # the old account's private conversations, the human-only DM with Bea
 # included.
 expect sees_among(Ann, { conv: hh, among: again }) == Hidden
 expect sees_among(Ann, { conv: ha_cross_none, among: again }) == Hidden
-expect !ConvAccess.can_post(viewer(Ann), { conv: hh, accounts: again })
+expect posts_among(Ann, { conv: hh, among: again }) == ReadOnly
 # A copy of Ann's account beside it: her vote names nobody.
 expect ha_own_ann.visibility(List.append(accounts, principal(Ann))) == Private
 
@@ -1379,7 +1477,7 @@ sees_gone = |who| sees_among(who, { conv: ha_cross_both, among: gone_agent })
 
 posts_gone : Who -> [Writable, ReadOnly]
 posts_gone = |who|
-	if ConvAccess.can_post(viewer(who), { conv: ha_cross_both, accounts: gone_agent }) Writable else ReadOnly
+	posts_among(who, { conv: ha_cross_both, among: gone_agent })
 
 expect ha_cross_both.visibility(gone_agent) == Private
 expect sees_gone(Out) == Hidden
@@ -1408,3 +1506,26 @@ expect sees_among(BeaAgent, { conv: aa_both, among: gone_agent }) == Hidden
 
 # A viewer two accounts hold sees nothing, even a public conversation.
 expect sees_among(Dee, { conv: ha_own_ann, among: List.append(accounts, principal(Dee)) }) == Hidden
+
+## A key acting as human `who` themselves, reaching everywhere, as a viewer.
+own_key_viewer : Who -> Access.Viewer(ConvAccess.ConvId)
+own_key_viewer = |who| {
+	p = principal(who)
+	key = ApiKey.Key.issue(
+		{ granter: Session(session_of(Principal.answers_to(p).to_u64(), 1)), acts_as: Principal.id(p), scope: { read: On(Everywhere), post: On(Everywhere), admin: Off }, accounts, now: 10 },
+		{ key: kid(2), expires: Never },
+	)
+	match key {
+		Ok(k) =>
+			match Access.Viewer.from_key(k, { accounts, now: 10 }) {
+				Ok(v) => v
+				Err(_) => crash "own_key_viewer: a test's key stands"
+			}
+		Err(_) => crash "own_key_viewer: a test's key is grantable"
+	}
+}
+
+# A human's own key sees and posts as the human does, where it reaches.
+expect ConvAccess.can_see(own_key_viewer(Ann), { conv: hh, accounts })
+expect ConvAccess.can_post(own_key_viewer(Ann), { conv: hh, accounts })
+expect !ConvAccess.can_see(own_key_viewer(Cal), { conv: hh, accounts })
