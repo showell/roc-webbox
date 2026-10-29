@@ -21,7 +21,7 @@ Upload := [].{
 	content_type = |name| {
 		bytes = name.to_utf8()
 		hex = List.take_first(bytes, 32)
-		if List.len(bytes) > 33 and List.get(bytes, 32) == Ok('.') and List.all(hex, is_hex) {
+		if List.len(bytes) > 33 and List.get(bytes, 32) == Ok('.') and List.all(hex, is_lower_hex) {
 			match Str.from_utf8(List.drop_first(bytes, 33)) {
 				Ok(ext) =>
 					match List.find_first(types, |t| t.ext == ext) {
@@ -282,8 +282,11 @@ from_to = |left, { right, size }| {
 	}
 }
 
-is_hex : U8 -> Bool
-is_hex = |c| Ascii.is_digit(c) or (c >= 'a' and c <= 'f')
+## A stored name's hex: lowercase only, as the host writes it, unlike
+## Ascii.is_hex_digit, so the same file has one name (and one path) to
+## serve it by.
+is_lower_hex : U8 -> Bool
+is_lower_hex = |c| Ascii.is_digit(c) or (c >= 'a' and c <= 'f')
 
 ## The types the chat takes (chat_upload `accepted`): each stored name's
 ## extension and the type it is served as.
