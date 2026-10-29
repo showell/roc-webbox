@@ -35,7 +35,7 @@
 ## **A LOGIN IS ONE ACCOUNT'S AT A TIME**: GitHub frees a renamed login for
 ## anyone to take, so when an account signs in or signs up with a login
 ## another account still holds (GitHub's logins ignore case), that other
-## account's login is cleared, for the host to store, so its GitHub link
+## account's login is cleared (a ClearLogin step), so its GitHub link
 ## never leads to the new owner.
 ##
 ## **Sign-up is open (Steve):** any GitHub account may make an account,
@@ -133,15 +133,62 @@ GitHubSignIn := [].{
 		token_hash : Stored.SecretHash,
 	}
 
-	## Signed in: the account (its login brought up to date, and `Renamed`
-	## when the host must store it again), the admission Session.start
-	## takes, and the other accounts whose login is cleared (to store).
+	## **ONE STEP OF A SIGN-IN'S PLAN**, for the host to apply in order
+	## (`applied` says what each does). Steps, never whole records of an
+	## existing account: a record copied at sign-in and stored later would
+	## undo whatever changed meanwhile (a demotion). Each step is
+	## idempotent, so a plan applied twice after a crash leaves what once
+	## does.
+	Step : [
+		## Make the account, when no account holds its id: a new one, whose
+		## record is the only copy.
+		AddAccount(Principal),
+
+		## Set the human's login, GitHub having renamed them.
+		SetLogin({ human : Principal.GitHubId, login : Str }),
+
+		## Clear the human's login, while it is still `login` (in any case):
+		## another account signed in with it, GitHub having given it away.
+		ClearLogin({ human : Principal.GitHubId, login : Str }),
+
+		## Raise the settings' generation counter to at least this.
+		AdvanceGeneration(Principal.Generation),
+	]
+
+	## Signed in: the admission Session.start takes, and the steps to store
+	## (the login brought up to date; other accounts' logins cleared).
 	SignedIn : {
-		account : Principal,
-		login : [Unchanged, Renamed],
 		admission : GitHubSignIn.Admission,
-		cleared : List(Principal),
+		steps : List(GitHubSignIn.Step),
 	}
+
+	## **WHAT A SIGN-IN'S STEPS LEAVE**: `accounts` and `settings` with each
+	## step made, in order; the one home of what a step means.
+	applied : List(GitHubSignIn.Step), { accounts : List(Principal), settings : GitHubSignIn.Settings } -> { accounts : List(Principal), settings : GitHubSignIn.Settings }
+	applied = |steps, start|
+		List.fold(
+			steps,
+			start,
+			|{ accounts, settings }, step|
+				match step {
+					AddAccount(account) =>
+						if List.any(accounts, |a| Principal.id(a) == Principal.id(account)) {
+							{ accounts, settings }
+						} else {
+							{ accounts: List.append(accounts, account), settings }
+						}
+					SetLogin({ human, login }) =>
+						{ accounts: with_human(accounts, human, |h| { ..h, login }), settings }
+					ClearLogin({ human, login }) =>
+						{ accounts: with_human(accounts, human, |h| if lowered(h.login) == lowered(login) { ..h, login: "" } else h), settings }
+					AdvanceGeneration(g) =>
+						if g.to_u64() > settings.next_generation.to_u64() {
+							{ accounts, settings: { ..settings, next_generation: g } }
+						} else {
+							{ accounts, settings }
+						}
+				},
+		)
 
 	## **ADMITTED**: the flow's end, the one value Session.start takes. Only
 	## this module makes one, at `resolve` or `name`, once every step before
@@ -428,8 +475,9 @@ GitHubSignIn := [].{
 		## pending sign-up before) is refused, and signs in through /login;
 		## a name the rule refuses is said, to ask again; a generation
 		## counter that went back or is spent is refused; otherwise the
-		## account is made, of the settings' next generation (`next` is the
-		## counter for the host to store), admin only as the first admin.
+		## account is made, of the settings' next generation, admin only as
+		## the first admin: its steps advance the counter first, then add the
+		## account, then clear other accounts' hold on its login.
 		name : GitHubSignIn.Pending,
 		{
 			name : List(U8),
@@ -441,10 +489,8 @@ GitHubSignIn := [].{
 		} -> [
 			Created(
 				{
-					account : Principal,
 					admission : GitHubSignIn.Admission,
-					cleared : List(Principal),
-					next : Principal.Generation,
+					steps : List(GitHubSignIn.Step),
 				},
 			),
 			NameRefused(DisplayName.Problem),
@@ -476,17 +522,23 @@ GitHubSignIn := [].{
 							(Ok(_), Err(why)) => Refused(why)
 							(Ok(chosen), Ok({ this, next })) =>
 								Created({
-									account: Principal.Human({
-										id: p.github,
-										login: p.login.to_str(),
-										name: chosen.to_str(),
-										role: first_role({
-											github: p.github,
-											accounts,
-											settings,
-										}),
-										generation: this,
-									}),
+									steps: [
+										AdvanceGeneration(next),
+										AddAccount(
+											Principal.Human({
+												id: p.github,
+												login: p.login.to_str(),
+												name: chosen.to_str(),
+												role: first_role({
+													github: p.github,
+													accounts,
+													settings,
+												}),
+												generation: this,
+											}),
+										),
+									]
+										.concat(displaced(accounts, { github: p.github, login: p.login })),
 									admission: GitHubSignIn.Admission.(
 										{
 											human: p.github,
@@ -495,8 +547,6 @@ GitHubSignIn := [].{
 											now,
 										},
 									),
-									cleared: displaced(accounts, { github: p.github, login: p.login }),
-									next,
 								})
 						}
 				}
@@ -554,8 +604,7 @@ known_account = |
 			Ok(h) => {
 				fresh = login.to_str()
 				Known({
-					account: Principal.Human({ ..h, login: fresh }),
-					login: if h.login == fresh Unchanged else Renamed,
+					steps: (if h.login == fresh [] else [SetLogin({ human: github, login: fresh })]).concat(displaced(accounts, { github, login })),
 					admission: GitHubSignIn.Admission.(
 						{
 							human: github,
@@ -564,24 +613,23 @@ known_account = |
 							now,
 						},
 					),
-					cleared: displaced(accounts, { github, login }),
 				})
 			}
 		}
 	}
 
-## **THE OTHER ACCOUNTS HOLDING `login`**, each with its login cleared:
-## every human but `github` whose stored login is `login` in any case.
-displaced : List(Principal), { github : Principal.GitHubId, login : GitHubLogin } -> List(Principal)
+## **THE OTHER ACCOUNTS HOLDING `login`**, a ClearLogin each: every human
+## but `github` whose stored login is `login` in any case.
+displaced : List(Principal), { github : Principal.GitHubId, login : GitHubLogin } -> List(GitHubSignIn.Step)
 displaced = |accounts, { github, login }| {
-	wanted = List.map(Str.to_utf8(login.to_str()), Ascii.to_lowercase)
+	wanted = lowered(login.to_str())
 	List.join_map(
 		accounts,
 		|p|
 			match p {
 				Human(h) =>
-					if h.id != github and List.map(Str.to_utf8(h.login), Ascii.to_lowercase) == wanted {
-						[Principal.Human({ ..h, login: "" })]
+					if h.id != github and h.login != "" and lowered(h.login) == wanted {
+						[ClearLogin({ human: h.id, login: h.login })]
 					} else {
 						[]
 					}
@@ -589,6 +637,22 @@ displaced = |accounts, { github, login }| {
 			},
 	)
 }
+
+## A login's bytes in lower case: GitHub's logins ignore case.
+lowered : Str -> List(U8)
+lowered = |login| List.map(Str.to_utf8(login), Ascii.to_lowercase)
+
+## `accounts` with the human `human`'s record changed by `change`.
+with_human : List(Principal), Principal.GitHubId, ({ id : Principal.GitHubId, login : Str, name : Str, role : Principal.Role, generation : Principal.Generation } -> { id : Principal.GitHubId, login : Str, name : Str, role : Principal.Role, generation : Principal.Generation }) -> List(Principal)
+with_human = |accounts, human, change|
+	List.map(
+		accounts,
+		|p|
+			match p {
+				Human(h) if h.id == human => Principal.Human(change(h))
+				_ => p
+			},
+	)
 
 ## **A NEW ACCOUNT'S GENERATION**: the settings' next, when it is above
 ## every account's (a counter that went back might give one twice); and
@@ -855,16 +919,26 @@ seen = |account|
 		Agent(_) | Bot(_) => crash "seen: the flow makes and signs in humans alone"
 	}
 
+## A step, comparably: an added account every field of it.
+SeenStep : [
+	AddAccount(Seen),
+	SetLogin({ human : Principal.GitHubId, login : Str }),
+	ClearLogin({ human : Principal.GitHubId, login : Str }),
+	AdvanceGeneration(Principal.Generation),
+]
+
+seen_step : GitHubSignIn.Step -> SeenStep
+seen_step = |step|
+	match step {
+		AddAccount(p) => AddAccount(seen(p))
+		SetLogin(s) => SetLogin(s)
+		ClearLogin(c) => ClearLogin(c)
+		AdvanceGeneration(g) => AdvanceGeneration(g)
+	}
+
 ## What resolving says, comparably.
 Said : [
-	SignedIn(
-		{
-			account : Seen,
-			login : [Unchanged, Renamed],
-			admission : Facts_,
-			cleared : List(Seen),
-		},
-	),
+	SignedIn({ admission : Facts_, steps : List(SeenStep) }),
 	NeedsName({ github : U64, login : Str }),
 	Refused(GitHubSignIn.Refusal),
 ]
@@ -874,12 +948,7 @@ said = |f|
 	match resolved_by(f) {
 		Err(why) => Refused(why)
 		Ok(Refused(why)) => Refused(why)
-		Ok(SignedIn(s)) => SignedIn({
-			account: seen(s.account),
-			login: s.login,
-			admission: s.admission.facts(),
-			cleared: List.map(s.cleared, seen),
-		})
+		Ok(SignedIn(s)) => SignedIn({ admission: s.admission.facts(), steps: List.map(s.steps, seen_step) })
 		Ok(NeedsName(p)) => {
 			fields = p.fields()
 			match Str.from_utf8(fields.login) {
@@ -906,28 +975,18 @@ expect said(usual) == NeedsName({ github: 2, login: "ann" })
 # Ann with an account: signed in to it, a session made.
 expect
 	said({ ..usual, accounts: [boss, ann] })
-		== SignedIn({
-			account: seen(ann),
-			login: Unchanged,
-			admission: session_for(2),
-			cleared: [],
-		})
+		== SignedIn({ admission: session_for(2), steps: [] })
 
 # **A GITHUB ID THAT CHANGED ITS LOGIN IS THE SAME ACCOUNT**: Ann renamed
-# to `ann-b` signs in to Ann's account, its login brought up to date and
-# said `Renamed` (to store); her name and role are untouched.
+# to `ann-b` signs in to Ann's account, a SetLogin step bringing its
+# login up to date; nothing else of hers is touched.
 expect
 	said({
 		..usual,
 		accounts: [boss, ann],
 		github: Identified({ id: 2, login: Str.to_utf8("ann-b") }),
 	})
-		== SignedIn({
-			account: { ..seen(ann), login: "ann-b" },
-			login: Renamed,
-			admission: session_for(2),
-			cleared: [],
-		})
+		== SignedIn({ admission: session_for(2), steps: [SetLogin({ human: gid(2), login: "ann-b" })] })
 
 # **A LOGIN REUSED BY ANOTHER ID IS ANOTHER ACCOUNT**: GitHub id 3 now
 # calling itself `ann` is never Ann; it is a new human.
@@ -950,12 +1009,7 @@ expect
 		accounts: [ann],
 		settings: { ..usual_settings, first_admin: Named(gid(2)) },
 	})
-		== SignedIn({
-			account: seen(ann),
-			login: Unchanged,
-			admission: session_for(2),
-			cleared: [],
-		})
+		== SignedIn({ admission: session_for(2), steps: [] })
 
 # ── RESOLVING: the hostile runs.
 # A state not signed by us: refused, whatever GitHub said.
@@ -1110,7 +1164,7 @@ usual_naming = {
 
 ## What naming says, comparably.
 NameSaid : [
-	Created({ account : Seen, admission : Facts_, cleared : List(Seen), next : Principal.Generation }),
+	Created({ admission : Facts_, steps : List(SeenStep) }),
 	NameRefused(DisplayName.Problem),
 	Refused(GitHubSignIn.Refusal),
 ]
@@ -1132,7 +1186,7 @@ name_said = |n|
 				session: new_session,
 				now: n.at,
 			}) {
-				Created(c) => Created({ account: seen(c.account), admission: c.admission.facts(), cleared: List.map(c.cleared, seen), next: c.next })
+				Created(c) => Created({ admission: c.admission.facts(), steps: List.map(c.steps, seen_step) })
 				NameRefused(problem) => NameRefused(problem)
 				Refused(why) => Refused(why)
 			}
@@ -1157,9 +1211,9 @@ ann_as = |name, role| {
 	generation: gen(10),
 }
 
-## Made at 1120 as `account`, no login cleared.
+## Made at 1120 as `account`, the counter advanced, no login cleared.
 made : Seen -> NameSaid
-made = |account| Created({ account, admission: named_at(1120), cleared: [], next: gen(11) })
+made = |account| Created({ admission: named_at(1120), steps: [AdvanceGeneration(gen(11)), AddAccount(account)] })
 
 # Made: a member, named as given, trimmed, created now; its admission.
 expect name_said(usual_naming) == made(ann_as("Ann B.", Member))
@@ -1230,7 +1284,7 @@ expect said({ ..usual, accounts: [human(2, { login: "ann", name: "Ann", role: Ad
 # not above every account's (it went back), or a spent one, makes nothing.
 expect name_said({ ..usual_naming, settings: { ..usual_settings, next_generation: gen(6) } }) == Refused(StaleGeneration)
 expect name_said({ ..usual_naming, settings: { ..usual_settings, next_generation: gen(5) } }) == Refused(StaleGeneration)
-expect name_said({ ..usual_naming, settings: { ..usual_settings, next_generation: gen(7) } }) == Created({ account: { ..ann_as("Ann B.", Member), generation: gen(7) }, admission: { ..named_at(1120), generation: gen(7) }, cleared: [], next: gen(8) })
+expect name_said({ ..usual_naming, settings: { ..usual_settings, next_generation: gen(7) } }) == Created({ admission: { ..named_at(1120), generation: gen(7) }, steps: [AdvanceGeneration(gen(8)), AddAccount({ ..ann_as("Ann B.", Member), generation: gen(7) })] })
 expect name_said({ ..usual_naming, settings: { ..usual_settings, next_generation: gen(18446744073709551615) } }) == Refused(GenerationsExhausted)
 
 # Under a clock before 1970, no account is made.
@@ -1250,7 +1304,7 @@ expect name_said({ ..usual_naming, cookie: Sent(that_nonce) }) == Refused(Pendin
 expect name_said({ ..usual_naming, cookie: Unsent }) == Refused(PendingMismatched)
 expect
 	name_said({ ..usual_naming, at: 1659 })
-		== Created({ account: ann_as("Ann B.", Member), admission: named_at(1659), cleared: [], next: gen(11) })
+		== Created({ admission: named_at(1659), steps: [AdvanceGeneration(gen(11)), AddAccount(ann_as("Ann B.", Member))] })
 expect name_said({ ..usual_naming, at: 1660 }) == Refused(PendingExpired)
 expect name_said({ ..usual_naming, at: 1059 }) == Refused(PendingExpired)
 expect name_said({
@@ -1275,19 +1329,67 @@ old_bea = human(7, { login: "ANN", name: "Bea", role: Member })
 
 expect
 	name_said({ ..usual_naming, accounts: [boss, old_bea] })
-		== Created({ account: ann_as("Ann B.", Member), admission: named_at(1120), cleared: [{ ..seen(old_bea), login: "" }], next: gen(11) })
+		== Created({ admission: named_at(1120), steps: [AdvanceGeneration(gen(11)), AddAccount(ann_as("Ann B.", Member)), ClearLogin({ human: gid(7), login: "ANN" })] })
 expect
 	said({ ..usual, accounts: [boss, ann, old_bea] })
-		== SignedIn({
-			account: seen(ann),
-			login: Unchanged,
-			admission: session_for(2),
-			cleared: [{ ..seen(old_bea), login: "" }],
-		})
+		== SignedIn({ admission: session_for(2), steps: [ClearLogin({ human: gid(7), login: "ANN" })] })
 # A login already cleared is cleared nowhere again.
-expect said({ ..usual, accounts: [boss, ann, human(8, { login: "", name: "C", role: Member })] }) == SignedIn({
-	account: seen(ann),
-	login: Unchanged,
-	admission: session_for(2),
-	cleared: [],
-})
+expect said({ ..usual, accounts: [boss, ann, human(8, { login: "", name: "C", role: Member })] }) == SignedIn({ admission: session_for(2), steps: [] })
+
+# ── THE STEPS (round three's third)
+## The accounts the steps leave from `start`, under the usual settings.
+applied_to : List(GitHubSignIn.Step), List(Principal) -> List(Seen)
+applied_to = |steps, start| GitHubSignIn.applied(steps, { accounts: start, settings: usual_settings }).accounts.map(seen)
+
+## The steps resolving hands back, for a run that signs in.
+steps_of : Facts -> List(GitHubSignIn.Step)
+steps_of = |f|
+	match resolved_by(f) {
+		Ok(SignedIn(s)) => s.steps
+		_ => crash "steps_of: the run signs in"
+	}
+
+# ATTACK (round three's third): boss renamed signs in; an admin demotes
+# boss before the sign-in's output is stored; storing what sign-in handed
+# back must not undo the demotion.
+boss_renamed_steps : List(GitHubSignIn.Step)
+boss_renamed_steps = steps_of({ ..usual, accounts: [boss, ann], github: Identified({ id: 1, login: Str.to_utf8("boss-b") }) })
+
+demoted_since : List(Principal)
+demoted_since = [human(1, { login: "boss", name: "Boss", role: Member }), ann]
+
+expect applied_to(boss_renamed_steps, demoted_since) == [{ ..seen(boss), login: "boss-b", role: Member }, seen(ann)]
+
+# A cleared login is cleared only while it is still the one cleared: Bea,
+# renamed since to `bea`, keeps her new login.
+clear_bea : List(GitHubSignIn.Step)
+clear_bea = steps_of({ ..usual, accounts: [boss, ann, old_bea] })
+
+expect applied_to(clear_bea, [boss, ann, old_bea]) == [seen(boss), seen(ann), { ..seen(old_bea), login: "" }]
+expect applied_to(clear_bea, [boss, ann, human(7, { login: "bea", name: "Bea", role: Member })]) == [seen(boss), seen(ann), { ..seen(old_bea), login: "bea" }]
+
+# A sign-up's steps, applied twice (a crash, and the plan again), leave
+# what once does: one account, the counter once advanced.
+signed_up : Naming -> List(GitHubSignIn.Step)
+signed_up = |n|
+	match GitHubSignIn.Pending.resume({ pending: n.pending, cookie: n.cookie, now: n.at }) {
+		Ok(p) =>
+			match p.name({ name: n.name, pending_use: n.pending_use, accounts: n.accounts, settings: n.settings, session: new_session, now: n.at }) {
+				Created(c) => c.steps
+				_ => crash "signed_up: the naming makes the account"
+			}
+		Err(_) => crash "signed_up: the pending sign-up resumes"
+	}
+
+once : { accounts : List(Principal), settings : GitHubSignIn.Settings }
+once = GitHubSignIn.applied(signed_up(usual_naming), { accounts: [boss, ann_agent], settings: usual_settings })
+
+twice : { accounts : List(Principal), settings : GitHubSignIn.Settings }
+twice = GitHubSignIn.applied(List.concat(signed_up(usual_naming), signed_up(usual_naming)), { accounts: [boss, ann_agent], settings: usual_settings })
+
+expect once.accounts.map(Principal.id) == [Principal.id(boss), Principal.id(ann_agent), Principal.Id.Human(gid(2))]
+expect twice.accounts.map(Principal.id) == once.accounts.map(Principal.id)
+expect once.settings == { ..usual_settings, next_generation: gen(11) }
+expect twice.settings == once.settings
+# The counter is never lowered by a step behind it.
+expect GitHubSignIn.applied([AdvanceGeneration(gen(3))], { accounts: [], settings: usual_settings }).settings == usual_settings
