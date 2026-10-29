@@ -2,6 +2,8 @@
 
 A Roc platform for [webbox](../zig-webbox), and a TODO list built on it.
 
+**The chat here (`chat/`) is frozen as reference.** It was the Roc half of angry-gopher's chat on that repo's `box/roc-cleanup` branch, which never shipped; production's chat stays Zig. Its successor is [roc-chat](https://github.com/showell/roc-chat), a standalone deployment that copies what it needs from here. Nothing in `chat/` is gated or merged into anymore. The auth core on branch `box/auth` moves to roc-chat.
+
 The app is Roc (`app/todo.roc`). Webbox serves it: `/` is a thin HTML/JS page
 (`web/index.html`, compiled in), and every request under `/api/` goes to the
 app. The app reads and writes its list as it runs, through effects the
