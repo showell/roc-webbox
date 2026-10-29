@@ -4,7 +4,7 @@
 ## Pure; angry-gopher's chat_twin_test.zig holds it to the Zig.
 import JsonOut
 import Bytes
-import Fence
+import MdFence
 import Time
 import Uid
 import Ascii
@@ -212,13 +212,13 @@ quotes_from = |ls, { at: i, out }|
 	match List.get(ls, i) {
 		Err(_) => out
 		Ok(line) =>
-			match Fence.fence_open(line) {
+			match MdFence.open(line) {
 				Err(NotAFence) => quotes_from(
 					ls,
 					{ at: i + 1, out: List.append(List.concat(out, line), '\n') },
 				)
 				Ok(fo) => {
-					j = Fence.close_at(
+					j = MdFence.close_at(
 						ls,
 						{
 							char: fo.char,

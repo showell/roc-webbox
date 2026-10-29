@@ -5,9 +5,9 @@
 ## ones. Pure; angry-gopher's chat_twin_test.zig holds each to its Zig.
 import JsonOut
 import Bytes
-import Fence
+import MdFence
 import ChatUrl
-import SafeImg
+import MdMedia
 import Transcript
 import Ascii
 
@@ -138,12 +138,12 @@ Feeds := [].{
 	## **NO STORED TAG REACHES THE PAGE AS WRITTEN** (metal-vmm QUEUE 266):
 	## the tags are spans of a member's raw markdown, and images.js parses
 	## them as HTML into the live page, so each is rebuilt by the renderer's
-	## rule (SafeImg) and one it refuses is dropped. Here, where the page's
+	## rule (MdMedia) and one it refuses is dropped. Here, where the page's
 	## backlog and the live event both pass, so the entries already on disk
 	## are rebuilt too.
 	images_event : Header, List(Str) -> JsonOut
 	images_event = |h, tags| {
-		safe = List.keep_oks(tags, SafeImg.rebuild)
+		safe = List.keep_oks(tags, MdMedia.rebuild)
 		JsonOut.object(
 			List.concat(
 				head_fields(h),
@@ -332,10 +332,10 @@ blocks_from = |ls, { at: i, out }|
 	match List.get(ls, i) {
 		Err(_) => out
 		Ok(line) =>
-			match Fence.fence_open(line) {
+			match MdFence.open(line) {
 				Err(NotAFence) => blocks_from(ls, { at: i + 1, out })
 				Ok(fo) => {
-					j = Fence.close_at(
+					j = MdFence.close_at(
 						ls,
 						{
 							char: fo.char,
