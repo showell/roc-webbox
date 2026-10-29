@@ -57,15 +57,5 @@
     `errors.shale`'s `error_alias` and `optional_tag`; and
     `nest_depth.shale`'s `nested` at `min=4` (a call four deep).
 
-- **`roc_hunt/zig_census.shale`** — how much of the chat is still Zig,
-  from angry-gopher's zig-server (`gopher=`, a mount path): each route
-  (every one the Roc's; it stops if the Roc can hand one back to Zig), each
-  hosted function's Zig answer sized and classed, the chat's Zig called
-  from outside it, what no live root reaches (twins and tests are not
-  live), and the number to watch: live chat Zig against chat Roc. Sizes
-  are code, not layout: Zig tokens and Roc parse nodes, with code lines
-  beside them marked as layout's.
-  `shale tools/roc_hunt/zig_census.shale`; its budget is in its header.
-
 A hunt worth running again is saved here, with plants; a one-off question is
 asked inline and not kept.
