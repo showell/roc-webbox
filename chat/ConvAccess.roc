@@ -1,13 +1,18 @@
 ## **WHO MAY SEE A CONVERSATION, AND WHO ELECTS** (the Roc chat's auth
-## design, section 4, with Steve's answers in 8 and 9): the chat's layer on
-## Access.roc. A conversation is the resource; what makes it public is the
-## chat's own rule, kept here:
+## design, section 4, with Steve's answers in 8, 9 and 11): the chat's layer
+## on Access.roc. A conversation is the resource; what makes it public is
+## the chat's own rule, kept here:
 ## - a conversation of humans alone is always private;
 ## - one with an agent or a bot in it is public only while every human
 ##   involved (its human participants, and the owners of its agents and
-##   bots) has elected public, and any one of them can withdraw.
-## Who sees and who posts is then Access's, unchanged. Pure; the table of
-## every viewer against every conversation is below.
+##   bots) still has an account and has elected public; any one of them can
+##   withdraw, and retiring one withdraws their election.
+## A conversation holds its participants by id alone: who owns an agent is
+## the accounts' answer at each decision, never a copy the caller hands in.
+## Who sees and who posts is then Access's, on the resource made here.
+## Pure; the table of every viewer against every conversation is below,
+## a cell a line, which is why the module runs past a thousand lines: the
+## code is the first 240.
 import Access
 import Principal
 
@@ -25,26 +30,44 @@ ConvAccess := [].{
 		is_eq : _
 	}
 
-	## One human's election: the visibility they want for the conversation.
+	## One principal's election: who is voting (the principal the request
+	## acts as, which must be a human: an agent or a bot never votes, not
+	## even for its owner), the visibility they want, and the accounts now.
 	Election : {
-		human : Principal.GitHubId,
+		by : Principal,
 		visibility : [Private, Public],
+		accounts : List(Principal),
 	}
 
+	## Why an election is refused.
+	ElectionRefusal : [
+		## An agent or a bot asked: only a human elects, for themselves.
+		NotHuman,
+
+		## A conversation of humans alone has no election.
+		AlwaysPrivate,
+
+		## The voter has no account now (never made, or retired).
+		NoSuchPrincipal,
+
+		## The voter is neither in it nor owns an agent or a bot in it.
+		NotInvolved,
+	]
+
 	## **A CONVERSATION AND ITS ELECTIONS, AS A STATE MACHINE**: opaque, so
-	## `start` is the one way in (every human's election private) and
-	## `elect` the one transition. `public_by` holds the humans whose
-	## election is public now; a human not in it has elected private, or
-	## never elected, which is the same.
+	## `start` is the one way in (every human's election private), and
+	## `elect` and `withdraw_votes` the transitions. `public_by` holds the
+	## humans whose election is public now; a human not in it has elected
+	## private, or never elected, which is the same.
 	Conv :: {
 		id : ConvAccess.ConvId,
-		participants : List(Principal),
+		participants : List(Principal.Id),
 		public_by : List(Principal.GitHubId),
 	}.{
 
-		## A new conversation among `participants` (each once, by id),
-		## private to every human involved. `NoParticipants` for none.
-		start : { id : ConvAccess.ConvId, participants : List(Principal) } -> Try(
+		## A new conversation among `participants` (each once), private to
+		## every human involved. `NoParticipants` for none.
+		start : { id : ConvAccess.ConvId, participants : List(Principal.Id) } -> Try(
 			ConvAccess.Conv,
 			[NoParticipants],
 		)
@@ -52,10 +75,7 @@ ConvAccess := [].{
 			once = List.fold(
 				participants,
 				[],
-				|kept, p| {
-					is_kept = List.any(kept, |k| Principal.id(k) == Principal.id(p))
-					if is_kept kept else List.append(kept, p)
-				},
+				|kept, p| if List.contains(kept, p) kept else List.append(kept, p),
 			)
 			if List.is_empty(once) {
 				Err(NoParticipants)
@@ -76,7 +96,7 @@ ConvAccess := [].{
 		id : ConvAccess.Conv -> ConvAccess.ConvId
 		id = |ConvAccess.Conv.(c)| c.id
 
-		## Humans alone, or an agent or a bot among them.
+		## Humans alone, or an agent or a bot among them: the ids say.
 		kind : ConvAccess.Conv -> [HumansOnly, WithAgents]
 		kind = |ConvAccess.Conv.(c)|
 			if List.all(
@@ -91,89 +111,137 @@ ConvAccess := [].{
 				WithAgents
 			}
 
-		## **THE HUMANS INVOLVED, WHO ELECT**: the human participants and the
-		## owners of the agents and bots, each once.
-		involved : ConvAccess.Conv -> List(Principal.GitHubId)
-		involved = |ConvAccess.Conv.(c)|
+		## **THE HUMANS INVOLVED, WHO ELECT, AS THE ACCOUNTS SAY NOW**: the
+		## human participants, and the owner of each agent and bot that
+		## exactly one account holds, each once.
+		involved : ConvAccess.Conv, List(Principal) -> List(Principal.GitHubId)
+		involved = |ConvAccess.Conv.(c), accounts|
 			List.fold(
 				c.participants,
 				[],
-				|kept, p| {
-					human = Principal.answers_to(p)
-					if List.contains(kept, human) kept else List.append(kept, human)
-				},
+				|kept, p|
+					match answerer(accounts, p) {
+						Answers(human) =>
+							if List.contains(kept, human) {
+								kept
+							} else {
+								List.append(kept, human)
+							}
+						Unresolved => kept
+					},
 			)
 
-		## **THE ONE TRANSITION**: `human` elects a visibility.
-		## `AlwaysPrivate` for a conversation of humans alone, which has no
-		## election; `NotInvolved` for a human who is neither in it nor owns
-		## an agent or bot in it. Electing private withdraws a public
-		## election, and makes the conversation private at once.
+		## **AN ELECTION**: the human `by` elects a visibility for
+		## themselves. Electing private withdraws a public election, and
+		## makes the conversation private at once.
 		elect : ConvAccess.Conv,
 		ConvAccess.Election -> Try(
 			ConvAccess.Conv,
-			[AlwaysPrivate, NotInvolved],
+			ConvAccess.ElectionRefusal,
 		)
-		elect = |conv, { human, visibility }| {
+		elect = |
+			conv,
+			{
+				by,
+				visibility,
+				accounts,
+			},
+		| {
 			ConvAccess.Conv.(c) = conv
-			match conv.kind() {
-				HumansOnly => Err(AlwaysPrivate)
-				WithAgents =>
-					if !List.contains(conv.involved(), human) {
+			match (by, conv.kind()) {
+				(Agent(_), _) | (Bot(_), _) => Err(NotHuman)
+				(Human(_), HumansOnly) => Err(AlwaysPrivate)
+				(Human(h), WithAgents) =>
+					if !Principal.has_account(accounts, h.id) {
+						Err(NoSuchPrincipal)
+					} else if !List.contains(conv.involved(accounts), h.id) {
 						Err(NotInvolved)
 					} else {
-						others = List.keep_if(c.public_by, |h| h != human)
+						others = List.keep_if(c.public_by, |g| g != h.id)
 						match visibility {
-							Public => Ok(ConvAccess.Conv.({ ..c, public_by: others.append(human) }))
+							Public => Ok(ConvAccess.Conv.({ ..c, public_by: others.append(h.id) }))
 							Private => Ok(ConvAccess.Conv.({ ..c, public_by: others }))
 						}
 					}
 			}
 		}
 
+		## **A RETIRED HUMAN'S ELECTION, WITHDRAWN**, for the retirement to
+		## write back: their public election is gone for good, so an account
+		## made again with their GitHub id starts private. (Until it is
+		## written, `visibility` counts no election of a human without an
+		## account.)
+		withdraw_votes : ConvAccess.Conv, Principal.GitHubId -> ConvAccess.Conv
+		withdraw_votes = |ConvAccess.Conv.(c), human|
+			ConvAccess.Conv.({ ..c, public_by: List.keep_if(c.public_by, |g| g != human) })
+
 		## **ITS VISIBILITY NOW**: private for humans alone; otherwise
-		## public only while every human involved has elected public.
-		visibility : ConvAccess.Conv -> [Private, Public]
-		visibility = |conv| {
+		## public only while every agent and bot in it is held by exactly
+		## one account, and every human involved has an account and has
+		## elected public.
+		visibility : ConvAccess.Conv, List(Principal) -> [Private, Public]
+		visibility = |conv, accounts| {
 			ConvAccess.Conv.(c) = conv
 			match conv.kind() {
 				HumansOnly => Private
-				WithAgents =>
-					if List.all(conv.involved(), |h| c.public_by.contains(h)) Public else Private
+				WithAgents => {
+					is_resolved = List.all(c.participants, |p| answerer(accounts, p) != Unresolved)
+					is_elected = List.all(
+						conv.involved(accounts),
+						|h| Principal.has_account(accounts, h) and c.public_by.contains(h),
+					)
+					if is_resolved and is_elected Public else Private
+				}
 			}
 		}
 
-		## The conversation as Access decides on it.
-		resource : ConvAccess.Conv -> Access.Resource(ConvAccess.ConvId)
-		resource = |conv| {
+		## The conversation as Access decides on it, with the accounts now.
+		resource : ConvAccess.Conv, List(Principal) -> Access.Resource(ConvAccess.ConvId)
+		resource = |conv, accounts| {
 			ConvAccess.Conv.(c) = conv
 			{
 				id: c.id,
-				participants: List.map(c.participants, Principal.id),
-				visibility: conv.visibility(),
+				participants: c.participants,
+				involved: conv.involved(accounts),
+				visibility: conv.visibility(accounts),
 			}
 		}
 	}
 
 	## **CAN THIS VIEWER SEE THIS CONVERSATION?** Access's rule on the
-	## conversation's resource: a participant always; anyone signed in
-	## while it is public; nobody signed out. An admin is no exception, and
-	## neither is the owner of an agent or bot in it.
-	can_see : Access.Viewer, ConvAccess.Conv -> Bool
-	can_see = |viewer, conv| Access.can_see(viewer, conv.resource())
+	## conversation's resource: a participant, or the human it answers to,
+	## always; any human or agent signed in while it is public, never a bot
+	## not in it; nobody signed out. An admin is no exception.
+	can_see : Access.Viewer, { conv : ConvAccess.Conv, accounts : List(Principal) } -> Bool
+	can_see = |viewer, { conv, accounts }| Access.can_see(viewer, conv.resource(accounts))
 
-	## **CAN THIS VIEWER POST TO THIS CONVERSATION?** A participant only,
-	## public or not.
-	can_post : Access.Viewer, ConvAccess.Conv -> Bool
-	can_post = |viewer, conv| Access.can_post(viewer, conv.resource())
+	## **CAN THIS VIEWER POST TO THIS CONVERSATION?** A participant, or the
+	## human it answers to, public or not.
+	can_post : Access.Viewer, { conv : ConvAccess.Conv, accounts : List(Principal) } -> Bool
+	can_post = |viewer, { conv, accounts }| Access.can_post(viewer, conv.resource(accounts))
 }
 
+## **THE HUMAN A PARTICIPANT ANSWERS TO, AS THE ACCOUNTS SAY**: a human,
+## itself; an agent or a bot, its owner, when exactly one account holds its
+## id. An id no account holds (retired), or more than one does (a forged
+## copy beside the real one), names nobody: `Unresolved`.
+answerer : List(Principal), Principal.Id -> [Answers(Principal.GitHubId), Unresolved]
+answerer = |accounts, id|
+	match id {
+		Human(g) => Answers(g)
+		Agent(_) | Bot(_) =>
+			match List.keep_if(accounts, |p| Principal.id(p) == id) {
+				[only] => Answers(Principal.answers_to(only))
+				_ => Unresolved
+			}
+	}
+
 # ── the cast
-# Four humans, and five agents and bots, two of them a stranger's:
+# Four humans, and six agents and bots:
 #   Ann     a member, owns AnnAgent
 #   Bea     a member, owns BeaAgent and BeaBot
-#   Cal     an ADMIN, in none of the conversations and owning nothing in them
-#   Dee     a member, unrelated: owns DeeAgent and DeeBot, in none of them
+#   Cal     an ADMIN, owns CalAgent; in `adm` and, by CalAgent, in `ca`
+#   Dee     a member, owns DeeAgent and DeeBot; by DeeAgent, in `three`
 # and `Out`, nobody signed in.
 Who : [
 	Out,
@@ -184,6 +252,7 @@ Who : [
 	AnnAgent,
 	BeaAgent,
 	BeaBot,
+	CalAgent,
 	DeeAgent,
 	DeeBot,
 ]
@@ -242,23 +311,38 @@ principal = |who|
 		AnnAgent => owned(Agent, { id: 1, owner: 1 })
 		BeaAgent => owned(Agent, { id: 2, owner: 2 })
 		BeaBot => owned(Bot, { id: 3, owner: 2 })
+		CalAgent => owned(Agent, { id: 6, owner: 3 })
 		DeeAgent => owned(Agent, { id: 4, owner: 4 })
 		DeeBot => owned(Bot, { id: 5, owner: 4 })
 	}
+
+## Every account in the cast.
+accounts : List(Principal)
+accounts = List.map(
+	[
+		Ann,
+		Bea,
+		Cal,
+		Dee,
+		AnnAgent,
+		BeaAgent,
+		BeaBot,
+		CalAgent,
+		DeeAgent,
+		DeeBot,
+	],
+	principal,
+)
+
+## The cast's accounts, `gone` retired.
+without : Who -> List(Principal)
+without = |gone| List.keep_if(accounts, |p| Principal.id(p) != Principal.id(principal(gone)))
 
 viewer : Who -> Access.Viewer
 viewer = |who|
 	match who {
 		Out => SignedOut
 		_ => SignedIn(Principal.id(principal(who)))
-	}
-
-## A conversation among the cast.
-among : List(Who) -> ConvAccess.Conv
-among = |people|
-	match ConvAccess.Conv.start({ id: cid(1), participants: List.map(people, principal) }) {
-		Ok(conv) => conv
-		Err(NoParticipants) => crash "among: a test's conversation has participants"
 	}
 
 cid : U64 -> ConvAccess.ConvId
@@ -268,20 +352,45 @@ cid = |n|
 		Err(NotAnId) => crash "cid: a test's conversation id is not 0"
 	}
 
+## A conversation among the cast.
+among : List(Who) -> ConvAccess.Conv
+among = |people|
+	match ConvAccess.Conv.start({ id: cid(1), participants: List.map(people, id_of) }) {
+		Ok(conv) => conv
+		Err(NoParticipants) => crash "among: a test's conversation has participants"
+	}
+
+## A cast member's id.
+id_of : Who -> Principal.Id
+id_of = |who| Principal.id(principal(who))
+
 ## `human` elects `visibility`, in a test where that is allowed.
 elected : ConvAccess.Conv, { human : Who, visibility : [Private, Public] } -> ConvAccess.Conv
 elected = |conv, { human, visibility }|
-	match conv.elect({ human: Principal.answers_to(principal(human)), visibility }) {
+	match conv.elect({
+		by: principal(human),
+		visibility,
+		accounts,
+	}) {
 		Ok(next) => next
 		Err(_) => crash "elected: a test's election is allowed"
 	}
 
+## The conversation's visibility among the whole cast.
+shown : ConvAccess.Conv -> [Private, Public]
+shown = |conv| conv.visibility(accounts)
+
 ## The answers said as words, so each cell reads plainly.
 sees : Who, ConvAccess.Conv -> [Visible, Hidden]
-sees = |who, conv| if ConvAccess.can_see(viewer(who), conv) Visible else Hidden
+sees = |who, conv| if ConvAccess.can_see(viewer(who), { conv, accounts }) Visible else Hidden
 
 posts : Who, ConvAccess.Conv -> [Writable, ReadOnly]
-posts = |who, conv| if ConvAccess.can_post(viewer(who), conv) Writable else ReadOnly
+posts = |who, conv| if ConvAccess.can_post(viewer(who), { conv, accounts }) Writable else ReadOnly
+
+## `sees`, among other accounts.
+sees_among : Who, { conv : ConvAccess.Conv, among : List(Principal) } -> [Visible, Hidden]
+sees_among = |who, { conv, among: others }|
+	if ConvAccess.can_see(viewer(who), { conv, accounts: others }) Visible else Hidden
 
 # ── the conversations, in each election state
 # hh        Ann and Bea: humans alone, always private, no election.
@@ -289,8 +398,14 @@ posts = |who, conv| if ConvAccess.can_post(viewer(who), conv) Writable else Read
 # ha_cross  Ann and BeaAgent: Ann and Bea elect.
 # aa        AnnAgent and BeaAgent: their owners, Ann and Bea, elect.
 # hb        Ann and BeaBot: Ann and Bea elect.
+# adm       Cal, an admin, and AnnAgent: Cal and Ann elect.
+# ca        Ann and CalAgent, an admin's agent: Ann and Cal elect.
+# own_bot   Bea and BeaBot, her own bot: Bea alone elects.
+# three     Ann, Bea and DeeAgent: Ann, Bea and Dee elect.
 # A state's suffix says who has elected public now: `none`, `ann`, `bea`,
-# `both`, or `withdrawn` (both elected, then Ann elected private again).
+# `both`, `all`, or a withdrawal: `withdrawn` (all elected, then Ann
+# elected private again), `bea_withdrawn` (both, then Bea, an owner not in
+# it), `dee_withdrawn` (all three, then Dee).
 hh : ConvAccess.Conv
 hh = among([Ann, Bea])
 
@@ -317,6 +432,9 @@ ha_cross_both = elected(ha_cross_ann, { human: Bea, visibility: Public })
 
 ha_cross_withdrawn : ConvAccess.Conv
 ha_cross_withdrawn = elected(ha_cross_both, { human: Ann, visibility: Private })
+
+ha_cross_bea_withdrawn : ConvAccess.Conv
+ha_cross_bea_withdrawn = elected(ha_cross_both, { human: Bea, visibility: Private })
 
 aa_none : ConvAccess.Conv
 aa_none = among([AnnAgent, BeaAgent])
@@ -348,64 +466,188 @@ hb_both = elected(hb_ann, { human: Bea, visibility: Public })
 hb_withdrawn : ConvAccess.Conv
 hb_withdrawn = elected(hb_both, { human: Ann, visibility: Private })
 
+adm_none : ConvAccess.Conv
+adm_none = among([Cal, AnnAgent])
+
+adm_cal : ConvAccess.Conv
+adm_cal = elected(adm_none, { human: Cal, visibility: Public })
+
+adm_both : ConvAccess.Conv
+adm_both = elected(adm_cal, { human: Ann, visibility: Public })
+
+ca_none : ConvAccess.Conv
+ca_none = among([Ann, CalAgent])
+
+ca_ann : ConvAccess.Conv
+ca_ann = elected(ca_none, { human: Ann, visibility: Public })
+
+ca_both : ConvAccess.Conv
+ca_both = elected(ca_ann, { human: Cal, visibility: Public })
+
+own_bot_none : ConvAccess.Conv
+own_bot_none = among([Bea, BeaBot])
+
+own_bot_bea : ConvAccess.Conv
+own_bot_bea = elected(own_bot_none, { human: Bea, visibility: Public })
+
+three_none : ConvAccess.Conv
+three_none = among([
+	Ann,
+	Bea,
+	DeeAgent,
+])
+
+three_ann : ConvAccess.Conv
+three_ann = elected(three_none, { human: Ann, visibility: Public })
+
+three_both : ConvAccess.Conv
+three_both = elected(three_ann, { human: Bea, visibility: Public })
+
+three_all : ConvAccess.Conv
+three_all = elected(three_both, { human: Dee, visibility: Public })
+
+three_dee_withdrawn : ConvAccess.Conv
+three_dee_withdrawn = elected(three_all, { human: Dee, visibility: Private })
+
 # ── the elections
-# Humans alone have no election; a human uninvolved has none either.
-## `who` tries to elect public, where that is refused.
-refused : ConvAccess.Conv, Who -> Try(ConvAccess.ConvId, [AlwaysPrivate, NotInvolved])
+## `who` tries to elect public, where that may be refused.
+refused : ConvAccess.Conv, Who -> Try(ConvAccess.ConvId, ConvAccess.ElectionRefusal)
 refused = |conv, who|
-	conv.elect({ human: Principal.answers_to(principal(who)), visibility: Public })
+	conv.elect({
+		by: principal(who),
+		visibility: Public,
+		accounts,
+	})
 		.map_ok(ConvAccess.Conv.id)
 
 nobody : Try(ConvAccess.ConvId, [NoParticipants])
 nobody = ConvAccess.Conv.start({ id: cid(1), participants: [] }).map_ok(ConvAccess.Conv.id)
 
+# Humans alone have no election; a human uninvolved has none either.
 expect refused(hh, Ann) == Err(AlwaysPrivate)
 expect refused(hh, Cal) == Err(AlwaysPrivate)
 expect refused(ha_own_none, Bea) == Err(NotInvolved)
 expect refused(aa_none, Cal) == Err(NotInvolved)
 expect refused(hb_none, Dee) == Err(NotInvolved)
 expect nobody == Err(NoParticipants)
+# Only a human elects, for themselves: an agent or a bot never, even one
+# whose owner may.
+expect refused(ha_own_none, AnnAgent) == Err(NotHuman)
+expect refused(own_bot_none, BeaBot) == Err(NotHuman)
+expect refused(hh, AnnAgent) == Err(NotHuman)
+# A human without an account elects nothing.
+expect
+	ha_own_none.elect({
+		by: principal(Ann),
+		visibility: Public,
+		accounts: without(Ann),
+	}).is_err()
 # Who is involved: participants that are humans, and owners, each once.
-expect ha_cross_none.involved() == [gid(1), gid(2)]
-expect aa_none.involved() == [gid(1), gid(2)]
-expect among([BeaAgent, BeaBot]).involved() == [gid(2)]
-expect among([Ann, Ann]).resource().participants == [Principal.Id.Human(gid(1))]
+expect ha_cross_none.involved(accounts) == [gid(1), gid(2)]
+expect aa_none.involved(accounts) == [gid(1), gid(2)]
+expect among([BeaAgent, BeaBot]).involved(accounts) == [gid(2)]
+expect three_none.involved(accounts) == [
+	gid(1),
+	gid(2),
+	gid(4),
+]
+expect among([Ann, Ann]).resource(accounts).participants == [Principal.Id.Human(gid(1))]
 # Electing public twice is one election; one withdrawal undoes it.
-expect elected(ha_own_ann, { human: Ann, visibility: Public }).visibility() == Public
+expect shown(elected(ha_own_ann, { human: Ann, visibility: Public })) == Public
 ha_own_twice : ConvAccess.Conv
 ha_own_twice = elected(ha_own_ann, { human: Ann, visibility: Public })
 
-expect elected(ha_own_twice, { human: Ann, visibility: Private }).visibility() == Private
+expect shown(elected(ha_own_twice, { human: Ann, visibility: Private })) == Private
 # Electing private when already private changes nothing.
-expect elected(aa_none, { human: Ann, visibility: Private }).visibility() == Private
+expect shown(elected(aa_none, { human: Ann, visibility: Private })) == Private
 
 # Each state's visibility, stated.
-expect hh.visibility() == Private
-expect ha_own_none.visibility() == Private
-expect ha_own_ann.visibility() == Public
-expect ha_own_withdrawn.visibility() == Private
-expect ha_cross_none.visibility() == Private
-expect ha_cross_ann.visibility() == Private
-expect ha_cross_bea.visibility() == Private
-expect ha_cross_both.visibility() == Public
-expect ha_cross_withdrawn.visibility() == Private
-expect aa_none.visibility() == Private
-expect aa_ann.visibility() == Private
-expect aa_bea.visibility() == Private
-expect aa_both.visibility() == Public
-expect aa_withdrawn.visibility() == Private
-expect hb_none.visibility() == Private
-expect hb_ann.visibility() == Private
-expect hb_bea.visibility() == Private
-expect hb_both.visibility() == Public
-expect hb_withdrawn.visibility() == Private
+expect shown(hh) == Private
+expect shown(ha_own_none) == Private
+expect shown(ha_own_ann) == Public
+expect shown(ha_own_withdrawn) == Private
+expect shown(ha_cross_none) == Private
+expect shown(ha_cross_ann) == Private
+expect shown(ha_cross_bea) == Private
+expect shown(ha_cross_both) == Public
+expect shown(ha_cross_withdrawn) == Private
+expect shown(ha_cross_bea_withdrawn) == Private
+expect shown(aa_none) == Private
+expect shown(aa_ann) == Private
+expect shown(aa_bea) == Private
+expect shown(aa_both) == Public
+expect shown(aa_withdrawn) == Private
+expect shown(hb_none) == Private
+expect shown(hb_ann) == Private
+expect shown(hb_bea) == Private
+expect shown(hb_both) == Public
+expect shown(hb_withdrawn) == Private
+expect shown(adm_none) == Private
+expect shown(adm_cal) == Private
+expect shown(adm_both) == Public
+expect shown(ca_none) == Private
+expect shown(ca_ann) == Private
+expect shown(ca_both) == Public
+expect shown(own_bot_none) == Private
+expect shown(own_bot_bea) == Public
+expect shown(three_none) == Private
+expect shown(three_ann) == Private
+expect shown(three_both) == Private
+expect shown(three_all) == Public
+expect shown(three_dee_withdrawn) == Private
+
+# ── RETIRING A HUMAN WITHDRAWS THEIR ELECTION (decision 4)
+# A public conversation goes private when a human it relied on retires: a
+# participant (Ann), or an owner not in it (Bea, Dee).
+expect ha_own_ann.visibility(without(Ann)) == Private
+expect ha_cross_both.visibility(without(Bea)) == Private
+expect aa_both.visibility(without(Bea)) == Private
+expect three_all.visibility(without(Dee)) == Private
+expect sees_among(Dee, { conv: ha_cross_both, among: without(Bea) }) == Hidden
+# Retiring someone it never relied on changes nothing.
+expect ha_own_ann.visibility(without(Dee)) == Public
+# The retirement's write: an account made again starts private.
+expect shown(ha_own_ann.withdraw_votes(gid(1))) == Private
+expect shown(ha_cross_both.withdraw_votes(gid(4))) == Public
+
+# ── A CONVERSATION HOLDS IDS, AND THE ACCOUNTS NAME THE OWNERS (bug 4)
+# A copy of BeaAgent claiming Ann as its owner, in the accounts beside the
+# real one: neither copy names an owner, so the conversation stays private
+# and nobody gains an owner's sight of it.
+forged_bea_agent : Principal
+forged_bea_agent = owned(Agent, { id: 2, owner: 1 })
+
+forged_first : List(Principal)
+forged_first = List.prepend(accounts, forged_bea_agent)
+
+forged_last : List(Principal)
+forged_last = List.append(accounts, forged_bea_agent)
+
+expect ha_cross_both.visibility(forged_first) == Private
+expect ha_cross_both.visibility(forged_last) == Private
+expect sees_among(Ann, { conv: among([BeaAgent, DeeAgent]), among: forged_first }) == Hidden
+expect sees_among(Bea, { conv: among([BeaAgent, DeeAgent]), among: forged_last }) == Hidden
+# Ann alone cannot make Bea's agent's conversation public, whatever list
+# of participants started it.
+repeated : ConvAccess.Conv
+repeated = among([
+	BeaAgent,
+	Ann,
+	BeaAgent,
+])
+
+expect shown(elected(repeated, { human: Ann, visibility: Public })) == Private
+# An agent that has no account names no owner: private, whatever was
+# elected.
+expect ha_cross_both.visibility(without(BeaAgent)) == Private
 
 # ── THE can_see TABLE
 # Every viewer against every conversation in every election state, one
 # cell a line, its answer written out. A private conversation is seen by
-# its participants alone: not Cal the admin, not an owner who is not in it
-# (Bea in ha_cross, aa and hb; Ann in aa), never `Out`. A public one is
-# seen by everyone signed in, and still never by `Out`.
+# its participants and the humans they answer to (Bea in ha_cross, aa and
+# hb; Ann in aa and adm; Cal in ca; Dee in three); not Cal the admin
+# elsewhere, never `Out`. A public one is seen by every human and agent
+# signed in, by a bot only when it is in it, and still never by `Out`.
 
 # hh: Ann and Bea; always private.
 expect sees(Out, hh) == Hidden
@@ -416,6 +658,7 @@ expect sees(Dee, hh) == Hidden
 expect sees(AnnAgent, hh) == Hidden
 expect sees(BeaAgent, hh) == Hidden
 expect sees(BeaBot, hh) == Hidden
+expect sees(CalAgent, hh) == Hidden
 expect sees(DeeAgent, hh) == Hidden
 expect sees(DeeBot, hh) == Hidden
 
@@ -428,6 +671,7 @@ expect sees(Dee, ha_own_none) == Hidden
 expect sees(AnnAgent, ha_own_none) == Visible
 expect sees(BeaAgent, ha_own_none) == Hidden
 expect sees(BeaBot, ha_own_none) == Hidden
+expect sees(CalAgent, ha_own_none) == Hidden
 expect sees(DeeAgent, ha_own_none) == Hidden
 expect sees(DeeBot, ha_own_none) == Hidden
 
@@ -439,9 +683,10 @@ expect sees(Cal, ha_own_ann) == Visible
 expect sees(Dee, ha_own_ann) == Visible
 expect sees(AnnAgent, ha_own_ann) == Visible
 expect sees(BeaAgent, ha_own_ann) == Visible
-expect sees(BeaBot, ha_own_ann) == Visible
+expect sees(BeaBot, ha_own_ann) == Hidden
+expect sees(CalAgent, ha_own_ann) == Visible
 expect sees(DeeAgent, ha_own_ann) == Visible
-expect sees(DeeBot, ha_own_ann) == Visible
+expect sees(DeeBot, ha_own_ann) == Hidden
 
 # ha_own, Ann elected public then withdrew: private to Ann and AnnAgent.
 expect sees(Out, ha_own_withdrawn) == Hidden
@@ -452,42 +697,47 @@ expect sees(Dee, ha_own_withdrawn) == Hidden
 expect sees(AnnAgent, ha_own_withdrawn) == Visible
 expect sees(BeaAgent, ha_own_withdrawn) == Hidden
 expect sees(BeaBot, ha_own_withdrawn) == Hidden
+expect sees(CalAgent, ha_own_withdrawn) == Hidden
 expect sees(DeeAgent, ha_own_withdrawn) == Hidden
 expect sees(DeeBot, ha_own_withdrawn) == Hidden
 
-# ha_cross, nobody elected public: private to Ann and BeaAgent.
+# ha_cross, nobody elected public: private to Ann, BeaAgent and Bea, its
+# owner.
 expect sees(Out, ha_cross_none) == Hidden
 expect sees(Ann, ha_cross_none) == Visible
-expect sees(Bea, ha_cross_none) == Hidden
+expect sees(Bea, ha_cross_none) == Visible
 expect sees(Cal, ha_cross_none) == Hidden
 expect sees(Dee, ha_cross_none) == Hidden
 expect sees(AnnAgent, ha_cross_none) == Hidden
 expect sees(BeaAgent, ha_cross_none) == Visible
 expect sees(BeaBot, ha_cross_none) == Hidden
+expect sees(CalAgent, ha_cross_none) == Hidden
 expect sees(DeeAgent, ha_cross_none) == Hidden
 expect sees(DeeBot, ha_cross_none) == Hidden
 
-# ha_cross, Ann alone elected public: still private to Ann and BeaAgent.
+# ha_cross, Ann alone elected public: still private.
 expect sees(Out, ha_cross_ann) == Hidden
 expect sees(Ann, ha_cross_ann) == Visible
-expect sees(Bea, ha_cross_ann) == Hidden
+expect sees(Bea, ha_cross_ann) == Visible
 expect sees(Cal, ha_cross_ann) == Hidden
 expect sees(Dee, ha_cross_ann) == Hidden
 expect sees(AnnAgent, ha_cross_ann) == Hidden
 expect sees(BeaAgent, ha_cross_ann) == Visible
 expect sees(BeaBot, ha_cross_ann) == Hidden
+expect sees(CalAgent, ha_cross_ann) == Hidden
 expect sees(DeeAgent, ha_cross_ann) == Hidden
 expect sees(DeeBot, ha_cross_ann) == Hidden
 
-# ha_cross, Bea alone elected public: still private to Ann and BeaAgent.
+# ha_cross, Bea alone elected public: still private.
 expect sees(Out, ha_cross_bea) == Hidden
 expect sees(Ann, ha_cross_bea) == Visible
-expect sees(Bea, ha_cross_bea) == Hidden
+expect sees(Bea, ha_cross_bea) == Visible
 expect sees(Cal, ha_cross_bea) == Hidden
 expect sees(Dee, ha_cross_bea) == Hidden
 expect sees(AnnAgent, ha_cross_bea) == Hidden
 expect sees(BeaAgent, ha_cross_bea) == Visible
 expect sees(BeaBot, ha_cross_bea) == Hidden
+expect sees(CalAgent, ha_cross_bea) == Hidden
 expect sees(DeeAgent, ha_cross_bea) == Hidden
 expect sees(DeeBot, ha_cross_bea) == Hidden
 
@@ -499,56 +749,74 @@ expect sees(Cal, ha_cross_both) == Visible
 expect sees(Dee, ha_cross_both) == Visible
 expect sees(AnnAgent, ha_cross_both) == Visible
 expect sees(BeaAgent, ha_cross_both) == Visible
-expect sees(BeaBot, ha_cross_both) == Visible
+expect sees(BeaBot, ha_cross_both) == Hidden
+expect sees(CalAgent, ha_cross_both) == Visible
 expect sees(DeeAgent, ha_cross_both) == Visible
-expect sees(DeeBot, ha_cross_both) == Visible
+expect sees(DeeBot, ha_cross_both) == Hidden
 
-# ha_cross, both elected, then Ann withdrew: private to Ann and BeaAgent.
+# ha_cross, both elected, then Ann withdrew: private again.
 expect sees(Out, ha_cross_withdrawn) == Hidden
 expect sees(Ann, ha_cross_withdrawn) == Visible
-expect sees(Bea, ha_cross_withdrawn) == Hidden
+expect sees(Bea, ha_cross_withdrawn) == Visible
 expect sees(Cal, ha_cross_withdrawn) == Hidden
 expect sees(Dee, ha_cross_withdrawn) == Hidden
 expect sees(AnnAgent, ha_cross_withdrawn) == Hidden
 expect sees(BeaAgent, ha_cross_withdrawn) == Visible
 expect sees(BeaBot, ha_cross_withdrawn) == Hidden
+expect sees(CalAgent, ha_cross_withdrawn) == Hidden
 expect sees(DeeAgent, ha_cross_withdrawn) == Hidden
 expect sees(DeeBot, ha_cross_withdrawn) == Hidden
 
-# aa, nobody elected public: private to AnnAgent and BeaAgent; their
-# owners, not being in it, do not see it.
+# ha_cross, both elected, then Bea, the owner not in it, withdrew: private
+# again.
+expect sees(Out, ha_cross_bea_withdrawn) == Hidden
+expect sees(Ann, ha_cross_bea_withdrawn) == Visible
+expect sees(Bea, ha_cross_bea_withdrawn) == Visible
+expect sees(Cal, ha_cross_bea_withdrawn) == Hidden
+expect sees(Dee, ha_cross_bea_withdrawn) == Hidden
+expect sees(AnnAgent, ha_cross_bea_withdrawn) == Hidden
+expect sees(BeaAgent, ha_cross_bea_withdrawn) == Visible
+expect sees(BeaBot, ha_cross_bea_withdrawn) == Hidden
+expect sees(CalAgent, ha_cross_bea_withdrawn) == Hidden
+expect sees(DeeAgent, ha_cross_bea_withdrawn) == Hidden
+expect sees(DeeBot, ha_cross_bea_withdrawn) == Hidden
+
+# aa, nobody elected public: private to the two agents and their owners.
 expect sees(Out, aa_none) == Hidden
-expect sees(Ann, aa_none) == Hidden
-expect sees(Bea, aa_none) == Hidden
+expect sees(Ann, aa_none) == Visible
+expect sees(Bea, aa_none) == Visible
 expect sees(Cal, aa_none) == Hidden
 expect sees(Dee, aa_none) == Hidden
 expect sees(AnnAgent, aa_none) == Visible
 expect sees(BeaAgent, aa_none) == Visible
 expect sees(BeaBot, aa_none) == Hidden
+expect sees(CalAgent, aa_none) == Hidden
 expect sees(DeeAgent, aa_none) == Hidden
 expect sees(DeeBot, aa_none) == Hidden
 
-# aa, Ann alone elected public: still private to the two agents.
+# aa, Ann alone elected public: still private.
 expect sees(Out, aa_ann) == Hidden
-expect sees(Ann, aa_ann) == Hidden
-expect sees(Bea, aa_ann) == Hidden
+expect sees(Ann, aa_ann) == Visible
+expect sees(Bea, aa_ann) == Visible
 expect sees(Cal, aa_ann) == Hidden
 expect sees(Dee, aa_ann) == Hidden
 expect sees(AnnAgent, aa_ann) == Visible
 expect sees(BeaAgent, aa_ann) == Visible
 expect sees(BeaBot, aa_ann) == Hidden
+expect sees(CalAgent, aa_ann) == Hidden
 expect sees(DeeAgent, aa_ann) == Hidden
 expect sees(DeeBot, aa_ann) == Hidden
 
-# aa, Bea alone elected public: still private to the two agents.
+# aa, Bea alone elected public: still private.
 expect sees(Out, aa_bea) == Hidden
-expect sees(Ann, aa_bea) == Hidden
-expect sees(Bea, aa_bea) == Hidden
+expect sees(Ann, aa_bea) == Visible
+expect sees(Bea, aa_bea) == Visible
 expect sees(Cal, aa_bea) == Hidden
 expect sees(Dee, aa_bea) == Hidden
 expect sees(AnnAgent, aa_bea) == Visible
 expect sees(BeaAgent, aa_bea) == Visible
 expect sees(BeaBot, aa_bea) == Hidden
+expect sees(CalAgent, aa_bea) == Hidden
 expect sees(DeeAgent, aa_bea) == Hidden
 expect sees(DeeBot, aa_bea) == Hidden
 
@@ -560,59 +828,64 @@ expect sees(Cal, aa_both) == Visible
 expect sees(Dee, aa_both) == Visible
 expect sees(AnnAgent, aa_both) == Visible
 expect sees(BeaAgent, aa_both) == Visible
-expect sees(BeaBot, aa_both) == Visible
+expect sees(BeaBot, aa_both) == Hidden
+expect sees(CalAgent, aa_both) == Visible
 expect sees(DeeAgent, aa_both) == Visible
-expect sees(DeeBot, aa_both) == Visible
+expect sees(DeeBot, aa_both) == Hidden
 
-# aa, both elected, then Ann withdrew: private to the two agents.
+# aa, both elected, then Ann withdrew: private again.
 expect sees(Out, aa_withdrawn) == Hidden
-expect sees(Ann, aa_withdrawn) == Hidden
-expect sees(Bea, aa_withdrawn) == Hidden
+expect sees(Ann, aa_withdrawn) == Visible
+expect sees(Bea, aa_withdrawn) == Visible
 expect sees(Cal, aa_withdrawn) == Hidden
 expect sees(Dee, aa_withdrawn) == Hidden
 expect sees(AnnAgent, aa_withdrawn) == Visible
 expect sees(BeaAgent, aa_withdrawn) == Visible
 expect sees(BeaBot, aa_withdrawn) == Hidden
+expect sees(CalAgent, aa_withdrawn) == Hidden
 expect sees(DeeAgent, aa_withdrawn) == Hidden
 expect sees(DeeBot, aa_withdrawn) == Hidden
 
-# hb, nobody elected public: private to Ann and BeaBot.
+# hb, nobody elected public: private to Ann, BeaBot and Bea, its owner.
 expect sees(Out, hb_none) == Hidden
 expect sees(Ann, hb_none) == Visible
-expect sees(Bea, hb_none) == Hidden
+expect sees(Bea, hb_none) == Visible
 expect sees(Cal, hb_none) == Hidden
 expect sees(Dee, hb_none) == Hidden
 expect sees(AnnAgent, hb_none) == Hidden
 expect sees(BeaAgent, hb_none) == Hidden
 expect sees(BeaBot, hb_none) == Visible
+expect sees(CalAgent, hb_none) == Hidden
 expect sees(DeeAgent, hb_none) == Hidden
 expect sees(DeeBot, hb_none) == Hidden
 
-# hb, Ann alone elected public: still private to Ann and BeaBot.
+# hb, Ann alone elected public: still private.
 expect sees(Out, hb_ann) == Hidden
 expect sees(Ann, hb_ann) == Visible
-expect sees(Bea, hb_ann) == Hidden
+expect sees(Bea, hb_ann) == Visible
 expect sees(Cal, hb_ann) == Hidden
 expect sees(Dee, hb_ann) == Hidden
 expect sees(AnnAgent, hb_ann) == Hidden
 expect sees(BeaAgent, hb_ann) == Hidden
 expect sees(BeaBot, hb_ann) == Visible
+expect sees(CalAgent, hb_ann) == Hidden
 expect sees(DeeAgent, hb_ann) == Hidden
 expect sees(DeeBot, hb_ann) == Hidden
 
-# hb, Bea alone elected public: still private to Ann and BeaBot.
+# hb, Bea alone elected public: still private.
 expect sees(Out, hb_bea) == Hidden
 expect sees(Ann, hb_bea) == Visible
-expect sees(Bea, hb_bea) == Hidden
+expect sees(Bea, hb_bea) == Visible
 expect sees(Cal, hb_bea) == Hidden
 expect sees(Dee, hb_bea) == Hidden
 expect sees(AnnAgent, hb_bea) == Hidden
 expect sees(BeaAgent, hb_bea) == Hidden
 expect sees(BeaBot, hb_bea) == Visible
+expect sees(CalAgent, hb_bea) == Hidden
 expect sees(DeeAgent, hb_bea) == Hidden
 expect sees(DeeBot, hb_bea) == Hidden
 
-# hb, both elected public: public.
+# hb, both elected public: public; DeeBot, a bot not in it, still not.
 expect sees(Out, hb_both) == Hidden
 expect sees(Ann, hb_both) == Visible
 expect sees(Bea, hb_both) == Visible
@@ -621,24 +894,182 @@ expect sees(Dee, hb_both) == Visible
 expect sees(AnnAgent, hb_both) == Visible
 expect sees(BeaAgent, hb_both) == Visible
 expect sees(BeaBot, hb_both) == Visible
+expect sees(CalAgent, hb_both) == Visible
 expect sees(DeeAgent, hb_both) == Visible
-expect sees(DeeBot, hb_both) == Visible
+expect sees(DeeBot, hb_both) == Hidden
 
-# hb, both elected, then Ann withdrew: private to Ann and BeaBot.
+# hb, both elected, then Ann withdrew: private again.
 expect sees(Out, hb_withdrawn) == Hidden
 expect sees(Ann, hb_withdrawn) == Visible
-expect sees(Bea, hb_withdrawn) == Hidden
+expect sees(Bea, hb_withdrawn) == Visible
 expect sees(Cal, hb_withdrawn) == Hidden
 expect sees(Dee, hb_withdrawn) == Hidden
 expect sees(AnnAgent, hb_withdrawn) == Hidden
 expect sees(BeaAgent, hb_withdrawn) == Hidden
 expect sees(BeaBot, hb_withdrawn) == Visible
+expect sees(CalAgent, hb_withdrawn) == Hidden
 expect sees(DeeAgent, hb_withdrawn) == Hidden
 expect sees(DeeBot, hb_withdrawn) == Hidden
 
+# adm, nobody elected public: private to Cal, AnnAgent and Ann, its owner.
+expect sees(Out, adm_none) == Hidden
+expect sees(Ann, adm_none) == Visible
+expect sees(Bea, adm_none) == Hidden
+expect sees(Cal, adm_none) == Visible
+expect sees(Dee, adm_none) == Hidden
+expect sees(AnnAgent, adm_none) == Visible
+expect sees(BeaAgent, adm_none) == Hidden
+expect sees(BeaBot, adm_none) == Hidden
+expect sees(CalAgent, adm_none) == Hidden
+expect sees(DeeAgent, adm_none) == Hidden
+expect sees(DeeBot, adm_none) == Hidden
+
+# adm, Cal alone elected public: an admin's election is one of two.
+expect sees(Out, adm_cal) == Hidden
+expect sees(Ann, adm_cal) == Visible
+expect sees(Bea, adm_cal) == Hidden
+expect sees(Cal, adm_cal) == Visible
+expect sees(Dee, adm_cal) == Hidden
+expect sees(AnnAgent, adm_cal) == Visible
+expect sees(BeaAgent, adm_cal) == Hidden
+expect sees(BeaBot, adm_cal) == Hidden
+expect sees(CalAgent, adm_cal) == Hidden
+expect sees(DeeAgent, adm_cal) == Hidden
+expect sees(DeeBot, adm_cal) == Hidden
+
+# adm, both elected public: public.
+expect sees(Out, adm_both) == Hidden
+expect sees(Ann, adm_both) == Visible
+expect sees(Bea, adm_both) == Visible
+expect sees(Cal, adm_both) == Visible
+expect sees(Dee, adm_both) == Visible
+expect sees(AnnAgent, adm_both) == Visible
+expect sees(BeaAgent, adm_both) == Visible
+expect sees(BeaBot, adm_both) == Hidden
+expect sees(CalAgent, adm_both) == Visible
+expect sees(DeeAgent, adm_both) == Visible
+expect sees(DeeBot, adm_both) == Hidden
+
+# ca, nobody elected public: private to Ann, CalAgent and Cal, its owner.
+expect sees(Out, ca_none) == Hidden
+expect sees(Ann, ca_none) == Visible
+expect sees(Bea, ca_none) == Hidden
+expect sees(Cal, ca_none) == Visible
+expect sees(Dee, ca_none) == Hidden
+expect sees(AnnAgent, ca_none) == Hidden
+expect sees(BeaAgent, ca_none) == Hidden
+expect sees(BeaBot, ca_none) == Hidden
+expect sees(CalAgent, ca_none) == Visible
+expect sees(DeeAgent, ca_none) == Hidden
+expect sees(DeeBot, ca_none) == Hidden
+
+# ca, Ann alone elected public: still private.
+expect sees(Out, ca_ann) == Hidden
+expect sees(Ann, ca_ann) == Visible
+expect sees(Bea, ca_ann) == Hidden
+expect sees(Cal, ca_ann) == Visible
+expect sees(Dee, ca_ann) == Hidden
+expect sees(AnnAgent, ca_ann) == Hidden
+expect sees(BeaAgent, ca_ann) == Hidden
+expect sees(BeaBot, ca_ann) == Hidden
+expect sees(CalAgent, ca_ann) == Visible
+expect sees(DeeAgent, ca_ann) == Hidden
+expect sees(DeeBot, ca_ann) == Hidden
+
+# ca, both elected public: public.
+expect sees(Out, ca_both) == Hidden
+expect sees(Ann, ca_both) == Visible
+expect sees(Bea, ca_both) == Visible
+expect sees(Cal, ca_both) == Visible
+expect sees(Dee, ca_both) == Visible
+expect sees(AnnAgent, ca_both) == Visible
+expect sees(BeaAgent, ca_both) == Visible
+expect sees(BeaBot, ca_both) == Hidden
+expect sees(CalAgent, ca_both) == Visible
+expect sees(DeeAgent, ca_both) == Visible
+expect sees(DeeBot, ca_both) == Hidden
+
+# own_bot, nobody elected public: private to Bea and BeaBot.
+expect sees(Out, own_bot_none) == Hidden
+expect sees(Ann, own_bot_none) == Hidden
+expect sees(Bea, own_bot_none) == Visible
+expect sees(Cal, own_bot_none) == Hidden
+expect sees(Dee, own_bot_none) == Hidden
+expect sees(AnnAgent, own_bot_none) == Hidden
+expect sees(BeaAgent, own_bot_none) == Hidden
+expect sees(BeaBot, own_bot_none) == Visible
+expect sees(CalAgent, own_bot_none) == Hidden
+expect sees(DeeAgent, own_bot_none) == Hidden
+expect sees(DeeBot, own_bot_none) == Hidden
+
+# own_bot, Bea elected public: public, Bea being the only human involved.
+expect sees(Out, own_bot_bea) == Hidden
+expect sees(Ann, own_bot_bea) == Visible
+expect sees(Bea, own_bot_bea) == Visible
+expect sees(Cal, own_bot_bea) == Visible
+expect sees(Dee, own_bot_bea) == Visible
+expect sees(AnnAgent, own_bot_bea) == Visible
+expect sees(BeaAgent, own_bot_bea) == Visible
+expect sees(BeaBot, own_bot_bea) == Visible
+expect sees(CalAgent, own_bot_bea) == Visible
+expect sees(DeeAgent, own_bot_bea) == Visible
+expect sees(DeeBot, own_bot_bea) == Hidden
+
+# three, nobody elected public: private to Ann, Bea, DeeAgent and Dee.
+expect sees(Out, three_none) == Hidden
+expect sees(Ann, three_none) == Visible
+expect sees(Bea, three_none) == Visible
+expect sees(Cal, three_none) == Hidden
+expect sees(Dee, three_none) == Visible
+expect sees(AnnAgent, three_none) == Hidden
+expect sees(BeaAgent, three_none) == Hidden
+expect sees(BeaBot, three_none) == Hidden
+expect sees(CalAgent, three_none) == Hidden
+expect sees(DeeAgent, three_none) == Visible
+expect sees(DeeBot, three_none) == Hidden
+
+# three, Ann and Bea elected public: Dee has not, so still private.
+expect sees(Out, three_both) == Hidden
+expect sees(Ann, three_both) == Visible
+expect sees(Bea, three_both) == Visible
+expect sees(Cal, three_both) == Hidden
+expect sees(Dee, three_both) == Visible
+expect sees(AnnAgent, three_both) == Hidden
+expect sees(BeaAgent, three_both) == Hidden
+expect sees(BeaBot, three_both) == Hidden
+expect sees(CalAgent, three_both) == Hidden
+expect sees(DeeAgent, three_both) == Visible
+expect sees(DeeBot, three_both) == Hidden
+
+# three, all three elected public: public.
+expect sees(Out, three_all) == Hidden
+expect sees(Ann, three_all) == Visible
+expect sees(Bea, three_all) == Visible
+expect sees(Cal, three_all) == Visible
+expect sees(Dee, three_all) == Visible
+expect sees(AnnAgent, three_all) == Visible
+expect sees(BeaAgent, three_all) == Visible
+expect sees(BeaBot, three_all) == Hidden
+expect sees(CalAgent, three_all) == Visible
+expect sees(DeeAgent, three_all) == Visible
+expect sees(DeeBot, three_all) == Hidden
+
+# three, all elected, then Dee withdrew: private again.
+expect sees(Out, three_dee_withdrawn) == Hidden
+expect sees(Ann, three_dee_withdrawn) == Visible
+expect sees(Bea, three_dee_withdrawn) == Visible
+expect sees(Cal, three_dee_withdrawn) == Hidden
+expect sees(Dee, three_dee_withdrawn) == Visible
+expect sees(AnnAgent, three_dee_withdrawn) == Hidden
+expect sees(BeaAgent, three_dee_withdrawn) == Hidden
+expect sees(BeaBot, three_dee_withdrawn) == Hidden
+expect sees(CalAgent, three_dee_withdrawn) == Hidden
+expect sees(DeeAgent, three_dee_withdrawn) == Visible
+expect sees(DeeBot, three_dee_withdrawn) == Hidden
+
 # ── THE can_post TABLE
 # Seeing is not posting: each conversation private and public, and only
-# its participants may post in either.
+# its participants and the humans they answer to may post in either.
 
 # hh: Ann and Bea.
 expect posts(Out, hh) == ReadOnly
@@ -649,6 +1080,7 @@ expect posts(Dee, hh) == ReadOnly
 expect posts(AnnAgent, hh) == ReadOnly
 expect posts(BeaAgent, hh) == ReadOnly
 expect posts(BeaBot, hh) == ReadOnly
+expect posts(CalAgent, hh) == ReadOnly
 expect posts(DeeAgent, hh) == ReadOnly
 expect posts(DeeBot, hh) == ReadOnly
 
@@ -661,6 +1093,7 @@ expect posts(Dee, ha_own_none) == ReadOnly
 expect posts(AnnAgent, ha_own_none) == Writable
 expect posts(BeaAgent, ha_own_none) == ReadOnly
 expect posts(BeaBot, ha_own_none) == ReadOnly
+expect posts(CalAgent, ha_own_none) == ReadOnly
 expect posts(DeeAgent, ha_own_none) == ReadOnly
 expect posts(DeeBot, ha_own_none) == ReadOnly
 
@@ -673,77 +1106,188 @@ expect posts(Dee, ha_own_ann) == ReadOnly
 expect posts(AnnAgent, ha_own_ann) == Writable
 expect posts(BeaAgent, ha_own_ann) == ReadOnly
 expect posts(BeaBot, ha_own_ann) == ReadOnly
+expect posts(CalAgent, ha_own_ann) == ReadOnly
 expect posts(DeeAgent, ha_own_ann) == ReadOnly
 expect posts(DeeBot, ha_own_ann) == ReadOnly
 
-# ha_cross, private: Ann and BeaAgent; Bea, the owner, may not.
+# ha_cross, private: Ann, BeaAgent, and Bea, its owner.
 expect posts(Out, ha_cross_none) == ReadOnly
 expect posts(Ann, ha_cross_none) == Writable
-expect posts(Bea, ha_cross_none) == ReadOnly
+expect posts(Bea, ha_cross_none) == Writable
 expect posts(Cal, ha_cross_none) == ReadOnly
 expect posts(Dee, ha_cross_none) == ReadOnly
 expect posts(AnnAgent, ha_cross_none) == ReadOnly
 expect posts(BeaAgent, ha_cross_none) == Writable
 expect posts(BeaBot, ha_cross_none) == ReadOnly
+expect posts(CalAgent, ha_cross_none) == ReadOnly
 expect posts(DeeAgent, ha_cross_none) == ReadOnly
 expect posts(DeeBot, ha_cross_none) == ReadOnly
 
-# ha_cross, public: still Ann and BeaAgent.
+# ha_cross, public: the same three.
 expect posts(Out, ha_cross_both) == ReadOnly
 expect posts(Ann, ha_cross_both) == Writable
-expect posts(Bea, ha_cross_both) == ReadOnly
+expect posts(Bea, ha_cross_both) == Writable
 expect posts(Cal, ha_cross_both) == ReadOnly
 expect posts(Dee, ha_cross_both) == ReadOnly
 expect posts(AnnAgent, ha_cross_both) == ReadOnly
 expect posts(BeaAgent, ha_cross_both) == Writable
 expect posts(BeaBot, ha_cross_both) == ReadOnly
+expect posts(CalAgent, ha_cross_both) == ReadOnly
 expect posts(DeeAgent, ha_cross_both) == ReadOnly
 expect posts(DeeBot, ha_cross_both) == ReadOnly
 
-# aa, private: the two agents.
+# aa, private: the two agents and their owners.
 expect posts(Out, aa_none) == ReadOnly
-expect posts(Ann, aa_none) == ReadOnly
-expect posts(Bea, aa_none) == ReadOnly
+expect posts(Ann, aa_none) == Writable
+expect posts(Bea, aa_none) == Writable
 expect posts(Cal, aa_none) == ReadOnly
 expect posts(Dee, aa_none) == ReadOnly
 expect posts(AnnAgent, aa_none) == Writable
 expect posts(BeaAgent, aa_none) == Writable
 expect posts(BeaBot, aa_none) == ReadOnly
+expect posts(CalAgent, aa_none) == ReadOnly
 expect posts(DeeAgent, aa_none) == ReadOnly
 expect posts(DeeBot, aa_none) == ReadOnly
 
-# aa, public: still the two agents.
+# aa, public: the same four.
 expect posts(Out, aa_both) == ReadOnly
-expect posts(Ann, aa_both) == ReadOnly
-expect posts(Bea, aa_both) == ReadOnly
+expect posts(Ann, aa_both) == Writable
+expect posts(Bea, aa_both) == Writable
 expect posts(Cal, aa_both) == ReadOnly
 expect posts(Dee, aa_both) == ReadOnly
 expect posts(AnnAgent, aa_both) == Writable
 expect posts(BeaAgent, aa_both) == Writable
 expect posts(BeaBot, aa_both) == ReadOnly
+expect posts(CalAgent, aa_both) == ReadOnly
 expect posts(DeeAgent, aa_both) == ReadOnly
 expect posts(DeeBot, aa_both) == ReadOnly
 
-# hb, private: Ann and BeaBot.
+# hb, private: Ann, BeaBot, and Bea, its owner.
 expect posts(Out, hb_none) == ReadOnly
 expect posts(Ann, hb_none) == Writable
-expect posts(Bea, hb_none) == ReadOnly
+expect posts(Bea, hb_none) == Writable
 expect posts(Cal, hb_none) == ReadOnly
 expect posts(Dee, hb_none) == ReadOnly
 expect posts(AnnAgent, hb_none) == ReadOnly
 expect posts(BeaAgent, hb_none) == ReadOnly
 expect posts(BeaBot, hb_none) == Writable
+expect posts(CalAgent, hb_none) == ReadOnly
 expect posts(DeeAgent, hb_none) == ReadOnly
 expect posts(DeeBot, hb_none) == ReadOnly
 
-# hb, public: still Ann and BeaBot.
+# hb, public: the same three.
 expect posts(Out, hb_both) == ReadOnly
 expect posts(Ann, hb_both) == Writable
-expect posts(Bea, hb_both) == ReadOnly
+expect posts(Bea, hb_both) == Writable
 expect posts(Cal, hb_both) == ReadOnly
 expect posts(Dee, hb_both) == ReadOnly
 expect posts(AnnAgent, hb_both) == ReadOnly
 expect posts(BeaAgent, hb_both) == ReadOnly
 expect posts(BeaBot, hb_both) == Writable
+expect posts(CalAgent, hb_both) == ReadOnly
 expect posts(DeeAgent, hb_both) == ReadOnly
 expect posts(DeeBot, hb_both) == ReadOnly
+
+# adm, private: Cal, AnnAgent, and Ann, its owner.
+expect posts(Out, adm_none) == ReadOnly
+expect posts(Ann, adm_none) == Writable
+expect posts(Bea, adm_none) == ReadOnly
+expect posts(Cal, adm_none) == Writable
+expect posts(Dee, adm_none) == ReadOnly
+expect posts(AnnAgent, adm_none) == Writable
+expect posts(BeaAgent, adm_none) == ReadOnly
+expect posts(BeaBot, adm_none) == ReadOnly
+expect posts(CalAgent, adm_none) == ReadOnly
+expect posts(DeeAgent, adm_none) == ReadOnly
+expect posts(DeeBot, adm_none) == ReadOnly
+
+# adm, public: the same three.
+expect posts(Out, adm_both) == ReadOnly
+expect posts(Ann, adm_both) == Writable
+expect posts(Bea, adm_both) == ReadOnly
+expect posts(Cal, adm_both) == Writable
+expect posts(Dee, adm_both) == ReadOnly
+expect posts(AnnAgent, adm_both) == Writable
+expect posts(BeaAgent, adm_both) == ReadOnly
+expect posts(BeaBot, adm_both) == ReadOnly
+expect posts(CalAgent, adm_both) == ReadOnly
+expect posts(DeeAgent, adm_both) == ReadOnly
+expect posts(DeeBot, adm_both) == ReadOnly
+
+# ca, private: Ann, CalAgent, and Cal, its owner.
+expect posts(Out, ca_none) == ReadOnly
+expect posts(Ann, ca_none) == Writable
+expect posts(Bea, ca_none) == ReadOnly
+expect posts(Cal, ca_none) == Writable
+expect posts(Dee, ca_none) == ReadOnly
+expect posts(AnnAgent, ca_none) == ReadOnly
+expect posts(BeaAgent, ca_none) == ReadOnly
+expect posts(BeaBot, ca_none) == ReadOnly
+expect posts(CalAgent, ca_none) == Writable
+expect posts(DeeAgent, ca_none) == ReadOnly
+expect posts(DeeBot, ca_none) == ReadOnly
+
+# ca, public: the same three.
+expect posts(Out, ca_both) == ReadOnly
+expect posts(Ann, ca_both) == Writable
+expect posts(Bea, ca_both) == ReadOnly
+expect posts(Cal, ca_both) == Writable
+expect posts(Dee, ca_both) == ReadOnly
+expect posts(AnnAgent, ca_both) == ReadOnly
+expect posts(BeaAgent, ca_both) == ReadOnly
+expect posts(BeaBot, ca_both) == ReadOnly
+expect posts(CalAgent, ca_both) == Writable
+expect posts(DeeAgent, ca_both) == ReadOnly
+expect posts(DeeBot, ca_both) == ReadOnly
+
+# own_bot, private: Bea and BeaBot.
+expect posts(Out, own_bot_none) == ReadOnly
+expect posts(Ann, own_bot_none) == ReadOnly
+expect posts(Bea, own_bot_none) == Writable
+expect posts(Cal, own_bot_none) == ReadOnly
+expect posts(Dee, own_bot_none) == ReadOnly
+expect posts(AnnAgent, own_bot_none) == ReadOnly
+expect posts(BeaAgent, own_bot_none) == ReadOnly
+expect posts(BeaBot, own_bot_none) == Writable
+expect posts(CalAgent, own_bot_none) == ReadOnly
+expect posts(DeeAgent, own_bot_none) == ReadOnly
+expect posts(DeeBot, own_bot_none) == ReadOnly
+
+# own_bot, public: still Bea and BeaBot.
+expect posts(Out, own_bot_bea) == ReadOnly
+expect posts(Ann, own_bot_bea) == ReadOnly
+expect posts(Bea, own_bot_bea) == Writable
+expect posts(Cal, own_bot_bea) == ReadOnly
+expect posts(Dee, own_bot_bea) == ReadOnly
+expect posts(AnnAgent, own_bot_bea) == ReadOnly
+expect posts(BeaAgent, own_bot_bea) == ReadOnly
+expect posts(BeaBot, own_bot_bea) == Writable
+expect posts(CalAgent, own_bot_bea) == ReadOnly
+expect posts(DeeAgent, own_bot_bea) == ReadOnly
+expect posts(DeeBot, own_bot_bea) == ReadOnly
+
+# three, private: Ann, Bea, DeeAgent, and Dee, its owner.
+expect posts(Out, three_none) == ReadOnly
+expect posts(Ann, three_none) == Writable
+expect posts(Bea, three_none) == Writable
+expect posts(Cal, three_none) == ReadOnly
+expect posts(Dee, three_none) == Writable
+expect posts(AnnAgent, three_none) == ReadOnly
+expect posts(BeaAgent, three_none) == ReadOnly
+expect posts(BeaBot, three_none) == ReadOnly
+expect posts(CalAgent, three_none) == ReadOnly
+expect posts(DeeAgent, three_none) == Writable
+expect posts(DeeBot, three_none) == ReadOnly
+
+# three, public: the same four.
+expect posts(Out, three_all) == ReadOnly
+expect posts(Ann, three_all) == Writable
+expect posts(Bea, three_all) == Writable
+expect posts(Cal, three_all) == ReadOnly
+expect posts(Dee, three_all) == Writable
+expect posts(AnnAgent, three_all) == ReadOnly
+expect posts(BeaAgent, three_all) == ReadOnly
+expect posts(BeaBot, three_all) == ReadOnly
+expect posts(CalAgent, three_all) == ReadOnly
+expect posts(DeeAgent, three_all) == Writable
+expect posts(DeeBot, three_all) == ReadOnly

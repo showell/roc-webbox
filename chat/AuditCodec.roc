@@ -4,11 +4,13 @@
 ##
 ##     audit v1 at=1761600000 who=agent:1 via=key:4 action=revoke-keys:human:2 verdict=permitted
 ##     audit v1 at=1761600077 who=human:2 via=session:12 action=retire:human:1 verdict=refused:not-admin
+##     audit v1 at=1761600100 who=human:1 via=session:3 action=set-role:2:admin verdict=permitted
 ##
 ## Who (a principal's id, as AccountCodec spells it), by which session or
 ## key (its public number, never a secret), what, when, and the verdict,
-## each spelled once: an action as a word and its target after a colon, a
-## refusal as a word (a key's refusal after `key:`). Pure.
+## each spelled once: an action as a word and its target after a colon (a
+## role set, the human's GitHub id and the role), a refusal as a word (a
+## key's refusal after `key:`). Pure.
 import AccountCodec
 import Admin
 import ApiKey
@@ -104,6 +106,7 @@ ActionKind : [
 	Retire,
 	RevokeKeys,
 	RevokeSessions,
+	SetRole,
 	ReadCounters,
 ]
 
@@ -113,6 +116,7 @@ all_action_kinds = [
 	Retire,
 	RevokeKeys,
 	RevokeSessions,
+	SetRole,
 	ReadCounters,
 ]
 
@@ -123,11 +127,13 @@ spell_action = |kind|
 		Retire => "retire"
 		RevokeKeys => "revoke-keys"
 		RevokeSessions => "revoke-sessions"
+		SetRole => "set-role"
 		ReadCounters => "read-counters"
 	}
 
-## The action's word, and its target after a colon: a principal's id, or
-## a human's GitHub id for their sessions.
+## The action's word, and its target after a colon: a principal's id, a
+## human's GitHub id for their sessions, or a human's GitHub id and the
+## role set, colon between.
 action_text : Admin.Action -> Str
 action_text = |action|
 	match action {
@@ -135,6 +141,10 @@ action_text = |action|
 		Retire(id) => "${spell_action(Retire)}${colon}${AccountCodec.id_text(id)}"
 		RevokeKeys(id) => "${spell_action(RevokeKeys)}${colon}${AccountCodec.id_text(id)}"
 		RevokeSessions(g) => "${spell_action(RevokeSessions)}${colon}${g.to_u64().to_str()}"
+		SetRole({ human, role }) => {
+			target = "${human.to_u64().to_str()}${colon}${AccountCodec.role_text(role)}"
+			"${spell_action(SetRole)}${colon}${target}"
+		}
 		ReadCounters => spell_action(ReadCounters)
 	}
 
@@ -152,7 +162,7 @@ action_from = |value|
 			)? {
 				ListAccounts => Ok(ListAccounts)
 				ReadCounters => Ok(ReadCounters)
-				Retire | RevokeKeys | RevokeSessions => Err(BadValue("action"))
+				Retire | RevokeKeys | RevokeSessions | SetRole => Err(BadValue("action"))
 			}
 
 		Ok({ before, after }) =>
@@ -172,6 +182,12 @@ action_from = |value|
 						after,
 						{ name: "action", make: Principal.GitHubId.from_u64 },
 					).map_ok(|g| RevokeSessions(g))
+				SetRole => {
+					{ head, tail } = split_colon(after, "action")?
+					human = Stored.id(head, { name: "action", make: Principal.GitHubId.from_u64 })?
+					role = AccountCodec.role_from(tail, "action")?
+					Ok(SetRole({ human, role }))
+				}
 			}
 	}
 
@@ -180,26 +196,32 @@ Verdict : [Permitted, Refused(Admin.Refusal)]
 ## The refusals Admin says itself; a key's are ApiKey's, after `key:`.
 AdminRefusal : [
 	NoSuchPrincipal,
-	SessionNotHuman,
+	SessionExpired,
 	NotAdmin,
 	RetiresOwnAuthority,
+	SetsOwnRole,
+	NeedsSession,
 ]
 
 all_admin_refusals : List(AdminRefusal)
 all_admin_refusals = [
 	NoSuchPrincipal,
-	SessionNotHuman,
+	SessionExpired,
 	NotAdmin,
 	RetiresOwnAuthority,
+	SetsOwnRole,
+	NeedsSession,
 ]
 
 spell_admin_refusal : AdminRefusal -> Str
 spell_admin_refusal = |why|
 	match why {
 		NoSuchPrincipal => "no-such-principal"
-		SessionNotHuman => "session-not-human"
+		SessionExpired => "session-expired"
 		NotAdmin => "not-admin"
 		RetiresOwnAuthority => "retires-own-authority"
+		SetsOwnRole => "sets-own-role"
+		NeedsSession => "needs-session"
 	}
 
 all_key_refusals : List(ApiKey.Refusal)
@@ -235,9 +257,11 @@ refusal_text = |why|
 	match why {
 		KeyRefused(key_why) => "${key_prefix}${spell_key_refusal(key_why)}"
 		NoSuchPrincipal => spell_admin_refusal(NoSuchPrincipal)
-		SessionNotHuman => spell_admin_refusal(SessionNotHuman)
+		SessionExpired => spell_admin_refusal(SessionExpired)
 		NotAdmin => spell_admin_refusal(NotAdmin)
 		RetiresOwnAuthority => spell_admin_refusal(RetiresOwnAuthority)
+		SetsOwnRole => spell_admin_refusal(SetsOwnRole)
+		NeedsSession => spell_admin_refusal(NeedsSession)
 	}
 
 verdict_from : List(U8) -> Try(Verdict, Stored.Problem)
@@ -270,9 +294,11 @@ verdict_from = |value|
 							},
 						)? {
 							NoSuchPrincipal => Ok(Refused(NoSuchPrincipal))
-							SessionNotHuman => Ok(Refused(SessionNotHuman))
+							SessionExpired => Ok(Refused(SessionExpired))
 							NotAdmin => Ok(Refused(NotAdmin))
 							RetiresOwnAuthority => Ok(Refused(RetiresOwnAuthority))
+							SetsOwnRole => Ok(Refused(SetsOwnRole))
+							NeedsSession => Ok(Refused(NeedsSession))
 						}
 				}
 		}
@@ -363,6 +389,24 @@ expect
 		verdict: Refused(KeyRefused(OutOfScope)),
 	})
 		== "audit v1 at=-1 who=bot:3 via=key:5 action=read-counters verdict=refused:key:out-of-scope\n"
+expect
+	text_of({
+		who: Principal.Id.Human(gid(1)),
+		via: Session(sid(3)),
+		action: SetRole({ human: gid(2), role: Admin }),
+		at: 1761600100,
+		verdict: Permitted,
+	})
+		== "audit v1 at=1761600100 who=human:1 via=session:3 action=set-role:2:admin verdict=permitted\n"
+expect
+	text_of({
+		who: Principal.Id.Agent(aid(1)),
+		via: Key(kid(4)),
+		action: SetRole({ human: gid(2), role: Member }),
+		at: 1761600100,
+		verdict: Refused(NeedsSession),
+	})
+		== "audit v1 at=1761600100 who=agent:1 via=key:4 action=set-role:2:member verdict=refused:needs-session\n"
 
 # ── EVERY ENTRY ROUND-TRIPS: every action against every verdict, by a
 # session and by a key.
@@ -376,6 +420,8 @@ actions = [
 	RevokeKeys(Principal.Id.Agent(aid(2))),
 	RevokeKeys(Principal.Id.Bot(aid(3))),
 	RevokeSessions(gid(583231)),
+	SetRole({ human: gid(2), role: Admin }),
+	SetRole({ human: gid(583231), role: Member }),
 	ReadCounters,
 ]
 
@@ -389,9 +435,11 @@ when_refused : AdminRefusal -> Verdict
 when_refused = |why|
 	match why {
 		NoSuchPrincipal => Refused(NoSuchPrincipal)
-		SessionNotHuman => Refused(SessionNotHuman)
+		SessionExpired => Refused(SessionExpired)
 		NotAdmin => Refused(NotAdmin)
 		RetiresOwnAuthority => Refused(RetiresOwnAuthority)
+		SetsOwnRole => Refused(SetsOwnRole)
+		NeedsSession => Refused(NeedsSession)
 	}
 
 entries : List(Admin.Audit)
@@ -420,8 +468,8 @@ entries =
 			),
 	)
 
-expect List.len(verdicts) == 10
-expect List.len(entries) == 180
+expect List.len(verdicts) == 12
+expect List.len(entries) == 264
 expect List.all(entries, |e| AuditCodec.decode(AuditCodec.encode(e)) == Ok(e))
 
 # ── THE MALFORMED TABLE: each line, its named problem.
@@ -468,6 +516,22 @@ expect decoded({
 }) == Err(BadNumber("action"))
 expect decoded({ from: "revoke-keys:human:2", to: "revoke-sessions:2" }) == Ok({})
 expect decoded({ from: "revoke-keys:human:2", to: "list-accounts" }) == Ok({})
+expect decoded({ from: "revoke-keys:human:2", to: "set-role:2:admin" }) == Ok({})
+expect decoded({ from: "revoke-keys:human:2", to: "set-role:2" }) == Err(BadValue("action"))
+expect decoded({ from: "revoke-keys:human:2", to: "set-role" }) == Err(BadValue("action"))
+expect decoded({ from: "revoke-keys:human:2", to: "set-role:0:admin" }) == Err(BadValue("action"))
+expect decoded({
+	from: "revoke-keys:human:2",
+	to: "set-role:2:owner",
+}) == Err(UnknownWord("action"))
+expect decoded({
+	from: "revoke-keys:human:2",
+	to: "set-role:human:2:admin",
+}) == Err(BadNumber("action"))
+expect decoded({
+	from: "permitted",
+	to: "refused:session-not-human",
+}) == Err(UnknownWord("verdict"))
 expect decoded({ from: "permitted", to: "allowed" }) == Err(UnknownWord("verdict"))
 expect decoded({ from: "permitted", to: "refused:" }) == Err(UnknownWord("verdict"))
 expect decoded({ from: "permitted", to: "refused:not-admin" }) == Ok({})

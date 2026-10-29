@@ -1,12 +1,17 @@
 ## **THE ADMIN ACTIONS, AND WHO MAY PERFORM THEM** (the Roc chat's auth
-## design, section 9): a closed set of named actions, one decision for all
-## of them, and an audit record of every attempt, permitted or refused, for
-## the host to store and admins to read. An admin manages accounts and
-## reads no one's mail: nothing here reaches a resource's contents, and an
-## admin's sight is Access's like anyone's. Generic over the resource's id
+## design, sections 9 and 11): a closed set of named actions, one decision
+## for all of them, and an audit record of every attempt, permitted or
+## refused, for the host to store and admins to read. An admin manages
+## accounts and reads no one's mail: nothing here reaches a resource's
+## contents, and an admin's sight is Access's like anyone's. A key acts on
+## members' accounts only: acting on an admin, or on an admin's agent or
+## bot, or setting a role, takes a human admin's own session, so one stolen
+## admin key cannot remove the other admins. Generic over the resource's id
 ## only because a key is (ApiKey.Key). Pure.
 import ApiKey
 import Principal
+import Session
+import Stored
 
 Admin := [].{
 
@@ -24,25 +29,28 @@ Admin := [].{
 		## End every sign-in session of a human ("log out everywhere").
 		RevokeSessions(Principal.GitHubId),
 
+		## Make a human an admin, or a member. Never one's own role, and
+		## only from a session.
+		SetRole({ human : Principal.GitHubId, role : Principal.Role }),
+
 		## Read the operator's counters and logs.
 		ReadCounters,
 	]
 
-	## **HOW THE ACTOR CAME IN**: a browser's session (checked live by the
-	## host and the Roc at the door), with the principal it signed in as;
-	## or an API key.
+	## **HOW THE ACTOR CAME IN**: a browser's session, which must be live
+	## now; or an API key.
 	Credential(id) : [
-		Session({ id : Principal.SessionId, acts_as : Principal.Id }),
+		Session(Session),
 		Key(ApiKey.Key(id)),
 	]
 
 	## Why an admin action is refused.
 	Refusal : [
-		## The session's principal is not among the accounts.
+		## The session's human is not among the accounts.
 		NoSuchPrincipal,
 
-		## A session acting as an agent or a bot: they never sign in.
-		SessionNotHuman,
+		## The session is over (idle, or past its week).
+		SessionExpired,
 
 		## The session's human is not an admin now.
 		NotAdmin,
@@ -54,6 +62,13 @@ Admin := [].{
 		## The action would retire the actor, or the admin its authority
 		## comes from: no admin locks the admins out by one action.
 		RetiresOwnAuthority,
+
+		## The action would set the role of the actor's own human.
+		SetsOwnRole,
+
+		## A key asked to act on an admin, or on an admin's agent or bot,
+		## or to set a role: that takes a human admin's own session.
+		NeedsSession,
 	]
 
 	## **THE AUDIT RECORD**: who (the principal the credential names), by
@@ -69,11 +84,13 @@ Admin := [].{
 	}
 
 	## **MAY THIS CREDENTIAL PERFORM THIS ACTION, NOW?** The actor must
-	## have admin authority as the accounts say now: by a session, an
-	## admin human; by a key, one ApiKey.decide lets `Administer` (an admin
-	## scope, live, acting as an admin human or an agent an admin owns).
-	## Then the action must not retire the actor or the admin behind it.
-	## The answer is the audit record, verdict and all.
+	## have admin authority as the accounts say now: by a session, live and
+	## an admin human's; by a key, one ApiKey's `administers` permits (an
+	## admin scope, live, acting as an admin human or an agent an admin
+	## owns). Then the action must not retire the actor or the admin behind
+	## it, nor set their own role; and by a key, it must not touch an admin
+	## or an admin's agent or bot, nor set a role. The answer is the audit
+	## record, verdict and all.
 	decide : {
 		credential : Admin.Credential(id),
 		action : Admin.Action,
@@ -91,7 +108,7 @@ Admin := [].{
 	| {
 		(who, via) =
 			match credential {
-				Session(s) => (s.acts_as, Session(s.id))
+				Session(s) => (Principal.Id.Human(s.human()), Session(s.id()))
 				Key(key) => (key.acts_as(), Key(key.id()))
 			}
 		verdict =
@@ -102,7 +119,21 @@ Admin := [].{
 			}) {
 				Refused(why) => Refused(why)
 				Admitted(actor) =>
-					if is_own_authority(action, actor) Refused(RetiresOwnAuthority) else Permitted
+					if is_own_authority(action, actor) {
+						Refused(RetiresOwnAuthority)
+					} else if is_own_role(action, actor) {
+						Refused(SetsOwnRole)
+					} else {
+						match credential {
+							Session(_) => Permitted
+							Key(_) =>
+								if is_session_only(action, accounts) {
+									Refused(NeedsSession)
+								} else {
+									Permitted
+								}
+						}
+					}
 			}
 		{
 			who,
@@ -129,22 +160,22 @@ authorized = |
 	},
 |
 	match credential {
-		Session(s) =>
-			match Principal.find(accounts, s.acts_as) {
-				Err(NoSuchPrincipal) => Refused(NoSuchPrincipal)
-				Ok(Agent(_)) | Ok(Bot(_)) => Refused(SessionNotHuman)
-				Ok(Human(h)) =>
-					match h.role {
-						Admin => Admitted(Human(h))
-						Member => Refused(NotAdmin)
+		Session(session) =>
+			match session.admit({ accounts, now }) {
+				Refused(IdleExpired) | Refused(AbsoluteExpired) => Refused(SessionExpired)
+				Refused(NoSuchAccount) => Refused(NoSuchPrincipal)
+				Admitted({ principal, write: _ }) =>
+					match principal {
+						Human(h) =>
+							match h.role {
+								Admin => Admitted(principal)
+								Member => Refused(NotAdmin)
+							}
+						Agent(_) | Bot(_) => crash "Admin.authorized: a session admits a human"
 					}
 			}
 		Key(key) =>
-			match key.decide({
-				accounts,
-				action: Administer,
-				now,
-			}) {
+			match key.administers({ accounts, now }) {
 				Refused(why) => Refused(KeyRefused(why))
 				Permitted =>
 					match Principal.find(accounts, key.acts_as()) {
@@ -162,14 +193,54 @@ is_own_authority = |action, actor|
 			backer = Principal.Id.Human(Principal.answers_to(actor))
 			target == Principal.id(actor) or target == backer
 		}
-		ListAccounts | RevokeKeys(_) | RevokeSessions(_) | ReadCounters => Bool.False
+		ListAccounts | RevokeKeys(_) | RevokeSessions(_) | SetRole(_) | ReadCounters => Bool.False
+	}
+
+## `action` sets the role of the human `actor` answers to.
+is_own_role : Admin.Action, Principal -> Bool
+is_own_role = |action, actor|
+	match action {
+		SetRole({ human, role: _ }) => human == Principal.answers_to(actor)
+		ListAccounts | Retire(_) | RevokeKeys(_) | RevokeSessions(_) | ReadCounters => Bool.False
+	}
+
+## **`action` TAKES A SESSION**: it sets a role, or acts on an admin, or on
+## an agent or a bot an admin owns, as the accounts say now.
+is_session_only : Admin.Action, List(Principal) -> Bool
+is_session_only = |action, accounts|
+	match action {
+		SetRole(_) => Bool.True
+		Retire(target) | RevokeKeys(target) => is_admins(accounts, target)
+		RevokeSessions(human) => is_admins(accounts, Principal.Id.Human(human))
+		ListAccounts | ReadCounters => Bool.False
+	}
+
+## The principal `target` is an admin, or answers to one, among `accounts`.
+## A target no account holds answers to nobody: acting on it touches no
+## admin.
+is_admins : List(Principal), Principal.Id -> Bool
+is_admins = |accounts, target|
+	match Principal.find(accounts, target) {
+		Err(NoSuchPrincipal) => Bool.False
+		Ok(found) =>
+			match Principal.find(accounts, Principal.Id.Human(Principal.answers_to(found))) {
+				Ok(Human(h)) =>
+					match h.role {
+						Admin => Bool.True
+						Member => Bool.False
+					}
+				Ok(Agent(_)) | Ok(Bot(_)) => crash "Admin.is_admins: a human's id finds a human"
+				Err(NoSuchPrincipal) => Bool.False
+			}
 	}
 
 # The cast:
 #   boss        an admin human
 #   ann         a member human
+#   cal         another admin human
 #   boss_agent  an agent boss owns, with an admin-only key
 #   ann_agent   an agent ann owns, with a read-and-post key
+#   cal_agent   an agent cal owns
 gid : U64 -> Principal.GitHubId
 gid = |n|
 	match Principal.GitHubId.from_u64(n) {
@@ -226,18 +297,26 @@ boss_demoted = person(1, Member)
 ann : Principal
 ann = person(2, Member)
 
+cal : Principal
+cal = person(4, Admin)
+
 boss_agent : Principal
 boss_agent = agent({ id: 1, owner: 1 })
 
 ann_agent : Principal
 ann_agent = agent({ id: 3, owner: 2 })
 
+cal_agent : Principal
+cal_agent = agent({ id: 5, owner: 4 })
+
 accounts : List(Principal)
 accounts = [
 	boss,
 	ann,
+	cal,
 	boss_agent,
 	ann_agent,
+	cal_agent,
 ]
 
 admin_only : ApiKey.Scope(Str)
@@ -254,35 +333,86 @@ plain = {
 	admin: Off,
 }
 
-## Key number `key` acting as `acts_as`, granted by its owner (or itself,
-## a human), expiring at 1000.
-key_for : Principal, { scope : ApiKey.Scope(Str), key : U64 } -> ApiKey.Key(Str)
-key_for = |acts_as, { scope, key }|
-	match Principal.find(accounts, Principal.Id.Human(Principal.answers_to(acts_as))) {
-		Err(NoSuchPrincipal) => crash "key_for: a test key's owner is among the accounts"
-		Ok(granter) =>
-			match ApiKey.Key.issue({
-				granter,
-				acts_as,
-				scope,
-				accounts,
-				key: kid(key),
-				expires: At(1000),
-			}) {
-				Ok(made) => made
-				Err(Refused(_)) => crash "key_for: a test's key is grantable"
-			}
+## A test's token hash: every byte `b`.
+token : U8 -> Stored.SecretHash
+token = |b|
+	match Stored.SecretHash.from_bytes(List.repeat(b, 32)) {
+		Ok(h) => h
+		Err(NotAHash) => crash "token: 32 bytes are a hash"
 	}
 
-# The credentials.
+## Human `who`'s session `n`, signed in at `at`.
+session_of : {
+	n : U64,
+	who : U64,
+	at : I64,
+} -> Session
+session_of = |
+	{
+		n,
+		who,
+		at,
+	},
+|
+	Session.start({
+		id: sid(n),
+		human: gid(who),
+		token_hash: token(1),
+		now: at,
+	})
+
+## Key number `key` acting as `acts_as`, granted from its owner's session,
+## expiring at 1000.
+key_for : Principal, { scope : ApiKey.Scope(Str), key : U64 } -> ApiKey.Key(Str)
+key_for = |acts_as, { scope, key }|
+	match ApiKey.Key.issue(
+		{
+			granter: Session(
+				session_of({
+					n: 9,
+					who: Principal.answers_to(acts_as).to_u64(),
+					at: 0,
+				}),
+			),
+			acts_as: Principal.id(acts_as),
+			scope,
+			accounts,
+			now: 0,
+		},
+		{ key: kid(key), expires: At(1000) },
+	) {
+		Ok(made) => made
+		Err(Refused(_)) => crash "key_for: a test's key is grantable"
+	}
+
+# The credentials: sessions signed in at 0, one at 500 less a day (idle
+# by 500, when the table is decided).
 boss_session : Admin.Credential(Str)
-boss_session = Session({ id: sid(1), acts_as: Principal.id(boss) })
+boss_session = Session(
+	session_of({
+		n: 1,
+		who: 1,
+		at: 0,
+	}),
+)
 
 ann_session : Admin.Credential(Str)
-ann_session = Session({ id: sid(2), acts_as: Principal.id(ann) })
+ann_session = Session(
+	session_of({
+		n: 2,
+		who: 2,
+		at: 0,
+	}),
+)
 
-agent_session : Admin.Credential(Str)
-agent_session = Session({ id: sid(3), acts_as: Principal.id(boss_agent) })
+boss_idle_session : Admin.Credential(Str)
+boss_idle_session = Session(
+	session_of({
+		n: 3,
+		who: 1,
+		at: 500 - Session.idle_secs,
+	}),
+)
 
 boss_agent_key : Admin.Credential(Str)
 boss_agent_key = Key(key_for(boss_agent, { scope: admin_only, key: 1 }))
@@ -334,15 +464,27 @@ revoke_ann_keys = RevokeKeys(Principal.id(ann))
 revoke_ann_sessions : Admin.Action
 revoke_ann_sessions = RevokeSessions(gid(2))
 
+promote_ann : Admin.Action
+promote_ann = SetRole({ human: gid(2), role: Admin })
+
+retire_cal : Admin.Action
+retire_cal = Retire(Principal.id(cal))
+
+revoke_cal_agent_keys : Admin.Action
+revoke_cal_agent_keys = RevokeKeys(Principal.id(cal_agent))
+
 # ── THE ADMIN TABLE
 # Every credential against every action.
 
-# boss's session: everything but retiring boss.
+# boss's session: everything but retiring boss, another admin included.
 expect verdict(boss_session, ListAccounts) == Permitted
 expect verdict(boss_session, retire_ann_agent) == Permitted
 expect verdict(boss_session, retire_boss) == Refused(RetiresOwnAuthority)
 expect verdict(boss_session, revoke_ann_keys) == Permitted
 expect verdict(boss_session, revoke_ann_sessions) == Permitted
+expect verdict(boss_session, promote_ann) == Permitted
+expect verdict(boss_session, retire_cal) == Permitted
+expect verdict(boss_session, revoke_cal_agent_keys) == Permitted
 expect verdict(boss_session, ReadCounters) == Permitted
 
 # ann's session: a member, nothing.
@@ -351,22 +493,32 @@ expect verdict(ann_session, retire_ann_agent) == Refused(NotAdmin)
 expect verdict(ann_session, retire_boss) == Refused(NotAdmin)
 expect verdict(ann_session, revoke_ann_keys) == Refused(NotAdmin)
 expect verdict(ann_session, revoke_ann_sessions) == Refused(NotAdmin)
+expect verdict(ann_session, promote_ann) == Refused(NotAdmin)
+expect verdict(ann_session, retire_cal) == Refused(NotAdmin)
+expect verdict(ann_session, revoke_cal_agent_keys) == Refused(NotAdmin)
 expect verdict(ann_session, ReadCounters) == Refused(NotAdmin)
 
-# A session claiming boss's agent: agents never sign in.
-expect verdict(agent_session, ListAccounts) == Refused(SessionNotHuman)
-expect verdict(agent_session, retire_ann_agent) == Refused(SessionNotHuman)
-expect verdict(agent_session, retire_boss) == Refused(SessionNotHuman)
-expect verdict(agent_session, revoke_ann_keys) == Refused(SessionNotHuman)
-expect verdict(agent_session, revoke_ann_sessions) == Refused(SessionNotHuman)
-expect verdict(agent_session, ReadCounters) == Refused(SessionNotHuman)
+# boss's session, a day idle: nothing.
+expect verdict(boss_idle_session, ListAccounts) == Refused(SessionExpired)
+expect verdict(boss_idle_session, retire_ann_agent) == Refused(SessionExpired)
+expect verdict(boss_idle_session, retire_boss) == Refused(SessionExpired)
+expect verdict(boss_idle_session, revoke_ann_keys) == Refused(SessionExpired)
+expect verdict(boss_idle_session, revoke_ann_sessions) == Refused(SessionExpired)
+expect verdict(boss_idle_session, promote_ann) == Refused(SessionExpired)
+expect verdict(boss_idle_session, retire_cal) == Refused(SessionExpired)
+expect verdict(boss_idle_session, revoke_cal_agent_keys) == Refused(SessionExpired)
+expect verdict(boss_idle_session, ReadCounters) == Refused(SessionExpired)
 
-# boss_agent's admin key: as boss, but never retiring boss.
+# boss_agent's admin key: as boss on members' accounts, but never retiring
+# boss, never another admin or their agent, and never a role.
 expect verdict(boss_agent_key, ListAccounts) == Permitted
 expect verdict(boss_agent_key, retire_ann_agent) == Permitted
 expect verdict(boss_agent_key, retire_boss) == Refused(RetiresOwnAuthority)
 expect verdict(boss_agent_key, revoke_ann_keys) == Permitted
 expect verdict(boss_agent_key, revoke_ann_sessions) == Permitted
+expect verdict(boss_agent_key, promote_ann) == Refused(NeedsSession)
+expect verdict(boss_agent_key, retire_cal) == Refused(NeedsSession)
+expect verdict(boss_agent_key, revoke_cal_agent_keys) == Refused(NeedsSession)
 expect verdict(boss_agent_key, ReadCounters) == Permitted
 
 # ann_agent's key, without admin: nothing.
@@ -375,6 +527,9 @@ expect verdict(ann_agent_key, retire_ann_agent) == Refused(KeyRefused(OutOfScope
 expect verdict(ann_agent_key, retire_boss) == Refused(KeyRefused(OutOfScope))
 expect verdict(ann_agent_key, revoke_ann_keys) == Refused(KeyRefused(OutOfScope))
 expect verdict(ann_agent_key, revoke_ann_sessions) == Refused(KeyRefused(OutOfScope))
+expect verdict(ann_agent_key, promote_ann) == Refused(KeyRefused(OutOfScope))
+expect verdict(ann_agent_key, retire_cal) == Refused(KeyRefused(OutOfScope))
+expect verdict(ann_agent_key, revoke_cal_agent_keys) == Refused(KeyRefused(OutOfScope))
 expect verdict(ann_agent_key, ReadCounters) == Refused(KeyRefused(OutOfScope))
 
 # boss's own admin key, revoked: nothing.
@@ -383,20 +538,39 @@ expect verdict(boss_revoked_key, retire_ann_agent) == Refused(KeyRefused(Revoked
 expect verdict(boss_revoked_key, retire_boss) == Refused(KeyRefused(Revoked))
 expect verdict(boss_revoked_key, revoke_ann_keys) == Refused(KeyRefused(Revoked))
 expect verdict(boss_revoked_key, revoke_ann_sessions) == Refused(KeyRefused(Revoked))
+expect verdict(boss_revoked_key, promote_ann) == Refused(KeyRefused(Revoked))
+expect verdict(boss_revoked_key, retire_cal) == Refused(KeyRefused(Revoked))
+expect verdict(boss_revoked_key, revoke_cal_agent_keys) == Refused(KeyRefused(Revoked))
 expect verdict(boss_revoked_key, ReadCounters) == Refused(KeyRefused(Revoked))
 
 demoted : List(Principal)
 demoted = [boss_demoted, boss_agent]
 
 # The edges: an agent retiring itself; boss's session once boss is
-# retired or demoted; boss_agent's key once boss is demoted, and once
-# expired (it expires at 1000).
+# retired or demoted, and a week on; boss_agent's key once boss is
+# demoted, and once expired (it expires at 1000).
 expect verdict(boss_agent_key, Retire(Principal.id(boss_agent))) == Refused(RetiresOwnAuthority)
 expect lists(boss_session, { among: [ann], now: 500 }) == Refused(NoSuchPrincipal)
 expect lists(boss_session, { among: [boss_demoted], now: 500 }) == Refused(NotAdmin)
+expect lists(boss_session, { among: accounts, now: 31536000 }) == Refused(SessionExpired)
 expect lists(boss_agent_key, { among: demoted, now: 500 }) == Refused(KeyRefused(BeyondPrincipal))
 expect lists(boss_agent_key, { among: accounts, now: 999 }) == Permitted
 expect lists(boss_agent_key, { among: accounts, now: 1000 }) == Refused(KeyRefused(Expired))
+
+# Setting a role: never one's own, by session or key; a demotion of another
+# admin by session is allowed, and by a key is not.
+expect verdict(boss_session, SetRole({ human: gid(1), role: Member })) == Refused(SetsOwnRole)
+expect verdict(boss_agent_key, SetRole({ human: gid(1), role: Member })) == Refused(SetsOwnRole)
+expect verdict(boss_session, SetRole({ human: gid(4), role: Member })) == Permitted
+expect verdict(boss_agent_key, SetRole({ human: gid(4), role: Member })) == Refused(NeedsSession)
+
+# A key on an admin's own side touches no admin either: boss's sessions,
+# boss's agent's keys (itself included) take boss's session.
+expect verdict(boss_agent_key, RevokeSessions(gid(1))) == Refused(NeedsSession)
+expect verdict(boss_agent_key, RevokeKeys(Principal.id(boss_agent))) == Refused(NeedsSession)
+expect verdict(boss_agent_key, RevokeSessions(gid(4))) == Refused(NeedsSession)
+# A target no account holds touches no admin.
+expect verdict(boss_agent_key, RevokeKeys(Principal.Id.Agent(aid(9)))) == Permitted
 
 # ── THE AUDIT RECORD
 # Who, by which session or key, what, when: for a permitted action and a
@@ -424,3 +598,14 @@ expect refused_audit.via == Session(sid(2))
 expect refused_audit.action == retire_boss
 expect refused_audit.at == 77
 expect refused_audit.verdict == Refused(NotAdmin)
+
+role_audit : Admin.Audit
+role_audit = audited(
+	{ credential: boss_session, action: promote_ann },
+	{ among: accounts, now: 600 },
+)
+
+expect role_audit.who == Principal.id(boss)
+expect role_audit.via == Session(sid(1))
+expect role_audit.action == promote_ann
+expect role_audit.verdict == Permitted

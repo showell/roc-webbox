@@ -40,7 +40,7 @@ AccountCodec := [].{
 							("kind", spell_kind(Human)),
 							("github", h.id.to_u64().to_str()),
 							("login", login.to_str()),
-							("role", spell_role(h.role)),
+							("role", AccountCodec.role_text(h.role)),
 							("name", name),
 						],
 					),
@@ -94,6 +94,28 @@ AccountCodec := [].{
 			Agent(a) => "${spell_kind(Agent)}:${a.to_u64().to_str()}"
 			Bot(b) => "${spell_kind(Bot)}:${b.to_u64().to_str()}"
 		}
+
+	## **A HUMAN'S ROLE AS EVERY STORED RECORD SPELLS IT**: `admin` or
+	## `member`; what an account's `role` and an audit entry's `set-role`
+	## hold.
+	role_text : Principal.Role -> Str
+	role_text = |role|
+		match role {
+			Admin => "admin"
+			Member => "member"
+		}
+
+	## The role the value `role_text` spelled, in the field `name`.
+	role_from : List(U8), Str -> Try(Principal.Role, Stored.Problem)
+	role_from = |value, name|
+		Stored.word(
+			value,
+			{
+				name,
+				all: all_roles,
+				spell: AccountCodec.role_text,
+			},
+		)
 
 	## The principal's id the value `id_text` spelled, in the field `name`.
 	id_from : List(U8), Str -> Try(Principal.Id, Stored.Problem)
@@ -149,13 +171,6 @@ spell_kind = |kind|
 all_roles : List(Principal.Role)
 all_roles = [Admin, Member]
 
-spell_role : Principal.Role -> Str
-spell_role = |role|
-	match role {
-		Admin => "admin"
-		Member => "member"
-	}
-
 ## The name as stored: it passes the rule and is already trimmed.
 name_text : Str -> Try(Str, AccountCodec.EncodeProblem)
 name_text = |name|
@@ -207,14 +222,7 @@ decode_human = |after_kind| {
 	login = github.rest.field("login")?
 	login_text = GitHubLogin.from_utf8(login.value).map_err(|_| BadValue("login"))?
 	role = login.rest.field("role")?
-	role_word = Stored.word(
-		role.value,
-		{
-			name: "role",
-			all: all_roles,
-			spell: spell_role,
-		},
-	)?
+	role_word = AccountCodec.role_from(role.value, "role")?
 	name = stored_name(role.rest)?
 	Ok(
 		Principal.Human({

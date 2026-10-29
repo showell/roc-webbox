@@ -132,6 +132,16 @@ Principal := [
 			Err(_) => Err(NoSuchPrincipal)
 		}
 
+	## The human with GitHub id `human` has an account among `accounts`:
+	## what an agent's key, and a human's election, stand on.
+	has_account : List(Principal), Principal.GitHubId -> Bool
+	has_account = |accounts, human|
+		match find(accounts, Principal.Id.Human(human)) {
+			Ok(Human(_)) => Bool.True
+			Ok(Agent(_)) | Ok(Bot(_)) => crash "Principal.has_account: a human's id finds a human"
+			Err(NoSuchPrincipal) => Bool.False
+		}
+
 	## **THE AUTHORITY A PRINCIPAL ACTS WITH, AS THE ACCOUNTS SAY NOW**
 	## (design section 9): `Admin` for an admin human, and for an agent
 	## whose owner is an admin human among `accounts`; `Member` for anyone
@@ -247,6 +257,11 @@ found = |wanted| Principal.find(accounts, wanted).map_ok(Principal.id)
 expect found(Principal.Id.Agent(aid(3))) == Ok(Principal.id(ann_agent))
 expect found(Principal.Id.Bot(aid(3))) == Err(NoSuchPrincipal)
 expect found(Principal.Id.Human(gid(9))) == Err(NoSuchPrincipal)
+
+# has_account: a human's id alone; an agent's id never names a human.
+expect Principal.has_account(accounts, gid(2))
+expect !Principal.has_account(accounts, gid(9))
+expect !Principal.has_account([boss_agent], gid(1))
 
 # authority: one row a principal.
 expect Principal.authority(boss, accounts) == Admin
