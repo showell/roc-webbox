@@ -428,7 +428,7 @@ viewer_among = |who, among|
 			owner = Principal.answers_to(p)
 			key = ApiKey.Key.issue(
 				{ granter: Session(session_of(owner.to_u64(), 1)), acts_as: Principal.id(p), scope: { read: On(Everywhere), post: On(Everywhere), admin: Off }, accounts, now: 10 },
-				{ key: kid(1), expires: Never },
+				{ key: kid(1), expires: 1000 },
 			)
 			match key {
 				Err(_) => NoViewer
@@ -1513,7 +1513,7 @@ own_key_viewer = |who| {
 	p = principal(who)
 	key = ApiKey.Key.issue(
 		{ granter: Session(session_of(Principal.answers_to(p).to_u64(), 1)), acts_as: Principal.id(p), scope: { read: On(Everywhere), post: On(Everywhere), admin: Off }, accounts, now: 10 },
-		{ key: kid(2), expires: Never },
+		{ key: kid(2), expires: 1000 },
 	)
 	match key {
 		Ok(k) =>

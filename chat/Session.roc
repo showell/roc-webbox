@@ -93,14 +93,16 @@ Session :: SessionCodec.Fields.{
 	## **IS THE SESSION LIVE AT `now`?** The absolute limit is said first:
 	## a session past both is `AbsoluteExpired`. A creation or a last
 	## sight after `now` is `AbsoluteExpired` too: nothing is trusted from
-	## a time not yet reached. Each limit is live before it and over from
+	## a time not yet reached, nor at a `now` outside Stored's range (no
+	## touch ever writes a time the store cannot hold). Each limit is live
+	## before it and over from
 	## it on. Reckoned in I128, so no `now` a host hands in, and no stored
 	## time, overflows a difference.
 	liveness : Session, I64 -> Session.Liveness
 	liveness = |Session.(s), now| {
 		age = now.to_i128() - s.created.to_i128()
 		unseen = now.to_i128() - s.last_seen.to_i128()
-		if age < 0 or unseen < 0 or age >= Session.absolute_secs.to_i128() {
+		if now < 0 or now > Stored.max_time or age < 0 or unseen < 0 or age >= Session.absolute_secs.to_i128() {
 			AbsoluteExpired
 		} else if unseen >= Session.idle_secs.to_i128() {
 			IdleExpired
@@ -402,6 +404,15 @@ ann_same_second : Principal
 ann_same_second = Principal.Human({ id: gid(1), login: "ann", name: "Ann", role: Admin, generation: gen(3) })
 
 expect admitted(s1, { among: [ann_same_second, bea], now: 100000 }) == Refused(NoSuchAccount)
+
+# ATTACK (round three's second, its class): a session live near the end of
+# the store's range, asked at a time past it, is never touched with a time
+# the store cannot write.
+late : Session
+late = seen_line({ n: 1, who: 1, at: Stored.max_time - 10, seen: Stored.max_time - 10 })
+
+expect admitted(late, { among: [ann], now: Stored.max_time + 100 }) == Refused(AbsoluteExpired)
+expect admitted(late, { among: [ann], now: Stored.max_time }) == Admitted({ principal: Principal.id(ann), write: Unchanged })
 
 # ── STARTING: only from the flow's admission
 ## GitHub id `who`, known at `now` through the flow's steps.

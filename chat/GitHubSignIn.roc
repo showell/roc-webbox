@@ -109,6 +109,10 @@ GitHubSignIn := [].{
 
 		## The generation counter is spent.
 		GenerationsExhausted,
+
+		## The clock is outside Stored's range (before 1970 or past 9999):
+		## no session or account it would stamp could be stored.
+		ClockOutOfRange,
 	]
 
 	## **THE SETTINGS THE FLOW IS GIVEN**: the GitHub id of the first admin,
@@ -311,28 +315,32 @@ GitHubSignIn := [].{
 				now,
 			},
 		|
-			match known_account({
-				github: k.github,
-				login: k.login,
-				accounts,
-				settings,
-				session,
-				now,
-			}) {
-				Barred => Refused(Barred)
-				Duplicate => Refused(DuplicateAccount)
-				Known(signed_in) => SignedIn(signed_in)
-				Unknown =>
-					NeedsName(
-						GitHubSignIn.Pending.(
-							{
-								nonce: k.nonce,
-								github: k.github,
-								login: k.login,
-								issued_at: now,
-							},
-						),
-					)
+			if now < 0 or now > Stored.max_time {
+				Refused(ClockOutOfRange)
+			} else {
+				match known_account({
+					github: k.github,
+					login: k.login,
+					accounts,
+					settings,
+					session,
+					now,
+				}) {
+					Barred => Refused(Barred)
+					Duplicate => Refused(DuplicateAccount)
+					Known(signed_in) => SignedIn(signed_in)
+					Unknown =>
+						NeedsName(
+							GitHubSignIn.Pending.(
+								{
+									nonce: k.nonce,
+									github: k.github,
+									login: k.login,
+									issued_at: now,
+								},
+							),
+						)
+				}
 			}
 	}
 
@@ -453,7 +461,9 @@ GitHubSignIn := [].{
 				now,
 			},
 		|
-			if List.contains(settings.barred, p.github) {
+			if now < 0 or now > Stored.max_time {
+				Refused(ClockOutOfRange)
+			} else if List.contains(settings.barred, p.github) {
 				Refused(Barred)
 			} else {
 				match (pending_use, Principal.find(accounts, Principal.Id.Human(p.github))) {
@@ -1044,6 +1054,17 @@ expect
 	})
 		== Refused(Barred)
 
+# ATTACK (round three's second, its class): a sign-in whole under a clock
+# before 1970 admits no session, whose times the store could not write.
+expect
+	match resolved_by({ ..usual, accounts: [boss, ann], minted_at: -100, back_at: -50 }) {
+		Ok(SignedIn(s)) => s.admission.facts().now >= 0
+		_ => Bool.True
+	}
+
+expect said({ ..usual, accounts: [boss, ann], minted_at: -100, back_at: -50 }) == Refused(ClockOutOfRange)
+expect said({ ..usual, minted_at: Stored.max_time - 10, back_at: Stored.max_time + 1 }) == Refused(ClockOutOfRange)
+
 # ── THE NAME STEP
 ## The pending sign-up the usual run leaves, its facts as the host would
 ## hand them back.
@@ -1211,6 +1232,9 @@ expect name_said({ ..usual_naming, settings: { ..usual_settings, next_generation
 expect name_said({ ..usual_naming, settings: { ..usual_settings, next_generation: gen(5) } }) == Refused(StaleGeneration)
 expect name_said({ ..usual_naming, settings: { ..usual_settings, next_generation: gen(7) } }) == Created({ account: { ..ann_as("Ann B.", Member), generation: gen(7) }, admission: { ..named_at(1120), generation: gen(7) }, cleared: [], next: gen(8) })
 expect name_said({ ..usual_naming, settings: { ..usual_settings, next_generation: gen(18446744073709551615) } }) == Refused(GenerationsExhausted)
+
+# Under a clock before 1970, no account is made.
+expect name_said({ ..usual_naming, pending: Signed({ ..usual_pending, issued_at: -100 }), at: -50 }) == Refused(ClockOutOfRange)
 
 # Barred meanwhile.
 expect name_said({

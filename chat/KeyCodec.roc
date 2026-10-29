@@ -2,7 +2,7 @@
 ## one line in Stored's format, the key's hash and never the key, which its
 ## owner is shown once:
 ##
-##     key v1 id=4 acts=agent:7 generation=4 human-generation=3 hash=<64 hex digits> created=1761600000 expires=never state=active read=only:3,9 post=off admin=off
+##     key v1 id=4 acts=agent:7 generation=4 human-generation=3 hash=<64 hex digits> created=1761600000 expires=1793136000 state=active read=only:3,9 post=off admin=off
 ##
 ## `generation` is the generation of its principal's account, and
 ## `human-generation` that of the human it answers to (itself, or the owner
@@ -45,28 +45,39 @@ KeyCodec := [].{
 		admin : [Off, On],
 	}
 
-	## When a key stops: never, or at a unix time (seconds), from which on
-	## it is expired.
-	Expiry : [Never, At(I64)]
+	## **THE LONGEST A KEY LIVES**, in seconds: 365 days. Every key expires
+	## (no grant makes one that never does), so a key lost or forgotten is
+	## good for a year at most, and its expiry always fits the store.
+	max_lifetime_secs : I64
+	max_lifetime_secs = 31536000
+
+	## **AN EXPIRY A GRANT MAKES**: after the key's creation, at most
+	## `max_lifetime_secs` after it, and no later than Stored's last time.
+	## The one home of the rule: the grant asks it (ApiKey.Key.issue), and
+	## the decoder refuses a line that breaks it, as no grant wrote one.
+	is_fitting_expiry : { created : I64, expires : I64 } -> Bool
+	is_fitting_expiry = |{ created, expires }|
+		expires > created and expires.to_i128() - created.to_i128() <= KeyCodec.max_lifetime_secs.to_i128() and expires <= Stored.max_time
 
 	## **A KEY'S WHOLE RECORD**: its id, the principal it acts as, the
-	## generations it is bound to, its scope, expiry and revocation.
+	## generations it is bound to, its scope, when it was made and when it
+	## expires (unix seconds: expired from then on), and its revocation.
 	Record(id) : {
 		id : Principal.KeyId,
 		acts_as : Principal.Id,
 		generation : Principal.Generation,
 		human_generation : Principal.Generation,
 		scope : KeyCodec.Scope(id),
-		expires : KeyCodec.Expiry,
+		created : I64,
+		expires : I64,
 		revocation : [Active, Revoked],
 	}
 
-	## **WHAT THE STORE KEEPS OF A KEY**: its record, the hash the host
-	## looks it up by, and when it was made.
+	## **WHAT THE STORE KEEPS OF A KEY**: its record, and the hash the host
+	## looks it up by.
 	Entry(id) : {
 		record : KeyCodec.Record(id),
 		hash : Stored.SecretHash,
-		created : I64,
 	}
 
 	## **A LINE THAT DECODED**: its entry, every field checked. Opaque:
@@ -80,7 +91,7 @@ KeyCodec := [].{
 
 	## The entry's line, an id spelled by `number`, in the one spelling.
 	encode : KeyCodec.Entry(id), (id -> U64) -> List(U8)
-	encode = |{ record, hash, created }, number|
+	encode = |{ record, hash }, number|
 		Stored.line(
 			"key",
 			[
@@ -89,8 +100,8 @@ KeyCodec := [].{
 				("generation", record.generation.to_u64().to_str()),
 				("human-generation", record.human_generation.to_u64().to_str()),
 				("hash", Stored.hash_text(hash)),
-				("created", Stored.time_text(created)),
-				("expires", expiry_text(record.expires)),
+				("created", Stored.time_text(record.created)),
+				("expires", Stored.time_text(record.expires)),
 				("state", spell_revocation(record.revocation)),
 				("read", reach_text(record.scope.read, number)),
 				("post", reach_text(record.scope.post, number)),
@@ -115,7 +126,7 @@ KeyCodec := [].{
 		created_field = hash_field.rest.field("created")?
 		created = Stored.time(created_field.value, "created")?
 		expires_field = created_field.rest.field("expires")?
-		expires = expiry_from(expires_field.value)?
+		expires = Stored.time(expires_field.value, "expires")?
 		state_field = expires_field.rest.field("state")?
 		revocation = Stored.word(
 			state_field.value,
@@ -142,6 +153,7 @@ KeyCodec := [].{
 		match (acts_as, admin) {
 			(Bot(_), On) => Err(AdminForBot)
 			(Human(_), _) if generation != human_generation => Err(BadValue("human-generation"))
+			_ if !KeyCodec.is_fitting_expiry({ created, expires }) => Err(BadValue("expires"))
 			_ =>
 				Ok(
 					KeyCodec.Line.(
@@ -156,11 +168,11 @@ KeyCodec := [].{
 									post,
 									admin,
 								},
+								created,
 								expires,
 								revocation,
 							},
 							hash,
-							created,
 						},
 					),
 				)
@@ -191,31 +203,6 @@ spell_switch = |s|
 		Off => "off"
 		On => "on"
 	}
-
-## `never`, or `at:` and the time.
-expiry_text : KeyCodec.Expiry -> Str
-expiry_text = |expiry|
-	match expiry {
-		Never => never_word
-		At(t) => "${at_prefix}${Stored.time_text(t)}"
-	}
-
-expiry_from : List(U8) -> Try(KeyCodec.Expiry, Stored.Problem)
-expiry_from = |value|
-	if value == Str.to_utf8(never_word) {
-		Ok(Never)
-	} else {
-		match Bytes.strip_prefix(value, Str.to_utf8(at_prefix)) {
-			Ok(time) => Stored.time(time, "expires").map_ok(|t| At(t))
-			Err(NoMatch) => Err(UnknownWord("expires"))
-		}
-	}
-
-never_word : Str
-never_word = "never"
-
-at_prefix : Str
-at_prefix = "at:"
 
 ReachPart(id) : [Off, On(KeyCodec.Reach(id))]
 
@@ -337,12 +324,11 @@ hash_of = |b|
 		Err(NotAHash) => crash "hash_of: 32 bytes are a hash"
 	}
 
-## An entry for the record `r`, made at 1761600000.
+## An entry for the record `r`.
 entry : KeyCodec.Record(Conv) -> KeyCodec.Entry(Conv)
 entry = |r| {
 	record: r,
 	hash: hash_of(0x5a),
-	created: 1761600000,
 }
 
 ## A commit bot's key: agent 7, reading #3 and #9 alone.
@@ -357,7 +343,8 @@ narrow = {
 		post: Off,
 		admin: Off,
 	},
-	expires: Never,
+	created: 1761600000,
+	expires: 1793136000,
 	revocation: Active,
 }
 
@@ -374,7 +361,8 @@ broad = {
 		post: On(Only([conv(1)])),
 		admin: On,
 	},
-	expires: At(1761609999),
+	created: 1761600000,
+	expires: 1761609999,
 	revocation: Revoked,
 }
 
@@ -393,12 +381,12 @@ hex5a : Str
 hex5a = Str.repeat("5a", 32)
 
 narrow_line : Str
-narrow_line = "key v1 id=4 acts=agent:7 generation=4 human-generation=3 hash=${hex5a} created=1761600000 expires=never state=active read=only:3,9 post=off admin=off\n"
+narrow_line = "key v1 id=4 acts=agent:7 generation=4 human-generation=3 hash=${hex5a} created=1761600000 expires=1793136000 state=active read=only:3,9 post=off admin=off\n"
 
 expect encoded(entry(narrow)) == Str.to_utf8(narrow_line)
 expect
 	encoded(entry(broad))
-		== Str.to_utf8("key v1 id=18446744073709551615 acts=human:583231 generation=18446744073709551615 human-generation=18446744073709551615 hash=${hex5a} created=1761600000 expires=at:1761609999 state=revoked read=everywhere post=only:1 admin=on\n")
+		== Str.to_utf8("key v1 id=18446744073709551615 acts=human:583231 generation=18446744073709551615 human-generation=18446744073709551615 hash=${hex5a} created=1761600000 expires=1761609999 state=revoked read=everywhere post=only:1 admin=on\n")
 
 # Round trips: every part at each of its values.
 expect is_kept(entry(narrow))
@@ -407,8 +395,9 @@ expect
 	List.all(
 		[
 			{ ..narrow, acts_as: Principal.Id.Bot(aid(2)) },
-			{ ..narrow, expires: At(0) },
-			{ ..narrow, expires: At(Stored.max_time) },
+			{ ..narrow, created: 0, expires: 1 },
+			{ ..narrow, created: Stored.max_time - 1, expires: Stored.max_time },
+			{ ..narrow, expires: 1761600001 },
 			{
 				..narrow,
 				scope: {
@@ -480,37 +469,20 @@ expect decoded(
 		to: "created=now",
 	}),
 ) == Err(BadNumber("created"))
-expect decoded(
-	narrow_but({
-		from: "expires=never",
-		to: "expires=Never",
-	}),
-) == Err(UnknownWord("expires"))
-expect decoded(narrow_but({ from: "expires=never", to: "expires=" })) == Err(UnknownWord("expires"))
-expect decoded(
-	narrow_but({
-		from: "expires=never",
-		to: "expires=at:",
-	}),
-) == Err(BadNumber("expires"))
-expect decoded(
-	narrow_but({
-		from: "expires=never",
-		to: "expires=at:017",
-	}),
-) == Err(BadNumber("expires"))
-expect decoded(
-	narrow_but({
-		from: "expires=never",
-		to: "expires=at:-1",
-	}),
-) == Err(BadNumber("expires"))
-expect decoded(
-	narrow_but({
-		from: "expires=never",
-		to: "expires=1761609999",
-	}),
-) == Err(UnknownWord("expires"))
+expect decoded(narrow_but({ from: "expires=1793136000", to: "expires=never" })) == Err(BadNumber("expires"))
+expect decoded(narrow_but({ from: "expires=1793136000", to: "expires=" })) == Err(BadNumber("expires"))
+expect decoded(narrow_but({ from: "expires=1793136000", to: "expires=at:1793136000" })) == Err(BadNumber("expires"))
+expect decoded(narrow_but({ from: "expires=1793136000", to: "expires=01793136000" })) == Err(BadNumber("expires"))
+expect decoded(narrow_but({ from: "expires=1793136000", to: "expires=-1" })) == Err(BadNumber("expires"))
+# **AN EXPIRY NO GRANT MAKES** (round three's second): at or before the
+# key's creation, or more than a year after it.
+expect decoded(narrow_but({ from: "expires=1793136000", to: "expires=1761600000" })) == Err(BadValue("expires"))
+expect decoded(narrow_but({ from: "expires=1793136000", to: "expires=1761599999" })) == Err(BadValue("expires"))
+expect decoded(narrow_but({ from: "expires=1793136000", to: "expires=1793136001" })) == Err(BadValue("expires"))
+expect decoded(narrow_but({ from: "expires=1793136000", to: "expires=1761600001" })) == Ok({})
+expect KeyCodec.is_fitting_expiry({ created: Stored.max_time - 1, expires: Stored.max_time })
+expect !KeyCodec.is_fitting_expiry({ created: Stored.max_time, expires: Stored.max_time + 1 })
+expect !KeyCodec.is_fitting_expiry({ created: 0, expires: -1 })
 expect decoded(narrow_but({ from: "state=active", to: "state=live" })) == Err(UnknownWord("state"))
 expect decoded(narrow_but({ from: "state=active ", to: "" })) == Err(MissingField("state"))
 expect decoded(narrow_but({ from: "read=only:3,9", to: "read=all" })) == Err(UnknownWord("read"))

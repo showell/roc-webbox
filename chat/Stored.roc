@@ -236,7 +236,11 @@ Stored := [].{
 	}
 
 	## A time as `time` reads it. A time outside `time`'s range is not one
-	## the clock gave: a crash, as a control byte in a value is.
+	## the clock gave: a crash, as a control byte in a value is. No caller
+	## reaches it: every time written is refused upstream when out of range
+	## (a sign-in's and an admin decision's clock, ClockOutOfRange; a key's
+	## creation and expiry, ApiKey's grant and KeyCodec.is_fitting_expiry; a
+	## session's touch, Session.liveness), or was read back by `time`.
 	time_text : I64 -> Str
 	time_text = |t|
 		if t < 0 or t > Stored.max_time {

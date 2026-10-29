@@ -279,7 +279,7 @@ session_of = |who, g|
 	}
 
 ## A key acting as `acts_as`, granted by its owner's session among `among`.
-key_for : List(Principal), { acts_as : Principal, scope : ApiKey.Scope(id), expires : ApiKey.Expiry } -> ApiKey.Key(r, id)
+key_for : List(Principal), { acts_as : Principal, scope : ApiKey.Scope(id), expires : I64 } -> ApiKey.Key(r, id)
 key_for = |among, { acts_as, scope, expires }| {
 	owner = Principal.answers_to(acts_as)
 	g =
@@ -309,7 +309,7 @@ viewer_of = |among, who|
 ## The viewer a key acting as `acts_as`, of `scope`, mints among `among`.
 key_viewer : List(Principal), { acts_as : Principal, scope : ApiKey.Scope(id) } -> Access.Viewer(id)
 key_viewer = |among, { acts_as, scope }|
-	match Access.Viewer.from_key(key_for(among, { acts_as, scope, expires: Never }), { accounts: among, now: 10 }) {
+	match Access.Viewer.from_key(key_for(among, { acts_as, scope, expires: 1000 }), { accounts: among, now: 10 }) {
 		Ok(viewer) => viewer
 		Err(_) => crash "key_viewer: a test's key stands"
 	}
@@ -424,7 +424,7 @@ expect !Access.can_post(viewer_of(holder_again, person(1, { role: Member, g: 2 }
 # session, a session whose account is gone, and a revoked key mint none.
 expect Access.Viewer.from_session(session_of(1, 1), { accounts: files, now: Session.idle_secs }).map_ok(|_| {}) == Err(SessionExpired)
 expect Access.Viewer.from_session(session_of(1, 1), { accounts: holder_again, now: 10 }).map_ok(|_| {}) == Err(NoSuchAccount)
-expect Access.Viewer.from_key(key_for(files, { acts_as: other_agent, scope: everywhere({}), expires: Never }).revoke(), { accounts: files, now: 10 }).map_ok(|v| v.who()) == Err(Revoked)
+expect Access.Viewer.from_key(key_for(files, { acts_as: other_agent, scope: everywhere({}), expires: 1000 }).revoke(), { accounts: files, now: 10 }).map_ok(|v| v.who()) == Err(Revoked)
 expect Access.Viewer.from_session(session_of(1, 1), { accounts: files, now: 10 }).map_ok(|r| r.viewer.who()) == Ok(Session(bound(files, holder)))
 expect Access.Viewer.signed_out({}).who() == SignedOut
 # A key's viewer reads only where its scope reaches, its principal's sight
@@ -499,7 +499,7 @@ posts_a : ApiKey.Scope(U64)
 posts_a = { read: Off, post: On(Only([1])), admin: Off }
 
 ## A key acting as `acts_as`, granted among the cast.
-issued : { acts_as : Principal, scope : ApiKey.Scope(U64) }, ApiKey.Expiry -> ApiKey.Key(Held, U64)
+issued : { acts_as : Principal, scope : ApiKey.Scope(U64) }, I64 -> ApiKey.Key(Held, U64)
 issued = |{ acts_as, scope }, expires| key_for(accounts, { acts_as, scope, expires })
 
 Answer : [Permitted, Refused(ApiKey.Refusal)]
@@ -518,7 +518,7 @@ decided_among = |key, action, among| Access.decide(key, { accounts: among, actio
 
 # ann_agent, reading and posting everywhere: as far as ann_agent may.
 ann_agent_plain : ApiKey.Key(Held, U64)
-ann_agent_plain = issued({ acts_as: ann_agent, scope: plain }, Never)
+ann_agent_plain = issued({ acts_as: ann_agent, scope: plain }, 1000)
 
 expect decided(ann_agent_plain, Read(res_a)) == Permitted
 expect decided(ann_agent_plain, Read(res_b)) == Refused(BeyondPrincipal)
@@ -529,7 +529,7 @@ expect decided(ann_agent_plain, Post(res_c)) == Refused(BeyondPrincipal)
 
 # ann_agent, reading `c` alone.
 ann_agent_reads_c : ApiKey.Key(Held, U64)
-ann_agent_reads_c = issued({ acts_as: ann_agent, scope: reads_c }, Never)
+ann_agent_reads_c = issued({ acts_as: ann_agent, scope: reads_c }, 1000)
 
 expect decided(ann_agent_reads_c, Read(res_a)) == Refused(OutOfScope)
 expect decided(ann_agent_reads_c, Read(res_b)) == Refused(OutOfScope)
@@ -540,7 +540,7 @@ expect decided(ann_agent_reads_c, Post(res_c)) == Refused(OutOfScope)
 
 # ann_agent, posting to `a` alone.
 ann_agent_posts_a : ApiKey.Key(Held, U64)
-ann_agent_posts_a = issued({ acts_as: ann_agent, scope: posts_a }, Never)
+ann_agent_posts_a = issued({ acts_as: ann_agent, scope: posts_a }, 1000)
 
 expect decided(ann_agent_posts_a, Read(res_a)) == Refused(OutOfScope)
 expect decided(ann_agent_posts_a, Read(res_b)) == Refused(OutOfScope)
@@ -551,20 +551,20 @@ expect decided(ann_agent_posts_a, Post(res_c)) == Refused(OutOfScope)
 
 # ann herself, reading and posting everywhere: her agent's `a` too, as its
 # owner (decision 1).
-ann_forever : ApiKey.Key(Held, U64)
-ann_forever = issued({ acts_as: ann, scope: plain }, Never)
+ann_year : ApiKey.Key(Held, U64)
+ann_year = issued({ acts_as: ann, scope: plain }, 1000)
 
-expect decided(ann_forever, Read(res_a)) == Permitted
-expect decided(ann_forever, Read(res_b)) == Refused(BeyondPrincipal)
-expect decided(ann_forever, Read(res_c)) == Permitted
-expect decided(ann_forever, Post(res_a)) == Permitted
-expect decided(ann_forever, Post(res_b)) == Refused(BeyondPrincipal)
-expect decided(ann_forever, Post(res_c)) == Refused(BeyondPrincipal)
+expect decided(ann_year, Read(res_a)) == Permitted
+expect decided(ann_year, Read(res_b)) == Refused(BeyondPrincipal)
+expect decided(ann_year, Read(res_c)) == Permitted
+expect decided(ann_year, Post(res_a)) == Permitted
+expect decided(ann_year, Post(res_b)) == Refused(BeyondPrincipal)
+expect decided(ann_year, Post(res_c)) == Refused(BeyondPrincipal)
 
 # boss, everything and admin: an admin still reads no private resource it
 # is not in (`a`).
 boss_all : ApiKey.Key(Held, U64)
-boss_all = issued({ acts_as: boss, scope: with_admin }, Never)
+boss_all = issued({ acts_as: boss, scope: with_admin }, 1000)
 
 expect decided(boss_all, Read(res_a)) == Refused(BeyondPrincipal)
 expect decided(boss_all, Read(res_b)) == Permitted
@@ -575,7 +575,7 @@ expect decided(boss_all, Post(res_c)) == Permitted
 
 # boss_agent, admin alone: reads and posts nothing.
 boss_agent_admin : ApiKey.Key(Held, U64)
-boss_agent_admin = issued({ acts_as: boss_agent, scope: admin_only }, Never)
+boss_agent_admin = issued({ acts_as: boss_agent, scope: admin_only }, 1000)
 
 expect decided(boss_agent_admin, Read(res_a)) == Refused(OutOfScope)
 expect decided(boss_agent_admin, Read(res_b)) == Refused(OutOfScope)
@@ -587,7 +587,7 @@ expect decided(boss_agent_admin, Post(res_c)) == Refused(OutOfScope)
 # boss_bot, reading everywhere: a bot reads a public resource only when it
 # is in it (decision 3).
 boss_bot_plain : ApiKey.Key(Held, U64)
-boss_bot_plain = issued({ acts_as: boss_bot, scope: plain }, Never)
+boss_bot_plain = issued({ acts_as: boss_bot, scope: plain }, 1000)
 
 expect decided(boss_bot_plain, Read(res_c)) == Refused(BeyondPrincipal)
 
@@ -600,7 +600,7 @@ expect decided_among(ann_agent_plain, Post(res_a), without_ann) == Refused(NoSuc
 # Liveness comes first: revoked and expired keys do nothing, even what
 # their scope and principal would allow; an expiry at 100 is live at 99.
 boss_until_100 : ApiKey.Key(Held, U64)
-boss_until_100 = issued({ acts_as: boss, scope: with_admin }, At(100))
+boss_until_100 = issued({ acts_as: boss, scope: with_admin }, 100)
 
 expect decided(boss_all.revoke(), Read(res_c)) == Refused(Revoked)
 expect decided_at(boss_until_100, { action: Read(res_c), now: 99 }) == Permitted
@@ -610,7 +610,7 @@ expect decided_at(boss_until_100, { action: Read(res_c), now: 100 }) == Refused(
 # a narrowed line loads narrowed.
 from_store : ApiKey.Record(U64) -> ApiKey.Key(Held, U64)
 from_store = |record|
-	match KeyCodec.decode(KeyCodec.encode({ record, hash: token(9), created: 50 }, |n| n), |n| Ok(n)) {
+	match KeyCodec.decode(KeyCodec.encode({ record, hash: token(9) }, |n| n), |n| Ok(n)) {
 		Ok(line) => ApiKey.Key.load(line)
 		Err(_) => crash "from_store: a test's key line decodes"
 	}
@@ -622,10 +622,10 @@ token = |b|
 		Err(NotAHash) => crash "token: 32 bytes are a hash"
 	}
 
-expect decided(from_store({ ..ann_forever.record(), scope: with_admin }), Read(res_b)) == Refused(BeyondPrincipal)
+expect decided(from_store({ ..ann_year.record(), scope: with_admin }), Read(res_b)) == Refused(BeyondPrincipal)
 expect decided(from_store(ann_agent_reads_c.record()), Read(res_a)) == Refused(OutOfScope)
 
 # A forged copy of ann's agent beside it, or ann made again: the old key
 # stands no more.
 expect decided_among(ann_agent_plain, Read(res_a), List.prepend(accounts, owned(Agent, { id: 3, owner: 1 }))) == Refused(NoSuchPrincipal)
-expect decided_among(ann_forever, Read(res_c), [boss, person(2, { role: Member, g: 2 }), boss_agent, boss_bot, ann_agent]) == Refused(NoSuchPrincipal)
+expect decided_among(ann_year, Read(res_c), [boss, person(2, { role: Member, g: 2 }), boss_agent, boss_bot, ann_agent]) == Refused(NoSuchPrincipal)

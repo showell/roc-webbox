@@ -20,18 +20,17 @@ ConvKey := [].{
 	## A chat key: over conversations, by their ids.
 	Key : ApiKey.Key(ConvAccess.Conv, ConvAccess.ConvId)
 
-	## **WHAT THE STORE KEEPS OF A CHAT KEY**: the key, the hash the host
-	## looks it up by, and when it was made.
+	## **WHAT THE STORE KEEPS OF A CHAT KEY**: the key (when it was made is
+	## its record's), and the hash the host looks it up by.
 	Entry : {
 		key : ConvKey.Key,
 		hash : Stored.SecretHash,
-		created : I64,
 	}
 
 	## A new chat key, from a grant (ApiKey.may_grant: a live session's,
 	## for its own principals).
 	issue : ApiKey.Grant(ConvAccess.Conv, ConvAccess.ConvId),
-	{ key : Principal.KeyId, expires : ApiKey.Expiry } -> Try(
+	{ key : Principal.KeyId, expires : I64 } -> Try(
 		ConvKey.Key,
 		[Refused(ApiKey.GrantRefusal)],
 	)
@@ -39,15 +38,15 @@ ConvKey := [].{
 
 	## The entry's line (KeyCodec), a conversation by its number.
 	encode : ConvKey.Entry -> List(U8)
-	encode = |{ key, hash, created }|
-		KeyCodec.encode({ record: key.record(), hash, created }, ConvAccess.ConvId.to_u64)
+	encode = |{ key, hash }|
+		KeyCodec.encode({ record: key.record(), hash }, ConvAccess.ConvId.to_u64)
 
 	## The chat key a stored line holds: the one way back from the store.
 	decode : List(U8) -> Try(ConvKey.Entry, Stored.Problem)
 	decode = |raw| {
 		line = KeyCodec.decode(raw, ConvAccess.ConvId.from_u64)?
 		entry = line.entry()
-		Ok({ key: ApiKey.Key.load(line), hash: entry.hash, created: entry.created })
+		Ok({ key: ApiKey.Key.load(line), hash: entry.hash })
 	}
 
 	## **MAY THIS CHAT KEY READ OR POST IN THIS CONVERSATION, NOW?**
@@ -191,7 +190,7 @@ key_by : U64, { acts_as : Principal, among : List(Principal) } -> Try(ConvKey.Ke
 key_by = |who, { acts_as, among }|
 	ConvKey.issue(
 		{ granter: session_of(who, 1), acts_as: Principal.id(acts_as), scope: everything, accounts: among, now: 10 },
-		{ key: kid(who), expires: Never },
+		{ key: kid(who), expires: 1000 },
 	)
 
 ## The key, which the test's grant allows.
@@ -252,7 +251,7 @@ expect verdict(bot_key, { accounts, action: Read(conv(6, [bea, bea_bot])) }) == 
 # ── THE STORE: a chat key's line round-trips, and decides the same.
 stored : ConvKey.Key -> ConvKey.Key
 stored = |key|
-	match ConvKey.decode(ConvKey.encode({ key, hash: token(7), created: 10 })) {
+	match ConvKey.decode(ConvKey.encode({ key, hash: token(7) })) {
 		Ok(entry) => entry.key
 		Err(_) => crash "stored: a chat key's line decodes"
 	}
@@ -260,7 +259,7 @@ stored = |key|
 expect stored(bot_key).record() == bot_key.record()
 expect verdict(stored(bot_key), { accounts, action: Read(bot_public) }) == Permitted
 expect
-	ConvKey.decode(Str.to_utf8("key v1 id=4 acts=agent:2 generation=1 human-generation=1 hash=${Str.repeat("5a", 32)} created=1 expires=never state=active read=only:9,3,3 post=off admin=off\n")).map_ok(|_| {})
+	ConvKey.decode(Str.to_utf8("key v1 id=4 acts=agent:2 generation=1 human-generation=1 hash=${Str.repeat("5a", 32)} created=1 expires=2 state=active read=only:9,3,3 post=off admin=off\n")).map_ok(|_| {})
 		== Err(BadValue("read"))
 
 # ── ATTACK (round three's first), BY KEY: Ann retired and made again
@@ -281,7 +280,7 @@ new_ann_key =
 	granted(
 		ConvKey.issue(
 			{ granter: session_of(1, 2), acts_as: Principal.id(ann_again), scope: everything, accounts: again, now: 10 },
-			{ key: kid(9), expires: Never },
+			{ key: kid(9), expires: 1000 },
 		),
 	)
 

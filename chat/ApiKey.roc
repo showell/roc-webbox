@@ -42,10 +42,6 @@ ApiKey := [].{
 	## own: an admin-only key reads nothing.
 	Scope(id) : KeyCodec.Scope(id)
 
-	## When a key stops: never, or at a unix time (seconds), from which on
-	## it is expired.
-	Expiry : KeyCodec.Expiry
-
 	## **WHO ASKS FOR A KEY**: the credential the request came with. Only a
 	## browser's session mints keys; a key asking is refused, whatever its
 	## scope, so a stolen key cannot mint a wider one.
@@ -82,6 +78,15 @@ ApiKey := [].{
 
 		## Admin only for an admin human, or an agent an admin owns.
 		AdminBeyondPrincipal,
+
+		## The clock is outside Stored's range (before 1970 or past 9999):
+		## nothing it would write could be stored.
+		ClockOutOfRange,
+
+		## The expiry is not after now, or more than a year after it
+		## (KeyCodec.max_lifetime_secs), or past Stored's last time: every key
+		## expires, within a year, at a time the store can write.
+		BadExpiry,
 	]
 
 	## What a key's use is decided against: the accounts, and the time,
@@ -129,16 +134,17 @@ ApiKey := [].{
 	## back, and `revoke` the one transition.
 	Key(r, id) :: KeyCodec.Record(id).{
 
-		## A new key, active, when the grant is grantable; bound to the
-		## account of the human it answers to.
+		## A new key, active, made `now`, when the grant is grantable and the
+		## expiry fits (KeyCodec.is_fitting_expiry); bound to its accounts.
 		issue : ApiKey.Grant(r, id),
-		{ key : Principal.KeyId, expires : ApiKey.Expiry } -> Try(
+		{ key : Principal.KeyId, expires : I64 } -> Try(
 			ApiKey.Key(r, id),
 			[Refused(ApiKey.GrantRefusal)],
 		)
 		issue = |grant, { key, expires }|
 			match granted(grant) {
 				Err(why) => Err(Refused(why))
+				Ok(_) if !KeyCodec.is_fitting_expiry({ created: grant.now, expires }) => Err(Refused(BadExpiry))
 				Ok(bound) =>
 					Ok(
 						ApiKey.Key.(
@@ -148,6 +154,7 @@ ApiKey := [].{
 								generation: bound.generation,
 								human_generation: bound.human,
 								scope: grant.scope,
+								created: grant.now,
 								expires: expires,
 								revocation: Active,
 							},
@@ -189,10 +196,9 @@ ApiKey := [].{
 			Revoked,
 		]
 		liveness = |ApiKey.Key.(k), now|
-			match (k.revocation, k.expires) {
-				(Revoked, _) => Revoked
-				(Active, Never) => Live
-				(Active, At(t)) => if now < t Live else Expired
+			match k.revocation {
+				Revoked => Revoked
+				Active => if now < k.expires Live else Expired
 			}
 
 		## **MAY THIS KEY PERFORM AN ADMIN ACTION, NOW?** The key live and
@@ -237,6 +243,7 @@ granted = |
 	},
 |
 	match granter {
+		_ if now < 0 or now > Stored.max_time => Err(ClockOutOfRange)
 		Key(_) => Err(GrantedByKey)
 		Session(session) =>
 			match session.admit({ accounts, now }) {
@@ -386,6 +393,15 @@ accounts = [
 signed_in : { n : U64, who : U64 } -> ApiKey.Granter(Held, U64)
 signed_in = |{ n, who }|
 	stored_session("session v1 id=${n.to_str()} human=${who.to_str()} generation=1 token=${Str.repeat("07", 32)} created=0 seen=0\n")
+
+## Human `who`'s session, signed in at `at` to the account of generation
+## 1, from its stored line.
+session_at : U64, I64 -> Session
+session_at = |who, at|
+	match SessionCodec.decode(Str.to_utf8("session v1 id=3 human=${who.to_str()} generation=1 token=${Str.repeat("07", 32)} created=${at.to_str()} seen=${at.to_str()}\n")) {
+		Ok(line) => Session.load(line)
+		Err(_) => crash "session_at: a test's session line decodes"
+	}
 
 ## The session a stored line holds, as a granter.
 stored_session : Str -> ApiKey.Granter(Held, U64)
@@ -586,7 +602,7 @@ expect
 
 # ── keys for the tables
 ## A key acting as `acts_as`, granted by its owner's session.
-issued : { acts_as : Principal, scope : ApiKey.Scope(U64) }, ApiKey.Expiry -> ApiKey.Key(Held, U64)
+issued : { acts_as : Principal, scope : ApiKey.Scope(U64) }, I64 -> ApiKey.Key(Held, U64)
 issued = |{ acts_as, scope }, expires|
 	match ApiKey.Key.issue(
 		{
@@ -602,19 +618,20 @@ issued = |{ acts_as, scope }, expires|
 		Err(Refused(_)) => crash "issued: a test's key is grantable"
 	}
 
-ann_forever : ApiKey.Key(Held, U64)
-ann_forever = issued({ acts_as: ann, scope: plain }, Never)
+ann_year : ApiKey.Key(Held, U64)
+ann_year = issued({ acts_as: ann, scope: plain }, 1050)
 
 ann_until_100 : ApiKey.Key(Held, U64)
-ann_until_100 = issued({ acts_as: ann, scope: plain }, At(100))
+ann_until_100 = issued({ acts_as: ann, scope: plain }, 100)
 
 # ── THE LIVENESS TABLE
-expect ann_forever.liveness(0) == Live
-expect ann_forever.liveness(9999999999) == Live
+expect ann_year.liveness(0) == Live
+expect ann_year.liveness(1049) == Live
+expect ann_year.liveness(1050) == Expired
 expect ann_until_100.liveness(99) == Live
 expect ann_until_100.liveness(100) == Expired
 expect ann_until_100.liveness(101) == Expired
-expect ann_forever.revoke().liveness(0) == Revoked
+expect ann_year.revoke().liveness(0) == Revoked
 expect ann_until_100.revoke().liveness(99) == Revoked
 expect ann_until_100.revoke().liveness(101) == Revoked
 
@@ -628,9 +645,40 @@ expect
 			accounts,
 			now: 50,
 		},
-		{ key: kid(7), expires: Never },
+		{ key: kid(7), expires: 1050 },
 	).map_ok(ApiKey.Key.id)
 		== Err(Refused(AdminBeyondPrincipal))
+
+# ATTACK (round three's second): an expiry the store cannot write, one
+# already past, or one past a year, is never granted; nor is any key under
+# a clock outside the store's range.
+expect
+	List.all(
+		[-1, Stored.max_time + 1, 50, 10, 50 + KeyCodec.max_lifetime_secs + 1],
+		|expires|
+			ApiKey.Key.issue(
+				{ granter: by_ann, acts_as: Principal.id(ann), scope: plain, accounts, now: 50 },
+				{ key: kid(7), expires },
+			).map_ok(ApiKey.Key.id)
+				== Err(Refused(BadExpiry)),
+	)
+expect
+	ApiKey.Key.issue(
+		{ granter: by_ann, acts_as: Principal.id(ann), scope: plain, accounts, now: -1 },
+		{ key: kid(7), expires: 10 },
+	).map_ok(ApiKey.Key.id)
+		== Err(Refused(ClockOutOfRange))
+# The edges a grant does make: a year to the second, and the store's last
+# time, both of which encode.
+expect
+	List.all(
+		[{ now: 50, expires: 50 + KeyCodec.max_lifetime_secs }, { now: Stored.max_time - 1, expires: Stored.max_time }],
+		|{ now, expires }|
+			match ApiKey.Key.issue({ granter: Session(session_at(2, now)), acts_as: Principal.id(ann), scope: plain, accounts, now }, { key: kid(7), expires }) {
+				Ok(k) => KeyCodec.decode(KeyCodec.encode({ record: k.record(), hash: token(9) }, |n| n), |n| Ok(n)).is_ok()
+				Err(_) => Bool.False
+			},
+	)
 
 # ── STANDING, AND ADMINISTERING
 ## **A TEST'S RESOURCE TYPE**: a key is bound to its layer's resource (a
@@ -657,22 +705,22 @@ administers_among : ApiKey.Key(Held, U64), List(Principal) -> Answer
 administers_among = |key, among| key.administers({ accounts: among, now: 50 })
 
 ann_agent_plain : ApiKey.Key(Held, U64)
-ann_agent_plain = issued({ acts_as: ann_agent, scope: plain }, Never)
+ann_agent_plain = issued({ acts_as: ann_agent, scope: plain }, 1050)
 
 ann_agent_reads_c : ApiKey.Key(Held, U64)
-ann_agent_reads_c = issued({ acts_as: ann_agent, scope: reads_c }, Never)
+ann_agent_reads_c = issued({ acts_as: ann_agent, scope: reads_c }, 1050)
 
 ann_agent_posts_a : ApiKey.Key(Held, U64)
-ann_agent_posts_a = issued({ acts_as: ann_agent, scope: posts_a }, Never)
+ann_agent_posts_a = issued({ acts_as: ann_agent, scope: posts_a }, 1050)
 
 boss_all : ApiKey.Key(Held, U64)
-boss_all = issued({ acts_as: boss, scope: with_admin }, Never)
+boss_all = issued({ acts_as: boss, scope: with_admin }, 1050)
 
 boss_agent_admin : ApiKey.Key(Held, U64)
-boss_agent_admin = issued({ acts_as: boss_agent, scope: admin_only }, Never)
+boss_agent_admin = issued({ acts_as: boss_agent, scope: admin_only }, 1050)
 
 boss_until_100 : ApiKey.Key(Held, U64)
-boss_until_100 = issued({ acts_as: boss, scope: with_admin }, At(100))
+boss_until_100 = issued({ acts_as: boss, scope: with_admin }, 100)
 
 # A standing key stands as its principal.
 expect standing_among(ann_agent_plain, accounts) == Ok(Principal.id(ann_agent))
@@ -682,7 +730,7 @@ expect standing_among(boss_all, accounts) == Ok(Principal.id(boss))
 expect administered(ann_agent_plain) == Refused(OutOfScope)
 expect administered(ann_agent_reads_c) == Refused(OutOfScope)
 expect administered(ann_agent_posts_a) == Refused(OutOfScope)
-expect administered(ann_forever) == Refused(OutOfScope)
+expect administered(ann_year) == Refused(OutOfScope)
 expect administered(boss_all) == Permitted
 expect administered(boss_agent_admin) == Permitted
 
@@ -708,7 +756,7 @@ expect boss_until_100.revoke().administers({ accounts, now: 99 }) == Refused(Rev
 ## (a key's only way in but a grant).
 from_store : ApiKey.Record(U64) -> ApiKey.Key(Held, U64)
 from_store = |record|
-	match KeyCodec.decode(KeyCodec.encode({ record, hash: token(9), created: 50 }, |n| n), |n| Ok(n)) {
+	match KeyCodec.decode(KeyCodec.encode({ record, hash: token(9) }, |n| n), |n| Ok(n)) {
 		Ok(line) => ApiKey.Key.load(line)
 		Err(_) => crash "from_store: a test's key line decodes"
 	}
@@ -716,7 +764,7 @@ from_store = |record|
 # A key's record loads back to the same record, revoked or not.
 expect List.all(
 	[
-		ann_forever,
+		ann_year,
 		boss_until_100,
 		ann_agent_reads_c,
 		boss_agent_admin.revoke(),
@@ -727,7 +775,7 @@ expect List.all(
 # A line claiming admin for ann, a member, loads as it says, and the key
 # still administers nothing: its use is held to ann.
 ann_claims_admin : ApiKey.Key(Held, U64)
-ann_claims_admin = from_store({ ..ann_forever.record(), scope: with_admin })
+ann_claims_admin = from_store({ ..ann_year.record(), scope: with_admin })
 
 expect ann_claims_admin.record().scope == with_admin
 expect administered(ann_claims_admin) == Refused(BeyondPrincipal)
@@ -775,7 +823,7 @@ ann_again = Principal.Human({ id: gid(2), login: "h2", name: "H2", role: Member,
 again : List(Principal)
 again = [boss, ann_again, boss_agent, boss_bot, ann_agent]
 
-expect standing_at(ann_forever, { among: again, now: 70 }) == Err(Refused(NoSuchPrincipal))
+expect standing_at(ann_year, { among: again, now: 70 }) == Err(Refused(NoSuchPrincipal))
 expect standing_at(ann_agent_plain, { among: again, now: 70 }) == Err(Refused(NoSuchPrincipal))
 expect grant_at(by_ann, { acts_as: ann, scope: plain, among: again, now: 70 }) == Refused(NoSuchGranter)
 new_ann_session : ApiKey.Granter(Held, U64)
@@ -784,7 +832,7 @@ new_ann_session = stored_session("session v1 id=8 human=2 generation=2 token=${S
 expect
 	ApiKey.Key.issue(
 		{ granter: new_ann_session, acts_as: Principal.id(ann_again), scope: plain, accounts: again, now: 70 },
-		{ key: kid(8), expires: Never },
+		{ key: kid(8), expires: 1050 },
 	).map_ok(|k| k.record().human_generation)
 		== Ok(gen(2))
 

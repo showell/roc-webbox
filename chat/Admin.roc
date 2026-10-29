@@ -30,6 +30,7 @@ import GitHubSignIn
 import Principal
 import Session
 import SessionCodec
+import Stored
 
 Admin := [].{
 
@@ -160,14 +161,15 @@ Admin := [].{
 	## a role, nor lift a bar. Then its plan must be one: its target an
 	## account (a bar, for Unbar), never the bootstrap admin demoted or
 	## retired, and some admin left once the plan is applied to the
-	## snapshot.
+	## snapshot. A clock outside Stored's range decides nothing
+	## (`ClockOutOfRange`): its audit could not be stored.
 	decide : {
 		credential : Admin.Credential(r, id),
 		action : Admin.Action,
 		accounts : List(Principal),
 		settings : GitHubSignIn.Settings,
 		now : I64,
-	} -> Admin.Decision
+	} -> Try(Admin.Decision, [ClockOutOfRange])
 	decide = |
 		{
 			credential,
@@ -176,47 +178,12 @@ Admin := [].{
 			settings,
 			now,
 		},
-	| {
-		(who, via) =
-			match credential {
-				Session(s) => (Principal.Id.Human(s.human()), Session(s.id()))
-				Key(key) => (key.acts_as(), Key(key.id()))
-			}
-		answer =
-			match authorized({
-				credential,
-				accounts,
-				now,
-			}) {
-				Refused(why) => Err(why)
-				Admitted(actor) =>
-					if is_own_authority(action, actor) {
-						Err(RetiresOwnAuthority)
-					} else if is_own_role(action, actor) {
-						Err(SetsOwnRole)
-					} else {
-						match credential {
-							Key(_) if is_session_only(action, accounts) => Err(NeedsSession)
-							_ => planned(action, { accounts, settings })
-						}
-					}
-			}
-		(verdict, plan) =
-			match answer {
-				Ok(steps) => (Permitted, steps)
-				Err(why) => (Refused(why), [])
-			}
-		{
-			audit: {
-				who,
-				via,
-				action,
-				at: now,
-				verdict,
-			},
-			plan,
+	|
+		if now < 0 or now > Stored.max_time {
+			Err(ClockOutOfRange)
+		} else {
+			Ok(decided_now({ credential, action, accounts, settings, now }))
 		}
-	}
 
 	## **THE ACCOUNTS A PLAN LEAVES**: `accounts` with its removals and role
 	## changes made; the host's other steps (bars, votes, keys, sessions)
@@ -241,6 +208,58 @@ Admin := [].{
 					Bar(_) | Unbar(_) | WithdrawVotes(_) | RevokeKeysOf(_) | RevokeSessionsOf(_) => now
 				},
 		)
+}
+
+## **THE DECISION, ITS CLOCK IN RANGE**: the audit of the attempt and its
+## plan.
+decided_now : {
+	credential : Admin.Credential(r, id),
+	action : Admin.Action,
+	accounts : List(Principal),
+	settings : GitHubSignIn.Settings,
+	now : I64,
+} -> Admin.Decision
+decided_now = |{ credential, action, accounts, settings, now }| {
+	(who, via) =
+		match credential {
+			Session(s) => (Principal.Id.Human(s.human()), Session(s.id()))
+			Key(key) => (key.acts_as(), Key(key.id()))
+		}
+	answer =
+		match authorized({
+			credential,
+			accounts,
+			now,
+		}) {
+			Refused(why) => Err(why)
+			Admitted(actor) =>
+				if is_own_authority(action, actor) {
+					Err(RetiresOwnAuthority)
+				} else if is_own_role(action, actor) {
+					Err(SetsOwnRole)
+				} else {
+					match credential {
+						Key(_) if is_session_only(action, accounts) => Err(NeedsSession)
+						_ => planned(action, { accounts, settings })
+					}
+				}
+		}
+	(verdict, plan) =
+		match answer {
+			Ok(steps) => (Permitted, steps)
+			Err(why) => (Refused(why), [])
+		}
+
+	{
+		audit: {
+			who,
+			via,
+			action,
+			at: now,
+			verdict,
+		},
+		plan,
+	}
 }
 
 ## The actor, when the credential carries admin authority now.
@@ -569,7 +588,7 @@ key_for = |acts_as, { scope, key }|
 			accounts,
 			now: 100000,
 		},
-		{ key: kid(key), expires: At(101000) },
+		{ key: kid(key), expires: 101000 },
 	) {
 		Ok(made) => made
 		Err(Refused(_)) => crash "key_for: a test's key is grantable"
@@ -634,14 +653,21 @@ Attempt : { credential : Admin.Credential(Str, Str), action : Admin.Action }
 When : { among : List(Principal), now : I64 }
 
 decided : Attempt, When -> Admin.Decision
-decided = |{ credential, action }, { among, now }|
-	Admin.decide({
-		credential,
-		action,
-		accounts: among,
-		settings,
-		now,
-	})
+decided = |{ credential, action }, { among, now }| decision({ credential, action, accounts: among, settings, now })
+
+## A decision whose clock a test keeps in range.
+decision : {
+	credential : Admin.Credential(Str, Str),
+	action : Admin.Action,
+	accounts : List(Principal),
+	settings : GitHubSignIn.Settings,
+	now : I64,
+} -> Admin.Decision
+decision = |request|
+	match Admin.decide(request) {
+		Ok(d) => d
+		Err(ClockOutOfRange) => crash "decision: a test's clock is in range"
+	}
 
 audited : Attempt, When -> Admin.Audit
 audited = |attempt, at| decided(attempt, at).audit
@@ -840,7 +866,7 @@ two_admins = [boss, cal]
 
 unbootstrapped : Attempt -> Verdict
 unbootstrapped = |{ credential, action }|
-	Admin.decide({
+	decision({
 		credential,
 		action,
 		accounts: two_admins,
@@ -853,7 +879,7 @@ expect unbootstrapped({ credential: cal_session, action: retire_boss }) == Permi
 
 after_boss_retired_cal : List(Principal)
 after_boss_retired_cal = Admin.applied(
-	Admin.decide({ credential: boss_session, action: retire_cal, accounts: two_admins, settings: { first_admin: Unnamed, barred: [], next_generation: gen(9) }, now: 100500 }).plan,
+	decision({ credential: boss_session, action: retire_cal, accounts: two_admins, settings: { first_admin: Unnamed, barred: [], next_generation: gen(9) }, now: 100500 }).plan,
 	two_admins,
 )
 
@@ -922,6 +948,15 @@ cal_agent_forged = List.prepend(accounts, agent({ id: 5, owner: 2 }))
 
 expect verdict_among(boss_agent_key, revoke_cal_agent_keys, cal_agent_forged) == Refused(NeedsSession)
 expect verdict_among(boss_session, Retire(Principal.id(cal_agent)), cal_agent_forged) == Refused(NoSuchTarget)
+
+# ATTACK (round three's second, its class): an attempt under a clock past
+# the store's range makes no audit the store cannot write.
+expect
+	List.all(
+		[Stored.max_time + 1, -1],
+		|now| Admin.decide({ credential: boss_session, action: ListAccounts, accounts, settings, now }).map_ok(|d| d.audit.at) == Err(ClockOutOfRange),
+	)
+expect Admin.decide({ credential: boss_session, action: ListAccounts, accounts, settings, now: 100500 }).map_ok(|d| d.audit.at) == Ok(100500)
 
 # ── THE AUDIT RECORD
 # Who, by which session or key, what, when: for a permitted action and a
