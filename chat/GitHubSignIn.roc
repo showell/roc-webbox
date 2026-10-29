@@ -102,14 +102,24 @@ GitHubSignIn := [].{
 		## More than one account holds the GitHub id: no copy is signed in
 		## to, and none is made beside them.
 		DuplicateAccount,
+
+		## The settings' next generation is not above every account's: the
+		## counter went back, and a generation might be given twice.
+		StaleGeneration,
+
+		## The generation counter is spent.
+		GenerationsExhausted,
 	]
 
 	## **THE SETTINGS THE FLOW IS GIVEN**: the GitHub id of the first admin,
-	## if any is named; and the GitHub ids barred from signing up again
-	## (their accounts retired).
+	## if any is named; the GitHub ids barred from signing up again (their
+	## accounts retired); and the generation counter, the generation the next
+	## account made is given (Principal.Generation), which the host stores
+	## back advanced each time an account is made.
 	Settings : {
 		first_admin : [Unnamed, Named(Principal.GitHubId)],
 		barred : List(Principal.GitHubId),
+		next_generation : Principal.Generation,
 	}
 
 	## **A NEW SESSION'S FACTS**, the host's: its public number, and the
@@ -131,11 +141,11 @@ GitHubSignIn := [].{
 
 	## **ADMITTED**: the flow's end, the one value Session.start takes. Only
 	## this module makes one, at `resolve` or `name`, once every step before
-	## held: the human, the account's `created` the session is bound to, the
-	## host's facts of the new session, and the time.
+	## held: the human, the account's generation the session is bound to,
+	## the host's facts of the new session, and the time.
 	Admission :: {
 		human : Principal.GitHubId,
-		account_created : I64,
+		generation : Principal.Generation,
 		session : GitHubSignIn.NewSession,
 		now : I64,
 	}.{
@@ -143,7 +153,7 @@ GitHubSignIn := [].{
 		## What the admission holds, for Session.start.
 		facts : GitHubSignIn.Admission -> {
 			human : Principal.GitHubId,
-			account_created : I64,
+			generation : Principal.Generation,
 			session : GitHubSignIn.NewSession,
 			now : I64,
 		}
@@ -408,8 +418,10 @@ GitHubSignIn := [].{
 		## sign-up named before (its nonce spent) is refused; an id with an
 		## account now (made meanwhile, in a second tab, or by this very
 		## pending sign-up before) is refused, and signs in through /login;
-		## a name the rule refuses is said, to ask again; otherwise the
-		## account is made, created `now`, admin only as the first admin.
+		## a name the rule refuses is said, to ask again; a generation
+		## counter that went back or is spent is refused; otherwise the
+		## account is made, of the settings' next generation (`next` is the
+		## counter for the host to store), admin only as the first admin.
 		name : GitHubSignIn.Pending,
 		{
 			name : List(U8),
@@ -424,6 +436,7 @@ GitHubSignIn := [].{
 					account : Principal,
 					admission : GitHubSignIn.Admission,
 					cleared : List(Principal),
+					next : Principal.Generation,
 				},
 			),
 			NameRefused(DisplayName.Problem),
@@ -448,9 +461,10 @@ GitHubSignIn := [].{
 					(FirstUse, Ok(_)) => Refused(AccountExists)
 					(FirstUse, Err(Duplicated)) => Refused(DuplicateAccount)
 					(FirstUse, Err(NoSuchPrincipal)) =>
-						match DisplayName.from_utf8(name) {
-							Err(problem) => NameRefused(problem)
-							Ok(chosen) =>
+						match (DisplayName.from_utf8(name), fresh_generation(accounts, settings)) {
+							(Err(problem), _) => NameRefused(problem)
+							(Ok(_), Err(why)) => Refused(why)
+							(Ok(chosen), Ok({ this, next })) =>
 								Created({
 									account: Principal.Human({
 										id: p.github,
@@ -461,17 +475,18 @@ GitHubSignIn := [].{
 											accounts,
 											settings,
 										}),
-										created: now,
+										generation: this,
 									}),
 									admission: GitHubSignIn.Admission.(
 										{
 											human: p.github,
-											account_created: now,
+											generation: this,
 											session,
 											now,
 										},
 									),
 									cleared: displaced(accounts, { github: p.github, login: p.login }),
+									next,
 								})
 						}
 				}
@@ -534,7 +549,7 @@ known_account = |
 					admission: GitHubSignIn.Admission.(
 						{
 							human: github,
-							account_created: h.created,
+							generation: h.generation,
 							session,
 							now,
 						},
@@ -563,6 +578,26 @@ displaced = |accounts, { github, login }| {
 				Agent(_) | Bot(_) => []
 			},
 	)
+}
+
+## **A NEW ACCOUNT'S GENERATION**: the settings' next, when it is above
+## every account's (a counter that went back might give one twice); and
+## the counter after it, for the host to store.
+fresh_generation : List(Principal),
+GitHubSignIn.Settings -> Try(
+	{ this : Principal.Generation, next : Principal.Generation },
+	[StaleGeneration, GenerationsExhausted],
+)
+fresh_generation = |accounts, settings| {
+	this = settings.next_generation
+	if List.any(accounts, |a| Principal.generation(a).to_u64() >= this.to_u64()) {
+		Err(StaleGeneration)
+	} else {
+		match this.next() {
+			Ok(next) => Ok({ this, next })
+			Err(Exhausted) => Err(GenerationsExhausted)
+		}
+	}
 }
 
 ## The role a new human's account is made with: admin for the first admin
@@ -609,6 +644,13 @@ aid = |n|
 		Err(NotAnId) => crash "aid: a test's agent id is not 0"
 	}
 
+gen : U64 -> Principal.Generation
+gen = |n|
+	match Principal.Generation.from_u64(n) {
+		Ok(g) => g
+		Err(NotAnId) => crash "gen: a test's generation is not 0"
+	}
+
 sid : U64 -> Principal.SessionId
 sid = |n|
 	match Principal.SessionId.from_u64(n) {
@@ -643,7 +685,7 @@ human = |
 	login,
 	name,
 	role,
-	created: 500,
+	generation: gen(5),
 })
 
 # The cast: Boss (GitHub id 1), the admin; Ann (2), a member; Ann's agent,
@@ -673,6 +715,7 @@ ann_agent = Principal.Agent({
 	id: aid(1),
 	owner: gid(2),
 	name: "Ann's agent",
+	generation: gen(6),
 })
 
 ## This browser's nonce, 16 bytes; another browser's.
@@ -687,7 +730,7 @@ new_session = { id: sid(5), token_hash: token(0x42) }
 
 ## Open sign-up, Boss the first admin, GitHub id 66 barred.
 usual_settings : GitHubSignIn.Settings
-usual_settings = { first_admin: Named(gid(1)), barred: [gid(66)] }
+usual_settings = { first_admin: Named(gid(1)), barred: [gid(66)], next_generation: gen(10) }
 
 # ── STARTED
 expect GitHubSignIn.Started.start({
@@ -784,13 +827,13 @@ Seen : {
 	login : Str,
 	name : Str,
 	role : Principal.Role,
-	created : I64,
+	generation : Principal.Generation,
 }
 
 ## What an admission holds, comparably.
 Facts_ : {
 	human : Principal.GitHubId,
-	account_created : I64,
+	generation : Principal.Generation,
 	session : GitHubSignIn.NewSession,
 	now : I64,
 }
@@ -841,7 +884,7 @@ said = |f|
 session_for : U64 -> Facts_
 session_for = |n| {
 	human: gid(n),
-	account_created: 500,
+	generation: gen(5),
 	session: new_session,
 	now: 1060,
 }
@@ -1046,7 +1089,7 @@ usual_naming = {
 
 ## What naming says, comparably.
 NameSaid : [
-	Created({ account : Seen, admission : Facts_, cleared : List(Seen) }),
+	Created({ account : Seen, admission : Facts_, cleared : List(Seen), next : Principal.Generation }),
 	NameRefused(DisplayName.Problem),
 	Refused(GitHubSignIn.Refusal),
 ]
@@ -1068,7 +1111,7 @@ name_said = |n|
 				session: new_session,
 				now: n.at,
 			}) {
-				Created(c) => Created({ account: seen(c.account), admission: c.admission.facts(), cleared: List.map(c.cleared, seen) })
+				Created(c) => Created({ account: seen(c.account), admission: c.admission.facts(), cleared: List.map(c.cleared, seen), next: c.next })
 				NameRefused(problem) => NameRefused(problem)
 				Refused(why) => Refused(why)
 			}
@@ -1078,7 +1121,7 @@ name_said = |n|
 named_at : I64 -> Facts_
 named_at = |at| {
 	human: gid(2),
-	account_created: at,
+	generation: gen(10),
 	session: new_session,
 	now: at,
 }
@@ -1090,12 +1133,12 @@ ann_as = |name, role| {
 	login: "ann",
 	name,
 	role,
-	created: 1120,
+	generation: gen(10),
 }
 
 ## Made at 1120 as `account`, no login cleared.
 made : Seen -> NameSaid
-made = |account| Created({ account, admission: named_at(1120), cleared: [] })
+made = |account| Created({ account, admission: named_at(1120), cleared: [], next: gen(11) })
 
 # Made: a member, named as given, trimmed, created now; its admission.
 expect name_said(usual_naming) == made(ann_as("Ann B.", Member))
@@ -1161,6 +1204,14 @@ expect
 expect name_said({ ..usual_naming, accounts: [ann, ann] }) == Refused(DuplicateAccount)
 expect said({ ..usual, accounts: [human(2, { login: "ann", name: "Ann", role: Admin }), ann] }) == Refused(DuplicateAccount)
 
+# **THE GENERATION COUNTER** (round three's fifth): the new account takes
+# the settings' next generation, and `next` is the one after it; a counter
+# not above every account's (it went back), or a spent one, makes nothing.
+expect name_said({ ..usual_naming, settings: { ..usual_settings, next_generation: gen(6) } }) == Refused(StaleGeneration)
+expect name_said({ ..usual_naming, settings: { ..usual_settings, next_generation: gen(5) } }) == Refused(StaleGeneration)
+expect name_said({ ..usual_naming, settings: { ..usual_settings, next_generation: gen(7) } }) == Created({ account: { ..ann_as("Ann B.", Member), generation: gen(7) }, admission: { ..named_at(1120), generation: gen(7) }, cleared: [], next: gen(8) })
+expect name_said({ ..usual_naming, settings: { ..usual_settings, next_generation: gen(18446744073709551615) } }) == Refused(GenerationsExhausted)
+
 # Barred meanwhile.
 expect name_said({
 	..usual_naming,
@@ -1175,7 +1226,7 @@ expect name_said({ ..usual_naming, cookie: Sent(that_nonce) }) == Refused(Pendin
 expect name_said({ ..usual_naming, cookie: Unsent }) == Refused(PendingMismatched)
 expect
 	name_said({ ..usual_naming, at: 1659 })
-		== Created({ account: { ..ann_as("Ann B.", Member), created: 1659 }, admission: named_at(1659), cleared: [] })
+		== Created({ account: ann_as("Ann B.", Member), admission: named_at(1659), cleared: [], next: gen(11) })
 expect name_said({ ..usual_naming, at: 1660 }) == Refused(PendingExpired)
 expect name_said({ ..usual_naming, at: 1059 }) == Refused(PendingExpired)
 expect name_said({
@@ -1200,7 +1251,7 @@ old_bea = human(7, { login: "ANN", name: "Bea", role: Member })
 
 expect
 	name_said({ ..usual_naming, accounts: [boss, old_bea] })
-		== Created({ account: ann_as("Ann B.", Member), admission: named_at(1120), cleared: [{ ..seen(old_bea), login: "" }] })
+		== Created({ account: ann_as("Ann B.", Member), admission: named_at(1120), cleared: [{ ..seen(old_bea), login: "" }], next: gen(11) })
 expect
 	said({ ..usual, accounts: [boss, ann, old_bea] })
 		== SignedIn({

@@ -76,6 +76,13 @@ aid = |n|
 		Err(NotAnId) => crash "aid: a test's agent id is not 0"
 	}
 
+gen : U64 -> Principal.Generation
+gen = |n|
+	match Principal.Generation.from_u64(n) {
+		Ok(g) => g
+		Err(NotAnId) => crash "gen: a test's generation is not 0"
+	}
+
 kid : U64 -> Principal.KeyId
 kid = |n|
 	match Principal.KeyId.from_u64(n) {
@@ -98,10 +105,10 @@ token = |b|
 		Err(NotAHash) => crash "token: 32 bytes are a hash"
 	}
 
-## A test's human, its account made at 1.
+## A test's human, its account of generation 1.
 human : U64, { name : Str, role : Principal.Role } -> Principal
 human = |n, { name, role }|
-	Principal.Human({ id: gid(n), login: "h${n.to_str()}", name, role, created: 1 })
+	Principal.Human({ id: gid(n), login: "h${n.to_str()}", name, role, generation: gen(1) })
 
 # The cast: Ann and Bea, members; Boss, an admin; Bea owns BeaAgent,
 # DeeAgent and BeaBot.
@@ -115,25 +122,26 @@ boss : Principal
 boss = human(3, { name: "Boss", role: Admin })
 
 bea_agent : Principal
-bea_agent = Principal.Agent({ id: aid(2), name: "BeaAgent", owner: gid(2) })
+bea_agent = Principal.Agent({ id: aid(2), name: "BeaAgent", owner: gid(2), generation: gen(1) })
 
 dee_agent : Principal
-dee_agent = Principal.Agent({ id: aid(4), name: "DeeAgent", owner: gid(2) })
+dee_agent = Principal.Agent({ id: aid(4), name: "DeeAgent", owner: gid(2), generation: gen(1) })
 
 bea_bot : Principal
-bea_bot = Principal.Bot({ id: aid(5), name: "BeaBot", owner: gid(2) })
+bea_bot = Principal.Bot({ id: aid(5), name: "BeaBot", owner: gid(2), generation: gen(1) })
 
 accounts : List(Principal)
 accounts = [ann, bea, boss, bea_agent, dee_agent, bea_bot]
 
 ## A copy of BeaAgent claiming Ann as owner, FIRST in the accounts.
 forged : List(Principal)
-forged = List.prepend(accounts, Principal.Agent({ id: aid(2), name: "BeaAgent", owner: gid(1) }))
+forged = List.prepend(accounts, Principal.Agent({ id: aid(2), name: "BeaAgent", owner: gid(1), generation: gen(1) }))
 
-## Human `who`'s session, signed in at 0, from its stored line.
-session_of : U64 -> ApiKey.Granter(ConvAccess.Conv, ConvAccess.ConvId)
-session_of = |who|
-	match SessionCodec.decode(Str.to_utf8("session v1 id=${who.to_str()} human=${who.to_str()} account=1 token=${Str.repeat("01", 32)} created=0 seen=0\n")) {
+## Human `who`'s session to their account of generation `g`, signed in at
+## 0, from its stored line.
+session_of : U64, U64 -> ApiKey.Granter(ConvAccess.Conv, ConvAccess.ConvId)
+session_of = |who, g|
+	match SessionCodec.decode(Str.to_utf8("session v1 id=${who.to_str()} human=${who.to_str()} generation=${g.to_str()} token=${Str.repeat("01", 32)} created=0 seen=0\n")) {
 		Ok(line) => Session(Session.load(line))
 		Err(_) => crash "session_of: a test's session line decodes"
 	}
@@ -141,7 +149,7 @@ session_of = |who|
 ## A conversation among `who`, numbered `n`.
 conv : U64, List(Principal) -> ConvAccess.Conv
 conv = |n, who|
-	match ConvAccess.Conv.start({ id: cid(n), participants: List.map(who, Principal.id) }) {
+	match ConvAccess.Conv.start({ id: cid(n), participants: List.map(who, Principal.id), accounts }) {
 		Ok(c) => c
 		Err(_) => crash "conv: a test's conversation has participants"
 	}
@@ -173,7 +181,7 @@ everything = { read: On(Everywhere), post: On(Everywhere), admin: Off }
 key_by : U64, { acts_as : Principal, among : List(Principal) } -> Try(ConvKey.Key, [Refused(ApiKey.GrantRefusal)])
 key_by = |who, { acts_as, among }|
 	ConvKey.issue(
-		{ granter: session_of(who), acts_as: Principal.id(acts_as), scope: everything, accounts: among, now: 10 },
+		{ granter: session_of(who, 1), acts_as: Principal.id(acts_as), scope: everything, accounts: among, now: 10 },
 		{ key: kid(who), expires: Never },
 	)
 
@@ -239,5 +247,33 @@ stored = |key|
 expect stored(bot_key).record() == bot_key.record()
 expect verdict(stored(bot_key), { accounts, action: Read(bot_public) }) == Permitted
 expect
-	ConvKey.decode(Str.to_utf8("key v1 id=4 acts=agent:2 account=1 hash=${Str.repeat("5a", 32)} created=1 expires=never state=active read=only:9,3,3 post=off admin=off\n")).map_ok(|_| {})
+	ConvKey.decode(Str.to_utf8("key v1 id=4 acts=agent:2 generation=1 human-generation=1 hash=${Str.repeat("5a", 32)} created=1 expires=never state=active read=only:9,3,3 post=off admin=off\n")).map_ok(|_| {})
 		== Err(BadValue("read"))
+
+# ── ATTACK (round three's first), BY KEY: Ann retired and made again
+# (generation 2); a key from her new account's session reads and posts
+# nothing of the old account's private conversations, the human-only DM
+# with Bea included.
+ann_again : Principal
+ann_again = Principal.Human({ id: gid(1), login: "h1", name: "Ann", role: Member, generation: gen(2) })
+
+again : List(Principal)
+again = [ann_again, bea, boss, bea_agent, dee_agent, bea_bot]
+
+old_dm : ConvAccess.Conv
+old_dm = conv(8, [ann, bea])
+
+new_ann_key : ConvKey.Key
+new_ann_key =
+	granted(
+		ConvKey.issue(
+			{ granter: session_of(1, 2), acts_as: Principal.id(ann_again), scope: everything, accounts: again, now: 10 },
+			{ key: kid(9), expires: Never },
+		),
+	)
+
+expect verdict(new_ann_key, { accounts: again, action: Read(old_dm) }) == Refused(BeyondPrincipal)
+expect verdict(new_ann_key, { accounts: again, action: Post(old_dm) }) == Refused(BeyondPrincipal)
+expect verdict(new_ann_key, { accounts: again, action: Read(cross_public) }) == Refused(BeyondPrincipal)
+# Bea, still in it, still reads it.
+expect verdict(granted(key_by(2, { acts_as: bea, among: again })), { accounts: again, action: Read(old_dm) }) == Permitted

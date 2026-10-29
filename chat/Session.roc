@@ -1,8 +1,8 @@
 ## **A SIGN-IN SESSION, AND HOW LONG IT LIVES** (the Roc chat's auth design,
 ## section 2): a browser signed in as a human. The cookie carries a random
 ## secret; the store keeps the secret's hash (the host hashes, and looks a
-## session up by it), the human, the `created` of the account it was
-## started for, when it was created and when it was last seen. A record on
+## session up by it), the human, the generation of the account it was
+## started for (Principal.Generation), when it was created and when it was last seen. A record on
 ## disk rather than a signed cookie, so a session can be listed and ended:
 ## "log out everywhere" is real.
 ##
@@ -23,7 +23,7 @@
 ##   is not a write a request; idle expiry can therefore come up to 5
 ##   minutes early, never late;
 ## - **its account, not its GitHub id:** a session admits only the account
-##   it was started for (the same `created`), so an account retired and made
+##   it was started for (the same generation), so an account retired and made
 ##   again with the same GitHub id never inherits the old one's sessions.
 ## Only humans sign in: an agent or a bot acts through API keys. Pure.
 import GitHubSignIn
@@ -65,7 +65,7 @@ Session :: SessionCodec.Fields.{
 			{
 				id: a.session.id,
 				human: a.human,
-				account_created: a.account_created,
+				generation: a.generation,
 				token_hash: a.session.token_hash,
 				created: a.now,
 				last_seen: a.now,
@@ -135,12 +135,11 @@ Session :: SessionCodec.Fields.{
 			IdleExpired => Refused(IdleExpired)
 			AbsoluteExpired => Refused(AbsoluteExpired)
 			Live =>
-				match Principal.human_account(accounts, s.human) {
+				match Principal.holds(accounts, { id: Principal.Id.Human(s.human), generation: s.generation, human: s.generation }) {
 					Err(_) => Refused(NoSuchAccount)
-					Ok(h) =>
-						if h.created != s.account_created {
-							Refused(NoSuchAccount)
-						} else {
+					Ok(Agent(_)) | Ok(Bot(_)) => crash "Session.admit: a human's id holds a human"
+					Ok(Human(h)) =>
+						{
 							write = if now - s.last_seen >= Session.touch_secs Touched(
 								Session.(
 									{
@@ -179,6 +178,13 @@ gid = |n|
 		Err(NotAnId) => crash "gid: a test's GitHub id is not 0"
 	}
 
+gen : U64 -> Principal.Generation
+gen = |n|
+	match Principal.Generation.from_u64(n) {
+		Ok(g) => g
+		Err(NotAnId) => crash "gen: a test's generation is not 0"
+	}
+
 sid : U64 -> Principal.SessionId
 sid = |n|
 	match Principal.SessionId.from_u64(n) {
@@ -202,11 +208,11 @@ stored = |text|
 		Err(_) => crash "stored: a test's session line decodes"
 	}
 
-## Session `n` of human `who` (whose account was made at 1), created at
+## Session `n` of human `who` (whose account is generation 1), created at
 ## `at` and last seen at `seen`.
 seen_line : { n : U64, who : U64, at : I64, seen : I64 } -> Session
 seen_line = |{ n, who, at, seen }|
-	stored("session v1 id=${n.to_str()} human=${who.to_str()} account=1 token=${Str.repeat("01", 32)} created=${at.to_str()} seen=${seen.to_str()}\n")
+	stored("session v1 id=${n.to_str()} human=${who.to_str()} generation=1 token=${Str.repeat("01", 32)} created=${at.to_str()} seen=${seen.to_str()}\n")
 
 ## Session `n` of human `who`, created and seen at `at`.
 opened : {
@@ -282,7 +288,7 @@ ann = Principal.Human({
 	login: "ann",
 	name: "Ann",
 	role: Member,
-	created: 1,
+	generation: gen(1),
 })
 
 bea : Principal
@@ -291,7 +297,7 @@ bea = Principal.Human({
 	login: "bea",
 	name: "Bea",
 	role: Member,
-	created: 1,
+	generation: gen(1),
 })
 
 Admission : [
@@ -352,7 +358,7 @@ expect
 				login: "ann",
 				name: "Ann",
 				role: Admin,
-				created: 1,
+				generation: gen(1),
 			}),
 		],
 		now: 100000,
@@ -370,7 +376,7 @@ ann_admin_copy = Principal.Human({
 	login: "ann",
 	name: "Ann",
 	role: Admin,
-	created: 1,
+	generation: gen(1),
 })
 
 expect admitted(s1, { among: [ann_admin_copy, ann, bea], now: 100000 }) == Refused(NoSuchAccount)
@@ -384,10 +390,18 @@ ann_again = Principal.Human({
 	login: "ann",
 	name: "Ann",
 	role: Member,
-	created: 200,
+	generation: gen(2),
 })
 
 expect admitted(s1, { among: [ann_again, bea], now: 100000 }) == Refused(NoSuchAccount)
+
+# ATTACK (round three's fifth): Ann made again in the same second her old
+# account was (or under a clock that went back) is a new generation all the
+# same, and her old session does not admit it.
+ann_same_second : Principal
+ann_same_second = Principal.Human({ id: gid(1), login: "ann", name: "Ann", role: Admin, generation: gen(3) })
+
+expect admitted(s1, { among: [ann_same_second, bea], now: 100000 }) == Refused(NoSuchAccount)
 
 # ── STARTING: only from the flow's admission
 ## GitHub id `who`, known at `now` through the flow's steps.
@@ -412,7 +426,7 @@ signed_in = |{ who, among, now }|
 		Ok(k) =>
 			match k.resolve({
 				accounts: among,
-				settings: { first_admin: Unnamed, barred: [] },
+				settings: { first_admin: Unnamed, barred: [], next_generation: gen(9) },
 				session: {
 					id: sid(9),
 					token_hash: token(1),

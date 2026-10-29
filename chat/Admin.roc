@@ -430,6 +430,13 @@ aid = |n|
 		Err(NotAnId) => crash "aid: a test's agent id is not 0"
 	}
 
+gen : U64 -> Principal.Generation
+gen = |n|
+	match Principal.Generation.from_u64(n) {
+		Ok(g) => g
+		Err(NotAnId) => crash "gen: a test's generation is not 0"
+	}
+
 kid : U64 -> Principal.KeyId
 kid = |n|
 	match Principal.KeyId.from_u64(n) {
@@ -444,7 +451,7 @@ sid = |n|
 		Err(NotAnId) => crash "sid: a test's session id is not 0"
 	}
 
-## A test's human: GitHub id `n`, its role, its account made at 1.
+## A test's human: GitHub id `n`, its role, its account generation 1.
 person : U64, Principal.Role -> Principal
 person = |n, role|
 	Principal.Human({
@@ -452,7 +459,7 @@ person = |n, role|
 		login: "h${n.to_str()}",
 		name: "H${n.to_str()}",
 		role,
-		created: 1,
+		generation: gen(1),
 	})
 
 ## A test's agent: its id, and its owner's GitHub id.
@@ -462,6 +469,7 @@ agent = |{ id, owner }|
 		id: aid(id),
 		name: "a${id.to_str()}",
 		owner: gid(owner),
+		generation: gen(1),
 	})
 
 boss : Principal
@@ -483,7 +491,7 @@ ann_agent : Principal
 ann_agent = agent({ id: 3, owner: 2 })
 
 ann_bot : Principal
-ann_bot = Principal.Bot({ id: aid(6), name: "b6", owner: gid(2) })
+ann_bot = Principal.Bot({ id: aid(6), name: "b6", owner: gid(2), generation: gen(1) })
 
 cal_agent : Principal
 cal_agent = agent({ id: 5, owner: 4 })
@@ -501,7 +509,7 @@ accounts = [
 
 ## Boss is the bootstrap admin; GitHub id 66 is barred.
 settings : GitHubSignIn.Settings
-settings = { first_admin: Named(gid(1)), barred: [gid(66)] }
+settings = { first_admin: Named(gid(1)), barred: [gid(66)], next_generation: gen(9) }
 
 admin_only : ApiKey.Scope(Str)
 admin_only = {
@@ -538,7 +546,7 @@ session_of = |
 		at,
 	},
 |
-	match SessionCodec.decode(Str.to_utf8("session v1 id=${n.to_str()} human=${who.to_str()} account=1 token=${Str.repeat("01", 32)} created=${at.to_str()} seen=${at.to_str()}\n")) {
+	match SessionCodec.decode(Str.to_utf8("session v1 id=${n.to_str()} human=${who.to_str()} generation=1 token=${Str.repeat("01", 32)} created=${at.to_str()} seen=${at.to_str()}\n")) {
 		Ok(line) => Session.load(line)
 		Err(_) => crash "session_of: a test's session line decodes"
 	}
@@ -836,7 +844,7 @@ unbootstrapped = |{ credential, action }|
 		credential,
 		action,
 		accounts: two_admins,
-		settings: { first_admin: Unnamed, barred: [] },
+		settings: { first_admin: Unnamed, barred: [], next_generation: gen(9) },
 		now: 100500,
 	}).audit.verdict
 
@@ -845,7 +853,7 @@ expect unbootstrapped({ credential: cal_session, action: retire_boss }) == Permi
 
 after_boss_retired_cal : List(Principal)
 after_boss_retired_cal = Admin.applied(
-	Admin.decide({ credential: boss_session, action: retire_cal, accounts: two_admins, settings: { first_admin: Unnamed, barred: [] }, now: 100500 }).plan,
+	Admin.decide({ credential: boss_session, action: retire_cal, accounts: two_admins, settings: { first_admin: Unnamed, barred: [], next_generation: gen(9) }, now: 100500 }).plan,
 	two_admins,
 )
 
@@ -893,7 +901,7 @@ expect plan_of(boss_session, promote_ann) == [SetRole({ human: gid(2), role: Adm
 # at 200: her old session admits nobody, so it is no admin either, even if
 # the new account were promoted.
 ann_again_admin : Principal
-ann_again_admin = Principal.Human({ id: gid(2), login: "h2", name: "H2", role: Admin, created: 200 })
+ann_again_admin = Principal.Human({ id: gid(2), login: "h2", name: "H2", role: Admin, generation: gen(2) })
 
 expect verdict_among(ann_session, ListAccounts, [boss, ann_again_admin]) == Refused(NoSuchPrincipal)
 

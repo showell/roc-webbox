@@ -1,11 +1,11 @@
 ## **A SESSION, STORED** (the Roc chat's auth design, section 2): one line in
 ## Stored's format, the cookie secret's hash and never the secret:
 ##
-##     session v1 id=12 human=583231 account=1761500000 token=<64 hex digits> created=1761600000 seen=1761603600
+##     session v1 id=12 human=583231 generation=3 token=<64 hex digits> created=1761600000 seen=1761603600
 ##
-## `account` is the `created` of the human's account the session was
-## started for: a session admits only that account, never one made again
-## later with the same GitHub id. `decode` gives a Line, an opaque value
+## `generation` is the generation of the human's account the session was
+## started for (Principal.Generation): a session admits only that account,
+## never one made again later with the same GitHub id. `decode` gives a Line, an opaque value
 ## only this module makes, and the only thing Session.load takes: a
 ## session comes back from the store through this decoder or not at all,
 ## never from a record a handler built. A record seen before it was created
@@ -21,7 +21,7 @@ SessionCodec := [].{
 	Fields : {
 		id : Principal.SessionId,
 		human : Principal.GitHubId,
-		account_created : I64,
+		generation : Principal.Generation,
 		token_hash : Stored.SecretHash,
 		created : I64,
 		last_seen : I64,
@@ -44,7 +44,7 @@ SessionCodec := [].{
 			[
 				("id", s.id.to_u64().to_str()),
 				("human", s.human.to_u64().to_str()),
-				("account", Stored.time_text(s.account_created)),
+				("generation", s.generation.to_u64().to_str()),
 				("token", Stored.hash_text(s.token_hash)),
 				("created", Stored.time_text(s.created)),
 				("seen", Stored.time_text(s.last_seen)),
@@ -59,9 +59,9 @@ SessionCodec := [].{
 		id = Stored.id(id_field.value, { name: "id", make: Principal.SessionId.from_u64 })?
 		human_field = id_field.rest.field("human")?
 		human = Stored.id(human_field.value, { name: "human", make: Principal.GitHubId.from_u64 })?
-		account_field = human_field.rest.field("account")?
-		account_created = Stored.time(account_field.value, "account")?
-		token_field = account_field.rest.field("token")?
+		generation_field = human_field.rest.field("generation")?
+		generation = Stored.id(generation_field.value, { name: "generation", make: Principal.Generation.from_u64 })?
+		token_field = generation_field.rest.field("token")?
 		token_hash = Stored.hash(token_field.value, "token")?
 		created_field = token_field.rest.field("created")?
 		created = Stored.time(created_field.value, "created")?
@@ -76,7 +76,7 @@ SessionCodec := [].{
 					{
 						id,
 						human,
-						account_created,
+						generation,
 						token_hash,
 						created,
 						last_seen,
@@ -94,6 +94,13 @@ gid = |n|
 	match Principal.GitHubId.from_u64(n) {
 		Ok(id) => id
 		Err(NotAnId) => crash "gid: a test's GitHub id is not 0"
+	}
+
+gen : U64 -> Principal.Generation
+gen = |n|
+	match Principal.Generation.from_u64(n) {
+		Ok(g) => g
+		Err(NotAnId) => crash "gen: a test's generation is not 0"
 	}
 
 sid : U64 -> Principal.SessionId
@@ -116,7 +123,7 @@ fields_at : { created : I64, seen : I64 } -> SessionCodec.Fields
 fields_at = |{ created, seen }| {
 	id: sid(12),
 	human: gid(583231),
-	account_created: 1761500000,
+	generation: gen(3),
 	token_hash: token(0xab),
 	created,
 	last_seen: seen,
@@ -129,7 +136,7 @@ ab64 : Str
 ab64 = Str.repeat("ab", 32)
 
 usual_line : Str
-usual_line = "session v1 id=12 human=583231 account=1761500000 token=${ab64} created=1761600000 seen=1761603600\n"
+usual_line = "session v1 id=12 human=583231 generation=3 token=${ab64} created=1761600000 seen=1761603600\n"
 
 expect SessionCodec.encode(usual) == Str.to_utf8(usual_line)
 
@@ -146,7 +153,7 @@ expect
 			fields_at({ created: 5, seen: 5 }),
 			fields_at({ created: 0, seen: 0 }),
 			fields_at({ created: 0, seen: Stored.max_time }),
-			{ ..usual, id: sid(18446744073709551615), human: gid(18446744073709551615), account_created: 0 },
+			{ ..usual, id: sid(18446744073709551615), human: gid(18446744073709551615), generation: gen(18446744073709551615) },
 		],
 		|f| read_back(SessionCodec.encode(f)) == Ok(f),
 	)
@@ -169,8 +176,10 @@ expect decoded(usual_but({ from: "id=12", to: "id=0" })) == Err(BadValue("id"))
 expect decoded(usual_but({ from: "id=12", to: "id=012" })) == Err(BadNumber("id"))
 expect decoded(usual_but({ from: "human=583231 ", to: "" })) == Err(MissingField("human"))
 expect decoded(usual_but({ from: "human=583231", to: "human=0" })) == Err(BadValue("human"))
-expect decoded(usual_but({ from: "account=1761500000 ", to: "" })) == Err(MissingField("account"))
-expect decoded(usual_but({ from: "account=1761500000", to: "account=-1" })) == Err(BadNumber("account"))
+expect decoded(usual_but({ from: "generation=3 ", to: "" })) == Err(MissingField("generation"))
+expect decoded(usual_but({ from: "generation=3", to: "generation=-1" })) == Err(BadNumber("generation"))
+expect decoded(usual_but({ from: "generation=3", to: "generation=0" })) == Err(BadValue("generation"))
+expect decoded(usual_but({ from: "generation=3", to: "account=3" })) == Err(MissingField("generation"))
 expect decoded(usual_but({ from: "token=${ab64} ", to: "" })) == Err(MissingField("token"))
 expect decoded(usual_but({ from: ab64, to: Str.repeat("AB", 32) })) == Err(BadValue("token"))
 expect decoded(usual_but({ from: ab64, to: Str.repeat("ab", 31) })) == Err(BadValue("token"))

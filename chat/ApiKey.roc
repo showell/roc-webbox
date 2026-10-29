@@ -12,9 +12,10 @@
 ## handler mints a key, an admin's or anyone's, without a grant or a line
 ## in the store.
 ##
-## **A KEY IS ITS ACCOUNT'S**: it holds the `created` of the account of
-## the human it answers to, and stands only while that very account does;
-## a GitHub id retired and made again never revives the old keys.
+## **A KEY IS ITS ACCOUNTS'**: it holds the generation of its principal's
+## account and of the human's it answers to (Principal.Bound), and stands
+## only while those very accounts do (Principal.holds); an id retired and
+## made again, a human's or an agent's, never revives the old keys.
 ##
 ## **GENERIC OVER THE RESOURCE, AND BOUND TO IT**: a key is
 ## `Key(r, id)`, `r` the resource its layer decides on (the chat's opaque
@@ -147,13 +148,14 @@ ApiKey := [].{
 		issue = |grant, { key, expires }|
 			match granted(grant) {
 				Err(why) => Err(Refused(why))
-				Ok(account_created) =>
+				Ok(bound) =>
 					Ok(
 						ApiKey.Key.(
 							{
 								id: key,
 								acts_as: grant.acts_as,
-								account_created: account_created,
+								generation: bound.generation,
+								human_generation: bound.human,
 								scope: grant.scope,
 								expires: expires,
 								revocation: Active,
@@ -287,9 +289,9 @@ ApiKey := [].{
 	}
 }
 
-## **THE GRANT, DECIDED**: the `created` of the account the key will
-## answer to, or why not.
-granted : ApiKey.Grant(r, id) -> Try(I64, ApiKey.GrantRefusal)
+## **THE GRANT, DECIDED**: the principal, bound to the accounts the key
+## will stand on, or why not.
+granted : ApiKey.Grant(r, id) -> Try(Principal.Bound, ApiKey.GrantRefusal)
 granted = |
 	{
 		granter,
@@ -308,27 +310,28 @@ granted = |
 				Admitted({ principal: human, write: _ }) =>
 				# The principal as the accounts have it now: its owner and
 				# its authority are theirs, not the caller's copy.
-					match (human, Principal.find(accounts, acts_as)) {
-						(_, Err(_)) => Err(NoSuchPrincipal)
-						(Human(h), Ok(current)) =>
+					match (human, Principal.find(accounts, acts_as), Principal.bind(accounts, acts_as)) {
+						(_, Err(_), _) | (_, _, Err(_)) => Err(NoSuchPrincipal)
+						(Human(h), Ok(current), Ok(bound)) =>
 							if Principal.answers_to(current) != h.id {
 								Err(NotTheGrantersOwn)
 							} else {
 								match (scope.admin, Principal.authority(current, accounts)) {
-									(Off, _) => Ok(h.created)
-									(On, Admin) => Ok(h.created)
+									(Off, _) => Ok(bound)
+									(On, Admin) => Ok(bound)
 									(On, Member) => Err(AdminBeyondPrincipal)
 								}
 							}
-						(Agent(_), _) | (Bot(_), _) => crash "ApiKey.granted: a session admits a human"
+						(Agent(_), _, _) | (Bot(_), _, _) => crash "ApiKey.granted: a session admits a human"
 					}
 			}
 	}
 
-## **A KEY'S PRINCIPAL, STANDING NOW**: the key live at `now`; the
-## principal it acts as held by exactly one account; and the human it
-## answers to (a human, itself; an agent or a bot, its owner) held by
-## exactly one account, made when the key's account was.
+## **A KEY'S PRINCIPAL, STANDING NOW**: the key live at `now`, and its
+## binding still holding (Principal.holds): the principal it acts as, and
+## the human it answers to (a human, itself; an agent or a bot, its owner),
+## each held by exactly one account, of the generation the key was granted
+## for.
 standing : ApiKey.Key(r, id), ApiKey.AsOf -> [Standing(Principal), Refused(ApiKey.Refusal)]
 standing = |key, { accounts, now }| {
 	ApiKey.Key.(k) = key
@@ -336,13 +339,9 @@ standing = |key, { accounts, now }| {
 		Revoked => Refused(Revoked)
 		Expired => Refused(Expired)
 		Live =>
-			match Principal.find(accounts, k.acts_as) {
+			match Principal.holds(accounts, { id: k.acts_as, generation: k.generation, human: k.human_generation }) {
 				Err(_) => Refused(NoSuchPrincipal)
-				Ok(principal) =>
-					match Principal.human_account(accounts, Principal.answers_to(principal)) {
-						Ok(h) if h.created == k.account_created => Standing(principal)
-						_ => Refused(NoSuchPrincipal)
-					}
+				Ok(principal) => Standing(principal)
 			}
 	}
 }
@@ -376,6 +375,13 @@ aid = |n|
 		Err(NotAnId) => crash "aid: a test's agent id is not 0"
 	}
 
+gen : U64 -> Principal.Generation
+gen = |n|
+	match Principal.Generation.from_u64(n) {
+		Ok(g) => g
+		Err(NotAnId) => crash "gen: a test's generation is not 0"
+	}
+
 kid : U64 -> Principal.KeyId
 kid = |n|
 	match Principal.KeyId.from_u64(n) {
@@ -398,7 +404,7 @@ person = |n, role|
 		login: "h${n.to_str()}",
 		name: "H${n.to_str()}",
 		role,
-		created: 1,
+		generation: gen(1),
 	})
 
 ## A test's agent or bot: its id, and its owner's GitHub id.
@@ -410,6 +416,7 @@ owned = |kind, { id, owner }|
 				id: aid(id),
 				name: "a${id.to_str()}",
 				owner: gid(owner),
+				generation: gen(1),
 			})
 
 		Bot =>
@@ -417,6 +424,7 @@ owned = |kind, { id, owner }|
 				id: aid(id),
 				name: "b${id.to_str()}",
 				owner: gid(owner),
+				generation: gen(1),
 			})
 	}
 
@@ -451,7 +459,7 @@ accounts = [
 ## made at 1, as the store holds it (a session's only way in but the flow).
 signed_in : { n : U64, who : U64 } -> ApiKey.Granter(Held, U64)
 signed_in = |{ n, who }|
-	stored_session("session v1 id=${n.to_str()} human=${who.to_str()} account=1 token=${Str.repeat("07", 32)} created=0 seen=0\n")
+	stored_session("session v1 id=${n.to_str()} human=${who.to_str()} generation=1 token=${Str.repeat("07", 32)} created=0 seen=0\n")
 
 ## The session a stored line holds, as a granter.
 stored_session : Str -> ApiKey.Granter(Held, U64)
@@ -943,7 +951,7 @@ expect ann_agent_plain.decide({ accounts: ann_admin_first, action: Read(res_a), 
 # and her old agent's, stand no more; a new session of the new account
 # grants keys bound to it.
 ann_again : Principal
-ann_again = Principal.Human({ id: gid(2), login: "h2", name: "H2", role: Member, created: 60 })
+ann_again = Principal.Human({ id: gid(2), login: "h2", name: "H2", role: Member, generation: gen(2) })
 
 again : List(Principal)
 again = [boss, ann_again, boss_agent, boss_bot, ann_agent]
@@ -952,11 +960,19 @@ expect ann_forever.decide({ accounts: again, action: Read(res_c), now: 70 }) == 
 expect ann_agent_plain.decide({ accounts: again, action: Read(res_a), now: 70 }) == Refused(NoSuchPrincipal)
 expect grant_at(by_ann, { acts_as: ann, scope: plain, among: again, now: 70 }) == Refused(NoSuchGranter)
 new_ann_session : ApiKey.Granter(Held, U64)
-new_ann_session = stored_session("session v1 id=8 human=2 account=60 token=${Str.repeat("07", 32)} created=60 seen=60\n")
+new_ann_session = stored_session("session v1 id=8 human=2 generation=2 token=${Str.repeat("07", 32)} created=60 seen=60\n")
 
 expect
 	ApiKey.Key.issue(
 		{ granter: new_ann_session, acts_as: Principal.id(ann_again), scope: plain, accounts: again, now: 70 },
 		{ key: kid(8), expires: Never },
-	).map_ok(|k| k.record().account_created)
-		== Ok(60)
+	).map_ok(|k| k.record().human_generation)
+		== Ok(gen(2))
+
+# **AN AGENT MADE AGAIN WITH ITS ID** (round three's fifth: agents had no
+# `created`): ann's agent retired, and an agent made again with id 3 for
+# ann (a host that reused the id): the old key stands no more.
+agent_again : List(Principal)
+agent_again = [boss, ann, boss_agent, boss_bot, Principal.Agent({ id: aid(3), name: "a3", owner: gid(2), generation: gen(5) })]
+
+expect ann_agent_plain.decide({ accounts: agent_again, action: Read(res_a), now: 50 }) == Refused(NoSuchPrincipal)

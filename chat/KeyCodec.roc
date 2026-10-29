@@ -2,12 +2,14 @@
 ## one line in Stored's format, the key's hash and never the key, which its
 ## owner is shown once:
 ##
-##     key v1 id=4 acts=agent:7 account=1761500000 hash=<64 hex digits> created=1761600000 expires=never state=active read=only:3,9 post=off admin=off
+##     key v1 id=4 acts=agent:7 generation=4 human-generation=3 hash=<64 hex digits> created=1761600000 expires=never state=active read=only:3,9 post=off admin=off
 ##
-## `account` is the `created` of the account of the human the key answers
-## to (its principal, or the owner of its agent or bot), when it was
-## granted: the key is that account's, never one made again later with the
-## same GitHub id. The record's types are here, the store's shape of a
+## `generation` is the generation of its principal's account, and
+## `human-generation` that of the human it answers to (itself, or the owner
+## of its agent or bot), when it was granted (Principal.Bound): the key is
+## those accounts', never ones made again later with the same ids. A human's
+## key holds one generation twice; a line whose two differ is refused
+## (`BadValue("human-generation")`), as no grant makes one. The record's types are here, the store's shape of a
 ## key, and ApiKey's are these; the line is generic over the resource's id,
 ## its spelling a number (`make` reads one back, `number` writes it).
 ##
@@ -48,12 +50,12 @@ KeyCodec := [].{
 	Expiry : [Never, At(I64)]
 
 	## **A KEY'S WHOLE RECORD**: its id, the principal it acts as, the
-	## `created` of the account it answers to, its scope, expiry and
-	## revocation.
+	## generations it is bound to, its scope, expiry and revocation.
 	Record(id) : {
 		id : Principal.KeyId,
 		acts_as : Principal.Id,
-		account_created : I64,
+		generation : Principal.Generation,
+		human_generation : Principal.Generation,
 		scope : KeyCodec.Scope(id),
 		expires : KeyCodec.Expiry,
 		revocation : [Active, Revoked],
@@ -84,7 +86,8 @@ KeyCodec := [].{
 			[
 				("id", record.id.to_u64().to_str()),
 				("acts", AccountCodec.id_text(record.acts_as)),
-				("account", Stored.time_text(record.account_created)),
+				("generation", record.generation.to_u64().to_str()),
+				("human-generation", record.human_generation.to_u64().to_str()),
 				("hash", Stored.hash_text(hash)),
 				("created", Stored.time_text(created)),
 				("expires", expiry_text(record.expires)),
@@ -103,9 +106,11 @@ KeyCodec := [].{
 		id = Stored.id(id_field.value, { name: "id", make: Principal.KeyId.from_u64 })?
 		acts_field = id_field.rest.field("acts")?
 		acts_as = AccountCodec.id_from(acts_field.value, "acts")?
-		account_field = acts_field.rest.field("account")?
-		account_created = Stored.time(account_field.value, "account")?
-		hash_field = account_field.rest.field("hash")?
+		generation_field = acts_field.rest.field("generation")?
+		generation = Stored.id(generation_field.value, { name: "generation", make: Principal.Generation.from_u64 })?
+		human_field = generation_field.rest.field("human-generation")?
+		human_generation = Stored.id(human_field.value, { name: "human-generation", make: Principal.Generation.from_u64 })?
+		hash_field = human_field.rest.field("hash")?
 		hash = Stored.hash(hash_field.value, "hash")?
 		created_field = hash_field.rest.field("created")?
 		created = Stored.time(created_field.value, "created")?
@@ -136,6 +141,7 @@ KeyCodec := [].{
 		admin_field.rest.close()?
 		match (acts_as, admin) {
 			(Bot(_), On) => Err(AdminForBot)
+			(Human(_), _) if generation != human_generation => Err(BadValue("human-generation"))
 			_ =>
 				Ok(
 					KeyCodec.Line.(
@@ -143,7 +149,8 @@ KeyCodec := [].{
 							record: {
 								id,
 								acts_as,
-								account_created,
+								generation,
+								human_generation,
 								scope: {
 									read,
 									post,
@@ -294,6 +301,13 @@ gid = |n|
 		Err(NotAnId) => crash "gid: a test's GitHub id is not 0"
 	}
 
+gen : U64 -> Principal.Generation
+gen = |n|
+	match Principal.Generation.from_u64(n) {
+		Ok(g) => g
+		Err(NotAnId) => crash "gen: a test's generation is not 0"
+	}
+
 aid : U64 -> Principal.AgentId
 aid = |n|
 	match Principal.AgentId.from_u64(n) {
@@ -336,7 +350,8 @@ narrow : KeyCodec.Record(Conv)
 narrow = {
 	id: kid(4),
 	acts_as: Principal.Id.Agent(aid(7)),
-	account_created: 1761500000,
+	generation: gen(4),
+	human_generation: gen(3),
 	scope: {
 		read: On(Only([conv(3), conv(9)])),
 		post: Off,
@@ -352,7 +367,8 @@ broad : KeyCodec.Record(Conv)
 broad = {
 	id: kid(18446744073709551615),
 	acts_as: Principal.Id.Human(gid(583231)),
-	account_created: 0,
+	generation: gen(18446744073709551615),
+	human_generation: gen(18446744073709551615),
 	scope: {
 		read: On(Everywhere),
 		post: On(Only([conv(1)])),
@@ -377,12 +393,12 @@ hex5a : Str
 hex5a = Str.repeat("5a", 32)
 
 narrow_line : Str
-narrow_line = "key v1 id=4 acts=agent:7 account=1761500000 hash=${hex5a} created=1761600000 expires=never state=active read=only:3,9 post=off admin=off\n"
+narrow_line = "key v1 id=4 acts=agent:7 generation=4 human-generation=3 hash=${hex5a} created=1761600000 expires=never state=active read=only:3,9 post=off admin=off\n"
 
 expect encoded(entry(narrow)) == Str.to_utf8(narrow_line)
 expect
 	encoded(entry(broad))
-		== Str.to_utf8("key v1 id=18446744073709551615 acts=human:583231 account=0 hash=${hex5a} created=1761600000 expires=at:1761609999 state=revoked read=everywhere post=only:1 admin=on\n")
+		== Str.to_utf8("key v1 id=18446744073709551615 acts=human:583231 generation=18446744073709551615 human-generation=18446744073709551615 hash=${hex5a} created=1761600000 expires=at:1761609999 state=revoked read=everywhere post=only:1 admin=on\n")
 
 # Round trips: every part at each of its values.
 expect is_kept(entry(narrow))
@@ -447,8 +463,14 @@ expect decoded(narrow_but({ from: "id=4 ", to: "" })) == Err(MissingField("id"))
 expect decoded(narrow_but({ from: "acts=agent:7", to: "acts=agent:0" })) == Err(BadValue("acts"))
 expect decoded(narrow_but({ from: "acts=agent:7", to: "acts=agent7" })) == Err(BadValue("acts"))
 expect decoded(narrow_but({ from: "acts=agent:7", to: "acts=admin:7" })) == Err(UnknownWord("acts"))
-expect decoded(narrow_but({ from: "account=1761500000 ", to: "" })) == Err(MissingField("account"))
-expect decoded(narrow_but({ from: "account=1761500000", to: "account=-1" })) == Err(BadNumber("account"))
+expect decoded(narrow_but({ from: "generation=4 ", to: "" })) == Err(MissingField("generation"))
+expect decoded(narrow_but({ from: "generation=4", to: "generation=-1" })) == Err(BadNumber("generation"))
+expect decoded(narrow_but({ from: "generation=4", to: "generation=0" })) == Err(BadValue("generation"))
+expect decoded(narrow_but({ from: "human-generation=3 ", to: "" })) == Err(MissingField("human-generation"))
+expect decoded(narrow_but({ from: "human-generation=3", to: "human-generation=0" })) == Err(BadValue("human-generation"))
+# A human's key with two generations: no grant makes one.
+expect decoded(narrow_but({ from: "acts=agent:7", to: "acts=human:7" })) == Err(BadValue("human-generation"))
+expect decoded(narrow_but({ from: "acts=agent:7 generation=4", to: "acts=human:7 generation=3" })) == Ok({})
 expect decoded(narrow_but({ from: "hash=", to: "hash=0" })) == Err(BadValue("hash"))
 expect decoded(narrow_but({ from: hex5a, to: Str.repeat("5A", 32) })) == Err(BadValue("hash"))
 expect decoded(narrow_but({ from: "hash=${hex5a} ", to: "" })) == Err(MissingField("hash"))

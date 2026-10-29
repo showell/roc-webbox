@@ -9,17 +9,15 @@ Principal := [
 	## never changes; the login (which can) is kept for display and the
 	## GitHub link, and is empty once GitHub has given it to another account
 	## that signed in here since (so it never links to the new owner). The
-	## name is the one they chose, real or not. `created` is when this
-	## account was made (unix seconds): a GitHub id retired, unbarred and
-	## signed up again is a new account, and the sessions and keys of the
-	## old one, bound to its `created`, stay dead.
+	## name is the one they chose, real or not. Every kind's `generation`
+	## is its account's (see Generation).
 	Human(
 		{
 			id : Principal.GitHubId,
 			login : Str,
 			name : Str,
 			role : Principal.Role,
-			created : I64,
+			generation : Principal.Generation,
 		},
 	),
 
@@ -30,6 +28,7 @@ Principal := [
 			id : Principal.AgentId,
 			name : Str,
 			owner : Principal.GitHubId,
+			generation : Principal.Generation,
 		},
 	),
 
@@ -40,9 +39,78 @@ Principal := [
 			id : Principal.AgentId,
 			name : Str,
 			owner : Principal.GitHubId,
+			generation : Principal.Generation,
 		},
 	),
 ].{
+
+	## **AN ACCOUNT'S GENERATION**: a number the host's one counter gives
+	## each account as it is made (GitHubSignIn's Settings hold the next),
+	## never given twice, so it never repeats for an id. Sessions, keys,
+	## votes and a conversation's participants are bound to the generation
+	## of the account they were made for (Bound), so an id made again, by
+	## a host bug or a future lifting of a bar, revives nothing; a time
+	## would not do, as two accounts can be made in one second, or under a
+	## clock that went back. Opaque: made only by `from_u64`, which refuses
+	## 0.
+	Generation :: U64.{
+		from_u64 : U64 -> Try(Principal.Generation, [NotAnId])
+		from_u64 = |n| if n == 0 Err(NotAnId) else Ok(Principal.Generation.(n))
+
+		to_u64 : Principal.Generation -> U64
+		to_u64 = |Principal.Generation.(n)| n
+
+		## The generation after this one, unless the counter is spent.
+		next : Principal.Generation -> Try(Principal.Generation, [Exhausted])
+		next = |Principal.Generation.(n)|
+			if n == u64_most Err(Exhausted) else Ok(Principal.Generation.(n + 1))
+
+		is_eq : _
+	}
+
+	## **A PRINCIPAL, BOUND TO ITS ACCOUNTS**: its id, its account's
+	## generation, and the generation of the human account it answers to
+	## (itself, for a human). What a session, a key and a participant hold:
+	## it names the principal only while both accounts are still the ones
+	## it was bound to (`holds`).
+	Bound : {
+		id : Principal.Id,
+		generation : Principal.Generation,
+		human : Principal.Generation,
+	}
+
+	## The principal's account's generation.
+	generation : Principal -> Principal.Generation
+	generation = |principal|
+		match principal {
+			Human(h) => h.generation
+			Agent(a) => a.generation
+			Bot(b) => b.generation
+		}
+
+	## **`wanted`, BOUND AS THE ACCOUNTS ARE NOW**: found as `find` finds it,
+	## and the human it answers to held by exactly one account.
+	bind : List(Principal), Principal.Id -> Try(Principal.Bound, [NoSuchPrincipal, Duplicated])
+	bind = |accounts, wanted| {
+		principal = Principal.find(accounts, wanted)?
+		human = Principal.human_account(accounts, Principal.answers_to(principal))?
+		Ok({ id: wanted, generation: Principal.generation(principal), human: human.generation })
+	}
+
+	## **THE PRINCIPAL A BINDING STILL NAMES**: its id held by exactly one
+	## account, of the bound generation, and the human it answers to held
+	## by exactly one account, of the bound generation too. Every check of a
+	## stored binding (a session, a key, a participant) asks here.
+	holds : List(Principal), Principal.Bound -> Try(Principal, [NoSuchPrincipal])
+	holds = |accounts, bound|
+		match Principal.bind(accounts, bound.id) {
+			Ok(now) if now == bound =>
+				match Principal.find(accounts, bound.id) {
+					Ok(p) => Ok(p)
+					Err(_) => crash "Principal.holds: `bind` found it"
+				}
+			_ => Err(NoSuchPrincipal)
+		}
 
 	## **A HUMAN'S ROLE**: an admin manages accounts (Admin.roc); set for
 	## the first account by the bootstrap setting, changed only by an admin.
@@ -150,7 +218,7 @@ Principal := [
 			login : Str,
 			name : Str,
 			role : Principal.Role,
-			created : I64,
+			generation : Principal.Generation,
 		},
 		[NoSuchPrincipal, Duplicated],
 	)
@@ -219,6 +287,10 @@ Principal := [
 	}
 }
 
+## The largest U64: a generation counter that reaches it is spent.
+u64_most : U64
+u64_most = 18446744073709551615
+
 gid : U64 -> Principal.GitHubId
 gid = |n|
 	match Principal.GitHubId.from_u64(n) {
@@ -233,7 +305,14 @@ aid = |n|
 		Err(NotAnId) => crash "aid: a test's agent id is not 0"
 	}
 
-## A test's human: GitHub id `n`, its role.
+gen : U64 -> Principal.Generation
+gen = |n|
+	match Principal.Generation.from_u64(n) {
+		Ok(g) => g
+		Err(NotAnId) => crash "gen: a test's generation is not 0"
+	}
+
+## A test's human: GitHub id `n`, its role, generation 1.
 person : U64, Principal.Role -> Principal
 person = |n, role|
 	Principal.Human({
@@ -241,10 +320,10 @@ person = |n, role|
 		login: "h${n.to_str()}",
 		name: "H${n.to_str()}",
 		role,
-		created: 1,
+		generation: gen(1),
 	})
 
-## A test's agent or bot: its id, and its owner's GitHub id.
+## A test's agent or bot: its id, and its owner's GitHub id; generation 1.
 owned : [Agent, Bot], { id : U64, owner : U64 } -> Principal
 owned = |kind, { id, owner }|
 	match kind {
@@ -253,6 +332,7 @@ owned = |kind, { id, owner }|
 				id: aid(id),
 				name: "a${id.to_str()}",
 				owner: gid(owner),
+				generation: gen(1),
 			})
 
 		Bot =>
@@ -260,6 +340,7 @@ owned = |kind, { id, owner }|
 				id: aid(id),
 				name: "b${id.to_str()}",
 				owner: gid(owner),
+				generation: gen(1),
 			})
 	}
 
@@ -367,3 +448,41 @@ expect loaded(with_ann_twice) == Err(DuplicateId(Principal.Id.Human(gid(2))))
 expect loaded(List.append(accounts, forged_ann_agent)) == Err(DuplicateId(Principal.Id.Agent(aid(3))))
 expect loaded([boss_agent, owned(Bot, { id: 1, owner: 1 })]) == Err(DuplicateId(Principal.Id.Bot(aid(1))))
 expect loaded([boss, owned(Agent, { id: 1, owner: 1 })]) == Ok({})
+
+# ── GENERATIONS AND BINDINGS
+expect Principal.Generation.from_u64(0) == Err(NotAnId)
+expect gen(7).next() == Ok(gen(8))
+expect gen(18446744073709551615).next() == Err(Exhausted)
+
+ann_agent_bound : Principal.Bound
+ann_agent_bound = { id: Principal.id(ann_agent), generation: gen(1), human: gen(1) }
+
+expect Principal.bind(accounts, Principal.id(ann_agent)) == Ok(ann_agent_bound)
+expect Principal.bind(accounts, Principal.id(boss)) == Ok({ id: Principal.id(boss), generation: gen(1), human: gen(1) })
+# An agent whose owner has no account binds to nothing.
+expect Principal.bind(accounts, Principal.id(orphan_agent)) == Err(NoSuchPrincipal)
+expect Principal.holds(accounts, ann_agent_bound).map_ok(Principal.id) == Ok(Principal.id(ann_agent))
+
+## `accounts`, with `who` swapped for the same id at generation 2.
+remade : Principal -> List(Principal)
+remade = |who|
+	List.map(
+		accounts,
+		|p|
+			if Principal.id(p) != Principal.id(who) {
+				p
+			} else {
+				match p {
+					Human(h) => Principal.Human({ ..h, generation: gen(2) })
+					Agent(a) => Principal.Agent({ ..a, generation: gen(2) })
+					Bot(b) => Principal.Bot({ ..b, generation: gen(2) })
+				}
+			},
+	)
+
+# The agent made again with its id, or its owner made again with theirs:
+# the binding names nobody. Retired, or held twice: nobody either.
+expect Principal.holds(remade(ann_agent), ann_agent_bound).is_err()
+expect Principal.holds(remade(ann), ann_agent_bound).is_err()
+expect Principal.holds([boss, ann], ann_agent_bound).is_err()
+expect Principal.holds(List.append(accounts, forged_ann_agent), ann_agent_bound).is_err()

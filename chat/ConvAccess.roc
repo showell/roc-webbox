@@ -7,11 +7,14 @@
 ##   involved (its human participants, and the owners of its agents and
 ##   bots) still has an account and has elected public; any one of them can
 ##   withdraw, and retiring one withdraws their election.
-## A conversation holds its participants by id alone: who owns an agent is
-## the accounts' answer at each decision, never a copy the caller hands in,
-## and only an id exactly one account holds names anyone. An election is
-## held by the voter's account (its `created`), so an account made again
-## with a retired human's GitHub id never inherits their public vote. Who
+## A conversation holds its participants bound to their accounts
+## (Principal.Bound, made when it starts): who owns an agent is the
+## accounts' answer at each decision, never a copy the caller hands in, and
+## a participant counts only while its binding holds (Principal.holds), so
+## an account made again with a retired participant's id, a human's or an
+## agent's, never sees, posts in or answers for the old conversations. An
+## election is held by the voter's account (its generation), so an account
+## made again never inherits a public vote either. Who
 ## sees and who posts is then Access's, on the resource made here, for a
 ## viewer exactly one account holds.
 ## Pure; the table of every viewer against every conversation is below,
@@ -62,34 +65,44 @@ ConvAccess := [].{
 	## `start` is the one way in (every human's election private), and
 	## `elect` and `withdraw_votes` the transitions. `public_by` holds the
 	## accounts whose election is public now, each by its human's GitHub id
-	## and the account's `created`; a human not in it has elected private,
+	## and the account's generation; a human not in it has elected private,
 	## or never elected, which is the same.
 	Conv :: {
 		id : ConvAccess.ConvId,
-		participants : List(Principal.Id),
-		public_by : List({ human : Principal.GitHubId, created : I64 }),
+		participants : List(Principal.Bound),
+		public_by : List({ human : Principal.GitHubId, generation : Principal.Generation }),
 	}.{
 
-		## A new conversation among `participants` (each once), private to
-		## every human involved. `NoParticipants` for none.
-		start : { id : ConvAccess.ConvId, participants : List(Principal.Id) } -> Try(
+		## A new conversation among `participants` (each once), each bound
+		## to its accounts now, private to every human involved.
+		## `NoParticipants` for none; `NoSuchParticipant` for an id that
+		## exactly one account, and its human, do not hold.
+		start : { id : ConvAccess.ConvId, participants : List(Principal.Id), accounts : List(Principal) } -> Try(
 			ConvAccess.Conv,
-			[NoParticipants],
+			[NoParticipants, NoSuchParticipant(Principal.Id)],
 		)
-		start = |{ id, participants }| {
+		start = |{ id, participants, accounts }| {
 			once = List.fold(
 				participants,
 				[],
 				|kept, p| if List.contains(kept, p) kept else List.append(kept, p),
 			)
-			if List.is_empty(once) {
+			bound = List.map_try(
+				once,
+				|p|
+					match Principal.bind(accounts, p) {
+						Ok(b) => Ok(b)
+						Err(_) => Err(NoSuchParticipant(p))
+					},
+			)?
+			if List.is_empty(bound) {
 				Err(NoParticipants)
 			} else {
 				Ok(
 					ConvAccess.Conv.(
 						{
 							id,
-							participants: once,
+							participants: bound,
 							public_by: [],
 						},
 					),
@@ -106,7 +119,7 @@ ConvAccess := [].{
 		kind = |ConvAccess.Conv.(c)|
 			if List.all(
 				c.participants,
-				|p| match p {
+				|p| match p.id {
 					Human(_) => Bool.True
 					Agent(_) | Bot(_) => Bool.False
 				},
@@ -117,8 +130,8 @@ ConvAccess := [].{
 			}
 
 		## **THE HUMANS INVOLVED, WHO ELECT, AS THE ACCOUNTS SAY NOW**: the
-		## human participants, and the owner of each agent and bot that
-		## exactly one account holds, each once.
+		## human participants, and the owner of each agent and bot, each
+		## once, for each participant whose binding still holds.
 		involved : ConvAccess.Conv, List(Principal) -> List(Principal.GitHubId)
 		involved = |ConvAccess.Conv.(c), accounts|
 			List.fold(
@@ -165,7 +178,7 @@ ConvAccess := [].{
 							} else {
 								others = List.keep_if(c.public_by, |vote| vote.human != h.id)
 								match visibility {
-									Public => Ok(ConvAccess.Conv.({ ..c, public_by: others.append({ human: h.id, created: account.created }) }))
+									Public => Ok(ConvAccess.Conv.({ ..c, public_by: others.append({ human: h.id, generation: account.generation }) }))
 									Private => Ok(ConvAccess.Conv.({ ..c, public_by: others }))
 								}
 							}
@@ -176,16 +189,16 @@ ConvAccess := [].{
 		## **A RETIRED HUMAN'S ELECTION, WITHDRAWN**, for the retirement's
 		## plan (Admin.roc) to write back: their public election is gone for
 		## good. (Until it is written, `visibility` counts no election of a
-		## human without an account, nor one an earlier account of their
+		## human without an account, nor one an earlier generation of their
 		## GitHub id cast.)
 		withdraw_votes : ConvAccess.Conv, Principal.GitHubId -> ConvAccess.Conv
 		withdraw_votes = |ConvAccess.Conv.(c), human|
 			ConvAccess.Conv.({ ..c, public_by: List.keep_if(c.public_by, |vote| vote.human != human) })
 
 		## **ITS VISIBILITY NOW**: private for humans alone; otherwise
-		## public only while every agent and bot in it is held by exactly
-		## one account, and every human involved has exactly one account,
-		## which has elected public itself.
+		## public only while every participant's binding holds, and every
+		## human involved has exactly one account, which has elected public
+		## itself.
 		visibility : ConvAccess.Conv, List(Principal) -> [Private, Public]
 		visibility = |conv, accounts| {
 			ConvAccess.Conv.(c) = conv
@@ -197,7 +210,7 @@ ConvAccess := [].{
 						conv.involved(accounts),
 						|h|
 							match Principal.human_account(accounts, h) {
-								Ok(account) => c.public_by.contains({ human: h, created: account.created })
+								Ok(account) => c.public_by.contains({ human: h, generation: account.generation })
 								Err(_) => Bool.False
 							},
 					)
@@ -206,13 +219,14 @@ ConvAccess := [].{
 			}
 		}
 
-		## The conversation as Access decides on it, with the accounts now.
+		## The conversation as Access decides on it, with the accounts now:
+		## its participants those whose binding holds.
 		resource : ConvAccess.Conv, List(Principal) -> Access.Resource(ConvAccess.ConvId)
 		resource = |conv, accounts| {
 			ConvAccess.Conv.(c) = conv
 			{
 				id: c.id,
-				participants: c.participants,
+				participants: List.keep_if(c.participants, |b| Principal.holds(accounts, b).is_ok()).map(|b| b.id),
 				involved: conv.involved(accounts),
 				visibility: conv.visibility(accounts),
 			}
@@ -245,18 +259,14 @@ is_held = |viewer, accounts|
 	}
 
 ## **THE HUMAN A PARTICIPANT ANSWERS TO, AS THE ACCOUNTS SAY**: a human,
-## itself; an agent or a bot, its owner, when exactly one account holds its
-## id. An id no account holds (retired), or more than one does (a forged
-## copy beside the real one), names nobody: `Unresolved`.
-answerer : List(Principal), Principal.Id -> [Answers(Principal.GitHubId), Unresolved]
-answerer = |accounts, id|
-	match id {
-		Human(g) => Answers(g)
-		Agent(_) | Bot(_) =>
-			match Principal.find(accounts, id) {
-				Ok(only) => Answers(Principal.answers_to(only))
-				Err(_) => Unresolved
-			}
+## itself; an agent or a bot, its owner; while its binding holds. One
+## retired, made again since, or held twice (a forged copy beside the real
+## one) names nobody: `Unresolved`.
+answerer : List(Principal), Principal.Bound -> [Answers(Principal.GitHubId), Unresolved]
+answerer = |accounts, bound|
+	match Principal.holds(accounts, bound) {
+		Ok(only) => Answers(Principal.answers_to(only))
+		Err(_) => Unresolved
 	}
 
 # ── the cast
@@ -302,7 +312,7 @@ person = |n, role|
 		login: "h${n.to_str()}",
 		name: "H${n.to_str()}",
 		role,
-		created: 1,
+		generation: gen(1),
 	})
 
 ## A test's agent or bot: its id, and its owner's GitHub id.
@@ -314,6 +324,7 @@ owned = |kind, { id, owner }|
 				id: aid(id),
 				name: "a${id.to_str()}",
 				owner: gid(owner),
+				generation: gen(1),
 			})
 
 		Bot =>
@@ -321,6 +332,7 @@ owned = |kind, { id, owner }|
 				id: aid(id),
 				name: "b${id.to_str()}",
 				owner: gid(owner),
+				generation: gen(1),
 			})
 	}
 
@@ -369,6 +381,13 @@ viewer = |who|
 		_ => SignedIn(Principal.id(principal(who)))
 	}
 
+gen : U64 -> Principal.Generation
+gen = |n|
+	match Principal.Generation.from_u64(n) {
+		Ok(g) => g
+		Err(NotAnId) => crash "gen: a test's generation is not 0"
+	}
+
 cid : U64 -> ConvAccess.ConvId
 cid = |n|
 	match ConvAccess.ConvId.from_u64(n) {
@@ -379,9 +398,9 @@ cid = |n|
 ## A conversation among the cast.
 among : List(Who) -> ConvAccess.Conv
 among = |people|
-	match ConvAccess.Conv.start({ id: cid(1), participants: List.map(people, id_of) }) {
+	match ConvAccess.Conv.start({ id: cid(1), participants: List.map(people, id_of), accounts }) {
 		Ok(conv) => conv
-		Err(NoParticipants) => crash "among: a test's conversation has participants"
+		Err(_) => crash "among: a test's conversation has participants with accounts"
 	}
 
 ## A cast member's id.
@@ -544,8 +563,8 @@ refused = |conv, who|
 	})
 		.map_ok(ConvAccess.Conv.id)
 
-nobody : Try(ConvAccess.ConvId, [NoParticipants])
-nobody = ConvAccess.Conv.start({ id: cid(1), participants: [] }).map_ok(ConvAccess.Conv.id)
+nobody : Try(ConvAccess.ConvId, [NoParticipants, NoSuchParticipant(Principal.Id)])
+nobody = ConvAccess.Conv.start({ id: cid(1), participants: [], accounts }).map_ok(ConvAccess.Conv.id)
 
 # Humans alone have no election; a human uninvolved has none either.
 expect refused(hh, Ann) == Err(AlwaysPrivate)
@@ -554,6 +573,9 @@ expect refused(ha_own_none, Bea) == Err(NotInvolved)
 expect refused(aa_none, Cal) == Err(NotInvolved)
 expect refused(hb_none, Dee) == Err(NotInvolved)
 expect nobody == Err(NoParticipants)
+# A participant no account holds, or whose owner none does, starts nothing.
+expect ConvAccess.Conv.start({ id: cid(1), participants: [id_of(Ann), Principal.Id.Agent(aid(99))], accounts }).map_ok(ConvAccess.Conv.id) == Err(NoSuchParticipant(Principal.Id.Agent(aid(99))))
+expect ConvAccess.Conv.start({ id: cid(1), participants: [id_of(AnnAgent)], accounts: without(Ann) }).map_ok(ConvAccess.Conv.id) == Err(NoSuchParticipant(id_of(AnnAgent)))
 # Only a human elects, for themselves: an agent or a bot never, even one
 # whose owner may.
 expect refused(ha_own_none, AnnAgent) == Err(NotHuman)
@@ -1318,10 +1340,10 @@ expect posts(DeeBot, three_all) == ReadOnly
 
 # ── RE-CREATION AFTER RETIREMENT (the round-two attacker's fifth)
 # Ann elected ha_own public, then retired; an account made again with her
-# GitHub id (created later) does not inherit her vote, even before the
+# GitHub id (a later generation) does not inherit her vote, even before the
 # retirement's withdrawal is written: private.
 ann_again : Principal
-ann_again = Principal.Human({ id: gid(1), login: "h1", name: "H1", role: Member, created: 99 })
+ann_again = Principal.Human({ id: gid(1), login: "h1", name: "H1", role: Member, generation: gen(2) })
 
 again : List(Principal)
 again = List.prepend(without(Ann), ann_again)
@@ -1329,14 +1351,19 @@ again = List.prepend(without(Ann), ann_again)
 expect ha_own_ann.visibility(again) == Private
 expect ha_cross_both.visibility(again) == Private
 expect sees_among(Dee, { conv: ha_own_ann, among: again }) == Hidden
-# Her own account, back as it was (the same `created`), is the same vote.
+# Her own account, back as it was (the same generation), is the same vote.
 expect ha_own_ann.visibility(List.append(without(Ann), principal(Ann))) == Public
-# The new account votes for itself.
-expect
-	match ha_own_ann.elect({ by: ann_again, visibility: Public, accounts: again }) {
-		Ok(c) => c.visibility(again) == Public
-		Err(_) => Bool.False
-	}
+# The new account is in none of the old one's conversations: it has no
+# election there, and its agent (bound to the old account) answers to it
+# no more.
+expect ha_own_ann.elect({ by: ann_again, visibility: Public, accounts: again }).map_ok(ConvAccess.Conv.id) == Err(NotInvolved)
+expect ha_own_ann.involved(again) == []
+# ATTACK (round three's first): the re-created Ann sees and posts nothing of
+# the old account's private conversations, the human-only DM with Bea
+# included.
+expect sees_among(Ann, { conv: hh, among: again }) == Hidden
+expect sees_among(Ann, { conv: ha_cross_none, among: again }) == Hidden
+expect !ConvAccess.can_post(viewer(Ann), { conv: hh, accounts: again })
 # A copy of Ann's account beside it: her vote names nobody.
 expect ha_own_ann.visibility(List.append(accounts, principal(Ann))) == Private
 
