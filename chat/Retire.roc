@@ -32,12 +32,12 @@ Retire := [].{
 
 	## A step of the plan, as the host is handed it: said for the report, a
 	## file or a folder removed, a file written whole, or a member retired
-	## outside the chat.
+	## outside the chat. Each is a command, so a verb.
 	Step : [
 		Note(Kind, Str),
 		Remove(Paths.ChatPath, [File, Tree]),
 		Replace(Paths.ChatPath, List(U8)),
-		Retired(Uid),
+		RetireUser(Uid),
 	]
 
 	## What a step removes, as the report counts it.
@@ -105,7 +105,7 @@ Retire := [].{
 		users = List.join(
 			List.map(
 				removed,
-				|a| [Note(User, "${a.name} (uid ${a.id.to_str()})"), Retired(a.id)],
+				|a| [Note(User, "${a.name} (uid ${a.id.to_str()})"), RetireUser(a.id)],
 			),
 		)
 		dms = gone_dms!(ids)?
@@ -175,7 +175,7 @@ Retire := [].{
 					}
 					Remove(path, what) => Host.retire_remove!(path.bytes(), what)
 					Replace(path, bytes) => Host.retire_replace!(path.bytes(), bytes)
-					Retired(uid) => Host.retire_user!(uid.to_str().to_utf8())
+					RetireUser(uid) => Host.retire_user!(uid.to_str().to_utf8())
 				}
 				match done {
 					Ok({}) => carry_out!(more)
