@@ -24,7 +24,10 @@
 ## conversation's topics, a channel's members, the rosters, a topic's
 ## reactions) it reads through the file primitives, the names and formats
 ## its own.
-app [handle!] { pf: platform "platform/main.roc" }
+app [handle!] {
+	md: "../../roc-markdown/package/main.roc",
+	pf: platform "platform/main.roc",
+}
 
 import pf.Chat
 import pf.Host

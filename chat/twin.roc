@@ -3,7 +3,10 @@
 ## bytes; a number crosses as its decimal digits, a missing value as no
 ## result at all. angry-gopher's chat_twin_test.zig holds each to the Zig
 ## it replaces. Never linked into a server.
-app [call] { pf: platform "twin/platform/main.roc" }
+app [call] {
+	md: "../../roc-markdown/package/main.roc",
+	pf: platform "twin/platform/main.roc",
+}
 
 import Time
 import ZigText
@@ -32,7 +35,7 @@ import BusKey
 import ChatUrl
 import Bytes
 import Backlog
-import Md
+import md.Md
 
 call : { which : U8, args : List(List(U8)) } -> List(List(U8))
 call = |req| {

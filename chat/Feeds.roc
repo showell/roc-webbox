@@ -5,9 +5,9 @@
 ## ones. Pure; angry-gopher's chat_twin_test.zig holds each to its Zig.
 import JsonOut
 import Bytes
-import MdFence
+import md.MdFence
 import ChatUrl
-import MdMedia
+import md.MdMedia
 import Transcript
 import Ascii
 

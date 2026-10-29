@@ -4,7 +4,7 @@
 ## Pure; angry-gopher's chat_twin_test.zig holds it to the Zig.
 import JsonOut
 import Bytes
-import MdFence
+import md.MdFence
 import Time
 import Uid
 import Ascii

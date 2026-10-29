@@ -11,7 +11,9 @@
 -- make of them outgrow the default 16 MiB arena.
 -- budget: steps=200000000 arena_bytes=1000000000
 -- The production modules are chat/*.roc and chat/platform/*.roc, less
--- twin.roc: tests may hold literal data.
+-- twin.roc (tests may hold literal data), and the modules of each package
+-- chat/main.roc's header imports by path (the markdown, roc-markdown,
+-- checked out beside roc-webbox).
 
 const roc_ast = real("tools:roc-ast/bin/roc-ast")
 -- Over this many parse nodes is long. The chat's largest definitions are
@@ -810,15 +812,17 @@ end
 -- over every chat/ module, twin.roc too. A line coming back long, or a
 -- group of three unstacked, is a finding here; `write=1` on the recipe
 -- stacks them. Its own plants are its `self_test=1`.
-function stack_hunt(what)
-  local r = run({"shale", "cookbook:roc/stack.shale", what}, {timeout_ms = 300000, whole = 4000000})
-  if r.code ~= 0 then
-    print(r.out)
-    fail("cookbook:roc/stack.shale failed")
-  end
+function stack_hunt(globs)
   local found = {}
-  for line in lines(r.out) do
-    if contains(line, ": stack: ") or contains(line, ": long: ") then push(found, line) end
+  for what in globs do
+    local r = run({"shale", "cookbook:roc/stack.shale", what}, {timeout_ms = 300000, whole = 4000000})
+    if r.code ~= 0 then
+      print(r.out)
+      fail("cookbook:roc/stack.shale failed")
+    end
+    for line in lines(r.out) do
+      if contains(line, ": stack: ") or contains(line, ": long: ") then push(found, line) end
+    end
   end
   print("== stack: " .. tostring(#found))
   for f in found do print("  " .. f) end
@@ -853,27 +857,79 @@ const gated = {
   {recipe = "nest_depth", args = {"min=4"}, checks = {"nested"}},
 }
 
+-- **THE PACKAGES THE CHAT IMPORTS, ASKED OF ITS HEADER**: each
+-- `name: "../../<repo>/<folder>/main.roc"` in chat/main.roc's app header,
+-- as `<repo>/<folder>` under the `repos:` mount, the folder roc-webbox is
+-- checked out in. The header is the one home of where a package lives.
+function chat_packages()
+  local header = between(read("chat/main.roc"), "\napp [", "}")
+  if header == nil then fail("chat/main.roc: no app header") end
+  local beside = real("repos:")
+  if real("repos:roc-webbox") ~= real(".") then
+    fail("the hunt: roc-webbox is not checked out under the repos: mount (" .. beside .. "), so its packages beside it cannot be read")
+  end
+  local found = {}
+  for entry in split(header, ",") do
+    if contains(entry, ": \"") and not contains(entry, "platform \"") then
+      local m = re_find(entry, [=[[a-z_]+: "\.\./\.\./([^"]+)/main\.roc"]=])
+      if m == nil then fail("chat/main.roc: a package not beside roc-webbox, which the hunt cannot read: " .. trim(entry)) end
+      push(found, m.groups[1])
+    end
+  end
+  return found
+end
+const packages = chat_packages()
+
+-- A package's modules, as Shale reads them (`repos:<folder>/X.roc`), less
+-- its `main.roc`, the package's header.
+function package_modules(folder)
+  local out = {}
+  for p in sort(glob("repos:" .. folder .. "/*.roc")) do
+    if not ends_with(p, "/main.roc") then push(out, p) end
+  end
+  if #out == 0 then fail("the hunt: the package " .. folder .. " has no modules under repos:") end
+  return out
+end
+
 -- Whether `path` is one of the production modules this hunt reads:
--- chat/*.roc but twin.roc, and chat/platform/*.roc.
+-- chat/*.roc but twin.roc, chat/platform/*.roc, and a package's modules.
 function is_production(path)
+  for folder in packages do
+    for prefix in {"repos:" .. folder .. "/", "../" .. folder .. "/"} do
+      if starts_with(path, prefix) then return not contains(sub(path, #prefix + 1), "/") end
+    end
+  end
   if path == "chat/twin.roc" or not starts_with(path, "chat/") then return false end
   local rest = sub(path, #"chat/" + 1)
   if not contains(rest, "/") then return true end
   return starts_with(rest, "platform/") and not contains(sub(rest, #"platform/" + 1), "/")
 end
 
-function cookbook_hunt(g)
-  local argv = {"shale", "cookbook:roc/" .. g.recipe .. ".shale", "glob=chat/**/*.roc"}
-  for a in g.args do push(argv, a) end
-  local r = run(argv, {timeout_ms = 300000, whole = 4000000})
-  if r.code ~= 0 then
-    print(r.out)
-    fail("cookbook:roc/" .. g.recipe .. ".shale failed")
+-- A finding's path: what comes before `:<line>:`, a mount's `repos:` kept.
+function finding_path(line)
+  local m = re_find(line, "^(.*\\.roc):[0-9]+:")
+  if m == nil then return "" end
+  return m.groups[1]
+end
+
+-- Each recipe reads one glob a run: the chat's, then each package's alone,
+-- so a call from the chat into a package is not seen from the package's.
+function cookbook_hunt(g, globs)
+  local out = ""
+  for what in globs do
+    local argv = {"shale", "cookbook:roc/" .. g.recipe .. ".shale", what}
+    for a in g.args do push(argv, a) end
+    local r = run(argv, {timeout_ms = 300000, whole = 4000000})
+    if r.code ~= 0 then
+      print(r.out)
+      fail("cookbook:roc/" .. g.recipe .. ".shale failed")
+    end
+    out = out .. r.out .. "\n"
   end
   for c in g.checks do
     local found = {}
-    for line in lines(r.out) do
-      if contains(line, ": " .. c .. ": ") and is_production(split(line, ":")[1]) then push(found, line) end
+    for line in lines(out) do
+      if contains(line, ": " .. c .. ": ") and is_production(finding_path(line)) then push(found, line) end
     end
     print("== " .. g.recipe .. " " .. c .. ": " .. tostring(#found))
     for f in found do print("  " .. f) end
@@ -955,7 +1011,14 @@ else
   local files = {}
   for p in glob("chat/*.roc") do if p ~= "chat/twin.roc" then push(files, p) end end
   for p in glob("chat/platform/*.roc") do push(files, p) end
-  local tree = read_trees(sort(files))
+  files = sort(files)
+  -- roc-ast reads a path from roc-webbox's root, the package beside it.
+  local globs = {"glob=chat/**/*.roc"}
+  for folder in packages do
+    for p in package_modules(folder) do push(files, "../" .. sub(p, #"repos:" + 1)) end
+    push(globs, "glob=repos:" .. folder .. "/*.roc")
+  end
+  local tree = read_trees(files)
   for name in hunts do
     local found = hunt(name, tree)
     print("== " .. name .. ": " .. tostring(#found))
@@ -964,6 +1027,6 @@ else
   local lone = single_caller({tree, read_trees({"chat/twin.roc"})})
   print("== single_caller: " .. tostring(#lone))
   for f in lone do print("  " .. f) end
-  stack_hunt("glob=chat/**/*.roc")
-  for g in gated do cookbook_hunt(g) end
+  stack_hunt(globs)
+  for g in gated do cookbook_hunt(g, globs) end
 end

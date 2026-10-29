@@ -267,7 +267,38 @@ fn chatModules(b: *std.Build, own: []const []const u8) []const []const u8 {
             if (std.mem.eql(u8, o, path)) break;
         } else out.append(b.allocator, path) catch @panic("OOM");
     }
+    packageModules(b, own[0], &out);
     return out.items;
+}
+
+/// **A PACKAGE'S MODULES ARE INPUTS TOO, FOUND FROM THE APP'S HEADER**: each
+/// `name: "<path>/main.roc"` the header of `app` names (its `platform` is
+/// `own`'s), and every `.roc` in that package's folder. The header is the one
+/// home of where a package lives (the markdown, `md`, is roc-markdown checked
+/// out beside roc-webbox), and a package module edited rebuilds the archive.
+fn packageModules(b: *std.Build, app: []const u8, out: *std.ArrayList([]const u8)) void {
+    const io = b.graph.io;
+    const source = b.root.root_dir.handle.readFileAlloc(io, app, b.allocator, .unlimited) catch |e| std.process.fatal("the Roc chat's packages: cannot read {s} ({t})", .{ app, e });
+    // The header: `app [...] {`, its entries split by commas, to its `}`.
+    const app_at = std.mem.indexOf(u8, source, "\napp [") orelse std.process.fatal("{s}: no app header", .{app});
+    const open = std.mem.indexOfScalarPos(u8, source, app_at, '{') orelse std.process.fatal("{s}: an app header with no {{", .{app});
+    const close = std.mem.indexOfScalarPos(u8, source, open, '}') orelse std.process.fatal("{s}: an app header with no }}", .{app});
+    var entries = std.mem.splitScalar(u8, source[open + 1 .. close], ',');
+    while (entries.next()) |entry_raw| {
+        const entry = std.mem.trim(u8, entry_raw, " \t\r\n");
+        const colon = std.mem.indexOf(u8, entry, ": \"") orelse continue;
+        const rel = std.mem.trimEnd(u8, entry[colon + 3 ..], "\"");
+        const main = std.fs.path.resolvePosix(b.allocator, &.{ std.fs.path.dirname(app) orelse ".", rel }) catch @panic("OOM");
+        const folder = std.fs.path.dirname(main) orelse ".";
+        var dir = b.root.root_dir.handle.openDir(io, folder, .{ .iterate = true }) catch |e|
+            std.process.fatal("{s} names the package {s}, and its folder {s} cannot be opened ({t}): check out roc-markdown beside roc-webbox", .{ app, rel, folder, e });
+        defer dir.close(io);
+        var it = dir.iterate();
+        while (it.next(io) catch |e| std.process.fatal("the Roc chat's packages: cannot list {s} ({t})", .{ folder, e })) |file| {
+            if (file.kind != .file or !std.mem.endsWith(u8, file.name, ".roc")) continue;
+            out.append(b.allocator, b.fmt("{s}/{s}", .{ folder, file.name })) catch @panic("OOM");
+        }
+    }
 }
 
 /// The Roc app `inputs[0]` (its other files the rest of `inputs`) built for
