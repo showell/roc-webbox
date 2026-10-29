@@ -46,7 +46,8 @@ ChatState := [].{
 		if next == [] {
 			Remove
 		} else {
-			Write(Str.join_with(List.map(Paths.sort_by_bytes(next), |s| "${s}\n"), "").to_utf8())
+			lines = Paths.sort_by_bytes(next).map(|s| "${s}\n")
+			Write(Str.join_with(lines, "").to_utf8())
 		}
 	}
 
@@ -60,7 +61,7 @@ ChatState := [].{
 	## trim also takes newlines, which a line split on them has none of),
 	## blank ones dropped.
 	parse : Str -> List(Str)
-	parse = |s| List.drop_if(List.map(s.split_on("\n"), ZigText.trim_str), |line| line.is_empty())
+	parse = |s| s.split_on("\n").map(ZigText.trim_str).drop_if(|line| line.is_empty())
 
 	## lastUserConv's and lastViewedTopic's reading of a bookmark: the file
 	## trimmed of spaces, tabs, CRs and newlines; "" when there is none (or

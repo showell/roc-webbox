@@ -105,8 +105,8 @@ Search := [].{
 		match h.found {
 			Found => {
 				at = h.at
-				start = U64.min(edge_fwd(h, U64.minus_saturated(at, excerpt_pad)), at)
-				end = U64.max(edge_back(h, U64.min(len, at + key_len + excerpt_pad)), at + key_len)
+				start = edge_fwd(h, at.minus_saturated(excerpt_pad)).min(at)
+				end = edge_back(h, len.min(at + key_len + excerpt_pad)).max(at + key_len)
 				{
 					before: List.concat(if start > 0 ellipsis else [], slice(start, at)),
 					mark: slice(at, at + key_len),

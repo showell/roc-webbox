@@ -60,7 +60,8 @@ backlog! = |at| {
 			}
 		},
 	)?
-	Ok(List.join(List.prepend(frames, Backlog.preamble(List.len(rest)))))
+	preamble = Backlog.preamble(List.len(rest))
+	Ok(frames.prepend(preamble).join())
 }
 
 ## The first value the host found, or none.

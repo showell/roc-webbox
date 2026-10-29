@@ -1005,9 +1005,10 @@ load_recent! = |accounts| {
 		channels,
 		from_dms,
 	)?
+	listed = list!(Paths.docs_folder(me))
 	docs = gather_docs!(
 		me,
-		Paths.docs(me, list!(Paths.docs_folder(me))),
+		Paths.docs(me, listed),
 		[],
 	)?
 	Ok((
@@ -2129,6 +2130,11 @@ scope_add_all! = |keys|
 search_error : Str -> List(U8)
 search_error = |text| JsonOut.object([("error", JsonOut.string(text))]).bytes()
 
+## A search's query field `name`, still form-encoded: its first value, and
+## none read as the empty key (a search for nothing finds nothing).
+search_field! : Str => List(U8)
+search_field! = |name| Host.read_query!(name.to_utf8()).first() ?? []
+
 search_words! : Chat.Request, List(Accounts.Account) => Chat.Answer
 search_words! = |req, accounts|
 	if req.method != Get {
@@ -2139,7 +2145,7 @@ search_words! = |req, accounts|
 			{ content_type: json, body: search_error("too many searches; wait a second") },
 		)
 	} else {
-		match Form.decode(List.first(Host.read_query!(Str.to_utf8("prefix"))) ?? []) {
+		match Form.decode(search_field!("prefix")) {
 			Err(BadEscape) => Chat.malformed
 			Ok(typed) =>
 				match search_scope!(accounts) {
@@ -2183,7 +2189,7 @@ search_messages! = |req, accounts|
 			{ content_type: json, body: search_error("too many searches; wait a second") },
 		)
 	} else {
-		match Form.decode(List.first(Host.read_query!(Str.to_utf8("word"))) ?? []) {
+		match Form.decode(search_field!("word")) {
 			Err(BadEscape) => Chat.malformed
 			Ok(typed) =>
 				match search_scope!(accounts) {

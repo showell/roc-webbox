@@ -227,7 +227,7 @@ text_blocks = |bytes| {
 				Err(_) => (kept, n + 1)
 			},
 	)
-	(text_of(List.join(List.intersperse(good, Feeds.sep))), bad)
+	(text_of(good.intersperse(Feeds.sep).join()), bad)
 }
 
 ## The file's blocks between separators, trimmed, the empty ones gone.

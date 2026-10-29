@@ -12,7 +12,10 @@ Time := [].{
 		days = I64.div_floor_by(unix_secs, 86400)
 		tod = unix_secs - days * 86400
 		c = civil_from_days(days)
-		"${year_text(c.year)}-${two(c.month)}-${two(c.day)}T${two(I64.div_floor_by(tod, 3600))}:${two(I64.div_floor_by(I64.mod_by(tod, 3600), 60))}:${two(I64.mod_by(tod, 60))}Z"
+		hour = I64.div_floor_by(tod, 3600)
+		minute = I64.div_floor_by(I64.mod_by(tod, 3600), 60)
+		second = I64.mod_by(tod, 60)
+		"${year_text(c.year)}-${two(c.month)}-${two(c.day)}T${two(hour)}:${two(minute)}:${two(second)}Z"
 	}
 
 	## `2026-06-19` for `unix_secs`: a topic named for its day.

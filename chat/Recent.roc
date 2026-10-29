@@ -174,8 +174,13 @@ Recent := [].{
 	## bug here, and crashes (a 500).
 	excerpt : Str -> Str
 	excerpt = |text| {
-		md = text.to_utf8()
-		match Str.from_utf8(cap(collapse_ws(md_images(html_images(quotes(md)))), 350)) {
+		edited = text.to_utf8()
+			|> quotes
+			|> html_images
+			|> md_images
+			|> collapse_ws
+			|> cap(350)
+		match Str.from_utf8(edited) {
 			Ok(cut) => cut
 			Err(_) => crash "Recent.excerpt: an edit split a codepoint"
 		}

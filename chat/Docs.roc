@@ -543,11 +543,10 @@ saved_message! = |m|
 ## publishDocRecent: the member's own recent feed told of doc `slug`,
 ## made or saved now.
 doc_touched! : Uid, Str => {}
-doc_touched! = |me, slug|
-	Host.publish!(
-		BusKey.recent(me).bytes(),
-		Docs.recent_frame(Time.rfc3339(Host.read_time!({})), slug),
-	)
+doc_touched! = |me, slug| {
+	now = Time.rfc3339(Host.read_time!({}))
+	Host.publish!(BusKey.recent(me).bytes(), Docs.recent_frame(now, slug))
+}
 
 ## **THE DOCS' READ PAGES** (docs.zig `handle`, metal-vmm QUEUE 289), each
 ## the member's own, never another's: the landing, the list's JSON, a doc's
