@@ -43,7 +43,9 @@ Accounts := [].{
 	## **A LOOKUP THAT NEEDED A READ THAT FAILED HAS NO ANSWER**: account
 	## `id`'s kind or name would not read, so the request fails with that
 	## read's own error (Host.fail!), as the Zig failed it. Never "no such
-	## account", never a name of "".
+	## account", never a name of "". Each lookup names only the tags it can
+	## fail with; this is what the one handler (Members.fail_unreadable!)
+	## takes.
 	Unreadable : [KindUnreadable(Uid), NameUnreadable(Uid)]
 
 	## **WHO MAY USE THE CHAT** (angry-gopher users.zig `userIsAuthorized`):
@@ -63,7 +65,7 @@ Accounts := [].{
 	## **AN ACCOUNT WHOSE KIND WILL NOT READ IS NO ANSWER**: the request fails
 	## with that read's error (`KindUnreadable`), as principalAuthorized's
 	## stat of the password failed it.
-	admits : List(Account), List(U8) -> Try([Admitted, Refused], Unreadable)
+	admits : List(Account), List(U8) -> Try([Admitted, Refused], [KindUnreadable(Uid)])
 	admits = |accounts, asking|
 		match Uid.from_utf8(asking) {
 			Err(NotAUid) => Ok(Refused)
@@ -96,7 +98,7 @@ Accounts := [].{
 	## and no name is a release cut short, and that member must still sign in
 	## by cookie to release again. What must not take "" for a name refuses
 	## it.
-	name : List(Account), Uid -> Try(Str, Unreadable)
+	name : List(Account), Uid -> Try(Str, [NameUnreadable(Uid)])
 	name = |accounts, id|
 		match List.keep_if(accounts, |a| a.id == id) {
 			[a, ..] =>
@@ -150,7 +152,10 @@ Accounts := [].{
 	## failed on the first read that failed. So the first account, in the
 	## host's order, whose kind is unreadable, or whose name is and which is
 	## not a guest, is the roster's failure; a guest's name is never read.
-	authorized : List(Account) -> Try(List({ id : Uid, name : Str }), Unreadable)
+	authorized : List(Account) -> Try(
+		List({ id : Uid, name : Str }),
+		[KindUnreadable(Uid), NameUnreadable(Uid)],
+	)
 	authorized = |accounts|
 		match List.keep_if(
 			accounts,
@@ -167,7 +172,7 @@ Accounts := [].{
 	## fails it, as listAuthorized did.
 	roster_named : List(Account) -> Try(
 		List({ id : Uid, name : Try(Str, [Unreadable]) }),
-		Unreadable,
+		[KindUnreadable(Uid)],
 	)
 	roster_named = |accounts|
 		match List.keep_if(accounts, |a| a.kind == Unreadable) {

@@ -71,7 +71,7 @@ Retire := [].{
 	refused : List(Accounts.Account),
 	List(List(U8)) -> Try(
 		{},
-		[Unreadable(Accounts.Unreadable), Refused(Str)],
+		[Unreadable([NameUnreadable(Uid)]), Refused(Str)],
 	)
 	refused = |accounts, keep|
 		match List.find_first(accounts, |a| a.name_read == Unreadable) {
