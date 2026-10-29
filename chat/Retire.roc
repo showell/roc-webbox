@@ -364,15 +364,9 @@ newest = |raw|
 	match Transcript.decode_file(raw) {
 		Err(_) => Err(Undated)
 		Ok(got) =>
-			match List.keep_oks(got.messages, |m| Time.unix_from_rfc3339(m.at)) {
-				[] => Err(Undated)
-				[first, .. as rest] => Ok(
-					List.fold(
-						rest,
-						first,
-						|a, b| if b > a b else a,
-					),
-				)
+			match List.max(List.keep_oks(got.messages, |m| Time.unix_from_rfc3339(m.at))) {
+				Ok(t) => Ok(t)
+				Err(ListWasEmpty) => Err(Undated)
 			}
 	}
 

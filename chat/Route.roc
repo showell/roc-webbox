@@ -178,26 +178,14 @@ family_under = |sub| {
 		("/code", Code),
 		("/links", Links),
 	]
-	List.fold(
-		named,
-		Err(NotUnderAPrefix),
-		|found, (prefix, f)|
-			match found {
-				Ok(r) => Ok(r)
-				Err(NotUnderAPrefix) =>
-					if sub.starts_with(prefix) {
-						rest = sub.drop_prefix(prefix)
-						if rest.is_empty() or rest.starts_with("/") Ok(
-							with_rest(
-								f,
-								rest,
-							),
-						) else Err(NotUnderAPrefix)
-					} else {
-						Err(NotUnderAPrefix)
-					}
-			},
-	)
+	under = |(prefix, _)| {
+		rest = sub.drop_prefix(prefix)
+		sub.starts_with(prefix) and (rest.is_empty() or rest.starts_with("/"))
+	}
+	match List.find_first(named, under) {
+		Ok((prefix, f)) => Ok(with_rest(f, sub.drop_prefix(prefix)))
+		Err(NotFound) => Err(NotUnderAPrefix)
+	}
 }
 
 ## A topic's tail (chat.zig `topicRoute`): one segment naming it, or
@@ -234,8 +222,10 @@ named_tail = |seg| {
 		("reactions", Reactions),
 		("react", React),
 	]
-	List.fold(tails, Invalid, |found, (name, tail)|
-		if found == Invalid and name == seg tail else found)
+	match List.find_first(tails, |(name, _)| name == seg) {
+		Ok((_, tail)) => tail
+		Err(NotFound) => Invalid
+	}
 }
 
 with_rest : Family, Str -> R
