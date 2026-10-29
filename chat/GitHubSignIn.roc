@@ -38,6 +38,11 @@
 ## account's login is cleared (a ClearLogin step), so its GitHub link
 ## never leads to the new owner.
 ##
+## **A BAR IS FOR LIFE (Steve, 2026-10-29)**: a retired human's GitHub id
+## is barred for good. A barred id is refused at `resolve` and again at
+## `name`, whatever the accounts hold, and no step here touches the barred
+## list (Admin has no Unbar either).
+##
 ## **Sign-up is open (Steve):** any GitHub account may make an account,
 ## giving a display name (DisplayName's rule). An account is its GitHub id;
 ## its login is only what GitHub last called it, so a renamed login signs
@@ -1393,3 +1398,17 @@ expect once.settings == { ..usual_settings, next_generation: gen(11) }
 expect twice.settings == once.settings
 # The counter is never lowered by a step behind it.
 expect GitHubSignIn.applied([AdvanceGeneration(gen(3))], { accounts: [], settings: usual_settings }).settings == usual_settings
+
+# **A BAR IS FOR LIFE** (Steve, 2026-10-29): no sign-in step, of any kind,
+# takes an id off the barred list; a barred id is refused at both doors.
+every_step : List(GitHubSignIn.Step)
+every_step = [
+	AddAccount(human(66, { login: "gone", name: "Gone", role: Member })),
+	SetLogin({ human: gid(66), login: "back" }),
+	ClearLogin({ human: gid(66), login: "gone" }),
+	AdvanceGeneration(gen(99)),
+]
+
+expect GitHubSignIn.applied(every_step, { accounts: [], settings: usual_settings }).settings.barred == usual_settings.barred
+expect said({ ..usual, github: Identified({ id: 66, login: Str.to_utf8("gone") }), accounts: [] }) == Refused(Barred)
+expect name_said({ ..usual_naming, pending: Signed({ ..usual_pending, github: 66 }) }) == Refused(Barred)

@@ -107,7 +107,6 @@ ActionKind : [
 	RevokeKeys,
 	RevokeSessions,
 	SetRole,
-	Unbar,
 	ReadCounters,
 ]
 
@@ -118,7 +117,6 @@ all_action_kinds = [
 	RevokeKeys,
 	RevokeSessions,
 	SetRole,
-	Unbar,
 	ReadCounters,
 ]
 
@@ -130,7 +128,6 @@ spell_action = |kind|
 		RevokeKeys => "revoke-keys"
 		RevokeSessions => "revoke-sessions"
 		SetRole => "set-role"
-		Unbar => "unbar"
 		ReadCounters => "read-counters"
 	}
 
@@ -144,7 +141,6 @@ action_text = |action|
 		Retire(id) => "${spell_action(Retire)}${colon}${AccountCodec.id_text(id)}"
 		RevokeKeys(id) => "${spell_action(RevokeKeys)}${colon}${AccountCodec.id_text(id)}"
 		RevokeSessions(g) => "${spell_action(RevokeSessions)}${colon}${g.to_u64().to_str()}"
-		Unbar(g) => "${spell_action(Unbar)}${colon}${g.to_u64().to_str()}"
 		SetRole({ human, role }) => {
 			target = "${human.to_u64().to_str()}${colon}${AccountCodec.role_text(role)}"
 			"${spell_action(SetRole)}${colon}${target}"
@@ -166,7 +162,7 @@ action_from = |value|
 			)? {
 				ListAccounts => Ok(ListAccounts)
 				ReadCounters => Ok(ReadCounters)
-				Retire | RevokeKeys | RevokeSessions | SetRole | Unbar => Err(BadValue("action"))
+				Retire | RevokeKeys | RevokeSessions | SetRole => Err(BadValue("action"))
 			}
 
 		Ok({ before, after }) =>
@@ -186,11 +182,6 @@ action_from = |value|
 						after,
 						{ name: "action", make: Principal.GitHubId.from_u64 },
 					).map_ok(|g| RevokeSessions(g))
-				Unbar =>
-					Stored.id(
-						after,
-						{ name: "action", make: Principal.GitHubId.from_u64 },
-					).map_ok(|g| Unbar(g))
 				SetRole => {
 					{ head, tail } = split_colon(after, "action")?
 					human = Stored.id(head, { name: "action", make: Principal.GitHubId.from_u64 })?
@@ -213,7 +204,6 @@ AdminRefusal : [
 	BootstrapAdmin,
 	LastAdmin,
 	NoSuchTarget,
-	NotBarred,
 ]
 
 all_admin_refusals : List(AdminRefusal)
@@ -227,7 +217,6 @@ all_admin_refusals = [
 	BootstrapAdmin,
 	LastAdmin,
 	NoSuchTarget,
-	NotBarred,
 ]
 
 spell_admin_refusal : AdminRefusal -> Str
@@ -242,7 +231,6 @@ spell_admin_refusal = |why|
 		BootstrapAdmin => "bootstrap-admin"
 		LastAdmin => "last-admin"
 		NoSuchTarget => "no-such-target"
-		NotBarred => "not-barred"
 	}
 
 all_key_refusals : List(ApiKey.Refusal)
@@ -286,7 +274,6 @@ refusal_text = |why|
 		BootstrapAdmin => spell_admin_refusal(BootstrapAdmin)
 		LastAdmin => spell_admin_refusal(LastAdmin)
 		NoSuchTarget => spell_admin_refusal(NoSuchTarget)
-		NotBarred => spell_admin_refusal(NotBarred)
 	}
 
 verdict_from : List(U8) -> Try(Verdict, Stored.Problem)
@@ -327,7 +314,6 @@ verdict_from = |value|
 							BootstrapAdmin => Ok(Refused(BootstrapAdmin))
 							LastAdmin => Ok(Refused(LastAdmin))
 							NoSuchTarget => Ok(Refused(NoSuchTarget))
-							NotBarred => Ok(Refused(NotBarred))
 						}
 				}
 		}
@@ -451,7 +437,6 @@ actions = [
 	RevokeSessions(gid(583231)),
 	SetRole({ human: gid(2), role: Admin }),
 	SetRole({ human: gid(583231), role: Member }),
-	Unbar(gid(66)),
 	ReadCounters,
 ]
 
@@ -473,7 +458,6 @@ when_refused = |why|
 		BootstrapAdmin => Refused(BootstrapAdmin)
 		LastAdmin => Refused(LastAdmin)
 		NoSuchTarget => Refused(NoSuchTarget)
-		NotBarred => Refused(NotBarred)
 	}
 
 entries : List(Admin.Audit)
@@ -502,8 +486,8 @@ entries =
 			),
 	)
 
-expect List.len(verdicts) == 16
-expect List.len(entries) == 384
+expect List.len(verdicts) == 15
+expect List.len(entries) == 330
 expect List.all(entries, |e| AuditCodec.decode(AuditCodec.encode(e)) == Ok(e))
 
 # ── THE MALFORMED TABLE: each line, its named problem.
@@ -553,11 +537,11 @@ expect decoded({ from: "revoke-keys:human:2", to: "list-accounts" }) == Ok({})
 expect decoded({ from: "revoke-keys:human:2", to: "set-role:2:admin" }) == Ok({})
 expect decoded({ from: "revoke-keys:human:2", to: "set-role:2" }) == Err(BadValue("action"))
 expect decoded({ from: "revoke-keys:human:2", to: "set-role" }) == Err(BadValue("action"))
-expect decoded({ from: "revoke-keys:human:2", to: "unbar:66" }) == Ok({})
-expect decoded({ from: "revoke-keys:human:2", to: "unbar" }) == Err(BadValue("action"))
-expect decoded({ from: "revoke-keys:human:2", to: "unbar:human:66" }) == Err(BadNumber("action"))
+# No action lifts a bar (Steve, 2026-10-29): `unbar` is no word.
+expect decoded({ from: "revoke-keys:human:2", to: "unbar:66" }) == Err(UnknownWord("action"))
+expect decoded({ from: "revoke-keys:human:2", to: "unbar" }) == Err(UnknownWord("action"))
 expect decoded({ from: "permitted", to: "refused:bootstrap-admin" }) == Ok({})
-expect decoded({ from: "permitted", to: "refused:not-barred" }) == Ok({})
+expect decoded({ from: "permitted", to: "refused:not-barred" }) == Err(UnknownWord("verdict"))
 expect decoded({ from: "at=1761600000", to: "at=-1" }) == Err(BadNumber("at"))
 expect decoded({ from: "revoke-keys:human:2", to: "set-role:0:admin" }) == Err(BadValue("action"))
 expect decoded({
