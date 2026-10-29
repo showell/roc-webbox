@@ -44,13 +44,15 @@ OAuthState := [].{
 	## - `Valid` otherwise.
 	check : OAuthState.Fields, { cookie : OAuthState.Cookie, now : I64 } -> OAuthState.Verdict
 	check = |state, { cookie, now }| {
-		age = now - state.issued_at
+		# In I128: two I64 times anywhere in their range differ by less
+		# than I128 holds, so no `issued_at` a host hands back overflows.
+		age = now.to_i128() - state.issued_at.to_i128()
 		match cookie {
 			Unsent => Mismatched
 			Sent(nonce) =>
 				if List.is_empty(state.nonce) or nonce != state.nonce {
 					Mismatched
-				} else if age < 0 or age >= OAuthState.lifetime_secs {
+				} else if age < 0 or age >= OAuthState.lifetime_secs.to_i128() {
 					Expired
 				} else {
 					Valid
@@ -84,6 +86,10 @@ expect back({ cookie: Sent(nonce), now: 1599 }) == Valid
 expect back({ cookie: Sent(nonce), now: 1600 }) == Expired
 expect back({ cookie: Sent(nonce), now: 99999 }) == Expired
 expect back({ cookie: Sent(nonce), now: 999 }) == Expired
+
+# I64's ends, issued or now: expired, never an overflow.
+expect OAuthState.check({ nonce, issued_at: -9223372036854775808 }, { cookie: Sent(nonce), now: 100 }) == Expired
+expect OAuthState.check({ nonce, issued_at: 9223372036854775807 }, { cookie: Sent(nonce), now: -9223372036854775808 }) == Expired
 
 # Mismatched: no cookie, another nonce, a nonce one byte longer or shorter,
 # an empty cookie, and an empty nonce on both sides.

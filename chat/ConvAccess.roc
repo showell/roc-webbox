@@ -8,11 +8,15 @@
 ##   bots) still has an account and has elected public; any one of them can
 ##   withdraw, and retiring one withdraws their election.
 ## A conversation holds its participants by id alone: who owns an agent is
-## the accounts' answer at each decision, never a copy the caller hands in.
-## Who sees and who posts is then Access's, on the resource made here.
+## the accounts' answer at each decision, never a copy the caller hands in,
+## and only an id exactly one account holds names anyone. An election is
+## held by the voter's account (its `created`), so an account made again
+## with a retired human's GitHub id never inherits their public vote. Who
+## sees and who posts is then Access's, on the resource made here, for a
+## viewer exactly one account holds.
 ## Pure; the table of every viewer against every conversation is below,
 ## a cell a line, which is why the module runs past a thousand lines: the
-## code is the first 240.
+## code is the first 260.
 import Access
 import Principal
 
@@ -57,12 +61,13 @@ ConvAccess := [].{
 	## **A CONVERSATION AND ITS ELECTIONS, AS A STATE MACHINE**: opaque, so
 	## `start` is the one way in (every human's election private), and
 	## `elect` and `withdraw_votes` the transitions. `public_by` holds the
-	## humans whose election is public now; a human not in it has elected
-	## private, or never elected, which is the same.
+	## accounts whose election is public now, each by its human's GitHub id
+	## and the account's `created`; a human not in it has elected private,
+	## or never elected, which is the same.
 	Conv :: {
 		id : ConvAccess.ConvId,
 		participants : List(Principal.Id),
-		public_by : List(Principal.GitHubId),
+		public_by : List({ human : Principal.GitHubId, created : I64 }),
 	}.{
 
 		## A new conversation among `participants` (each once), private to
@@ -152,33 +157,35 @@ ConvAccess := [].{
 				(Agent(_), _) | (Bot(_), _) => Err(NotHuman)
 				(Human(_), HumansOnly) => Err(AlwaysPrivate)
 				(Human(h), WithAgents) =>
-					if !Principal.has_account(accounts, h.id) {
-						Err(NoSuchPrincipal)
-					} else if !List.contains(conv.involved(accounts), h.id) {
-						Err(NotInvolved)
-					} else {
-						others = List.keep_if(c.public_by, |g| g != h.id)
-						match visibility {
-							Public => Ok(ConvAccess.Conv.({ ..c, public_by: others.append(h.id) }))
-							Private => Ok(ConvAccess.Conv.({ ..c, public_by: others }))
-						}
+					match Principal.human_account(accounts, h.id) {
+						Err(_) => Err(NoSuchPrincipal)
+						Ok(account) =>
+							if !List.contains(conv.involved(accounts), h.id) {
+								Err(NotInvolved)
+							} else {
+								others = List.keep_if(c.public_by, |vote| vote.human != h.id)
+								match visibility {
+									Public => Ok(ConvAccess.Conv.({ ..c, public_by: others.append({ human: h.id, created: account.created }) }))
+									Private => Ok(ConvAccess.Conv.({ ..c, public_by: others }))
+								}
+							}
 					}
 			}
 		}
 
-		## **A RETIRED HUMAN'S ELECTION, WITHDRAWN**, for the retirement to
-		## write back: their public election is gone for good, so an account
-		## made again with their GitHub id starts private. (Until it is
-		## written, `visibility` counts no election of a human without an
-		## account.)
+		## **A RETIRED HUMAN'S ELECTION, WITHDRAWN**, for the retirement's
+		## plan (Admin.roc) to write back: their public election is gone for
+		## good. (Until it is written, `visibility` counts no election of a
+		## human without an account, nor one an earlier account of their
+		## GitHub id cast.)
 		withdraw_votes : ConvAccess.Conv, Principal.GitHubId -> ConvAccess.Conv
 		withdraw_votes = |ConvAccess.Conv.(c), human|
-			ConvAccess.Conv.({ ..c, public_by: List.keep_if(c.public_by, |g| g != human) })
+			ConvAccess.Conv.({ ..c, public_by: List.keep_if(c.public_by, |vote| vote.human != human) })
 
 		## **ITS VISIBILITY NOW**: private for humans alone; otherwise
 		## public only while every agent and bot in it is held by exactly
-		## one account, and every human involved has an account and has
-		## elected public.
+		## one account, and every human involved has exactly one account,
+		## which has elected public itself.
 		visibility : ConvAccess.Conv, List(Principal) -> [Private, Public]
 		visibility = |conv, accounts| {
 			ConvAccess.Conv.(c) = conv
@@ -188,7 +195,11 @@ ConvAccess := [].{
 					is_resolved = List.all(c.participants, |p| answerer(accounts, p) != Unresolved)
 					is_elected = List.all(
 						conv.involved(accounts),
-						|h| Principal.has_account(accounts, h) and c.public_by.contains(h),
+						|h|
+							match Principal.human_account(accounts, h) {
+								Ok(account) => c.public_by.contains({ human: h, created: account.created })
+								Err(_) => Bool.False
+							},
 					)
 					if is_resolved and is_elected Public else Private
 				}
@@ -211,15 +222,27 @@ ConvAccess := [].{
 	## **CAN THIS VIEWER SEE THIS CONVERSATION?** Access's rule on the
 	## conversation's resource: a participant, or the human it answers to,
 	## always; any human or agent signed in while it is public, never a bot
-	## not in it; nobody signed out. An admin is no exception.
+	## not in it; nobody signed out, and nobody whose id no account, or more
+	## than one, holds (a retired participant sees nothing). An admin is no
+	## exception.
 	can_see : Access.Viewer, { conv : ConvAccess.Conv, accounts : List(Principal) } -> Bool
-	can_see = |viewer, { conv, accounts }| Access.can_see(viewer, conv.resource(accounts))
+	can_see = |viewer, { conv, accounts }|
+		is_held(viewer, accounts) and Access.can_see(viewer, conv.resource(accounts))
 
 	## **CAN THIS VIEWER POST TO THIS CONVERSATION?** A participant, or the
-	## human it answers to, public or not.
+	## human it answers to, public or not; held by exactly one account.
 	can_post : Access.Viewer, { conv : ConvAccess.Conv, accounts : List(Principal) } -> Bool
-	can_post = |viewer, { conv, accounts }| Access.can_post(viewer, conv.resource(accounts))
+	can_post = |viewer, { conv, accounts }|
+		is_held(viewer, accounts) and Access.can_post(viewer, conv.resource(accounts))
 }
+
+## A viewer signed in as an id exactly one account holds; nobody signed out.
+is_held : Access.Viewer, List(Principal) -> Bool
+is_held = |viewer, accounts|
+	match viewer {
+		SignedOut => Bool.True
+		SignedIn(who) => Principal.find(accounts, who).is_ok()
+	}
 
 ## **THE HUMAN A PARTICIPANT ANSWERS TO, AS THE ACCOUNTS SAY**: a human,
 ## itself; an agent or a bot, its owner, when exactly one account holds its
@@ -230,9 +253,9 @@ answerer = |accounts, id|
 	match id {
 		Human(g) => Answers(g)
 		Agent(_) | Bot(_) =>
-			match List.keep_if(accounts, |p| Principal.id(p) == id) {
-				[only] => Answers(Principal.answers_to(only))
-				_ => Unresolved
+			match Principal.find(accounts, id) {
+				Ok(only) => Answers(Principal.answers_to(only))
+				Err(_) => Unresolved
 			}
 	}
 
@@ -279,6 +302,7 @@ person = |n, role|
 		login: "h${n.to_str()}",
 		name: "H${n.to_str()}",
 		role,
+		created: 1,
 	})
 
 ## A test's agent or bot: its id, and its owner's GitHub id.
@@ -1291,3 +1315,69 @@ expect posts(BeaBot, three_all) == ReadOnly
 expect posts(CalAgent, three_all) == ReadOnly
 expect posts(DeeAgent, three_all) == Writable
 expect posts(DeeBot, three_all) == ReadOnly
+
+# ── RE-CREATION AFTER RETIREMENT (the round-two attacker's fifth)
+# Ann elected ha_own public, then retired; an account made again with her
+# GitHub id (created later) does not inherit her vote, even before the
+# retirement's withdrawal is written: private.
+ann_again : Principal
+ann_again = Principal.Human({ id: gid(1), login: "h1", name: "H1", role: Member, created: 99 })
+
+again : List(Principal)
+again = List.prepend(without(Ann), ann_again)
+
+expect ha_own_ann.visibility(again) == Private
+expect ha_cross_both.visibility(again) == Private
+expect sees_among(Dee, { conv: ha_own_ann, among: again }) == Hidden
+# Her own account, back as it was (the same `created`), is the same vote.
+expect ha_own_ann.visibility(List.append(without(Ann), principal(Ann))) == Public
+# The new account votes for itself.
+expect
+	match ha_own_ann.elect({ by: ann_again, visibility: Public, accounts: again }) {
+		Ok(c) => c.visibility(again) == Public
+		Err(_) => Bool.False
+	}
+# A copy of Ann's account beside it: her vote names nobody.
+expect ha_own_ann.visibility(List.append(accounts, principal(Ann))) == Private
+
+# ── VIEWERS AFTER AN AGENT PARTICIPANT RETIRES (round two's missing cells)
+# ha_cross, both elected public, then BeaAgent retired: private; Ann still
+# sees and posts; Bea, BeaAgent's owner, no longer answers for it; the
+# retired agent itself sees nothing.
+gone_agent : List(Principal)
+gone_agent = without(BeaAgent)
+
+sees_gone : Who -> [Visible, Hidden]
+sees_gone = |who| sees_among(who, { conv: ha_cross_both, among: gone_agent })
+
+posts_gone : Who -> [Writable, ReadOnly]
+posts_gone = |who|
+	if ConvAccess.can_post(viewer(who), { conv: ha_cross_both, accounts: gone_agent }) Writable else ReadOnly
+
+expect ha_cross_both.visibility(gone_agent) == Private
+expect sees_gone(Out) == Hidden
+expect sees_gone(Ann) == Visible
+expect sees_gone(Bea) == Hidden
+expect sees_gone(Cal) == Hidden
+expect sees_gone(Dee) == Hidden
+expect sees_gone(AnnAgent) == Hidden
+expect sees_gone(BeaAgent) == Hidden
+expect sees_gone(BeaBot) == Hidden
+expect sees_gone(CalAgent) == Hidden
+expect sees_gone(DeeAgent) == Hidden
+expect sees_gone(DeeBot) == Hidden
+expect posts_gone(Out) == ReadOnly
+expect posts_gone(Ann) == Writable
+expect posts_gone(Bea) == ReadOnly
+expect posts_gone(BeaAgent) == ReadOnly
+expect posts_gone(Cal) == ReadOnly
+# aa, both elected public, then BeaAgent retired: private to AnnAgent and
+# Ann alone.
+expect sees_among(Ann, { conv: aa_both, among: gone_agent }) == Visible
+expect sees_among(AnnAgent, { conv: aa_both, among: gone_agent }) == Visible
+expect sees_among(Bea, { conv: aa_both, among: gone_agent }) == Hidden
+expect sees_among(Dee, { conv: aa_both, among: gone_agent }) == Hidden
+expect sees_among(BeaAgent, { conv: aa_both, among: gone_agent }) == Hidden
+
+# A viewer two accounts hold sees nothing, even a public conversation.
+expect sees_among(Dee, { conv: ha_own_ann, among: List.append(accounts, principal(Dee)) }) == Hidden

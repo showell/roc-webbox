@@ -1,15 +1,18 @@
 ## **AN ACCOUNT, STORED** (the Roc chat's auth design, section 1): a human,
 ## an agent or a bot, one line in Stored's format:
 ##
-##     account v1 kind=human github=583231 login=octocat role=admin name=Steve H.
+##     account v1 kind=human github=583231 login=octocat created=1761600000 role=admin name=Steve H.
 ##     account v1 kind=agent id=7 owner=583231 name=CC
 ##     account v1 kind=bot id=9 owner=583231 name=commits
 ##
 ## A human is keyed by its GitHub id; an agent and a bot by the chat's own
-## id, with the GitHub id of the human who owns it. The name is last, as
-## Stored's free text is, and held to DisplayName's rule both ways; a login
-## to GitHubLogin's. `decode` gives a Principal or a named Stored.Problem,
-## never a guess. Pure.
+## id, with the GitHub id of the human who owns it. A human's `created` is
+## when the account was made, which its sessions and keys are bound to. The
+## name is last, as Stored's free text is, and held to DisplayName's rule
+## both ways; a login to GitHubLogin's, or empty once cleared (another
+## account signed in with it since). `decode` gives a Principal or a named
+## Stored.Problem, never a guess; `load` gives a whole store of them, or the
+## first line it refuses, or the first id two lines hold. Pure.
 import DisplayName
 import GitHubLogin
 import Principal
@@ -32,14 +35,15 @@ AccountCodec := [].{
 		match principal {
 			Human(h) => {
 				name = name_text(h.name)?
-				login = GitHubLogin.from_str(h.login).map_err(|_| LoginRefused)?
+				login = login_text(h.login)?
 				Ok(
 					Stored.line(
 						"account",
 						[
 							("kind", spell_kind(Human)),
 							("github", h.id.to_u64().to_str()),
-							("login", login.to_str()),
+							("login", login),
+							("created", Stored.time_text(h.created)),
 							("role", AccountCodec.role_text(h.role)),
 							("name", name),
 						],
@@ -82,6 +86,39 @@ AccountCodec := [].{
 			Agent => decode_owned(kind.rest).map_ok(|a| Principal.Agent(a))
 			Bot => decode_owned(kind.rest).map_ok(|b| Principal.Bot(b))
 		}
+	}
+
+	## Why a store of accounts will not load.
+	LoadProblem : [
+		## Line `line` (from 1) is refused, as `decode` says.
+		BadLine({ line : U64, problem : Stored.Problem }),
+
+		## Two lines hold one id (Principal.unique): a forged copy beside
+		## the real account, which no decision may pick between.
+		DuplicateId(Principal.Id),
+	]
+
+	## **THE ACCOUNTS LOADER**: a store of account lines, each ending in its
+	## newline (an empty store is no accounts), as the accounts every
+	## decision is made against; refused whole at its first bad line, or
+	## when two lines hold one id. A torn last line is the first's problem
+	## (`Torn`).
+	load : List(U8) -> Try(List(Principal), AccountCodec.LoadProblem)
+	load = |raw| {
+		pieces = List.split_on(raw, '\n')
+		lines = List.drop_last(pieces, 1)
+		torn =
+			match List.last(pieces) {
+				Ok(last) if last != [] => [last]
+				_ => []
+			}
+		decoded = List.map_with_index(
+			List.concat(List.map(lines, |l| List.append(l, '\n')), torn),
+			|bytes, i|
+				AccountCodec.decode(bytes).map_err(|problem| BadLine({ line: i + 1, problem })),
+		)
+		accounts = List.map_try(decoded, |d| d)?
+		Principal.unique(accounts).map_err(|DuplicateId(id)| DuplicateId(id))
 	}
 
 	## **A PRINCIPAL'S ID AS EVERY STORED RECORD SPELLS IT**: its kind, a
@@ -171,6 +208,18 @@ spell_kind = |kind|
 all_roles : List(Principal.Role)
 all_roles = [Admin, Member]
 
+## The login as stored: GitHubLogin's rule, or empty (cleared).
+login_text : Str -> Try(Str, AccountCodec.EncodeProblem)
+login_text = |login|
+	if login == "" {
+		Ok("")
+	} else {
+		match GitHubLogin.from_str(login) {
+			Ok(known) => Ok(known.to_str())
+			Err(NotALogin) => Err(LoginRefused)
+		}
+	}
+
 ## The name as stored: it passes the rule and is already trimmed.
 name_text : Str -> Try(Str, AccountCodec.EncodeProblem)
 name_text = |name|
@@ -220,16 +269,24 @@ decode_human = |after_kind| {
 	github = after_kind.field("github")?
 	id = Stored.id(github.value, { name: "github", make: Principal.GitHubId.from_u64 })?
 	login = github.rest.field("login")?
-	login_text = GitHubLogin.from_utf8(login.value).map_err(|_| BadValue("login"))?
-	role = login.rest.field("role")?
+	login_word =
+		if login.value == [] {
+			""
+		} else {
+			GitHubLogin.from_utf8(login.value).map_err(|_| BadValue("login"))?.to_str()
+		}
+	created_field = login.rest.field("created")?
+	created = Stored.time(created_field.value, "created")?
+	role = created_field.rest.field("role")?
 	role_word = AccountCodec.role_from(role.value, "role")?
 	name = stored_name(role.rest)?
 	Ok(
 		Principal.Human({
 			id,
-			login: login_text.to_str(),
+			login: login_word,
 			name,
 			role: role_word,
+			created,
 		}),
 	)
 }
@@ -290,6 +347,7 @@ human = |{ name, role }|
 		login: "octocat",
 		name,
 		role,
+		created: 1761600000,
 	})
 
 steve : Principal
@@ -319,6 +377,7 @@ Every : [
 			login : Str,
 			name : Str,
 			role : Principal.Role,
+			created : I64,
 		},
 	),
 	Agent(
@@ -369,7 +428,7 @@ line_of = |account|
 	}
 
 # The exact lines.
-expect line_of(steve) == "account v1 kind=human github=583231 login=octocat role=admin name=Steve H.\n"
+expect line_of(steve) == "account v1 kind=human github=583231 login=octocat created=1761600000 role=admin name=Steve H.\n"
 expect line_of(cc) == "account v1 kind=agent id=7 owner=583231 name=CC\n"
 expect line_of(commits) == "account v1 kind=bot id=9 owner=583231 name=commits\n"
 
@@ -399,12 +458,16 @@ biggest = Principal.Bot({
 
 expect is_kept(biggest)
 expect round_trip(steve) != round_trip(human({ name: "Steve H.", role: Member }))
+# A cleared login (another account signed in with it since) is stored
+# empty, and reads back empty.
+expect is_kept(Principal.Human({ id: gid(5), login: "", name: "Old", role: Member, created: 0 }))
+expect line_of(Principal.Human({ id: gid(5), login: "", name: "Old", role: Member, created: 0 })) == "account v1 kind=human github=5 login= created=0 role=member name=Old\n"
 
 # Bytes round trip too: a decoded line encodes to the same bytes.
 expect
 	List.all(
 		[
-			"account v1 kind=human github=1 login=a role=member name=b\n",
+			"account v1 kind=human github=1 login=a created=7 role=member name=b\n",
 			"account v1 kind=agent id=7 owner=583231 name=CC\n",
 			"account v1 kind=bot id=9 owner=2 name=commits bot\n",
 		],
@@ -422,7 +485,7 @@ decoded : Str -> Try({}, Stored.Problem)
 decoded = |text| AccountCodec.decode(Str.to_utf8(text)).map_ok(|_| {})
 
 human_line : Str
-human_line = "account v1 kind=human github=1 login=a role=member name=b\n"
+human_line = "account v1 kind=human github=1 login=a created=7 role=member name=b\n"
 
 agent_line : Str
 agent_line = "account v1 kind=agent id=7 owner=5 name=CC\n"
@@ -450,14 +513,18 @@ expect human_but({ from: " login=a", to: "" }) == Err(MissingField("login"))
 expect human_but({ from: "github=1", to: "github=1 github=1" }) == Err(MissingField("login"))
 expect human_but({ from: " role=member", to: "" }) == Err(MissingField("role"))
 expect human_but({ from: " name=b", to: "" }) == Err(MissingField("name"))
-expect human_but({ from: "login=a ", to: "login=a  " }) == Err(MissingField("role"))
-expect human_but({ from: "login=a ", to: "login=a extra=1 " }) == Err(MissingField("role"))
+expect human_but({ from: "login=a ", to: "login=a  " }) == Err(MissingField("created"))
+expect human_but({ from: "login=a ", to: "login=a extra=1 " }) == Err(MissingField("created"))
 expect human_but({ from: "github=1", to: "github=0" }) == Err(BadValue("github"))
 expect human_but({ from: "github=1", to: "github=01" }) == Err(BadNumber("github"))
 expect human_but({ from: "github=1", to: "github=-1" }) == Err(BadNumber("github"))
 expect human_but({ from: "github=1", to: "github=" }) == Err(BadNumber("github"))
 expect human_but({ from: "login=a", to: "login=a_b" }) == Err(BadValue("login"))
-expect human_but({ from: "login=a", to: "login=" }) == Err(BadValue("login"))
+expect human_but({ from: "login=a", to: "login=" }) == Ok({})
+expect human_but({ from: " created=7", to: "" }) == Err(MissingField("created"))
+expect human_but({ from: "created=7", to: "created=-7" }) == Err(BadNumber("created"))
+expect human_but({ from: "created=7", to: "created=07" }) == Err(BadNumber("created"))
+expect human_but({ from: "login=a created=7", to: "created=7 login=a" }) == Err(MissingField("login"))
 expect human_but({ from: "role=member", to: "role=owner" }) == Err(UnknownWord("role"))
 expect human_but({ from: "role=member", to: "role=Admin" }) == Err(UnknownWord("role"))
 expect human_but({ from: "name=b", to: "name=" }) == Err(BadValue("name"))
@@ -525,6 +592,28 @@ expect
 			login: "bad login",
 			name: "b",
 			role: Member,
+			created: 0,
 		}),
 	)
 		== Err(LoginRefused)
+
+# ── THE ACCOUNTS LOADER
+loaded : Str -> Try(List(Principal.Id), AccountCodec.LoadProblem)
+loaded = |text| AccountCodec.load(Str.to_utf8(text)).map_ok(|list| List.map(list, Principal.id))
+
+agent_7 : Str
+agent_7 = "account v1 kind=agent id=7 owner=1 name=CC\n"
+
+expect loaded("") == Ok([])
+expect loaded(human_line) == Ok([Principal.Id.Human(gid(1))])
+expect loaded("${human_line}${agent_7}") == Ok([Principal.Id.Human(gid(1)), Principal.Id.Agent(aid(7))])
+# A torn last line, a bad line (its number from 1), a blank line.
+expect loaded("${human_line}${agent_7}".replace_last("\n", "")) == Err(BadLine({ line: 2, problem: Torn }))
+expect loaded("${human_line}account v1 kind=robot\n") == Err(BadLine({ line: 2, problem: UnknownWord("kind") }))
+expect loaded("${human_line}\n${agent_7}") == Err(BadLine({ line: 2, problem: WrongRecord }))
+# **A FORGED COPY FIRST** (round two's first finding): an agent line
+# claiming another owner, or a human line claiming admin, before the real
+# one; or an agent and a bot from the one counter.
+expect loaded("account v1 kind=agent id=7 owner=9 name=CC\n${human_line}${agent_7}") == Err(DuplicateId(Principal.Id.Agent(aid(7))))
+expect loaded("${human_line.replace_first("role=member", "role=admin")}${human_line}") == Err(DuplicateId(Principal.Id.Human(gid(1))))
+expect loaded("${agent_7}${agent_7.replace_first("kind=agent", "kind=bot")}") == Err(DuplicateId(Principal.Id.Bot(aid(7))))

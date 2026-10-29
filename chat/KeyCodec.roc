@@ -2,70 +2,110 @@
 ## one line in Stored's format, the key's hash and never the key, which its
 ## owner is shown once:
 ##
-##     key v1 id=4 acts=agent:7 hash=<64 hex digits> created=1761600000 expires=never state=active read=only:3,9 post=off admin=off
+##     key v1 id=4 acts=agent:7 account=1761500000 hash=<64 hex digits> created=1761600000 expires=never state=active read=only:3,9 post=off admin=off
 ##
-## The chat's keys, over its conversations (ConvAccess.ConvId). `decode` is
-## the store's way back to an ApiKey.Key, through `ApiKey.Key.load`, which
-## takes the record's scope exactly: a read or a post reach `off`,
-## `everywhere`, or `only:` its conversations; admin `off` or `on`; nothing
-## is widened or defaulted. A key acting as a bot with admin on is refused
-## (`AdminForBot`): no grant makes one (a bot is never an admin), so the
-## record is not one the chat wrote. Pure.
+## `account` is the `created` of the account of the human the key answers
+## to (its principal, or the owner of its agent or bot), when it was
+## granted: the key is that account's, never one made again later with the
+## same GitHub id. The record's types are here, the store's shape of a
+## key, and ApiKey's are these; the line is generic over the resource's id,
+## its spelling a number (`make` reads one back, `number` writes it).
+##
+## **`decode` GIVES A LINE, AND A LINE IS THE ONLY WAY BACK TO A KEY**: an
+## opaque value only this module makes, and the only thing ApiKey.Key.load
+## takes. No handler loads a key from a record it built; a key comes from
+## a grant (ApiKey.Key.issue) or from a stored line.
+##
+## **ONE SPELLING PER VALUE**: a read or a post reach is `off`,
+## `everywhere`, or `only:` and its ids, ascending, each once. `encode`
+## writes that spelling (a list sorted, a repeat dropped, an empty list
+## `off`, which reaches the same nothing), and `decode` refuses every other
+## (`only:9,3,3`, `only:`): two lines with one meaning are never both
+## valid. A key acting as a bot with admin on is refused (`AdminForBot`):
+## no grant makes one (a bot is never an admin), so the record is not one
+## the chat wrote. Pure.
 import AccountCodec
-import ApiKey
 import Bytes
-import ConvAccess
 import Principal
 import Stored
 
 KeyCodec := [].{
 
-	## The chat's key, over its conversations.
-	Key : ApiKey.Key(ConvAccess.ConvId)
+	## Where a read or a post reaches: every resource its principal may
+	## reach, or only the listed ones (a bot that posts only to #commits).
+	Reach(id) : [Everywhere, Only(List(id))]
 
-	## **WHAT THE STORE KEEPS OF A KEY**: the key, the hash the host looks
-	## it up by, and when it was made.
-	Entry : {
-		key : KeyCodec.Key,
+	## **WHAT A KEY MAY DO**, each part on or off. Admin is a scope of its
+	## own: an admin-only key reads nothing.
+	Scope(id) : {
+		read : [Off, On(KeyCodec.Reach(id))],
+		post : [Off, On(KeyCodec.Reach(id))],
+		admin : [Off, On],
+	}
+
+	## When a key stops: never, or at a unix time (seconds), from which on
+	## it is expired.
+	Expiry : [Never, At(I64)]
+
+	## **A KEY'S WHOLE RECORD**: its id, the principal it acts as, the
+	## `created` of the account it answers to, its scope, expiry and
+	## revocation.
+	Record(id) : {
+		id : Principal.KeyId,
+		acts_as : Principal.Id,
+		account_created : I64,
+		scope : KeyCodec.Scope(id),
+		expires : KeyCodec.Expiry,
+		revocation : [Active, Revoked],
+	}
+
+	## **WHAT THE STORE KEEPS OF A KEY**: its record, the hash the host
+	## looks it up by, and when it was made.
+	Entry(id) : {
+		record : KeyCodec.Record(id),
 		hash : Stored.SecretHash,
 		created : I64,
 	}
 
-	## The entry's line.
-	encode : KeyCodec.Entry -> List(U8)
-	encode = |
-		{
-			key,
-			hash,
-			created,
-		},
-	| {
-		k = key.record()
+	## **A LINE THAT DECODED**: its entry, every field checked. Opaque:
+	## made only by `decode`.
+	Line(id) :: KeyCodec.Entry(id).{
+
+		## The line's entry, for ApiKey.Key.load.
+		entry : KeyCodec.Line(id) -> KeyCodec.Entry(id)
+		entry = |KeyCodec.Line.(e)| e
+	}
+
+	## The entry's line, an id spelled by `number`, in the one spelling.
+	encode : KeyCodec.Entry(id), (id -> U64) -> List(U8)
+	encode = |{ record, hash, created }, number|
 		Stored.line(
 			"key",
 			[
-				("id", k.id.to_u64().to_str()),
-				("acts", AccountCodec.id_text(k.acts_as)),
+				("id", record.id.to_u64().to_str()),
+				("acts", AccountCodec.id_text(record.acts_as)),
+				("account", Stored.time_text(record.account_created)),
 				("hash", Stored.hash_text(hash)),
 				("created", Stored.time_text(created)),
-				("expires", expiry_text(k.expires)),
-				("state", spell_revocation(k.revocation)),
-				("read", reach_text(k.scope.read)),
-				("post", reach_text(k.scope.post)),
-				("admin", spell_switch(k.scope.admin)),
+				("expires", expiry_text(record.expires)),
+				("state", spell_revocation(record.revocation)),
+				("read", reach_text(record.scope.read, number)),
+				("post", reach_text(record.scope.post, number)),
+				("admin", spell_switch(record.scope.admin)),
 			],
 		)
-	}
 
-	## The entry a line holds.
-	decode : List(U8) -> Try(KeyCodec.Entry, Stored.Problem)
-	decode = |raw| {
+	## The entry a line holds, an id read by `make`, or the line's problem.
+	decode : List(U8), (U64 -> Try(id, [NotAnId])) -> Try(KeyCodec.Line(id), Stored.Problem)
+	decode = |raw, make| {
 		fields = Stored.Reader.open(raw, "key")?
 		id_field = fields.field("id")?
 		id = Stored.id(id_field.value, { name: "id", make: Principal.KeyId.from_u64 })?
 		acts_field = id_field.rest.field("acts")?
 		acts_as = AccountCodec.id_from(acts_field.value, "acts")?
-		hash_field = acts_field.rest.field("hash")?
+		account_field = acts_field.rest.field("account")?
+		account_created = Stored.time(account_field.value, "account")?
+		hash_field = account_field.rest.field("hash")?
 		hash = Stored.hash(hash_field.value, "hash")?
 		created_field = hash_field.rest.field("created")?
 		created = Stored.time(created_field.value, "created")?
@@ -81,9 +121,9 @@ KeyCodec := [].{
 			},
 		)?
 		read_field = state_field.rest.field("read")?
-		read = reach_from(read_field.value, "read")?
+		read = reach_from(read_field.value, { name: "read", make })?
 		post_field = read_field.rest.field("post")?
-		post = reach_from(post_field.value, "post")?
+		post = reach_from(post_field.value, { name: "post", make })?
 		admin_field = post_field.rest.field("admin")?
 		admin = Stored.word(
 			admin_field.value,
@@ -97,21 +137,26 @@ KeyCodec := [].{
 		match (acts_as, admin) {
 			(Bot(_), On) => Err(AdminForBot)
 			_ =>
-				Ok({
-					key: ApiKey.Key.load({
-						id,
-						acts_as,
-						scope: {
-							read,
-							post,
-							admin,
+				Ok(
+					KeyCodec.Line.(
+						{
+							record: {
+								id,
+								acts_as,
+								account_created,
+								scope: {
+									read,
+									post,
+									admin,
+								},
+								expires,
+								revocation,
+							},
+							hash,
+							created,
 						},
-						expires,
-						revocation,
-					}),
-					hash,
-					created,
-				})
+					),
+				)
 		}
 	}
 }
@@ -141,14 +186,14 @@ spell_switch = |s|
 	}
 
 ## `never`, or `at:` and the time.
-expiry_text : ApiKey.Expiry -> Str
+expiry_text : KeyCodec.Expiry -> Str
 expiry_text = |expiry|
 	match expiry {
 		Never => never_word
 		At(t) => "${at_prefix}${Stored.time_text(t)}"
 	}
 
-expiry_from : List(U8) -> Try(ApiKey.Expiry, Stored.Problem)
+expiry_from : List(U8) -> Try(KeyCodec.Expiry, Stored.Problem)
 expiry_from = |value|
 	if value == Str.to_utf8(never_word) {
 		Ok(Never)
@@ -165,22 +210,38 @@ never_word = "never"
 at_prefix : Str
 at_prefix = "at:"
 
-ReachPart : [Off, On(ApiKey.Reach(ConvAccess.ConvId))]
+ReachPart(id) : [Off, On(KeyCodec.Reach(id))]
 
-## `off`, `everywhere`, or `only:` and the conversations, commas between.
-reach_text : ReachPart -> Str
-reach_text = |part|
+## **THE ONE SPELLING OF A REACH**: `off`, `everywhere`, or `only:` and the
+## ids, ascending, each once, commas between; a list with no id reaches
+## nothing, which is `off`.
+reach_text : ReachPart(id), (id -> U64) -> Str
+reach_text = |part, number|
 	match part {
 		Off => spell_switch(Off)
 		On(Everywhere) => everywhere_word
-		On(Only(convs)) => {
-			listed = List.map(convs, |c| c.to_u64().to_str())
-			"${only_prefix}${Str.join_with(listed, ",")}"
-		}
+		On(Only(ids)) =>
+			match ascending_once(List.map(ids, number)) {
+				[] => spell_switch(Off)
+				numbers => "${only_prefix}${Str.join_with(List.map(numbers, U64.to_str), ",")}"
+			}
 	}
 
-reach_from : List(U8), Str -> Try(ReachPart, Stored.Problem)
-reach_from = |value, name|
+## The numbers ascending, each once.
+ascending_once : List(U64) -> List(U64)
+ascending_once = |numbers|
+	List.fold(
+		numbers,
+		[],
+		|sorted, n| {
+			below = List.keep_if(sorted, |m| m < n)
+			above = List.keep_if(sorted, |m| m > n)
+			List.concat(List.append(below, n), above)
+		},
+	)
+
+reach_from : List(U8), { name : Str, make : (U64 -> Try(id, [NotAnId])) } -> Try(ReachPart(id), Stored.Problem)
+reach_from = |value, { name, make }|
 	if value == Str.to_utf8(spell_switch(Off)) {
 		Ok(Off)
 	} else if value == Str.to_utf8(everywhere_word) {
@@ -188,13 +249,22 @@ reach_from = |value, name|
 	} else {
 		match Bytes.strip_prefix(value, Str.to_utf8(only_prefix)) {
 			Err(NoMatch) => Err(UnknownWord(name))
-			Ok([]) => Ok(On(Only([])))
+			Ok([]) => Err(BadValue(name))
 			Ok(listed) => {
-				convs = List.map_try(
-					List.split_on(listed, ','),
-					|c| Stored.id(c, { name, make: ConvAccess.ConvId.from_u64 }),
-				)?
-				Ok(On(Only(convs)))
+				numbers = List.map_try(List.split_on(listed, ','), |c| Stored.count(c, name))?
+				if ascending_once(numbers) != numbers {
+					Err(BadValue(name))
+				} else {
+					ids = List.map_try(
+						numbers,
+						|n|
+							match make(n) {
+								Ok(made) => Ok(made)
+								Err(_) => Err(BadValue(name))
+							},
+					)?
+					Ok(On(Only(ids)))
+				}
 			}
 		}
 	}
@@ -206,6 +276,16 @@ only_prefix : Str
 only_prefix = "only:"
 
 # ── tests
+# The id a test's lines hold: a conversation's number, any but 0.
+Conv :: U64.{
+	from_u64 : U64 -> Try(Conv, [NotAnId])
+	from_u64 = |n| if n == 0 Err(NotAnId) else Ok(Conv.(n))
+
+	to_u64 : Conv -> U64
+	to_u64 = |Conv.(n)| n
+
+	is_eq : _
+}
 
 gid : U64 -> Principal.GitHubId
 gid = |n|
@@ -228,9 +308,9 @@ kid = |n|
 		Err(NotAnId) => crash "kid: a test's key id is not 0"
 	}
 
-conv : U64 -> ConvAccess.ConvId
+conv : U64 -> Conv
 conv = |n|
-	match ConvAccess.ConvId.from_u64(n) {
+	match Conv.from_u64(n) {
 		Ok(id) => id
 		Err(NotAnId) => crash "conv: a test's conversation id is not 0"
 	}
@@ -244,18 +324,19 @@ hash_of = |b|
 	}
 
 ## An entry for the record `r`, made at 1761600000.
-entry : ApiKey.Record(ConvAccess.ConvId) -> KeyCodec.Entry
+entry : KeyCodec.Record(Conv) -> KeyCodec.Entry(Conv)
 entry = |r| {
-	key: ApiKey.Key.load(r),
+	record: r,
 	hash: hash_of(0x5a),
 	created: 1761600000,
 }
 
-## A commit bot's key: agent 7, reading and posting #3 and #9 alone.
-narrow : ApiKey.Record(ConvAccess.ConvId)
+## A commit bot's key: agent 7, reading #3 and #9 alone.
+narrow : KeyCodec.Record(Conv)
 narrow = {
 	id: kid(4),
 	acts_as: Principal.Id.Agent(aid(7)),
+	account_created: 1761500000,
 	scope: {
 		read: On(Only([conv(3), conv(9)])),
 		post: Off,
@@ -267,47 +348,41 @@ narrow = {
 
 ## Every part of a record at its other value: a human's, everywhere, admin,
 ## expiring, revoked.
-broad : ApiKey.Record(ConvAccess.ConvId)
+broad : KeyCodec.Record(Conv)
 broad = {
 	id: kid(18446744073709551615),
 	acts_as: Principal.Id.Human(gid(583231)),
+	account_created: 0,
 	scope: {
 		read: On(Everywhere),
-		post: On(Only([])),
+		post: On(Only([conv(1)])),
 		admin: On,
 	},
 	expires: At(1761609999),
 	revocation: Revoked,
 }
 
-## What a test compares of an entry: Key has no `==`, its record does.
-Seen : {
-	record : ApiKey.Record(ConvAccess.ConvId),
-	hash : Stored.SecretHash,
-	created : I64,
-}
+encoded : KeyCodec.Entry(Conv) -> List(U8)
+encoded = |e| KeyCodec.encode(e, Conv.to_u64)
 
-seen : KeyCodec.Entry -> Seen
-seen = |e| {
-	record: e.key.record(),
-	hash: e.hash,
-	created: e.created,
-}
+## The entry a line holds.
+read_back : List(U8) -> Try(KeyCodec.Entry(Conv), Stored.Problem)
+read_back = |raw| KeyCodec.decode(raw, Conv.from_u64).map_ok(KeyCodec.Line.entry)
 
 ## The entry survives a round trip whole.
-is_kept : KeyCodec.Entry -> Bool
-is_kept = |e| KeyCodec.decode(KeyCodec.encode(e)).map_ok(seen) == Ok(seen(e))
+is_kept : KeyCodec.Entry(Conv) -> Bool
+is_kept = |e| read_back(encoded(e)) == Ok(e)
 
 hex5a : Str
 hex5a = Str.repeat("5a", 32)
 
 narrow_line : Str
-narrow_line = "key v1 id=4 acts=agent:7 hash=${hex5a} created=1761600000 expires=never state=active read=only:3,9 post=off admin=off\n"
+narrow_line = "key v1 id=4 acts=agent:7 account=1761500000 hash=${hex5a} created=1761600000 expires=never state=active read=only:3,9 post=off admin=off\n"
 
-expect KeyCodec.encode(entry(narrow)) == Str.to_utf8(narrow_line)
+expect encoded(entry(narrow)) == Str.to_utf8(narrow_line)
 expect
-	KeyCodec.encode(entry(broad))
-		== Str.to_utf8("key v1 id=18446744073709551615 acts=human:583231 hash=${hex5a} created=1761600000 expires=at:1761609999 state=revoked read=everywhere post=only: admin=on\n")
+	encoded(entry(broad))
+		== Str.to_utf8("key v1 id=18446744073709551615 acts=human:583231 account=0 hash=${hex5a} created=1761600000 expires=at:1761609999 state=revoked read=everywhere post=only:1 admin=on\n")
 
 # Round trips: every part at each of its values.
 expect is_kept(entry(narrow))
@@ -316,8 +391,8 @@ expect
 	List.all(
 		[
 			{ ..narrow, acts_as: Principal.Id.Bot(aid(2)) },
-			{ ..narrow, expires: At(-1) },
 			{ ..narrow, expires: At(0) },
+			{ ..narrow, expires: At(Stored.max_time) },
 			{
 				..narrow,
 				scope: {
@@ -330,7 +405,7 @@ expect
 				..narrow,
 				scope: {
 					read: On(Only([conv(5)])),
-					post: On(Only([conv(5), conv(5)])),
+					post: On(Only([conv(5), conv(6)])),
 					admin: Off,
 				},
 			},
@@ -340,24 +415,30 @@ expect
 	)
 
 # **THE SCOPE IS THE RECORD'S, EXACTLY**: the narrow key decodes narrow;
-# its admin stays off; a reach of `only:` reaches nothing.
-narrow_scope : Try(ApiKey.Scope(ConvAccess.ConvId), Stored.Problem)
-narrow_scope = KeyCodec.decode(Str.to_utf8(narrow_line)).map_ok(|e| e.key.record().scope)
+# its admin stays off.
+expect read_back(Str.to_utf8(narrow_line)).map_ok(|e| e.record.scope) == Ok(narrow.scope)
 
-expect narrow_scope == Ok(narrow.scope)
-expect
-	KeyCodec.decode(Str.to_utf8(narrow_line.replace_first("read=only:3,9", "read=only:")))
-		.map_ok(|e| e.key.record().scope.read)
-		== Ok(On(Only([])))
+# **ONE SPELLING PER VALUE** (the round-two attacker's eighth): the encoder
+# writes a list ascending, each once, and an empty one `off`; the decoder
+# refuses every other spelling of the same reach.
+with_read : KeyCodec.Reach(Conv) -> List(U8)
+with_read = |reach| encoded(entry({ ..narrow, scope: { ..narrow.scope, read: On(reach) } }))
+
+expect with_read(Only([conv(9), conv(3), conv(3)])) == Str.to_utf8(narrow_line)
+expect with_read(Only([conv(3), conv(9)])) == Str.to_utf8(narrow_line)
+expect with_read(Only([])) == Str.to_utf8(narrow_line.replace_first("read=only:3,9", "read=off"))
+expect ascending_once([9, 3, 3, 1, 9]) == [1, 3, 9]
+expect ascending_once([]) == []
 
 # ── THE MALFORMED TABLE: each line, its named problem.
 decoded : Str -> Try({}, Stored.Problem)
-decoded = |text| KeyCodec.decode(Str.to_utf8(text)).map_ok(|_| {})
+decoded = |text| KeyCodec.decode(Str.to_utf8(text), Conv.from_u64).map_ok(|_| {})
 
 ## The narrow line with `from` replaced by `to`.
 narrow_but : { from : Str, to : Str } -> Str
 narrow_but = |{ from, to }| narrow_line.replace_first(from, to)
 
+expect decoded(narrow_line) == Ok({})
 expect decoded(narrow_but({ from: "\n", to: "" })) == Err(Torn)
 expect decoded(narrow_but({ from: "key v1", to: "key v2" })) == Err(UnknownVersion)
 expect decoded(narrow_but({ from: "key v1", to: "keys v1" })) == Err(WrongRecord)
@@ -366,6 +447,8 @@ expect decoded(narrow_but({ from: "id=4 ", to: "" })) == Err(MissingField("id"))
 expect decoded(narrow_but({ from: "acts=agent:7", to: "acts=agent:0" })) == Err(BadValue("acts"))
 expect decoded(narrow_but({ from: "acts=agent:7", to: "acts=agent7" })) == Err(BadValue("acts"))
 expect decoded(narrow_but({ from: "acts=agent:7", to: "acts=admin:7" })) == Err(UnknownWord("acts"))
+expect decoded(narrow_but({ from: "account=1761500000 ", to: "" })) == Err(MissingField("account"))
+expect decoded(narrow_but({ from: "account=1761500000", to: "account=-1" })) == Err(BadNumber("account"))
 expect decoded(narrow_but({ from: "hash=", to: "hash=0" })) == Err(BadValue("hash"))
 expect decoded(narrow_but({ from: hex5a, to: Str.repeat("5A", 32) })) == Err(BadValue("hash"))
 expect decoded(narrow_but({ from: "hash=${hex5a} ", to: "" })) == Err(MissingField("hash"))
@@ -397,6 +480,12 @@ expect decoded(
 expect decoded(
 	narrow_but({
 		from: "expires=never",
+		to: "expires=at:-1",
+	}),
+) == Err(BadNumber("expires"))
+expect decoded(
+	narrow_but({
+		from: "expires=never",
 		to: "expires=1761609999",
 	}),
 ) == Err(UnknownWord("expires"))
@@ -416,8 +505,14 @@ expect decoded(
 		to: "read=only:3,9,",
 	}),
 ) == Err(BadNumber("read"))
-expect decoded(narrow_but({ from: "read=only:3,9", to: "read=only:3,0" })) == Err(BadValue("read"))
+expect decoded(narrow_but({ from: "read=only:3,9", to: "read=only:0,3" })) == Err(BadValue("read"))
 expect decoded(narrow_but({ from: "read=only:3,9", to: "read=only:3;9" })) == Err(BadNumber("read"))
+# Not the one spelling: out of order, repeated, empty.
+expect decoded(narrow_but({ from: "read=only:3,9", to: "read=only:9,3,3" })) == Err(BadValue("read"))
+expect decoded(narrow_but({ from: "read=only:3,9", to: "read=only:9,3" })) == Err(BadValue("read"))
+expect decoded(narrow_but({ from: "read=only:3,9", to: "read=only:3,3,9" })) == Err(BadValue("read"))
+expect decoded(narrow_but({ from: "read=only:3,9", to: "read=only:" })) == Err(BadValue("read"))
+expect decoded(narrow_but({ from: "post=off", to: "post=only:" })) == Err(BadValue("post"))
 expect decoded(narrow_but({ from: "post=off", to: "post=on" })) == Err(UnknownWord("post"))
 expect decoded(narrow_but({ from: "post=off ", to: "" })) == Err(MissingField("post"))
 expect decoded(narrow_but({ from: "admin=off", to: "admin=yes" })) == Err(UnknownWord("admin"))

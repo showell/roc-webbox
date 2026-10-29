@@ -216,28 +216,34 @@ Stored := [].{
 		}
 	}
 
-	## **A TIME**: unix seconds, as `count` spells a number, with a `-` in
-	## front for one before 1970 (never `-0`); it fits an I64.
+	## **THE LATEST TIME A RECORD MAY HOLD**: the last second of the year
+	## 9999. A stored time is from the host's clock, so one before 1970 or
+	## past this is no record the chat wrote; bounding it keeps every sum
+	## and difference of two stored times far inside an I64.
+	max_time : I64
+	max_time = 253402300799
+
+	## **A TIME**: unix seconds, as `count` spells a number, from 0 to
+	## `max_time`; nothing before 1970 (no minus sign) and nothing past it.
 	time : List(U8), Str -> Try(I64, Stored.Problem)
 	time = |value, name| {
-		digits =
-			match value {
-				['-', .. as rest] => rest
-				_ => value
-			}
-		if !is_canonical_digits(digits) or value == Str.to_utf8("-0") {
+		n = Stored.count(value, name)?
+		if n > Stored.max_time.to_u64_wrap() {
 			Err(BadNumber(name))
 		} else {
-			match Str.from_utf8(value) {
-				Ok(text) => I64.from_str(text).map_err(|_| BadNumber(name))
-				Err(_) => crash "Stored.time: digits and a minus sign are UTF-8"
-			}
+			Ok(n.to_i64_wrap())
 		}
 	}
 
-	## A time as `time` reads it.
+	## A time as `time` reads it. A time outside `time`'s range is not one
+	## the clock gave: a crash, as a control byte in a value is.
 	time_text : I64 -> Str
-	time_text = |t| t.to_str()
+	time_text = |t|
+		if t < 0 or t > Stored.max_time {
+			crash "Stored.time_text: a stored time is from 1970 to 9999"
+		} else {
+			t.to_str()
+		}
 
 	## **A WORD FROM A CLOSED SET**: the member of `all` whose `spell` it is.
 	## `spell` is the one home of each member's word (an exhaustive match);
@@ -418,18 +424,23 @@ expect
 		|bad| Stored.count(Str.to_utf8(bad), "n") == Err(BadNumber("n")),
 	)
 expect Stored.time(Str.to_utf8("1761600000"), "t") == Ok(1761600000)
-expect Stored.time(Str.to_utf8("-5"), "t") == Ok(-5)
-expect Stored.time(Str.to_utf8("-9223372036854775808"), "t") == Ok(-9223372036854775808)
+expect Stored.time(Str.to_utf8("253402300799"), "t") == Ok(Stored.max_time)
+# Before 1970, past 9999, and I64's ends (the round-two attacker's session
+# was created at I64's minimum, and its liveness overflowed): refused.
 expect
 	List.all(
 		[
 			"",
 			"-",
 			"-0",
+			"-5",
 			"-05",
 			"05",
 			"+5",
+			"253402300800",
+			"9223372036854775807",
 			"9223372036854775808",
+			"-9223372036854775808",
 		],
 		|bad| Stored.time(Str.to_utf8(bad), "t") == Err(BadNumber("t")),
 	)
@@ -438,10 +449,8 @@ expect
 		[
 			0,
 			1,
-			-1,
 			1761600000,
-			-9223372036854775808,
-			9223372036854775807,
+			Stored.max_time,
 		],
 		|t| Stored.time(Str.to_utf8(Stored.time_text(t)), "t") == Ok(t),
 	)

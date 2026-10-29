@@ -7,13 +7,19 @@
 Principal := [
 	## A person, signed in with GitHub. Keyed by GitHub's numeric id, which
 	## never changes; the login (which can) is kept for display and the
-	## GitHub link. The name is the one they chose, real or not.
+	## GitHub link, and is empty once GitHub has given it to another account
+	## that signed in here since (so it never links to the new owner). The
+	## name is the one they chose, real or not. `created` is when this
+	## account was made (unix seconds): a GitHub id retired, unbarred and
+	## signed up again is a new account, and the sessions and keys of the
+	## old one, bound to its `created`, stay dead.
 	Human(
 		{
 			id : Principal.GitHubId,
 			login : Str,
 			name : Str,
 			role : Principal.Role,
+			created : I64,
 		},
 	),
 
@@ -123,44 +129,94 @@ Principal := [
 			Bot(b) => b.owner
 		}
 
-	## The principal with id `wanted` among `accounts`, or `NoSuchPrincipal`
-	## (never made, or retired).
-	find : List(Principal), Principal.Id -> Try(Principal, [NoSuchPrincipal])
+	## **THE ONE PRINCIPAL WITH ID `wanted` AMONG `accounts`**: found only
+	## when exactly one account holds the id. `NoSuchPrincipal` when none
+	## does (never made, or retired); `Duplicated` when more than one does
+	## (a forged copy beside the real one), so no copy, first or last, is
+	## ever taken for the account. Every decision finds through here.
+	find : List(Principal), Principal.Id -> Try(Principal, [NoSuchPrincipal, Duplicated])
 	find = |accounts, wanted|
-		match List.find_first(accounts, |p| Principal.id(p) == wanted) {
-			Ok(found) => Ok(found)
-			Err(_) => Err(NoSuchPrincipal)
+		match List.keep_if(accounts, |p| Principal.id(p) == wanted) {
+			[only] => Ok(only)
+			[] => Err(NoSuchPrincipal)
+			_ => Err(Duplicated)
 		}
 
-	## The human with GitHub id `human` has an account among `accounts`:
+	## **THE ONE HUMAN ACCOUNT WITH GITHUB ID `human`**, as `find` finds it.
+	human_account : List(Principal),
+	Principal.GitHubId -> Try(
+		{
+			id : Principal.GitHubId,
+			login : Str,
+			name : Str,
+			role : Principal.Role,
+			created : I64,
+		},
+		[NoSuchPrincipal, Duplicated],
+	)
+	human_account = |accounts, human|
+		match find(accounts, Principal.Id.Human(human)) {
+			Ok(Human(h)) => Ok(h)
+			Ok(Agent(_)) | Ok(Bot(_)) => crash "Principal.human_account: a human's id finds a human"
+			Err(why) => Err(why)
+		}
+
+	## The human with GitHub id `human` has one account among `accounts`:
 	## what an agent's key, and a human's election, stand on.
 	has_account : List(Principal), Principal.GitHubId -> Bool
-	has_account = |accounts, human|
-		match find(accounts, Principal.Id.Human(human)) {
-			Ok(Human(_)) => Bool.True
-			Ok(Agent(_)) | Ok(Bot(_)) => crash "Principal.has_account: a human's id finds a human"
-			Err(NoSuchPrincipal) => Bool.False
-		}
+	has_account = |accounts, human| human_account(accounts, human).is_ok()
 
 	## **THE AUTHORITY A PRINCIPAL ACTS WITH, AS THE ACCOUNTS SAY NOW**
 	## (design section 9): `Admin` for an admin human, and for an agent
 	## whose owner is an admin human among `accounts`; `Member` for anyone
 	## else. A bot is never `Admin`: the design grants admin to "an agent an
 	## admin owns", and a bot is fed by an outside system. Read from the
-	## accounts at each request, so an owner's demotion or retirement takes
-	## their agent's authority with it.
+	## accounts at each request (the human's own record too, never the
+	## caller's copy), so an owner's demotion or retirement takes their
+	## agent's authority with it; a human without exactly one account has
+	## none.
 	authority : Principal, List(Principal) -> Principal.Role
 	authority = |principal, accounts|
 		match principal {
-			Human(h) => h.role
 			Bot(_) => Member
-			Agent(a) =>
-				match find(accounts, Principal.Id.Human(a.owner)) {
-					Ok(Human(owner)) => owner.role
-					Ok(Agent(_)) | Ok(Bot(_)) => crash "Principal.authority: a non-human"
-					Err(NoSuchPrincipal) => Member
+			Human(_) | Agent(_) =>
+				match human_account(accounts, Principal.answers_to(principal)) {
+					Ok(h) => h.role
+					Err(_) => Member
 				}
 		}
+
+	## **THE ACCOUNTS LOADER'S CHECK**: `accounts` as they are, when no two
+	## hold one id; else the first id held twice. An agent and a bot share
+	## one counter, so `agent:7` beside `bot:7` is a duplicate too. A store
+	## with a duplicate is refused whole, never loaded with one copy chosen.
+	unique : List(Principal) -> Try(List(Principal), [DuplicateId(Principal.Id)])
+	unique = |accounts| {
+		number = |p|
+			match Principal.id(p) {
+				Human(g) => Human(g.to_u64())
+				Agent(a) | Bot(a) => Owned(a.to_u64())
+			}
+		seen : Try(List([Human(U64), Owned(U64)]), [DuplicateId(Principal.Id)])
+		seen = List.fold(
+			accounts,
+			Ok([]),
+			|so_far, p|
+				match so_far {
+					Err(dup) => Err(dup)
+					Ok(numbers) =>
+						if List.contains(numbers, number(p)) {
+							Err(DuplicateId(Principal.id(p)))
+						} else {
+							Ok(List.append(numbers, number(p)))
+						}
+				},
+		)
+		match seen {
+			Ok(_) => Ok(accounts)
+			Err(dup) => Err(dup)
+		}
+	}
 }
 
 gid : U64 -> Principal.GitHubId
@@ -185,6 +241,7 @@ person = |n, role|
 		login: "h${n.to_str()}",
 		name: "H${n.to_str()}",
 		role,
+		created: 1,
 	})
 
 ## A test's agent or bot: its id, and its owner's GitHub id.
@@ -251,12 +308,20 @@ expect Principal.answers_to(boss_agent) == gid(1)
 expect Principal.answers_to(boss_bot) == gid(1)
 
 # find: by id, a name playing no part.
-found : Principal.Id -> Try(Principal.Id, [NoSuchPrincipal])
+found : Principal.Id -> Try(Principal.Id, [NoSuchPrincipal, Duplicated])
 found = |wanted| Principal.find(accounts, wanted).map_ok(Principal.id)
 
 expect found(Principal.Id.Agent(aid(3))) == Ok(Principal.id(ann_agent))
 expect found(Principal.Id.Bot(aid(3))) == Err(NoSuchPrincipal)
 expect found(Principal.Id.Human(gid(9))) == Err(NoSuchPrincipal)
+
+# **A DUPLICATE NAMES NOBODY** (round two's first finding): a copy of
+# ann's agent claiming boss as owner, first or last, is found as neither.
+forged_ann_agent : Principal
+forged_ann_agent = owned(Agent, { id: 3, owner: 1 })
+
+expect Principal.find(List.prepend(accounts, forged_ann_agent), Principal.id(ann_agent)).map_ok(Principal.id) == Err(Duplicated)
+expect Principal.find(List.append(accounts, forged_ann_agent), Principal.id(ann_agent)).map_ok(Principal.id) == Err(Duplicated)
 
 # has_account: a human's id alone; an agent's id never names a human.
 expect Principal.has_account(accounts, gid(2))
@@ -272,3 +337,33 @@ expect Principal.authority(ann_agent, accounts) == Member
 expect Principal.authority(orphan_agent, accounts) == Member
 # The owner retired: the agent's authority went with them.
 expect Principal.authority(boss_agent, [boss_agent]) == Member
+
+# **THE ACCOUNTS' ROLE, NOT THE CALLER'S COPY** (the attacker's fourth): a
+# copy of ann claiming admin is no admin; nor is ann, once a duplicate
+# admin line of her sits first in the accounts; nor her agent.
+ann_admin_copy : Principal
+ann_admin_copy = person(2, Admin)
+
+with_ann_twice : List(Principal)
+with_ann_twice = List.prepend(accounts, ann_admin_copy)
+
+expect Principal.authority(ann_admin_copy, accounts) == Member
+expect Principal.authority(ann, with_ann_twice) == Member
+expect Principal.authority(ann_admin_copy, with_ann_twice) == Member
+expect Principal.authority(ann_agent, with_ann_twice) == Member
+expect !Principal.has_account(with_ann_twice, gid(2))
+# A demoted boss in the accounts: boss's own copy, still saying admin, is
+# no admin.
+expect Principal.authority(boss, [person(1, Member)]) == Member
+
+# **THE LOADER'S CHECK**: every id once, an agent's and a bot's numbers
+# from one counter.
+loaded : List(Principal) -> Try({}, [DuplicateId(Principal.Id)])
+loaded = |list| Principal.unique(list).map_ok(|_| {})
+
+expect loaded(accounts) == Ok({})
+expect loaded([]) == Ok({})
+expect loaded(with_ann_twice) == Err(DuplicateId(Principal.Id.Human(gid(2))))
+expect loaded(List.append(accounts, forged_ann_agent)) == Err(DuplicateId(Principal.Id.Agent(aid(3))))
+expect loaded([boss_agent, owned(Bot, { id: 1, owner: 1 })]) == Err(DuplicateId(Principal.Id.Bot(aid(1))))
+expect loaded([boss, owned(Agent, { id: 1, owner: 1 })]) == Ok({})

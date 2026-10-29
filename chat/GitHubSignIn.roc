@@ -11,12 +11,32 @@
 ##     /login/github         CameBack      came_back: the state and GitHub's code returned
 ##                           StateChecked  check: OAuthState.check, and the nonce spent once
 ##     (host asks GitHub)    IdentityKnown identify: GitHub's id and login
-##                           resolve:      SignedIn an existing account's new session
+##                           resolve:      SignedIn an existing account, and its Admission
 ##                                         NeedsName a new human, asked for a name
 ##                                         Refused
 ##     /login/name           Pending       resume: the pending sign-up, back from this browser
-##                           name:         Created a new account and its session
-##                                         SignedIn (an account made meanwhile), NameRefused, Refused
+##                           name:         Created a new account, and its Admission
+##                                         NameRefused, Refused
+##
+## **AN ADMISSION IS THE ONLY WAY TO A SESSION.** The flow never makes a
+## session itself: it ends in an Admission, an opaque value only this
+## module makes, and Session.start takes nothing else. So no handler mints
+## a session by calling a constructor; it must walk every state here, each
+## from the host's fact. (A handler that lies about the facts is beyond any
+## type: the facts are the host's to tell truly.)
+##
+## **A PENDING SIGN-UP IS SPENT ONCE**, and names only an id with no
+## account: the host spends its nonce (Pending.nonce) in a set of its own,
+## apart from the states' (the state's spend of the same nonce was the
+## callback's), and the name step refuses an id that has an account now, so
+## a pending sign-up replayed in its window (from the same browser, after a
+## log-out) never signs anyone in.
+##
+## **A LOGIN IS ONE ACCOUNT'S AT A TIME**: GitHub frees a renamed login for
+## anyone to take, so when an account signs in or signs up with a login
+## another account still holds (GitHub's logins ignore case), that other
+## account's login is cleared, for the host to store, so its GitHub link
+## never leads to the new owner.
 ##
 ## **Sign-up is open (Steve):** any GitHub account may make an account,
 ## giving a display name (DisplayName's rule). An account is its GitHub id;
@@ -29,7 +49,6 @@ import DisplayName
 import GitHubLogin
 import OAuthState
 import Principal
-import Session
 import Stored
 
 GitHubSignIn := [].{
@@ -72,6 +91,17 @@ GitHubSignIn := [].{
 
 		## The pending sign-up is older than OAuthState's lifetime.
 		PendingExpired,
+
+		## The pending sign-up was named before: a replay.
+		PendingReused,
+
+		## The pending sign-up's id has an account now: it signs in through
+		## /login, never by naming again.
+		AccountExists,
+
+		## More than one account holds the GitHub id: no copy is signed in
+		## to, and none is made beside them.
+		DuplicateAccount,
 	]
 
 	## **THE SETTINGS THE FLOW IS GIVEN**: the GitHub id of the first admin,
@@ -90,11 +120,34 @@ GitHubSignIn := [].{
 	}
 
 	## Signed in: the account (its login brought up to date, and `Renamed`
-	## when the host must store it again) and the new session.
+	## when the host must store it again), the admission Session.start
+	## takes, and the other accounts whose login is cleared (to store).
 	SignedIn : {
 		account : Principal,
 		login : [Unchanged, Renamed],
-		session : Session,
+		admission : GitHubSignIn.Admission,
+		cleared : List(Principal),
+	}
+
+	## **ADMITTED**: the flow's end, the one value Session.start takes. Only
+	## this module makes one, at `resolve` or `name`, once every step before
+	## held: the human, the account's `created` the session is bound to, the
+	## host's facts of the new session, and the time.
+	Admission :: {
+		human : Principal.GitHubId,
+		account_created : I64,
+		session : GitHubSignIn.NewSession,
+		now : I64,
+	}.{
+
+		## What the admission holds, for Session.start.
+		facts : GitHubSignIn.Admission -> {
+			human : Principal.GitHubId,
+			account_created : I64,
+			session : GitHubSignIn.NewSession,
+			now : I64,
+		}
+		facts = |GitHubSignIn.Admission.(a)| a
 	}
 
 	## **STARTED**: a state minted for this browser.
@@ -257,6 +310,7 @@ GitHubSignIn := [].{
 				now,
 			}) {
 				Barred => Refused(Barred)
+				Duplicate => Refused(DuplicateAccount)
 				Known(signed_in) => SignedIn(signed_in)
 				Unknown =>
 					NeedsName(
@@ -288,6 +342,11 @@ GitHubSignIn := [].{
 		login : GitHubLogin,
 		issued_at : I64,
 	}.{
+
+		## The nonce the host spends when the name is given, in its set of
+		## spent pending sign-ups, answering whether it was spent before.
+		nonce : GitHubSignIn.Pending -> List(U8)
+		nonce = |GitHubSignIn.Pending.(p)| p.nonce
 
 		## Its fields, for the host to sign.
 		fields : GitHubSignIn.Pending -> GitHubSignIn.PendingFields
@@ -345,20 +404,28 @@ GitHubSignIn := [].{
 					}
 			}
 
-		## **THE NAME GIVEN**: in order, a barred id is refused; an id
-		## whose account was made meanwhile (a second tab) signs in to it,
-		## the name unused; a name the rule refuses is said, to ask again;
-		## otherwise the account is made, admin only as the first admin.
+		## **THE NAME GIVEN**: in order, a barred id is refused; a pending
+		## sign-up named before (its nonce spent) is refused; an id with an
+		## account now (made meanwhile, in a second tab, or by this very
+		## pending sign-up before) is refused, and signs in through /login;
+		## a name the rule refuses is said, to ask again; otherwise the
+		## account is made, created `now`, admin only as the first admin.
 		name : GitHubSignIn.Pending,
 		{
 			name : List(U8),
+			pending_use : [FirstUse, UsedBefore],
 			accounts : List(Principal),
 			settings : GitHubSignIn.Settings,
 			session : GitHubSignIn.NewSession,
 			now : I64,
 		} -> [
-			Created({ account : Principal, session : Session }),
-			SignedIn(GitHubSignIn.SignedIn),
+			Created(
+				{
+					account : Principal,
+					admission : GitHubSignIn.Admission,
+					cleared : List(Principal),
+				},
+			),
 			NameRefused(DisplayName.Problem),
 			Refused(GitHubSignIn.Refusal),
 		]
@@ -366,40 +433,48 @@ GitHubSignIn := [].{
 			GitHubSignIn.Pending.(p),
 			{
 				name,
+				pending_use,
 				accounts,
 				settings,
 				session,
 				now,
 			},
 		|
-			match known_account({
-				github: p.github,
-				login: p.login,
-				accounts,
-				settings,
-				session,
-				now,
-			}) {
-				Barred => Refused(Barred)
-				Known(signed_in) => SignedIn(signed_in)
-				Unknown =>
-					match DisplayName.from_utf8(name) {
-						Err(problem) => NameRefused(problem)
-						Ok(chosen) =>
-							Created({
-								account: Principal.Human({
-									id: p.github,
-									login: p.login.to_str(),
-									name: chosen.to_str(),
-									role: first_role({
-										github: p.github,
-										accounts,
-										settings,
+			if List.contains(settings.barred, p.github) {
+				Refused(Barred)
+			} else {
+				match (pending_use, Principal.find(accounts, Principal.Id.Human(p.github))) {
+					(UsedBefore, _) => Refused(PendingReused)
+					(FirstUse, Ok(_)) => Refused(AccountExists)
+					(FirstUse, Err(Duplicated)) => Refused(DuplicateAccount)
+					(FirstUse, Err(NoSuchPrincipal)) =>
+						match DisplayName.from_utf8(name) {
+							Err(problem) => NameRefused(problem)
+							Ok(chosen) =>
+								Created({
+									account: Principal.Human({
+										id: p.github,
+										login: p.login.to_str(),
+										name: chosen.to_str(),
+										role: first_role({
+											github: p.github,
+											accounts,
+											settings,
+										}),
+										created: now,
 									}),
-								}),
-								session: started(p.github, { session, now }),
-							})
-					}
+									admission: GitHubSignIn.Admission.(
+										{
+											human: p.github,
+											account_created: now,
+											session,
+											now,
+										},
+									),
+									cleared: displaced(accounts, { github: p.github, login: p.login }),
+								})
+						}
+				}
 			}
 	}
 }
@@ -420,7 +495,8 @@ is_code = |code|
 		|c| Ascii.is_alphanumeric(c) or c == '-' or c == '_',
 	)
 
-## The id's standing: barred, an account it signs in to, or none yet.
+## The id's standing: barred, held by more than one account, an account it
+## signs in to, or none yet.
 known_account : {
 	github : Principal.GitHubId,
 	login : GitHubLogin,
@@ -430,6 +506,7 @@ known_account : {
 	now : I64,
 } -> [
 	Barred,
+	Duplicate,
 	Known(GitHubSignIn.SignedIn),
 	Unknown,
 ]
@@ -446,19 +523,47 @@ known_account = |
 	if List.contains(settings.barred, github) {
 		Barred
 	} else {
-		match Principal.find(accounts, Principal.Id.Human(github)) {
+		match Principal.human_account(accounts, github) {
 			Err(NoSuchPrincipal) => Unknown
-			Ok(Agent(_)) | Ok(Bot(_)) => crash "known_account: a human's id finds a human"
-			Ok(Human(h)) => {
+			Err(Duplicated) => Duplicate
+			Ok(h) => {
 				fresh = login.to_str()
 				Known({
 					account: Principal.Human({ ..h, login: fresh }),
 					login: if h.login == fresh Unchanged else Renamed,
-					session: started(github, { session, now }),
+					admission: GitHubSignIn.Admission.(
+						{
+							human: github,
+							account_created: h.created,
+							session,
+							now,
+						},
+					),
+					cleared: displaced(accounts, { github, login }),
 				})
 			}
 		}
 	}
+
+## **THE OTHER ACCOUNTS HOLDING `login`**, each with its login cleared:
+## every human but `github` whose stored login is `login` in any case.
+displaced : List(Principal), { github : Principal.GitHubId, login : GitHubLogin } -> List(Principal)
+displaced = |accounts, { github, login }| {
+	wanted = List.map(Str.to_utf8(login.to_str()), Ascii.to_lowercase)
+	List.join_map(
+		accounts,
+		|p|
+			match p {
+				Human(h) =>
+					if h.id != github and List.map(Str.to_utf8(h.login), Ascii.to_lowercase) == wanted {
+						[Principal.Human({ ..h, login: "" })]
+					} else {
+						[]
+					}
+				Agent(_) | Bot(_) => []
+			},
+	)
+}
 
 ## The role a new human's account is made with: admin for the first admin
 ## the settings name, while no human is an admin yet; member otherwise.
@@ -487,16 +592,6 @@ first_role = |
 		_ => Member
 	}
 }
-
-## A session for `github`, from the host's facts.
-started : Principal.GitHubId, { session : GitHubSignIn.NewSession, now : I64 } -> Session
-started = |github, { session, now }|
-	Session.start({
-		id: session.id,
-		human: github,
-		token_hash: session.token_hash,
-		now,
-	})
 
 # ── tests
 
@@ -529,7 +624,7 @@ token = |b|
 		Err(NotAHash) => crash "token: 32 bytes are a hash"
 	}
 
-## A test's human: GitHub id `n`, its login, name and role.
+## A test's human: GitHub id `n`, its login, name and role, made at 500.
 human : U64,
 {
 	login : Str,
@@ -548,6 +643,7 @@ human = |
 	login,
 	name,
 	role,
+	created: 500,
 })
 
 # The cast: Boss (GitHub id 1), the admin; Ann (2), a member; Ann's agent,
@@ -688,6 +784,15 @@ Seen : {
 	login : Str,
 	name : Str,
 	role : Principal.Role,
+	created : I64,
+}
+
+## What an admission holds, comparably.
+Facts_ : {
+	human : Principal.GitHubId,
+	account_created : I64,
+	session : GitHubSignIn.NewSession,
+	now : I64,
 }
 
 seen : Principal -> Seen
@@ -703,7 +808,8 @@ Said : [
 		{
 			account : Seen,
 			login : [Unchanged, Renamed],
-			session : Session,
+			admission : Facts_,
+			cleared : List(Seen),
 		},
 	),
 	NeedsName({ github : U64, login : Str }),
@@ -718,7 +824,8 @@ said = |f|
 		Ok(SignedIn(s)) => SignedIn({
 			account: seen(s.account),
 			login: s.login,
-			session: s.session,
+			admission: s.admission.facts(),
+			cleared: List.map(s.cleared, seen),
 		})
 		Ok(NeedsName(p)) => {
 			fields = p.fields()
@@ -729,14 +836,15 @@ said = |f|
 		}
 	}
 
-## The session a sign-in at 1060 makes for GitHub id `n`.
-session_for : U64 -> Session
-session_for = |n| Session.start({
-	id: sid(5),
+## The admission a sign-in at 1060 makes for GitHub id `n`, whose account
+## was made at 500.
+session_for : U64 -> Facts_
+session_for = |n| {
 	human: gid(n),
-	token_hash: token(0x42),
+	account_created: 500,
+	session: new_session,
 	now: 1060,
-})
+}
 
 # ── RESOLVING: the usual runs.
 # Ann, no account yet: a new human, asked for a name.
@@ -748,7 +856,8 @@ expect
 		== SignedIn({
 			account: seen(ann),
 			login: Unchanged,
-			session: session_for(2),
+			admission: session_for(2),
+			cleared: [],
 		})
 
 # **A GITHUB ID THAT CHANGED ITS LOGIN IS THE SAME ACCOUNT**: Ann renamed
@@ -763,7 +872,8 @@ expect
 		== SignedIn({
 			account: { ..seen(ann), login: "ann-b" },
 			login: Renamed,
-			session: session_for(2),
+			admission: session_for(2),
+			cleared: [],
 		})
 
 # **A LOGIN REUSED BY ANOTHER ID IS ANOTHER ACCOUNT**: GitHub id 3 now
@@ -790,7 +900,8 @@ expect
 		== SignedIn({
 			account: seen(ann),
 			login: Unchanged,
-			session: session_for(2),
+			admission: session_for(2),
+			cleared: [],
 		})
 
 # ── RESOLVING: the hostile runs.
@@ -916,6 +1027,7 @@ Naming : {
 	cookie : OAuthState.Cookie,
 	at : I64,
 	name : List(U8),
+	pending_use : [FirstUse, UsedBefore],
 	accounts : List(Principal),
 	settings : GitHubSignIn.Settings,
 }
@@ -927,20 +1039,14 @@ usual_naming = {
 	cookie: Sent(this_nonce),
 	at: 1120,
 	name: Str.to_utf8("Ann B."),
+	pending_use: FirstUse,
 	accounts: [boss, ann_agent],
 	settings: usual_settings,
 }
 
 ## What naming says, comparably.
 NameSaid : [
-	Created({ account : Seen, session : Session }),
-	SignedIn(
-		{
-			account : Seen,
-			login : [Unchanged, Renamed],
-			session : Session,
-		},
-	),
+	Created({ account : Seen, admission : Facts_, cleared : List(Seen) }),
 	NameRefused(DisplayName.Problem),
 	Refused(GitHubSignIn.Refusal),
 ]
@@ -956,106 +1062,104 @@ name_said = |n|
 		Ok(p) =>
 			match p.name({
 				name: n.name,
+				pending_use: n.pending_use,
 				accounts: n.accounts,
 				settings: n.settings,
 				session: new_session,
 				now: n.at,
 			}) {
-				Created(c) => Created({ account: seen(c.account), session: c.session })
-				SignedIn(s) => SignedIn({
-					account: seen(s.account),
-					login: s.login,
-					session: s.session,
-				})
+				Created(c) => Created({ account: seen(c.account), admission: c.admission.facts(), cleared: List.map(c.cleared, seen) })
 				NameRefused(problem) => NameRefused(problem)
 				Refused(why) => Refused(why)
 			}
 	}
 
-## The session a naming at 1120 makes for GitHub id `n`.
-named_session : U64 -> Session
-named_session = |n| Session.start({
-	id: sid(5),
-	human: gid(n),
-	token_hash: token(0x42),
-	now: 1120,
-})
+## The admission a naming at `at` makes for Ann's new account, made then.
+named_at : I64 -> Facts_
+named_at = |at| {
+	human: gid(2),
+	account_created: at,
+	session: new_session,
+	now: at,
+}
 
-## Ann's new account, named `name`, with `role`.
+## Ann's new account, named `name`, with `role`, made at 1120.
 ann_as : Str, Principal.Role -> Seen
 ann_as = |name, role| {
 	id: gid(2),
 	login: "ann",
 	name,
 	role,
+	created: 1120,
 }
 
-# Made: a member, named as given, trimmed; a session with it.
-expect name_said(usual_naming) == Created({
-	account: ann_as("Ann B.", Member),
-	session: named_session(2),
-})
-expect
-	name_said({ ..usual_naming, name: Str.to_utf8("  Ann B.  ") })
-		== Created({ account: ann_as("Ann B.", Member), session: named_session(2) })
-expect
-	name_said({ ..usual_naming, name: Str.to_utf8("🦊") })
-		== Created({ account: ann_as("🦊", Member), session: named_session(2) })
+## Made at 1120 as `account`, no login cleared.
+made : Seen -> NameSaid
+made = |account| Created({ account, admission: named_at(1120), cleared: [] })
+
+# Made: a member, named as given, trimmed, created now; its admission.
+expect name_said(usual_naming) == made(ann_as("Ann B.", Member))
+expect name_said({ ..usual_naming, name: Str.to_utf8("  Ann B.  ") }) == made(ann_as("Ann B.", Member))
+expect name_said({ ..usual_naming, name: Str.to_utf8("🦊") }) == made(ann_as("🦊", Member))
 
 # **THE NAME RULE**: empty, spaces alone, over 64 bytes, a control
-# character, a bidi control, not UTF-8: each said, so the form asks again.
+# character, a bidi control, a format character, not UTF-8: each said, so
+# the form asks again.
 expect name_said({ ..usual_naming, name: [] }) == NameRefused(Empty)
 expect name_said({ ..usual_naming, name: Str.to_utf8("   ") }) == NameRefused(Empty)
 expect name_said({ ..usual_naming, name: Str.to_utf8(Str.repeat("n", 65)) }) == NameRefused(TooLong)
-expect
-	name_said({ ..usual_naming, name: Str.to_utf8(Str.repeat("n", 64)) })
-		== Created({ account: ann_as(Str.repeat("n", 64), Member), session: named_session(2) })
+expect name_said({ ..usual_naming, name: Str.to_utf8(Str.repeat("n", 64)) }) == made(ann_as(Str.repeat("n", 64), Member))
 expect name_said({
 	..usual_naming,
 	name: Str.to_utf8("Ann\nrole=admin"),
 }) == NameRefused(ControlCharacter)
 expect name_said({ ..usual_naming, name: Str.to_utf8("\u(202E)nnA") }) == NameRefused(BidiControl)
+expect name_said({ ..usual_naming, name: Str.to_utf8("\u(200B)") }) == NameRefused(FormatCharacter)
 expect name_said({ ..usual_naming, name: [0x41, 0xff] }) == NameRefused(NotUtf8)
 
 # **THE FIRST ADMIN**: the named id, while no human is an admin.
 first_ann : GitHubSignIn.Settings
 first_ann = { ..usual_settings, first_admin: Named(gid(2)) }
 
-expect
-	name_said({
-		..usual_naming,
-		settings: first_ann,
-		accounts: [ann_agent],
-	})
-		== Created({ account: ann_as("Ann B.", Admin), session: named_session(2) })
-expect
-	name_said({
-		..usual_naming,
-		settings: first_ann,
-		accounts: [boss],
-	})
-		== Created({ account: ann_as("Ann B.", Member), session: named_session(2) })
-expect name_said({ ..usual_naming, accounts: [] }) == Created({
-	account: ann_as("Ann B.", Member),
-	session: named_session(2),
-})
+expect name_said({ ..usual_naming, settings: first_ann, accounts: [ann_agent] }) == made(ann_as("Ann B.", Admin))
+expect name_said({ ..usual_naming, settings: first_ann, accounts: [boss] }) == made(ann_as("Ann B.", Member))
+expect name_said({ ..usual_naming, accounts: [] }) == made(ann_as("Ann B.", Member))
 expect
 	name_said({
 		..usual_naming,
 		settings: { ..usual_settings, first_admin: Unnamed },
 		accounts: [],
 	})
-		== Created({ account: ann_as("Ann B.", Member), session: named_session(2) })
+		== made(ann_as("Ann B.", Member))
 
-# An account made meanwhile (a second tab): signed in to it, no second
-# account, the name unused.
+# **AN ACCOUNT MADE MEANWHILE IS NEVER SIGNED IN BY NAMING** (the round-two
+# attacker's tenth): a second tab's account, or this pending sign-up's own,
+# replayed in its window from the same browser after a log-out: refused,
+# with no admission; the person signs in through /login.
+expect name_said({ ..usual_naming, accounts: [boss, ann] }) == Refused(AccountExists)
 expect
-	name_said({ ..usual_naming, accounts: [boss, ann] })
-		== SignedIn({
-			account: seen(ann),
-			login: Unchanged,
-			session: named_session(2),
-		})
+	name_said({
+		..usual_naming,
+		accounts: [boss, ann],
+		at: 1500,
+		name: Str.to_utf8("whatever"),
+	})
+		== Refused(AccountExists)
+
+# **A PENDING SIGN-UP IS SPENT ONCE**: its nonce spent before, it makes
+# nothing, though no account was made (the first naming refused, say).
+expect name_said({ ..usual_naming, pending_use: UsedBefore }) == Refused(PendingReused)
+expect name_said({ ..usual_naming, pending_use: UsedBefore, accounts: [boss, ann] }) == Refused(PendingReused)
+expect
+	match GitHubSignIn.Pending.resume({ pending: Signed(usual_pending), cookie: Sent(this_nonce), now: 1120 }) {
+		Ok(p) => p.nonce() == this_nonce
+		Err(_) => Bool.False
+	}
+
+# Two accounts holding Ann's id (a forged copy): nothing made beside them,
+# and neither signed in to at /login.
+expect name_said({ ..usual_naming, accounts: [ann, ann] }) == Refused(DuplicateAccount)
+expect said({ ..usual, accounts: [human(2, { login: "ann", name: "Ann", role: Admin }), ann] }) == Refused(DuplicateAccount)
 
 # Barred meanwhile.
 expect name_said({
@@ -1071,15 +1175,7 @@ expect name_said({ ..usual_naming, cookie: Sent(that_nonce) }) == Refused(Pendin
 expect name_said({ ..usual_naming, cookie: Unsent }) == Refused(PendingMismatched)
 expect
 	name_said({ ..usual_naming, at: 1659 })
-		== Created({
-			account: ann_as("Ann B.", Member),
-			session: Session.start({
-				id: sid(5),
-				human: gid(2),
-				token_hash: token(0x42),
-				now: 1659,
-			}),
-		})
+		== Created({ account: { ..ann_as("Ann B.", Member), created: 1659 }, admission: named_at(1659), cleared: [] })
 expect name_said({ ..usual_naming, at: 1660 }) == Refused(PendingExpired)
 expect name_said({ ..usual_naming, at: 1059 }) == Refused(PendingExpired)
 expect name_said({
@@ -1090,3 +1186,33 @@ expect name_said({
 	..usual_naming,
 	pending: Signed({ ..usual_pending, login: [] }),
 }) == Refused(BadIdentity)
+expect name_said({
+	..usual_naming,
+	pending: Signed({ ..usual_pending, issued_at: -9223372036854775808 }),
+}) == Refused(PendingExpired)
+
+# ── A LOGIN ANOTHER ACCOUNT HOLDS IS CLEARED THERE (round two's tenth)
+# Bea (id 7) once went by `ann`; GitHub gave it to Ann since. Ann signing
+# up, or signing in, as `ann` clears Bea's login, in any case, so Bea's
+# GitHub link never leads to Ann; nobody else's is touched.
+old_bea : Principal
+old_bea = human(7, { login: "ANN", name: "Bea", role: Member })
+
+expect
+	name_said({ ..usual_naming, accounts: [boss, old_bea] })
+		== Created({ account: ann_as("Ann B.", Member), admission: named_at(1120), cleared: [{ ..seen(old_bea), login: "" }] })
+expect
+	said({ ..usual, accounts: [boss, ann, old_bea] })
+		== SignedIn({
+			account: seen(ann),
+			login: Unchanged,
+			admission: session_for(2),
+			cleared: [{ ..seen(old_bea), login: "" }],
+		})
+# A login already cleared is cleared nowhere again.
+expect said({ ..usual, accounts: [boss, ann, human(8, { login: "", name: "C", role: Member })] }) == SignedIn({
+	account: seen(ann),
+	login: Unchanged,
+	admission: session_for(2),
+	cleared: [],
+})

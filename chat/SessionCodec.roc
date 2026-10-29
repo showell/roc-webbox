@@ -1,55 +1,89 @@
 ## **A SESSION, STORED** (the Roc chat's auth design, section 2): one line in
 ## Stored's format, the cookie secret's hash and never the secret:
 ##
-##     session v1 id=12 human=583231 token=<64 hex digits> created=1761600000 seen=1761603600
+##     session v1 id=12 human=583231 account=1761500000 token=<64 hex digits> created=1761600000 seen=1761603600
 ##
-## `decode` gives a Session through Session.load, so a record seen before it
-## was created is refused (`SeenBeforeCreated`) as every other malformed
-## line is, by name. Pure.
+## `account` is the `created` of the human's account the session was
+## started for: a session admits only that account, never one made again
+## later with the same GitHub id. `decode` gives a Line, an opaque value
+## only this module makes, and the only thing Session.load takes: a
+## session comes back from the store through this decoder or not at all,
+## never from a record a handler built. A record seen before it was created
+## is refused (`SeenBeforeCreated`) as every other malformed line is, by
+## name. Pure.
 import Principal
-import Session
 import Stored
 
 SessionCodec := [].{
 
+	## **A SESSION'S STORED FIELDS**: what the line holds, and what
+	## Session.fields gives back to store.
+	Fields : {
+		id : Principal.SessionId,
+		human : Principal.GitHubId,
+		account_created : I64,
+		token_hash : Stored.SecretHash,
+		created : I64,
+		last_seen : I64,
+	}
+
+	## **A LINE THAT DECODED**: its fields, every one checked. Opaque: made
+	## only by `decode`.
+	Line :: SessionCodec.Fields.{
+
+		## The line's fields, for Session.load.
+		fields : SessionCodec.Line -> SessionCodec.Fields
+		fields = |SessionCodec.Line.(f)| f
+	}
+
 	## The session's line.
-	encode : Session -> List(U8)
-	encode = |session| {
-		s = session.fields()
+	encode : SessionCodec.Fields -> List(U8)
+	encode = |s|
 		Stored.line(
 			"session",
 			[
 				("id", s.id.to_u64().to_str()),
 				("human", s.human.to_u64().to_str()),
+				("account", Stored.time_text(s.account_created)),
 				("token", Stored.hash_text(s.token_hash)),
 				("created", Stored.time_text(s.created)),
 				("seen", Stored.time_text(s.last_seen)),
 			],
 		)
-	}
 
 	## The session a line holds.
-	decode : List(U8) -> Try(Session, Stored.Problem)
+	decode : List(U8) -> Try(SessionCodec.Line, Stored.Problem)
 	decode = |raw| {
 		fields = Stored.Reader.open(raw, "session")?
 		id_field = fields.field("id")?
 		id = Stored.id(id_field.value, { name: "id", make: Principal.SessionId.from_u64 })?
 		human_field = id_field.rest.field("human")?
 		human = Stored.id(human_field.value, { name: "human", make: Principal.GitHubId.from_u64 })?
-		token_field = human_field.rest.field("token")?
+		account_field = human_field.rest.field("account")?
+		account_created = Stored.time(account_field.value, "account")?
+		token_field = account_field.rest.field("token")?
 		token_hash = Stored.hash(token_field.value, "token")?
 		created_field = token_field.rest.field("created")?
 		created = Stored.time(created_field.value, "created")?
 		seen_field = created_field.rest.field("seen")?
 		last_seen = Stored.time(seen_field.value, "seen")?
 		seen_field.rest.close()?
-		Session.load({
-			id,
-			human,
-			token_hash,
-			created,
-			last_seen,
-		}).map_err(|SeenBeforeCreated| SeenBeforeCreated)
+		if last_seen < created {
+			Err(SeenBeforeCreated)
+		} else {
+			Ok(
+				SessionCodec.Line.(
+					{
+						id,
+						human,
+						account_created,
+						token_hash,
+						created,
+						last_seen,
+					},
+				),
+			)
+		}
 	}
 }
 
@@ -78,52 +112,44 @@ token = |b|
 	}
 
 ## Session 12 of human 583231, created at `created` and seen at `seen`.
-session_at : { created : I64, seen : I64 } -> Session
-session_at = |{ created, seen }|
-	match Session.load({
-		id: sid(12),
-		human: gid(583231),
-		token_hash: token(0xab),
-		created,
-		last_seen: seen,
-	}) {
-		Ok(s) => s
-		Err(SeenBeforeCreated) => crash "session_at: a test's session is seen after it was created"
-	}
+fields_at : { created : I64, seen : I64 } -> SessionCodec.Fields
+fields_at = |{ created, seen }| {
+	id: sid(12),
+	human: gid(583231),
+	account_created: 1761500000,
+	token_hash: token(0xab),
+	created,
+	last_seen: seen,
+}
 
-usual : Session
-usual = session_at({ created: 1761600000, seen: 1761603600 })
+usual : SessionCodec.Fields
+usual = fields_at({ created: 1761600000, seen: 1761603600 })
 
 ab64 : Str
 ab64 = Str.repeat("ab", 32)
 
-expect
-	SessionCodec.encode(usual)
-		== Str.to_utf8("session v1 id=12 human=583231 token=${ab64} created=1761600000 seen=1761603600\n")
+usual_line : Str
+usual_line = "session v1 id=12 human=583231 account=1761500000 token=${ab64} created=1761600000 seen=1761603600\n"
+
+expect SessionCodec.encode(usual) == Str.to_utf8(usual_line)
+
+## The fields a line decodes to.
+read_back : List(U8) -> Try(SessionCodec.Fields, Stored.Problem)
+read_back = |raw| SessionCodec.decode(raw).map_ok(SessionCodec.Line.fields)
 
 # Round trips: the usual, a fresh one (seen when created), times at 0 and
-# before 1970, the biggest ids.
-expect SessionCodec.decode(SessionCodec.encode(usual)) == Ok(usual)
+# at the last a record may hold, the biggest ids.
+expect read_back(SessionCodec.encode(usual)) == Ok(usual)
 expect
 	List.all(
 		[
-			session_at({ created: 5, seen: 5 }),
-			session_at({ created: 0, seen: 0 }),
-			session_at({ created: -100, seen: -1 }),
-			session_at({ created: -9223372036854775808, seen: 9223372036854775807 }),
+			fields_at({ created: 5, seen: 5 }),
+			fields_at({ created: 0, seen: 0 }),
+			fields_at({ created: 0, seen: Stored.max_time }),
+			{ ..usual, id: sid(18446744073709551615), human: gid(18446744073709551615), account_created: 0 },
 		],
-		|s| SessionCodec.decode(SessionCodec.encode(s)) == Ok(s),
+		|f| read_back(SessionCodec.encode(f)) == Ok(f),
 	)
-biggest : Session
-biggest =
-	Session.start({
-		id: sid(18446744073709551615),
-		human: gid(18446744073709551615),
-		token_hash: token(0xff),
-		now: 1,
-	})
-
-expect SessionCodec.decode(SessionCodec.encode(biggest)) == Ok(biggest)
 
 # ── THE MALFORMED TABLE: each line, its named problem.
 decoded : Str -> Try({}, Stored.Problem)
@@ -131,11 +157,7 @@ decoded = |text| SessionCodec.decode(Str.to_utf8(text)).map_ok(|_| {})
 
 ## The usual line with `from` replaced by `to`.
 usual_but : { from : Str, to : Str } -> Str
-usual_but = |{ from, to }|
-	"session v1 id=12 human=583231 token=${ab64} created=1761600000 seen=1761603600\n".replace_first(
-		from,
-		to,
-	)
+usual_but = |{ from, to }| usual_line.replace_first(from, to)
 
 expect decoded(usual_but({ from: "", to: "" })) == Ok({})
 expect decoded(usual_but({ from: "\n", to: "" })) == Err(Torn)
@@ -147,6 +169,8 @@ expect decoded(usual_but({ from: "id=12", to: "id=0" })) == Err(BadValue("id"))
 expect decoded(usual_but({ from: "id=12", to: "id=012" })) == Err(BadNumber("id"))
 expect decoded(usual_but({ from: "human=583231 ", to: "" })) == Err(MissingField("human"))
 expect decoded(usual_but({ from: "human=583231", to: "human=0" })) == Err(BadValue("human"))
+expect decoded(usual_but({ from: "account=1761500000 ", to: "" })) == Err(MissingField("account"))
+expect decoded(usual_but({ from: "account=1761500000", to: "account=-1" })) == Err(BadNumber("account"))
 expect decoded(usual_but({ from: "token=${ab64} ", to: "" })) == Err(MissingField("token"))
 expect decoded(usual_but({ from: ab64, to: Str.repeat("AB", 32) })) == Err(BadValue("token"))
 expect decoded(usual_but({ from: ab64, to: Str.repeat("ab", 31) })) == Err(BadValue("token"))
@@ -175,4 +199,10 @@ expect decoded(
 		to: "seen=1761603600 created=1761600000",
 	}),
 ) == Err(MissingField("created"))
-expect SessionCodec.decode([0xff, '\n']) == Err(NotUtf8)
+expect SessionCodec.decode([0xff, '\n']).map_ok(|_| {}) == Err(NotUtf8)
+
+# **THE ATTACKER'S EXTREME SESSION** (round two's seventh): created at I64's
+# minimum, its liveness overflowed. A time before 1970 is no record the chat
+# wrote: refused at the door, as is one past 9999.
+expect decoded(usual_but({ from: "created=1761600000", to: "created=-9223372036854775808" })) == Err(BadNumber("created"))
+expect decoded(usual_but({ from: "seen=1761603600", to: "seen=9223372036854775807" })) == Err(BadNumber("seen"))

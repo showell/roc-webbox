@@ -107,6 +107,7 @@ ActionKind : [
 	RevokeKeys,
 	RevokeSessions,
 	SetRole,
+	Unbar,
 	ReadCounters,
 ]
 
@@ -117,6 +118,7 @@ all_action_kinds = [
 	RevokeKeys,
 	RevokeSessions,
 	SetRole,
+	Unbar,
 	ReadCounters,
 ]
 
@@ -128,6 +130,7 @@ spell_action = |kind|
 		RevokeKeys => "revoke-keys"
 		RevokeSessions => "revoke-sessions"
 		SetRole => "set-role"
+		Unbar => "unbar"
 		ReadCounters => "read-counters"
 	}
 
@@ -141,6 +144,7 @@ action_text = |action|
 		Retire(id) => "${spell_action(Retire)}${colon}${AccountCodec.id_text(id)}"
 		RevokeKeys(id) => "${spell_action(RevokeKeys)}${colon}${AccountCodec.id_text(id)}"
 		RevokeSessions(g) => "${spell_action(RevokeSessions)}${colon}${g.to_u64().to_str()}"
+		Unbar(g) => "${spell_action(Unbar)}${colon}${g.to_u64().to_str()}"
 		SetRole({ human, role }) => {
 			target = "${human.to_u64().to_str()}${colon}${AccountCodec.role_text(role)}"
 			"${spell_action(SetRole)}${colon}${target}"
@@ -162,7 +166,7 @@ action_from = |value|
 			)? {
 				ListAccounts => Ok(ListAccounts)
 				ReadCounters => Ok(ReadCounters)
-				Retire | RevokeKeys | RevokeSessions | SetRole => Err(BadValue("action"))
+				Retire | RevokeKeys | RevokeSessions | SetRole | Unbar => Err(BadValue("action"))
 			}
 
 		Ok({ before, after }) =>
@@ -182,6 +186,11 @@ action_from = |value|
 						after,
 						{ name: "action", make: Principal.GitHubId.from_u64 },
 					).map_ok(|g| RevokeSessions(g))
+				Unbar =>
+					Stored.id(
+						after,
+						{ name: "action", make: Principal.GitHubId.from_u64 },
+					).map_ok(|g| Unbar(g))
 				SetRole => {
 					{ head, tail } = split_colon(after, "action")?
 					human = Stored.id(head, { name: "action", make: Principal.GitHubId.from_u64 })?
@@ -201,6 +210,10 @@ AdminRefusal : [
 	RetiresOwnAuthority,
 	SetsOwnRole,
 	NeedsSession,
+	BootstrapAdmin,
+	LastAdmin,
+	NoSuchTarget,
+	NotBarred,
 ]
 
 all_admin_refusals : List(AdminRefusal)
@@ -211,6 +224,10 @@ all_admin_refusals = [
 	RetiresOwnAuthority,
 	SetsOwnRole,
 	NeedsSession,
+	BootstrapAdmin,
+	LastAdmin,
+	NoSuchTarget,
+	NotBarred,
 ]
 
 spell_admin_refusal : AdminRefusal -> Str
@@ -222,6 +239,10 @@ spell_admin_refusal = |why|
 		RetiresOwnAuthority => "retires-own-authority"
 		SetsOwnRole => "sets-own-role"
 		NeedsSession => "needs-session"
+		BootstrapAdmin => "bootstrap-admin"
+		LastAdmin => "last-admin"
+		NoSuchTarget => "no-such-target"
+		NotBarred => "not-barred"
 	}
 
 all_key_refusals : List(ApiKey.Refusal)
@@ -262,6 +283,10 @@ refusal_text = |why|
 		RetiresOwnAuthority => spell_admin_refusal(RetiresOwnAuthority)
 		SetsOwnRole => spell_admin_refusal(SetsOwnRole)
 		NeedsSession => spell_admin_refusal(NeedsSession)
+		BootstrapAdmin => spell_admin_refusal(BootstrapAdmin)
+		LastAdmin => spell_admin_refusal(LastAdmin)
+		NoSuchTarget => spell_admin_refusal(NoSuchTarget)
+		NotBarred => spell_admin_refusal(NotBarred)
 	}
 
 verdict_from : List(U8) -> Try(Verdict, Stored.Problem)
@@ -299,6 +324,10 @@ verdict_from = |value|
 							RetiresOwnAuthority => Ok(Refused(RetiresOwnAuthority))
 							SetsOwnRole => Ok(Refused(SetsOwnRole))
 							NeedsSession => Ok(Refused(NeedsSession))
+							BootstrapAdmin => Ok(Refused(BootstrapAdmin))
+							LastAdmin => Ok(Refused(LastAdmin))
+							NoSuchTarget => Ok(Refused(NoSuchTarget))
+							NotBarred => Ok(Refused(NotBarred))
 						}
 				}
 		}
@@ -385,10 +414,10 @@ expect
 		who: Principal.Id.Bot(aid(3)),
 		via: Key(kid(5)),
 		action: ReadCounters,
-		at: -1,
+		at: 0,
 		verdict: Refused(KeyRefused(OutOfScope)),
 	})
-		== "audit v1 at=-1 who=bot:3 via=key:5 action=read-counters verdict=refused:key:out-of-scope\n"
+		== "audit v1 at=0 who=bot:3 via=key:5 action=read-counters verdict=refused:key:out-of-scope\n"
 expect
 	text_of({
 		who: Principal.Id.Human(gid(1)),
@@ -422,6 +451,7 @@ actions = [
 	RevokeSessions(gid(583231)),
 	SetRole({ human: gid(2), role: Admin }),
 	SetRole({ human: gid(583231), role: Member }),
+	Unbar(gid(66)),
 	ReadCounters,
 ]
 
@@ -440,6 +470,10 @@ when_refused = |why|
 		RetiresOwnAuthority => Refused(RetiresOwnAuthority)
 		SetsOwnRole => Refused(SetsOwnRole)
 		NeedsSession => Refused(NeedsSession)
+		BootstrapAdmin => Refused(BootstrapAdmin)
+		LastAdmin => Refused(LastAdmin)
+		NoSuchTarget => Refused(NoSuchTarget)
+		NotBarred => Refused(NotBarred)
 	}
 
 entries : List(Admin.Audit)
@@ -468,8 +502,8 @@ entries =
 			),
 	)
 
-expect List.len(verdicts) == 12
-expect List.len(entries) == 264
+expect List.len(verdicts) == 16
+expect List.len(entries) == 384
 expect List.all(entries, |e| AuditCodec.decode(AuditCodec.encode(e)) == Ok(e))
 
 # ── THE MALFORMED TABLE: each line, its named problem.
@@ -519,6 +553,12 @@ expect decoded({ from: "revoke-keys:human:2", to: "list-accounts" }) == Ok({})
 expect decoded({ from: "revoke-keys:human:2", to: "set-role:2:admin" }) == Ok({})
 expect decoded({ from: "revoke-keys:human:2", to: "set-role:2" }) == Err(BadValue("action"))
 expect decoded({ from: "revoke-keys:human:2", to: "set-role" }) == Err(BadValue("action"))
+expect decoded({ from: "revoke-keys:human:2", to: "unbar:66" }) == Ok({})
+expect decoded({ from: "revoke-keys:human:2", to: "unbar" }) == Err(BadValue("action"))
+expect decoded({ from: "revoke-keys:human:2", to: "unbar:human:66" }) == Err(BadNumber("action"))
+expect decoded({ from: "permitted", to: "refused:bootstrap-admin" }) == Ok({})
+expect decoded({ from: "permitted", to: "refused:not-barred" }) == Ok({})
+expect decoded({ from: "at=1761600000", to: "at=-1" }) == Err(BadNumber("at"))
 expect decoded({ from: "revoke-keys:human:2", to: "set-role:0:admin" }) == Err(BadValue("action"))
 expect decoded({
 	from: "revoke-keys:human:2",
