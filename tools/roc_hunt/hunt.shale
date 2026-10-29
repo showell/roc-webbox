@@ -722,8 +722,9 @@ const kept_alone = {
   TopicStream = "a topic's stream whole (its backlog read, resumed and framed): main only dispatches to it, and Backlog (pure, the twin's) holds the rules",
   -- An effect kept apart from what it reads.
   Last = "a topic's count and last message from its sidecar, effectful; main reads both through it, and Count (pure, the twin's) holds the rules",
-  -- A rule to audit alone.
-  SafeImg = "a security rule (which <img> a page may hold), auditable alone; its one caller is Feeds",
+  -- The dialect's layers, each read beside its Zig file (metal-vmm QUEUE 305).
+  MdInline = "the markdown's inline pass whole, markdown_inline.zig's port, read beside it: Md, the block layer, is its one caller",
+  Md = "the chat's markdown, markdown.zig's port: twin's until the chat renders with it (QUEUE 306)",
   -- The plants' own (tools/roc_hunt/plants/single_caller/).
   QuietKept = "a plant: allowlisted, so quiet",
 }
