@@ -249,7 +249,7 @@ tags_in = |s| List.map(
 		{
 			at: 0,
 			out: [],
-			gt_seen: Unknown,
+			gt_seen: Bytes.Seen.unknown,
 		},
 	),
 	text_of,

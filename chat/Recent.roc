@@ -245,7 +245,7 @@ html_images = |s| html_from(
 	{
 		at: 0,
 		out: [],
-		gt_seen: Unknown,
+		gt_seen: Bytes.Seen.unknown,
 	},
 )
 
@@ -314,7 +314,7 @@ md_images = |s| md_from(
 	{
 		at: 0,
 		out: [],
-		seen: { br: Unknown, pa: Unknown },
+		seen: { br: Bytes.Seen.unknown, pa: Bytes.Seen.unknown },
 	},
 )
 
