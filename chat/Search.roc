@@ -152,7 +152,7 @@ Search := [].{
 				JsonOut.array(
 					List.map(
 						hits,
-						|h| hit_json(h, { key_len: List.len(word), key: in_scope(walked, h.conv) }),
+						|h| hit_json(h, { key_len: List.len(word), key: conv_at(walked, h.conv) }),
 					),
 				),
 			),
@@ -187,8 +187,8 @@ Search := [].{
 ## The conversation at place `at` of the scope the host walked. **A PLACE
 ## PAST IT IS THE HOST'S BUG**: a crash (a 500), never a hit shown under
 ## another conversation.
-in_scope : List(Paths.ConvKey), U64 -> Paths.ConvKey
-in_scope = |scope, at|
+conv_at : List(Paths.ConvKey), U64 -> Paths.ConvKey
+conv_at = |scope, at|
 	match List.get(scope, at) {
 		Ok(key) => key
 		Err(_) => crash "Search: a hit's conversation past the scope the host was handed"
