@@ -3,11 +3,12 @@
 -- roc-lang/roc's at the commit roc-version names: build.zig.zon pins that
 -- commit's archive by hash, and the build forks it to a full worktree of the
 -- same commit (the archive's package leaves out vendor/, which the parser's
--- modules import). Built with Zig 0.16.0, the pinned Roc's (build.zig says
--- why). Run from roc-webbox:
+-- modules import). Built with Zig 0.17.0, the pinned Roc's (build.zig says
+-- why). The pin is tools/roc_ast/roc-version, roc-chat's Roc, not this
+-- repo's. Run from roc-webbox:
 --   shale tools/roc_ast/install.shale
 
-local version = trim(read("roc-version"))
+local version = trim(read("tools/roc_ast/roc-version"))
 local parts = split(version, "-")
 local short = parts[#parts]
 local zon = read("tools/roc_ast/build.zig.zon")
@@ -24,7 +25,7 @@ if head ~= commit then
   fail("roc-ast: " .. src .. " is at " .. head .. ", not " .. commit .. ": git -C ~/tools/roc-pr worktree add --detach " .. src .. " " .. commit)
 end
 
-local built = run({real("zig016:zig"), "build", "--fork=" .. src, "--prefix", real("tools:roc-ast")}, {timeout_ms = 1800000, tail = 20, cwd = "tools/roc_ast"})
+local built = run({real("zig:zig"), "build", "--fork=" .. src, "--prefix", real("tools:roc-ast")}, {timeout_ms = 1800000, tail = 20, cwd = "tools/roc_ast"})
 print(built.out)
 -- Installed only when the build said so and the binary is there: a failed
 -- fetch or compile once printed this line anyway (metal-vmm QUEUE 263).
