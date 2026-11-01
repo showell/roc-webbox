@@ -74,7 +74,7 @@ holds = |todos, id| List.len(List.keep_if(todos.items, |t| t.id == id)) > 0
 toggle : U64 -> (Todos -> Try(Todos, [NoSuchItem(U64), Empty]))
 toggle = |id| |todos|
 	if holds(todos, id) {
-		Ok({ ..todos, items: List.map(todos.items, |t| if t.id == id { ..t, done: !t.done } else t) })
+		Ok({ ..todos, items: List.map(todos.items, |t| if (t.id == id) { ..t, done: !t.done } else t) })
 	} else {
 		Err(NoSuchItem(id))
 	}
