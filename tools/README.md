@@ -16,11 +16,11 @@
 
 ## Reading Roc with Roc's own parser
 
-- **`roc_ast/`** — `roc-ast`: the parse tree of each `.roc` path on stdin,
-  as roc-lang/roc's parser at the commit `roc_ast/roc-version` pins prints it
-  (one node a line, indented by tabs). That pin is roc-chat's Roc, not this
-  repo's. Built with Zig 0.17.0, the pinned Roc's (its build.zig says why). Install or update it with `shale tools/roc_ast/install.shale`;
-  it lands at `~/tools/roc-ast/bin/roc-ast`, where Shale may run it.
+- **`roc-ast`** — the parse tree of each `.roc` path on stdin, as Roc's own
+  parser prints it, lives in Shale (`tools/roc_ast`, its one user being
+  Shale's `roc_tree` and Roc recipes). Install or update it from Shale's
+  checkout with `shale tools/roc_ast/install.shale`; it lands at
+  `~/tools/roc-ast/bin/roc-ast`, which the hunt below runs.
 - **`roc_hunt/hunt.shale`** — Shale hunts over those trees for the
   constructs our Roc style replaces, one named function a kind, the trees
   read once (Shale has no way to share functions between scripts). Each hunt
