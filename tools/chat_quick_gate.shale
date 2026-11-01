@@ -44,8 +44,6 @@
 --     x64v1elf): the same Roc source for another target, a codegen question
 --     a refactor does not raise; the release's gates build it;
 --   - `zig build codec-bench`, which links the twin archive: run by hand;
---   - roc_hunt's plants (tools/roc_hunt/hunt.shale self_test=1): they test
---     the hunts against their own plants, never chat/;
 --
 -- **RUN THE FULL GATES INSTEAD** when a step changes anything beyond the
 -- chat's Roc and its seam: angry-gopher's Zig other than its chat twins'

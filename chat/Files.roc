@@ -1,6 +1,5 @@
 ## **THE CHAT'S ONE WAY TO THE DISK**: every file primitive the chat calls
-## is called here, on a path Paths.roc made (tools/roc_hunt's `fs_bypass`
-## flags a call anywhere else).
+## is called here, on a path Paths.roc made.
 import pf.Host
 import Paths
 
