@@ -138,17 +138,30 @@ local branch = run({"git", "rev-parse", "--abbrev-ref", "HEAD"}, {tail = 5, time
 print("roc-webbox " .. trim(branch.out) .. " " .. git_head("") .. " (" .. here .. ")")
 print("angry-gopher " .. trim(found.out) .. " (" .. gopher .. ")")
 
+-- The Roc roc-version pins, at ~/tools/roc-<pin>/roc as build.zig finds it;
+-- the PATH's `roc` is not asked, and another version stops the gate.
+const pin = trim(read("roc-version"))
+const roc_at = "tools:roc-" .. pin .. "/roc"
+if not exists(roc_at) then
+  fail("quick gate: no Roc " .. pin .. " (roc-version) at ~/tools/roc-" .. pin .. "/roc: tools/get_roc.sh installs it")
+end
+const roc = real(roc_at)
+local said = run({roc, "version"}, {timeout_ms = 30000, whole = 1000})
+if find(said.out, pin) == nil then
+  fail("quick gate: " .. roc .. " says " .. trim(said.out) .. ", roc-version pins " .. pin)
+end
+
 -- Every tracked .roc file of the chat, its platforms and its test app: a
 -- vertical stack is asked for with a trailing comma, which roc fmt keeps.
-const roc_fmt_check = {"roc", "fmt", "--check"}
+const roc_fmt_check = {roc, "fmt", "--check"}
 for f in lines(trim(run({"git", "ls-files", "chat/*.roc", "chat/platform/*.roc", "chat/twin/*.roc", "chat/twin/platform/*.roc", "chat/test/*.roc"}, {whole = 100000, timeout_ms = 10000}).out)) do push(roc_fmt_check, f) end
 
 part("zig fmt --check, roc-webbox", {"zig", "fmt", "--check", "src", "build.zig"})
 part("zig fmt --check, angry-gopher", {"zig", "fmt", "--check", gopher .. "/zig-server/src", gopher_build})
 part("roc fmt --check, the chat's Roc", roc_fmt_check)
-part("roc check chat/main.roc", {"roc", "check", "chat/main.roc"})
-part("roc check chat/twin.roc", {"roc", "check", "chat/twin.roc"})
-part("roc test chat/main.roc", {"roc", "test", "--no-cache", "chat/main.roc"})
+part("roc check chat/main.roc", {roc, "check", "chat/main.roc"})
+part("roc check chat/twin.roc", {roc, "check", "chat/twin.roc"})
+part("roc test chat/main.roc", {roc, "test", "--no-cache", "chat/main.roc"})
 part("roc glue's snapshot", {"shale", "tools/chat_glue.shale"})
 part("roc-webbox zig build test", {"zig", "build", "test", "--summary", "failures"})
 -- Its own build root and cache, as `cd zig-server && zig build test` has
