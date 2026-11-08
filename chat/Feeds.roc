@@ -5,6 +5,7 @@
 ## ones. Pure; angry-gopher's chat_twin_test.zig holds each to its Zig.
 import JsonOut
 import Bytes
+import md.Md
 import md.MdFence
 import ChatUrl
 import md.MdMedia
@@ -13,7 +14,13 @@ import Ascii
 
 Feeds := [].{
 
-	## One entry's header line: `Sent by <from> at <at>, source MSG_<source_id> in <conv>:`.
+	## The chat's rule for a member's media, as angry-gopher's Zig renderer
+	## has it: any same-origin path. The markdown package still refuses
+	## another site, a `..` and an encoded separator before it asks.
+	md_options : Md.Options
+	md_options = { uploads: |_| Bool.True }
+
+	## One entry's header line:`Sent by <from> at <at>, source MSG_<source_id> in <conv>:`.
 	Header : {
 		from : Str,
 		at : Str,
@@ -144,7 +151,7 @@ Feeds := [].{
 	## are rebuilt too.
 	images_event : Header, List(Str) -> JsonOut
 	images_event = |h, tags| {
-		safe = List.keep_oks(tags, MdMedia.rebuild)
+		safe = List.keep_oks(tags, |tag| MdMedia.rebuild(tag, md_options.uploads))
 		JsonOut.object(
 			List.concat(
 				head_fields(h),

@@ -885,14 +885,14 @@ call = |req| {
 		# render's html, the work units, the hostility's words (none when
 		# renderable), trusted html, trusted reflow html.
 		82 => [
-			Md.render(arg(0)),
-			num(Md.work_units(arg(0))),
-			match Md.hostility(arg(0)) {
+			Md.render(arg(0), Feeds.md_options),
+			num(Md.work_units(arg(0), Feeds.md_options)),
+			match Md.hostility(arg(0), Feeds.md_options) {
 				Renderable => []
 				TooMuchFormatting => Str.to_utf8(Md.too_much_formatting)
 			},
-			Md.render_trusted(arg(0)),
-			Md.render_trusted_reflow(arg(0)),
+			Md.render_trusted(arg(0), Feeds.md_options),
+			Md.render_trusted_reflow(arg(0), Feeds.md_options),
 		]
 		_ => crash "twin: no function ${U8.to_str(req.which)}"
 	}
