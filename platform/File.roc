@@ -6,6 +6,7 @@
 ## answers, never one: a list read as empty because the disk failed would be
 ## written back empty.
 File := [].{
+
 	## What the host answers for a read: `status` 0 with the file's text,
 	## 1 when there is no such file, 2 when it could not be read (`text` the
 	## host's reason).
@@ -36,13 +37,13 @@ File := [].{
 	write! : Str, Str => Try({}, [WriteFailed(Str)])
 	write! = |path, text| {
 		why = File.write_raw!(path, text)
-		if Str.is_empty(why) Ok({}) else Err(WriteFailed("${path}: ${why}"))
+		if (Str.is_empty(why)) Ok({}) else Err(WriteFailed("${path}: ${why}"))
 	}
 
 	## Removes the file, or says why it could not.
 	delete! : Str => Try({}, [DeleteFailed(Str)])
 	delete! = |path| {
 		why = File.delete_raw!(path)
-		if Str.is_empty(why) Ok({}) else Err(DeleteFailed("${path}: ${why}"))
+		if (Str.is_empty(why)) Ok({}) else Err(DeleteFailed("${path}: ${why}"))
 	}
 }

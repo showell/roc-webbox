@@ -11,9 +11,9 @@ platform ""
 	packages {}
 	provides { "roc_handle": handle_for_host! }
 	hosted {
+		"roc_file_delete": File.delete_raw!,
 		"roc_file_read": File.read_raw!,
 		"roc_file_write": File.write_raw!,
-		"roc_file_delete": File.delete_raw!,
 	}
 	targets: {
 		x64musl: {
