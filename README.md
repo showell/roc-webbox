@@ -18,7 +18,7 @@ app does not hand the host a description of work to do afterwards.
   chat's markdown is (`chat/main.roc` and `chat/twin.roc` import it by path);
   `../zig-metal-unikernel` and the `../zig-coverage-sdk` it depends on for
   `zig build metal` (a lazy dependency: only `metal` needs them).
-- **Roc, the nightly `roc-version` pins** (`nightly-2026-10-30-0602c5f`), as
+- **Roc, the nightly `roc-version` pins** (`nightly-2026-11-03-34bd006`), as
   installed at `~/tools/roc-<pin>/roc`. `build.zig` (`rocCompiler`) takes
   `-Droc=<path>` when given, else that file, else `roc` on the PATH, and
   stops at configure time if there is none or `roc version` names another,
