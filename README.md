@@ -19,11 +19,12 @@ app does not hand the host a description of work to do afterwards.
   `../zig-metal-unikernel` and the `../zig-coverage-sdk` it depends on for
   `zig build metal` (a lazy dependency: only `metal` needs them).
 - **Roc, the nightly `roc-version` pins** (`nightly-2026-10-30-0602c5f`), as
-  `roc` on the PATH or named with `-Droc=<path>`. Every build compiles
-  `app/todo.roc`, and `build.zig` (`rocCompiler`) stops at configure time if
-  there is no Roc or `roc version` names another. `tools/get_roc.sh`
-  installs the pinned one into `~/roc-<pin>/` and links `~/.local/bin/roc`
-  to it; it stops if a sibling dog-park pins another nightly.
+  installed at `~/tools/roc-<pin>/roc`. `build.zig` (`rocCompiler`) takes
+  `-Droc=<path>` when given, else that file, else `roc` on the PATH, and
+  stops at configure time if there is none or `roc version` names another,
+  so a PATH holding an older Roc is refused, not used. `tools/get_roc.sh`
+  installs the pinned one there; it stops if a sibling dog-park pins
+  another nightly.
 
 ## Build, test, serve
 
