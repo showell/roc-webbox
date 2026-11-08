@@ -47,7 +47,7 @@ tracking (milestones, the release candidate and its scope) is in metal-vmm's
 ## 3. Scope
 
 **The router takes every `/chat` and `/channel` path** angry-gopher's
-router.zig hands it (`chat_router.zig` `handle`). It parses the path into a
+router.zig hands it (`handle` in chat_router.zig, since removed). It parses the path into a
 route (`chat/Route.roc`, pure, by the old Zig dispatch's rules) and runs the
 prelude in Zig's order:
 1. a static script under `/chat` (`/<name>.js`) goes to Zig, before the gate;
@@ -133,8 +133,8 @@ render) would corrupt it. So:
   a call starts, refusing a call inside or beside one; the runtime's
   functions and every hosted function panic when no call is open.
 - **No Roc in render or in any hook before the turn.** A topic stream's
-  blob is its finished frame, and its render (angry-gopher
-  `chat_router.zig` `verbatim`) only copies it.
+  blob is its finished frame, and its render (`verbatim` in angry-gopher's
+  chat_router.zig, since removed) only copies it.
 - **A delegated handler runs after the call.** `decide` (`src/chat_abi.zig`)
   copies the answer out and ends the call before it returns.
 - **Writes inside a call are safe on metal**: a pump runs the kernel's turn
@@ -151,7 +151,7 @@ piece that moves has its twin, and the twins cover Zig's remaining writers
 too (a docs post or welcome DM into Roc-written files). The format facts
 that bite:
 - the transcript separator `\n\n-------------\n` and its body-line escape
-  (`chat/Codec.roc`);
+  (`chat/Transcript.roc`);
 - the block header `MSG_<sid>_<n>`, `from:`, `date:`, and `uid:` on newer
   blocks; every reader skips header lines it does not know;
 - a reaction appended to a file that does not end in `\n` starts with one,
@@ -250,7 +250,7 @@ place.
 They are `chat/platform/Host.roc`, answered by the host `decide` is handed
 (`chat_abi.zig` `Host`): a host type declares a `pub fn` for each, named as
 Host.roc names it, its context first, and the seam makes its table at
-compile time. `Host.of` (angry-gopher's `chat_router.zig` `Call`) fails the
+compile time. `Host.of` (`Call` in angry-gopher's chat_router.zig) fails the
 build for a function the type lacks; `Host.partly` (a test's host) panics,
 naming it, when the Roc asks for it. Never a weak symbol's jump to 0 (R0):
 each `roc_chat_` export is the seam's, one per binary, and asks the host
@@ -279,15 +279,16 @@ viewer; only the sending tab shows "sent".
 ### 6.1 The twins and the oracle
 
 - **The pure modules**: `chat/twin.roc` puts them behind one test-only
-  entry (`roc_chat_twin`, `src/twin_abi.zig`); angry-gopher
-  `chat_twin_test.zig` calls each beside the Zig it replaces, on many
-  inputs, and the bytes must match.
-- **The routes**: angry-gopher `chat_actions_twin.zig` keeps the old Zig as
+  entry (`roc_chat_twin`, `src/twin_abi.zig`); angry-gopher's
+  chat_twin_test.zig calls each beside the Zig it replaces, on many
+  inputs, and the bytes must match. The angry-gopher twin files this
+  section names are gone.
+- **The routes**: angry-gopher's chat_actions_twin.zig keeps the old Zig as
   the oracle, run when a test sets `chat_router.test_oracle`;
-  `chat_actions_twin_test.zig` runs one scenario both ways on two copies of
+  chat_actions_twin_test.zig runs one scenario both ways on two copies of
   one tree at one fixed `now`, and every answer and file left must be the
   same.
-- **The router**: angry-gopher `chat_route_twin.zig`, the old dispatch as a
+- **The router**: angry-gopher's chat_route_twin.zig, the old dispatch as a
   pure function, held to the Roc over a corpus; angry-gopher's route tests
   all run through the router.
 - **What no request can reach** (the order of hosted calls, a failed store,
