@@ -31,8 +31,7 @@ tracking (milestones, the release candidate and its scope) is in metal-vmm's
   (`1_2/general`, `ntf:1`). A sender publishes a **blob**; each open stream
   has a subscriber, a 16-slot mailbox with its own copy, and a **render**
   that turns each blob into a frame.
-- **Mounted.** The Roc chat runs inside angry-gopher's process, as
-  angry-gopher mounts cobble-webbox's `codex_chat`.
+- **Mounted.** The Roc chat runs inside angry-gopher's process.
 - **Router.** The Roc chat's entry point (`chat/main.roc` `handle!`), for
   every `/chat` and `/channel` request.
 - **Delegation.** An answer that names a route for Zig to serve; the host
