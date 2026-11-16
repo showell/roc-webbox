@@ -23,8 +23,7 @@ app does not hand the host a description of work to do afterwards.
   `-Droc=<path>` when given, else that file, else `roc` on the PATH, and
   stops at configure time if there is none or `roc version` names another,
   so a PATH holding an older Roc is refused, not used. `tools/get_roc.sh`
-  installs the pinned one there; it stops if a sibling dog-park pins
-  another nightly.
+  installs the pinned one there.
 
 ## Build, test, serve
 
@@ -86,11 +85,9 @@ The list mounts beside other apps through zig-webbox's `webbox.combo.Mount`
 prefix stripped and gets its own `<data>/<name>` and `<auth>/<name>`. The
 page asks for `api/todos` relative to itself, so it works under any prefix.
 
-**A combination's build lives in its primary's repo.** Dog Park + TODO is
-in dog-park: `src/combos/dogpark_todo.zig` (the site),
-`src/combos/dogpark_todo_main.zig` (Linux), and the steps `dogpark-todo`,
-`serve-dogpark-todo` (Dog Park at `/`, the list at `/todo/`, port 9113,
-`COMBO_PORT`) and `metal-dogpark-todo` (`zig-out/bin/dogpark-todo.elf`).
+**A combination's build lives in its primary's repo.** The one that was
+here, Dog Park + TODO, was built in the dog-park repo; that repo was retired
+on 2026-11-16 (Dog Park now lives in roc-apps), and the combination with it.
 
 What this repo exports for a combination (`build.zig`):
 

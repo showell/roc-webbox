@@ -1,24 +1,15 @@
 #!/bin/sh
 # **THE PINNED ROC, INSTALLED** (README, "Before you build"): the nightly
 # roc-version names, from roc-lang/nightlies' release of that tag, into
-# ~/tools/roc-<pin>/, where every build here (build.zig, `rocCompiler`) and
-# dog-park's finds it with no PATH. Already there and answering the pin, it
-# is left alone.
+# ~/tools/roc-<pin>/, where every build here (build.zig, `rocCompiler`)
+# finds it with no PATH. Already there and answering the pin, it is left
+# alone.
 #
 #     tools/get_roc.sh
-#
-# Every Roc app beside this checkout builds with the same Roc, because a
-# combination builds its parts with its primary's: a sibling dog-park whose
-# roc/roc-version names another nightly stops this, saying both.
 set -eu
 
 here=$(cd "$(dirname "$0")/.." && pwd)
 pin=$(tr -d '[:space:]' < "$here/roc-version")
-park="$here/../dog-park/roc/roc-version"
-if [ -f "$park" ] && [ "$(tr -d '[:space:]' < "$park")" != "$pin" ]; then
-    echo "get_roc: roc-webbox pins $pin and dog-park pins $(tr -d '[:space:]' < "$park"): one Roc builds a combination, so move the pins together" >&2
-    exit 1
-fi
 
 case "$(uname -s) $(uname -m)" in
     "Linux x86_64") platform=linux_x86_64 ;;
