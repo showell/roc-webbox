@@ -1,5 +1,25 @@
 # roc-webbox
 
+**Deprecated (2026-11-18): roc-webbox is no longer developed.**
+
+roc-webbox is a Roc platform for zig-webbox, with a TODO list on it. From
+October 2026 it was also where the Roc chat for angry-gopher was written,
+its decisions moved into Roc one by one while the Zig host only read and
+wrote; that chat never shipped, and production's chat stayed Zig. Its
+successors are repos of their own: roc-chat, a standalone Roc chat that
+copied what it needed from here, and roc-markdown, the chat's markdown,
+split out as a Roc package on 2026-10-29.
+
+What we learned:
+- Two Roc apps in one binary share Roc's four runtime symbols, so a
+  combination needs one owner of them (`roc_hooks`) and one Roc pin for
+  every part.
+- A file that is not there and a file that could not be read are different
+  answers: were a failed read an empty list, the next write would replace
+  the real list with it.
+
+---
+
 A Roc platform for [webbox](../zig-webbox), and a TODO list built on it.
 
 **The chat here (`chat/`) is frozen as reference.** It was the Roc half of angry-gopher's chat on that repo's `box/roc-cleanup` branch, which never shipped; production's chat stays Zig. Its successor is [roc-chat](https://github.com/showell/roc-chat), a standalone deployment that copies what it needs from here. Nothing in `chat/` is gated or merged into anymore. The auth core on branch `box/auth` moves to roc-chat.
