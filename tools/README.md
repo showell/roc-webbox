@@ -16,11 +16,12 @@
 
 ## Reading Roc with Roc's own parser
 
-- **`roc-ast`** — the parse tree of each `.roc` path on stdin, as Roc's own
-  parser prints it, lives in Shale (`tools/roc_ast`, its one user being
-  Shale's `roc_tree` and Roc recipes). Install or update it from Shale's
-  checkout with `shale tools/roc_ast/install.shale`; it lands at
-  `~/tools/roc-ast/bin/roc-ast`.
+- **roc-ast** — the parse tree of each `.roc` path on stdin, as Roc's own
+  parser prints it, is a repo of its own,
+  [roc-ast](https://github.com/showell/roc-ast). It began here, and moved
+  to Shale and then to that repo; Shale's `roc_tree` and Roc recipes read
+  it. Install or update it from a checkout of that repo with `shale
+  install.shale`; it lands at `~/tools/roc-ast/bin/roc-ast`.
 - **The chat's style hunts** are retired (2026-11-01; git history has them):
   the chat is frozen as reference, and Shale's cookbook recipes
   (`cookbook/roc/`, on `roc_tree`) hunt the Roc we still write.
